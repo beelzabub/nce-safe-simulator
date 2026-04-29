@@ -7,5 +7,5 @@ stages:
 python-version-test:
   stage: build
   script:
-    - python -V
+    - python cicd-env.py 
 
