@@ -10,6 +10,9 @@ echo-stuff:
   stage: build
   script:
     - echo Hello Jamie > output.txt
+  artifacts:
+    paths:
+      - ./output.txt
 
 run-script:
   stage: build
