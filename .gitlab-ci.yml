@@ -7,4 +7,4 @@ stages:
 run-script:
   stage: build
   script:
-    - echo "Hello Jamie: $(date)" > my-result.out
+    - echo Hello Jamie
