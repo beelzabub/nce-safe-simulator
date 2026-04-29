@@ -25,3 +25,4 @@ print-cicd-vars:
     - echo "Printing CI/CD variables defined in the UI"
     - echo "  APP_USER: $APP_USER"
     - echo "  APP_PASS: $APP_PASS"
+    - echo "Finished  printing CI/CD variables"
