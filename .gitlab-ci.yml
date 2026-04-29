@@ -1,29 +1,9 @@
-image: alpine:latest
+image: python:latest
 
 stages:
   - build
-  - test
-  - deploy
 
 
-echo-stuff:
-  stage: build
-  script:
-    - echo Hello Jamie > output.txt
-  artifacts:
-    paths:
-      - ./output.txt
+before_script:
+  - python -V
 
-run-script:
-  stage: build
-  script: ./test-script.sh
-
-
-print-cicd-vars:
-  stage: build
-  script:
-    |
-    echo "Printing CI/CD variables defined in the UI ..."
-    echo "  APP_USER: $APP_USER"
-    echo "  APP_PASS: $APP_PASS"
-    echo "Finished  printing CI/CD variables"
