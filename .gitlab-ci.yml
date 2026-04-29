@@ -12,4 +12,5 @@ echo-stuff:
     - echo Hello Jamie > output.txt
 
 run-script:
+  stage: build
   script: ./test-script.sh
