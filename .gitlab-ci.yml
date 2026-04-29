@@ -5,6 +5,7 @@ stages:
 
 
 python-version-test:
+  stage: build
   script:
     - python -V
 
