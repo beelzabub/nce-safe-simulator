@@ -4,6 +4,6 @@ stages:
   - build
 
 
-before_script:
+python-version-test:
   - python -V
 
