@@ -6,7 +6,10 @@ stages:
   - deploy
 
 
-run-script:
+echo-stuff:
   stage: build
   script:
     - echo Hello Jamie > output.txt
+
+run-script:
+  script: ./test-script.sh
