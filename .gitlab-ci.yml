@@ -7,4 +7,4 @@ stages:
 run-script:
   stage: build
   script:
-    - echo Hello Jamie
+    - echo Hello Jamie > output.txt
