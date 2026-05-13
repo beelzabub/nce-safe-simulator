@@ -39,12 +39,13 @@ class NceGitLab:
 
         self.url = config.get("url", "")
         self.private_token = config.get("private_token", "")
+        self.fibonacci_weights = config.get("fibonacci_weights")
 
         self.PROJECT_LABELS = config.get("project_labels", [])
         self.PIID_LABELS = config.get("piid_labels", [])
         self.EPIC_LABELS = config.get("epic_labels", [])
 
-        if not all([self.url, self.private_token, self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_LABELS]):
+        if not all([self.url, self.private_token, self.fibonacci_weights, self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_LABELS]):
             print("Missing required fields or label settings in nec_gitlab_config.json")
             exit(1)
 
@@ -321,8 +322,6 @@ NceGitLab:
         try:
             group = self.get_group_by_name(group_name)
 
-            fibonacci_weights = [1, 2, 3, 5, 8, 13]
-
             created_epics = []
 
             def get_next_month_start_date():
@@ -353,7 +352,7 @@ NceGitLab:
             for i in range(num_epics):
                 title = lorem.sentence()
                 description = lorem.paragraph()
-                weight = random.choice(fibonacci_weights)
+                weight = random.choice(self.fibonacci_weights)
 
                 start_date = get_next_month_start_date()
                 due_date = get_random_end_date_from_start(start_date)
@@ -384,8 +383,6 @@ NceGitLab:
         try:
             group = self.get_group_by_name(group_name)
 
-            fibonacci_weights = [1, 2, 3, 5, 8, 13]
-
             created_epics = []
 
             def get_next_month_start_date():
@@ -414,7 +411,7 @@ NceGitLab:
             for i in range(num_epics):
                 title = lorem.sentence()
                 description = lorem.paragraph()
-                weight = random.choice(fibonacci_weights)
+                weight = random.choice(self.fibonacci_weights)
 
                 start_date = get_next_month_start_date()
                 due_date = get_random_end_date_from_start(start_date)
@@ -574,14 +571,12 @@ NceGitLab:
         try:
             project = self.get_project_by_name(project_name)
 
-            fibonacci_weights = [1, 2, 3, 5, 8, 13]
-
             created_issues = []
 
             for i in range(num_issues):
                 title = lorem.sentence()
                 description = lorem.paragraph() 
-                weight = random.choice(fibonacci_weights)
+                weight = random.choice(self.fibonacci_weights)
 
                 issue = project.issues.create({
                     'title': title,
@@ -662,8 +657,6 @@ NceGitLab:
 
 
     def issues_assign_random_weights(self, group_name, recursive=False):
-        fibonacci_weights = [1, 2, 3, 5, 8, 13]
-
         group = self.get_group_by_name(group_name)
         if group is None:
             print(f"Group '{group_name}' not found. Aborting weight assignment.")
@@ -684,7 +677,7 @@ NceGitLab:
                 for issue in issues:
                     if issue.weight is None:
                         try:
-                            issue_weight = random.choice(fibonacci_weights)
+                            issue_weight = random.choice(self.fibonacci_weights)
                             issue.weight = issue_weight
                             issue.save()
                             print(f"Assigned random weight {issue_weight} to issue: {issue.title} (id: {issue.id})")
@@ -1949,10 +1942,10 @@ def main():
     
 
     # Fill in your group
-    group_name = ""
+    group_name = "best-1"
 
     # Fill in your project
-    project_name = ""
+    project_name = "best-1-project"
 
     # gl.cleanup_group(group_name, project_name)
     # gl.create_all_lorem_objects(group_name, project_name, epic_count=25, issue_count=80)
