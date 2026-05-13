@@ -1280,15 +1280,16 @@ NceGitLab:
         self.upload_to_wiki(self.get_group_by_name(group_name), title, md)
 
 
-    def generate_detailed_report_first(self, group):
+    def generate_detailed_report(self, group):
         group_name = group.name
 
         milestones = []
         epics = {}
         project_issues_by_milestone = defaultdict(list)
-        issue_to_epic_map = {}
+        epic_to_issue_map = defaultdict(list)
 
         try:
+            # Fetch group-level milestones and epics
             milestones = group.milestones.list(all=True)
             epics = {epic.id: epic for epic in group.epics.list(all=True)}
         except Exception as e:
@@ -1297,7 +1298,7 @@ NceGitLab:
         print(f"Fetched {len(milestones)} group-level milestones")
         print(f"Fetched {len(epics)} group-level epics")
 
-        # Fetch project-level milestones and issues
+        # Fetch project-level milestones, issues, and create an epic-to-issues mapping
         for project in group.projects.list(all=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
@@ -1318,7 +1319,8 @@ NceGitLab:
                         project_issues_by_milestone[issue.milestone['id']].append(issue)
 
                     if hasattr(issue, 'epic_issue') and issue.epic_issue:
-                        issue_to_epic_map[issue.id] = issue.epic_issue
+                        epic_id = issue.epic_issue['epic_id']
+                        epic_to_issue_map[epic_id].append(issue)
 
                 print(f"Fetched {len(project_milestones)} milestones and {len(project_issues)} issues from project '{project.name}'")
 
@@ -1344,17 +1346,26 @@ NceGitLab:
             markdown_report.append(f"- **State:** {milestone.state}")
             markdown_report.append("")
 
-            # Fetch all issues associated with the milestone
+            # Fetch issues associated with this milestone
             milestone_issues = project_issues_by_milestone.get(milestone.id, [])
             if milestone_issues:
                 for issue in milestone_issues:
                     issue_line = f"  - **[{issue.title}]({issue.web_url})** (Status: {issue.state})"
-                    # Include the epic associated with the issue, if any
-                    if issue.id in issue_to_epic_map:
-                        epic_id = issue_to_epic_map[issue.id]
+                    
+                    # Include epic details if the issue is linked to one
+                    if hasattr(issue, 'epic_issue') and issue.epic_issue:
+                        epic_id = issue.epic_issue['epic_id']
                         epic = epics.get(epic_id)
                         if epic:
-                            issue_line += f" (_Epic: [{epic.title}]({epic.web_url})_)"
+                            # Infer the epic state dynamically based on the issues' states
+                            linked_issues = epic_to_issue_map.get(epic_id, [])
+                            all_issues_closed = all(i.state in ["closed", "done"] for i in linked_issues)
+
+                            # Override the Epic's state if all its issues are closed
+                            inferred_epic_state = "closed" if all_issues_closed else epic.state
+
+                            # Append accurate data to the issue line
+                            issue_line += f" (_Epic: [{epic.title}]({epic.web_url}) - **State:** {inferred_epic_state}_)"
                         else:
                             issue_line += " (_Epic: Unknown_)"
                     markdown_report.append(issue_line)
@@ -1372,128 +1383,28 @@ NceGitLab:
                 markdown_report.append(f"- **{milestone.title}** (No issues linked)")
             markdown_report.append("")
 
+        # Append summary of epic states
+        markdown_report.append("## Epics Overview")
+        for epic_id, epic in epics.items():
+            # Infer epic state based on its issues
+            linked_issues = epic_to_issue_map.get(epic_id, [])
+            all_issues_closed = all(issue.state in ["closed", "done"] for issue in linked_issues)
 
+            # Override the epic state dynamically
+            # Removing inferred_epic_state
+            inferred_epic_state = "closed" if all_issues_closed else epic.state
+
+            # Report dynamically inferred state in the summary
+            markdown_report.append(f"- **Epic: [{epic.title}]({epic.web_url})**")
+            markdown_report.append(f"  - **State:** {epic.state}")
+            markdown_report.append(f"  - **Linked Issues:** {len(linked_issues)} issue(s)")
+            for issue in linked_issues:
+                markdown_report.append(f"    - **[{issue.title}]({issue.web_url})** (State: {issue.state})")
+            markdown_report.append("")
+
+        # Join Markdown content for uploading to the wiki
         md = "\n".join(markdown_report)
         title = f"{group_name} - Detailed Report"
-        self.upload_to_wiki(group, title, md)
-
-        return md
-
-
-    def generate_detailed_report(self, group):
-        group_name = group.name
-
-        milestones = []
-        epics = {}
-        project_issues_by_milestone = defaultdict(list)
-        issue_to_epic_map = {}
-        
-        try:
-            milestones = group.milestones.list(all=True)
-            epics = {epic.id: epic for epic in group.epics.list(all=True)}
-        except Exception as e:
-            print(f"Error fetching group milestones or epics: {e}")
-
-        print(f"Fetched {len(milestones)} group-level milestones")
-        print(f"Fetched {len(epics)} group-level epics")
-
-        for project in group.projects.list(all=True):
-            try:
-                print(f"Processing project: {project.name} (ID: {project.id})")
-
-                full_project = self.gl.projects.get(project.id)
-
-                if not full_project.issues_enabled:
-                    print(f"Issues are disabled for project '{project.name}'. Skipping.")
-                    continue
-
-                # Fetch project-level milestones and issues
-                project_milestones = full_project.milestones.list(all=True)
-                project_issues = full_project.issues.list(all=True)
-
-                # Add project milestones to the milestones list
-                milestones.extend(project_milestones)
-
-                # Map issues to milestones and epics
-                for issue in project_issues:
-                    if issue.milestone:
-                        project_issues_by_milestone[issue.milestone['id']].append(issue)
-                    # Check if the issue has an associated epic
-                    if hasattr(issue, 'epic_issue') and issue.epic_issue:
-                        issue_to_epic_map[issue.id] = issue.epic_issue
-
-                print(f"Fetched {len(project_milestones)} milestones and {len(project_issues)} issues from project '{project.name}'")
-
-            except Exception as e:
-                print(f"Failed to fetch data from project '{project.name}': {e}")
-
-
-        total_milestones = len(milestones)
-        total_issues = sum(len(issues) for issues in project_issues_by_milestone.values())
-        print(f"Total milestones fetched: {total_milestones} (group-level + project-level)")
-        print(f"Total issues fetched: {total_issues}")
-
-
-        markdown_report = []
-        markdown_report.append(f"# Detailed Milestones, Issues, and Epics Report (Group: {group_name})")
-        markdown_report.append("")
-        markdown_report.append(f"## Execution Date: {datetime.today().strftime('%Y-%m-%d')}")
-        markdown_report.append("")
-
-        for milestone in milestones:
-            markdown_report.append(f"<details open>")
-            markdown_report.append(
-                f"  <summary><strong>Milestone: {milestone.title}</strong> "
-                f"<a href=\"{milestone.web_url}\" target=\"_blank\">[View]</a></summary>"
-            )
-            markdown_report.append("")
-            markdown_report.append(f"  **Start Date:** {milestone.start_date if milestone.start_date else 'Not Set'}  ")
-            markdown_report.append(f"  **Due Date:** {milestone.due_date if milestone.due_date else 'Not Set'}  ")
-            markdown_report.append(f"  **State:** {milestone.state}  ")
-            markdown_report.append("")
-
-            milestone_issues = project_issues_by_milestone.get(milestone.id, [])
-
-            # Add table for milestone issues
-            markdown_report.append("  | Issue Title | Status | Epic |")
-            markdown_report.append("  |-------------|--------|------|")
-            if milestone_issues:
-                for issue in milestone_issues:
-                    issue_title = f"[{issue.title}]({issue.web_url})"
-                    status = issue.state.capitalize()
-
-                    # Check if the issue is linked to an epic
-                    if issue.id in issue_to_epic_map:
-                        epic_id = issue_to_epic_map[issue.id]
-                        epic = epics.get(epic_id)
-                        epic_title = f"[{epic.title}]({epic.web_url})" if epic else "Unknown"
-                    else:
-                        epic_title = "None"
-
-                    markdown_report.append(f"  | {issue_title} | {status} | {epic_title} |")
-            else:
-                markdown_report.append("  | No issues linked | - | - |")
-
-            markdown_report.append("</details>")
-            markdown_report.append("")
-
-        # Add milestones without linked issues in their own section
-        all_milestone_ids_with_issues = set(project_issues_by_milestone.keys())
-        unlinked_milestones = [m for m in milestones if m.id not in all_milestone_ids_with_issues]
-
-        if unlinked_milestones:
-            markdown_report.append("## Milestones Without Linked Issues")
-            markdown_report.append("| Milestone | Start Date | Due Date | State |")
-            markdown_report.append("|-----------|------------|----------|-------|")
-            for milestone in unlinked_milestones:
-                markdown_report.append(
-                    f"| {milestone.title} | {milestone.start_date or 'Not Set'} | {milestone.due_date or 'Not Set'} | {milestone.state} |"
-                )
-            markdown_report.append("")  # Add a blank line for spacing
-
-        
-        md = "\n".join(markdown_report)
-        title = f"{group_name.capitalize()} - Detailed Report"
         self.upload_to_wiki(group, title, md)
 
         return md
@@ -1792,25 +1703,34 @@ NceGitLab:
 
     def upload_to_wiki(self, group, page_title, content):
         try:
+            # Convert page title to slug (wiki pages in GitLab use slugs for identifiers)
+            page_slug = page_title.replace(" ", "-").lower()
+
             try:
-                existing_page = group.wikis.get(page_title)
-                existing_page.content = content
-                existing_page.save()
-                print(f"Wiki page '{page_title}' was found and overwritten successfully.")
-            except Exception as e:
-                if "404" in str(e):
-                    group.wikis.create({
-                        'title': page_title,
-                        'content': content,
-                    })
-                    print(f"Wiki page '{page_title}' created successfully.")
+                # Attempt to retrieve the existing page using the slug
+                existing_page = group.wikis.get(page_slug)
+                print(f"Wiki page '{page_title}' found with slug '{page_slug}'. Deleting it before recreation.")
+
+                # .save() alternative was not updating the page so delete and create each time
+                existing_page.delete()
+                print(f"Wiki page '{page_title}' deleted successfully.")
+
+            except gitlab.exceptions.GitlabGetError as e:
+                if e.response_code == 404:  # Page doesn't exist
+                    print(f"Wiki page '{page_title}' does not exist. Proceeding to create a new one.")
                 else:
-                    print(f"Error checking or updating wiki page: {e}")
+                    print(f"Error fetching wiki page '{page_title}': {e}")
+                    return
+
+            print(f"Creating new wiki page '{page_title}' with updated content.")
+            group.wikis.create({
+                'title': page_title,
+                'content': content,
+            })
+            print(f"Wiki page '{page_title}' created successfully with updated content.")
 
         except Exception as e:
             print(f"An error occurred while uploading to the wiki: {e}")
-        
-        print()
 
 
     def delete_all_wiki_pages(self, group):
@@ -1850,6 +1770,11 @@ NceGitLab:
         except Exception as e:
             return f"Error retrieving obj attributes: {e}"
         
+
+    def truncate_text(self, text, max_length=20):
+        if len(text) > max_length:
+            return text[:max_length - 3] + "..."
+        return text
 
     #
     # Labels
@@ -1942,13 +1867,11 @@ def main():
     
 
     # Fill in your group
-    group_name = "best-1"
+    group_name = ""
 
     # Fill in your project
-    project_name = "best-1-project"
+    project_name = ""
 
-    # gl.cleanup_group(group_name, project_name)
-    # gl.create_all_lorem_objects(group_name, project_name, epic_count=25, issue_count=80)
     gl.create_all_lorem_reports(group_name, project_name)
 
 if __name__ == "__main__":
