@@ -1,0 +1,5 @@
+python-gitlab
+pandas
+python-dateutil
+requests
+lorem
