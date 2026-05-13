@@ -1949,10 +1949,10 @@ def main():
     
 
     # Fill in your group
-    group_name = "best-1"
+    group_name = ""
 
     # Fill in your project
-    project_name = "best-1-project"
+    project_name = ""
 
     # gl.cleanup_group(group_name, project_name)
     # gl.create_all_lorem_objects(group_name, project_name, epic_count=25, issue_count=80)
