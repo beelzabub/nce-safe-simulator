@@ -1,8 +1,7 @@
 
 
 export PATH="$PATH:/opt/homebrew/bin:/usr/bin"
-export TOKEN='glpat-OtPmDQ0y17wwicsmMQaJZ2M6MQpvOjEKdTptaGFueQ8.01.171mp6qxv'
-export TOKEN2='glpat-66StXqE3zaucPls1jeA8rGM6MQpvOjEKdTptaGFueQ8.01.170102ery'
+export TOKEN=''
 
 
 # These make aws cli work
