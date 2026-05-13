@@ -24,10 +24,6 @@ alias act='source bin/activate'
 
 
 # Functions
-hello() {
-  echo "Hello Jamie!"
-}
-
 govenv() {
 
   local reqs_file=~/requirements.txt
