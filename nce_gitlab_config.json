@@ -1,6 +1,6 @@
 {
   "url": "https://gitlab.com",
-  "private_token": "glpat-KXI-e8J4uQnyYgQGfh28sGM6MQpvOjEKdTptaGFueQ8.01.171twv9bv",
+  "private_token": "",
   "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
   "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
   "epic_labels": ["Epic", "Capability", "Feature"]
