@@ -6,8 +6,6 @@ import textwrap
 import gitlab
 import lorem
 import json
-import markdown
-import math
 import pandas as pd
 from pathlib import Path
 from pprint import pformat
@@ -15,49 +13,57 @@ from pprint import pprint
 import random
 import re
 import requests
-import time
 
-PROJECT_LABELS = ['project::DO', 'project::RTSO', 'project::DCGS', 'project::TestA', 'project::TestB', 'project::TestC']
-PIID_LABELS = ['PIID::2026Q3', 'PIID::2026Q4', 'PIID::2027Q1', 'PIID::2027Q2', 'PIID::2027Q3', 'PIID::2027Q4']
-EPIC_LABELS = ['Epic', 'Capability', 'Feature']
 
 
 class NceGitLab:
-    # Constructor
-    def __init__(self):
-        # Setup configuration from the config file
-        self.config_file = Path("nec_gitlab_config.json")
+    def __init__(self, config_file="nce_gitlab_config.json"):
+        self.config_file = Path(config_file)
 
         if not self.config_file.exists():
             print(f"Config file '{self.config_file}' not found!")
-            print('''Please create gitlab_config.json with:
+            print('''Please create nec_gitlab_config.json with the following format:
                     {
-                    "url": "https://gitlab.com",
-                    "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
-                    "group_path": "saic-study-group"
-                    }''')
+                        "url": "https://gitlab.com",
+                        "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
+                        "group_name": "saic-study-group",
+                        "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
+                        "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
+                        "epic_labels": ["Epic", "Capability", "Feature"]
+                    }
+            ''')
             exit(1)
 
-        with open(self.config_file, "r", encoding="utf-8") as f:
-            config = json.load(f)
+        with open(self.config_file, "r", encoding="utf-8") as config_file:
+            config = json.load(config_file)
 
-        self.url = config.get("url")
-        self.private_token = config.get("private_token")
-        self.group_name = config.get("group_name")
+        self.url = config.get("url", "")
+        self.private_token = config.get("private_token", "")
 
-        if not all([self.url, self.private_token, self.group_name]):
-            print("Missing required fields in gitlab_config.json")
+        self.PROJECT_LABELS = config.get("project_labels", [])
+        self.PIID_LABELS = config.get("piid_labels", [])
+        self.EPIC_LABELS = config.get("epic_labels", [])
+
+        if not all([self.url, self.private_token, self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_LABELS]):
+            print("Missing required fields or label settings in nec_gitlab_config.json")
             exit(1)
 
-        self.gl = gitlab.Gitlab(self.url, private_token=self.private_token)
-        self.gl.auth()  # Authenticate the client
+        try:
+            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token)
+            self.gl.auth()
 
-        print(f'''
+            print(f'''
 NceGitLab:
     Version: {self.gl.version()}
     api_url: {self.gl.api_url}
     api_version: {self.gl.api_version}
-              ''')
+                  ''')
+        except gitlab.GitlabAuthenticationError:
+            print("Authentication failed. Please check your private token.")
+            exit(1)
+        except gitlab.GitlabGetError as e:
+            print(f"Failed to fetch group '{self.group_name}': {e}")
+            exit(1)
         
     #
     # Group functions
@@ -72,7 +78,6 @@ NceGitLab:
 
     def get_groups(self):
         partial_groups = self.gl.groups.list(owned=True, all=True)
-        # Retrieve full group objects, not the lightweight ones returned by list()
         full_groups = [self.gl.groups.get(group.id) for group in partial_groups]
         return full_groups
     
@@ -105,8 +110,10 @@ NceGitLab:
         return group
 
 
-    # This function is unecessary as the top level group already returns all subgroups
     def get_all_subgroups(self, obj, include_self=True):
+        
+        # This function is unecessary as the top level group already returns all subgroups
+
         group = None
 
         if isinstance(obj, str):
@@ -139,17 +146,15 @@ NceGitLab:
         print()
 
 
-    def list_projects_recursive(self, group_name=None, level=0):
+    def list_projects_recursive(self, group_name, level=0):
         if group_name is None:
-            group_name = self.group_name
+            group_name = group_name
 
 
         group = self.get_group_by_name(group_name)
         if group is None:
-            # print(f"{'    ' * level}Group with name '{group_name}' could not be found or is not unique.")
             return
 
-        # List all projects in this group
         print(f"{'    ' * level}Group: {group.name} (id: {group.id})")
         projects = group.projects.list(all=True)
         for project in projects:
@@ -157,35 +162,14 @@ NceGitLab:
 
         subgroups = group.subgroups.list(all=True)
         for subgroup in subgroups:
-            # Use the 'full_path' to disambiguate subgroup names if necessary
             self.list_projects(subgroup.name, level + 1)
 
 
     def get_projects(self):
         partial_projects = self.gl.projects.list(owned=True, all=True)
-        # Retrieve full project objects, not the lightweight ones returned by list()
         full_projects = [self.gl.projects.get(project.id) for project in partial_projects]
         return full_projects
     
-
-    def get_projectsxxx(self, project_name=None):
-        if project_name is None:
-            project_name = self.project_name
-
-        project = self.get_project_by_name(project_name)
-        if project is None:
-            return []
-
-        all_projects = []
-        projects = project.projects.list(all=True)
-        all_projects.extend(projects)
-
-        subgroups = project.subgroups.list(all=True)
-        for subgroup in subgroups:
-            sub_projects = self.get_projects(subgroup.full_path)
-            all_projects.extend(sub_projects)
-
-        return all_projects
 
     def get_project_by_name(self, name):
         project = None
@@ -201,21 +185,6 @@ NceGitLab:
 
         return project
 
-
-    def get_project_by_namexxxx(self, name):
-        try:
-            projects = self.gl.projects.list(search=name)
-            if len(projects) == 1:
-                return projects[0]
-            elif len(projects) > 1:
-                print(f"More than one project found with the name '{name}'. Ensure project names are unique!")
-            else:
-                print(f"No project found with name '{name}'.")
-            return None
-        except Exception as e:
-            print(f"Error searching for project '{name}': {e}")
-            return None
-
     
     #
     # Epics functions
@@ -226,11 +195,10 @@ NceGitLab:
             if not group:
                 raise ValueError(f"Group with name '{group_name}' not found.")
 
-            # Initialize a list to store epics
             epics = group.epics.list(get_all=True)
 
             if recursive:
-                subgroups = group.subgroups.list(get_all=True, owned=True)  # Fetch subgroups
+                subgroups = group.subgroups.list(get_all=True, owned=True)
 
                 for subgroup in subgroups:
                     if hasattr(subgroup, "full_path") and subgroup.full_path:
@@ -276,10 +244,7 @@ NceGitLab:
         print(f"Successfully exported {len(data)} epics to {output_file}")
         print()
 
-    #
-    # TODO: add labels and maybe other fields
-    #       check what is exported by default
-    #
+
     def import_epics_from_csv(self, group_name, csv_file):
         group = self.get_group_by_name(group_name)
 
@@ -302,6 +267,7 @@ NceGitLab:
                     print(f"Skipping row {index + 1} due to missing title.")
                     continue
 
+                # TODO: add labels and maybe other fields check what is exported by default
                 epic_data = {
                     'title': row['title'],
                     'description': row.get('description', ''),  # Optional
@@ -425,7 +391,6 @@ NceGitLab:
             def get_next_month_start_date():
                 """Get the start date as the first Monday of the next month."""
                 today = datetime.today()
-                # Set to the first day of next month
                 first_of_next_month = datetime(today.year, today.month, 1) + relativedelta(months=1)
 
                 # Adjust to the next Monday if not already a Monday
@@ -447,7 +412,6 @@ NceGitLab:
 
             print(f"Generating lorem epics for group: {group.name}")
             for i in range(num_epics):
-                # Generate random title, description, and other properties
                 title = lorem.sentence()
                 description = lorem.paragraph()
                 weight = random.choice(fibonacci_weights)
@@ -459,9 +423,9 @@ NceGitLab:
                 due_date_str = due_date.isoformat()
 
                 # Randomly select one project label and one PIID label
-                project_label = random.choice(PROJECT_LABELS)
-                piid_label = random.choice(PIID_LABELS)
-                epic_label = random.choice(EPIC_LABELS)
+                project_label = random.choice(self.PROJECT_LABELS)
+                piid_label = random.choice(self.PIID_LABELS)
+                epic_label = random.choice(self.EPIC_LABELS)
 
                 epic = group.epics.create({
                     'title': title,
@@ -485,18 +449,7 @@ NceGitLab:
             return []
 
 
-
     def assign_issues_to_epics(self, epics, issues):
-        """
-        Randomly assigns issues to the given epics.
-
-        Args:
-            epics (list): List of epic objects to which issues are assigned.
-            issues (list): List of issue objects to be assigned to the epics.
-
-        Returns:
-            dict: Dictionary mapping epic titles to their assigned issues.
-        """
         if not epics:
             print("No epics available to assign issues to.")
             return {}
@@ -504,13 +457,11 @@ NceGitLab:
         assigned_issues = {}
 
         for issue in issues:
-            # Randomly select an epic from the list of epics
             selected_epic = random.choice(epics)
 
             try:
-                # Assign epic ID to the issue
                 issue.epic_id = selected_epic.id
-                issue.save()  # Save the changes in GitLab. NOTE: This updates the API
+                issue.save()
                 
                 # Map the assigned issue details to the selected epic
                 if selected_epic.title not in assigned_issues:
@@ -649,16 +600,6 @@ NceGitLab:
 
 
     def assign_issues_to_milestones(self, milestones, issues):
-        """
-        Randomly assigns issues to milestones.
-
-        Args:
-            milestones (list): List of milestone objects.
-            issues (list): List of issue objects to assign to milestones.
-
-        Returns:
-            dict: Dictionary mapping milestone title to assigned issue details.
-        """
         if not milestones:
             print("No milestones available to assign issues to.")
             return {}
@@ -671,12 +612,10 @@ NceGitLab:
 
         for issue in issues:
             try:
-                # Select a random milestone
                 selected_milestone = random.choice(milestones)
 
-                # Assign the milestone to the issue
                 issue.milestone_id = selected_milestone.id
-                issue.save()  # Save changes to GitLab
+                issue.save()
 
                 # Track assignments
                 if selected_milestone.title not in assigned_issues:
@@ -687,7 +626,6 @@ NceGitLab:
                     'issue_url': issue.web_url,
                 })
 
-                # Print log
                 print(f"Assigned issue '{issue.title}' to milestone '{selected_milestone.title}'")
 
             except Exception as e:
@@ -696,7 +634,6 @@ NceGitLab:
         print()
 
         return assigned_issues
-
 
 
     def delete_all_issues_from_project(self, project_name):
@@ -756,7 +693,6 @@ NceGitLab:
                     else:
                         print(f"Issue '{issue.title}' (ID: {issue.id}) already has a weight: {issue.weight}")
 
-        # Process projects in the current group
         process_projects_in_group(group)
 
         if recursive:
@@ -772,17 +708,10 @@ NceGitLab:
         group = self.get_group_by_name(group_name)
         epics = group.epics.list(get_all=True)
         
-        # Get all subgroups
         all_subgroups = self.get_all_subgroups(group)
-
-        # for subgroup in all_subgroups:
-        #     print(f"Group: {subgroup.name}, ID: {subgroup.get_id()}")
 
         open_epics_count = sum(1 for e in epics if e.state == 'opened')
         total_epics = len(epics)
-
-        # for epic in epics:
-        #     print(f"Epic: {epic.title}, Group ID: {epic.attributes['group_id']}")
 
         # GraphQL setup for epic weights
         session = requests.Session()
@@ -808,19 +737,18 @@ NceGitLab:
         total_story_points = 0
         open_story_points = 0
         epic_rows = []
-        grouped_epics = {}  # Group epics by their parent GitLab subgroup
+        grouped_epics = {}
 
         for epic in epics:
-            # Get the correct full path from the group ID
             group_id = epic.attributes['group_id']
             group = next((g for g in all_subgroups if g.id == group_id), None)
 
             if not group:
                 print(f"Warning: No group found for Epic '{epic.title}' with group ID {group_id}")
-                continue  # Skip if the group is not found
+                continue
 
-            subgroup_name = group.full_path  # The correct group or subgroup name
-            subgroup_url = group.web_url     # The group's web URL (used in markdown)
+            subgroup_name = group.full_path
+            subgroup_url = group.web_url
 
             # Get the direct link of the epic using the subgroup's full path
             epic_url = f"{subgroup_url}/-/epics/{epic.iid}"
@@ -989,7 +917,6 @@ NceGitLab:
                 for subgroup in subgroups:
                     if hasattr(subgroup, "full_path") and subgroup.full_path:
                         try:
-                            # Recursively fetch milestones from the subgroup and add to the current list
                             milestones += self.get_group_milestones(subgroup.name, recursive=True)
                         except Exception as recursive_error:
                             print(f"Error retrieving milestones for subgroup '{subgroup.name}': {recursive_error}")
@@ -1038,11 +965,8 @@ NceGitLab:
 
             milestones_with_epics = {}
 
-            # Fetch milestones and epics from the group
             milestones = group.milestones.list(get_all=True)
             all_epics = group.epics.list(get_all=True)
-            # print(f"Found {len(milestones)} milestones in the group.")
-            # print(f"Found {len(all_epics)} total epics in the group.")
 
             for milestone in milestones:
                 try:
@@ -1056,7 +980,6 @@ NceGitLab:
 
                 associated_epics = []
                 for epic in all_epics:
-                    # Get the start and end dates of the epic from milestones
                     epic_start = epic.start_date_from_milestones or epic.start_date_fixed
                     epic_end = epic.due_date_from_milestones or epic.due_date_fixed
 
@@ -1082,10 +1005,6 @@ NceGitLab:
                             print(f"Error parsing dates for Epic: {epic.title} (ID: {epic.id}) - {epic_date_error}")
                             continue
 
-                # print(f"Milestone: {milestone.title} has {len(associated_epics)} epics.")
-                # for epic in associated_epics:
-                #     print(f'. - epic: {epic["title"]}, state: {epic["state"]}')
-                # print()
 
                 # Store milestone and its associated epics
                 milestones_with_epics[milestone.title] = {
@@ -1110,7 +1029,6 @@ NceGitLab:
 
     def upload_milestones_and_epics_to_wiki(self, group, data_structure, wiki_page_title="Milestones_and_Epics"):
         try:
-            # Prepare Markdown content
             markdown_content = f"# Milestones and Epics\n\n"
 
             # Add a summary table header
@@ -1166,20 +1084,7 @@ NceGitLab:
             return
 
 
-        import random
-
-
     def create_lorem_milestones(self, target, num_milestones=12):
-        """
-        Create lorem milestones spread out over a year, with each milestone lasting 1–4 months.
-
-        Args:
-            target (object): GitLab group or project object to create milestones in.
-            num_milestones (int): The number of milestones to create.
-
-        Returns:
-            list: A list of created milestone objects.
-        """
         try:
             # Determine if target is a group or project
             target_type = 'group' if hasattr(target, 'milestones') and hasattr(target, 'projects') else 'project'
@@ -1214,13 +1119,11 @@ NceGitLab:
                     print(f"Skipping milestone creation: Start={milestone_start.date()} is not before End={milestone_end.date()}")
                     break
 
-                # Debugging: Log calculated dates
                 # print(f"Calculated milestone dates: Start={milestone_start.date()}, End={milestone_end.date()}")
 
                 try:
-                    # Generate milestone title and description
-                    milestone_title = lorem.sentence()  # Random title
-                    milestone_description = lorem.paragraph()  # Random description
+                    milestone_title = lorem.sentence()
+                    milestone_description = lorem.paragraph()
 
                     # Create the milestone in the target
                     milestone = target.milestones.create({
@@ -1250,8 +1153,7 @@ NceGitLab:
         try:
             target_type = 'group' if hasattr(target, 'milestones') and hasattr(target, 'projects') else 'project'
 
-            # Get all milestones from the target
-            milestones = target.milestones.list(all=True)  # Get all milestones
+            milestones = target.milestones.list(all=True)
 
             if not milestones:
                 print(f"No milestones found in the {target_type}. Nothing to delete.")
@@ -1278,16 +1180,6 @@ NceGitLab:
 
 
     def assign_epics_to_milestones_not_valid(self, milestones, epics):
-        """
-        Randomly assigns epics to milestones by syncing their start and end dates with the milestone's dates.
-
-        Args:
-            milestones (list): List of milestone objects with start_date and due_date.
-            epics (list): List of epic objects to assign to milestones.
-
-        Returns:
-            dict: Dictionary mapping milestone titles to their assigned epics.
-        """
         if not milestones:
             print("No milestones available to assign epics to.")
             return {}
@@ -1295,14 +1187,12 @@ NceGitLab:
         assigned_epics = {}
 
         for epic in epics:
-            # Randomly choose a milestone to assign the epic dates from
             selected_milestone = random.choice(milestones)
 
             try:
-                # Assign the milestone's start and due dates to the epic
                 epic.start_date = selected_milestone.start_date
                 epic.due_date = selected_milestone.due_date
-                epic.save()  # Save changes in GitLab
+                epic.save()
 
                 # Add the epic to the assigned_epics dictionary under the selected milestone
                 if selected_milestone.title not in assigned_epics:
@@ -1327,45 +1217,27 @@ NceGitLab:
     # Reports
     #
     def generate_summary_report(self, group):
-        """
-        Generates a summary Markdown report for a GitLab Group's milestones, epics, and issues.
-        Includes both group-level and project-level milestones.
-
-        Args:
-            group_name (str): The name of the GitLab group.
-
-        Returns:
-            str: A Markdown-formatted string containing the summary report.
-        """
-
-        # Fetch the group object using group_name
         try:
             group_name = group.name
         except Exception as e:
             return f"Error fetching group '{group_name}': {e}"
-
-        # Initialize empty lists for milestones, issues, and epics
+        
         milestones = []
         issues = []
         epics = []
 
-        # Fetch group-level milestones and epics
         try:
-            milestones = group.milestones.list(all=True)  # Group-level milestones
-            epics = group.epics.list(all=True)  # Group-level epics
+            milestones = group.milestones.list(all=True)
+            epics = group.epics.list(all=True)
         except Exception as e:
             print(f"Error fetching group milestones or epics: {e}")
 
-        # Collect all project-level milestones and issues
         for project in group.projects.list(all=True):
             try:
-                # Fetch the full project object using self.gl
                 full_project = self.gl.projects.get(project.id)
-                # Fetch project-level milestones and issues
                 project_milestones = full_project.milestones.list(all=True)
                 project_issues = full_project.issues.list(all=True)
 
-                # Add to the combined lists
                 milestones.extend(project_milestones)
                 issues.extend(project_issues)
 
@@ -1373,7 +1245,6 @@ NceGitLab:
             except Exception as e:
                 print(f"Failed to fetch data from project '{project.name}': {e}")
 
-        # Debugging: Display the fetched data
         total_milestones = len(milestones)
         total_epics = len(epics)
         total_issues = len(issues)
@@ -1392,10 +1263,7 @@ NceGitLab:
         ]
         unassigned_issues_count = len(unassigned_issues)
 
-        # Start generating markdown report
         markdown_report = []
-
-        # Add title and high-level summary
         markdown_report.append(f"# Workflow Summary Report (Group: {group_name})")
         markdown_report.append("")
         markdown_report.append(f"## Workflow Execution Summary")
@@ -1407,44 +1275,29 @@ NceGitLab:
         markdown_report.append(f"- **Unassigned Issues:** {unassigned_issues_count}")
         markdown_report.append("")
 
-        # Add unassigned issues (if any)
+
         if unassigned_issues_count > 0:
             markdown_report.append("## Unassigned Issues")
             for issue in unassigned_issues:
-                markdown_report.append(f"- **[{issue.title}]({issue.web_url})**")  # Include link to the issue
-            markdown_report.append("")  # Add a blank line for formatting
+                markdown_report.append(f"- **[{issue.title}]({issue.web_url})**")
+            markdown_report.append("")
 
-        md = "\n".join(markdown_report)  # Combine all lines into a single string
+        md = "\n".join(markdown_report)
         title = f"{group_name.capitalize()} - Summary Report"
         self.upload_to_wiki(self.get_group_by_name(group_name), title, md)
 
 
     def generate_detailed_report_first(self, group):
-        """
-        Generates a detailed Markdown report for a GitLab Group's milestones, issues, and associated epics.
-        Includes both group-level and project-level milestones.
-
-        Args:
-            group (object): The GitLab group object.
-
-        Returns:
-            None: The report will be uploaded to the group's wiki.
-        """
-        from collections import defaultdict
-        from datetime import datetime
-
         group_name = group.name
 
-        # Initialize empty lists for milestones, issues, epics
         milestones = []
         epics = {}
-        project_issues_by_milestone = defaultdict(list)  # Milestone ID -> List of issues
-        issue_to_epic_map = {}  # Issue ID -> Epic ID
+        project_issues_by_milestone = defaultdict(list)
+        issue_to_epic_map = {}
 
-        # Fetch group-level milestones and epics
         try:
-            milestones = group.milestones.list(all=True)  # Group-level milestones
-            epics = {epic.id: epic for epic in group.epics.list(all=True)}  # Group-level epics as a dict
+            milestones = group.milestones.list(all=True)
+            epics = {epic.id: epic for epic in group.epics.list(all=True)}
         except Exception as e:
             print(f"Error fetching group milestones or epics: {e}")
 
@@ -1456,26 +1309,21 @@ NceGitLab:
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
-                # Fetch the full project object
                 full_project = self.gl.projects.get(project.id)
 
-                # Check if issues are enabled for this project
                 if not full_project.issues_enabled:
                     print(f"Issues are disabled for project '{project.name}'. Skipping.")
                     continue
 
-                # Fetch project-level milestones and issues
                 project_milestones = full_project.milestones.list(all=True)
                 project_issues = full_project.issues.list(all=True)
 
-                # Add project milestones to overall milestones list
                 milestones.extend(project_milestones)
 
-                # Map issues to milestones and epics
                 for issue in project_issues:
                     if issue.milestone:
                         project_issues_by_milestone[issue.milestone['id']].append(issue)
-                    # Check if the issue has an associated epic
+
                     if hasattr(issue, 'epic_issue') and issue.epic_issue:
                         issue_to_epic_map[issue.id] = issue.epic_issue
 
@@ -1484,16 +1332,12 @@ NceGitLab:
             except Exception as e:
                 print(f"Failed to fetch data from project '{project.name}': {e}")
 
-        # Log the total numbers fetched
         total_milestones = len(milestones)
         total_issues = sum(len(issues) for issues in project_issues_by_milestone.values())
         print(f"Total milestones fetched: {total_milestones} (group-level + project-level)")
         print(f"Total issues fetched: {total_issues}")
 
-        # Start generating the markdown report
         markdown_report = []
-
-        # Add title and date
         markdown_report.append(f"# Detailed Milestones, Issues, and Epics Report (Group: {group_name})")
         markdown_report.append("")
         markdown_report.append(f"## Execution Date: {datetime.today().strftime('%Y-%m-%d')}")
@@ -1522,9 +1366,8 @@ NceGitLab:
                             issue_line += " (_Epic: Unknown_)"
                     markdown_report.append(issue_line)
             else:
-                # No issues linked to this milestone
                 markdown_report.append("  - No issues linked to this milestone")
-            markdown_report.append("")  # Add a blank line for formatting
+            markdown_report.append("")
 
         # Handle milestones without issues (if any milestones do not have issues assigned)
         all_milestone_ids_with_issues = set(project_issues_by_milestone.keys())
@@ -1534,60 +1377,39 @@ NceGitLab:
             markdown_report.append("## Milestones Without Linked Issues")
             for milestone in unlinked_milestones:
                 markdown_report.append(f"- **{milestone.title}** (No issues linked)")
-            markdown_report.append("")  # Add a blank line for formatting
+            markdown_report.append("")
 
-        # Combine the markdown report into a single string
+
         md = "\n".join(markdown_report)
         title = f"{group_name} - Detailed Report"
-
-        # Upload the report to the group's wiki
         self.upload_to_wiki(group, title, md)
 
         return md
 
 
     def generate_detailed_report(self, group):
-        """
-        Generates a detailed Markdown/HTML report for a GitLab Group's milestones, issues, and associated epics.
-        Includes both group-level and project-level milestones formatted in an open <details> tag by default,
-        with a "View" link to the milestone's URL.
-
-        Args:
-            group (object): The GitLab group object.
-
-        Returns:
-            None: The report will be uploaded to the group's wiki.
-        """
-        from collections import defaultdict
-        from datetime import datetime
-
         group_name = group.name
 
-        # Initialize empty lists for milestones, issues, epics
         milestones = []
         epics = {}
-        project_issues_by_milestone = defaultdict(list)  # Milestone ID -> List of issues
-        issue_to_epic_map = {}  # Issue ID -> Epic ID
-
-        # Fetch group-level milestones and epics
+        project_issues_by_milestone = defaultdict(list)
+        issue_to_epic_map = {}
+        
         try:
-            milestones = group.milestones.list(all=True)  # Group-level milestones
-            epics = {epic.id: epic for epic in group.epics.list(all=True)}  # Group-level epics as a dict
+            milestones = group.milestones.list(all=True)
+            epics = {epic.id: epic for epic in group.epics.list(all=True)}
         except Exception as e:
             print(f"Error fetching group milestones or epics: {e}")
 
         print(f"Fetched {len(milestones)} group-level milestones")
         print(f"Fetched {len(epics)} group-level epics")
 
-        # Fetch project-level milestones and issues
         for project in group.projects.list(all=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
-                # Fetch the full project object
                 full_project = self.gl.projects.get(project.id)
 
-                # Check if issues are enabled for this project
                 if not full_project.issues_enabled:
                     print(f"Issues are disabled for project '{project.name}'. Skipping.")
                     continue
@@ -1612,22 +1434,19 @@ NceGitLab:
             except Exception as e:
                 print(f"Failed to fetch data from project '{project.name}': {e}")
 
-        # Log the total numbers fetched
+
         total_milestones = len(milestones)
         total_issues = sum(len(issues) for issues in project_issues_by_milestone.values())
         print(f"Total milestones fetched: {total_milestones} (group-level + project-level)")
         print(f"Total issues fetched: {total_issues}")
 
-        # Start generating the markdown report with <details open>
-        markdown_report = []
 
-        # Add title and date
+        markdown_report = []
         markdown_report.append(f"# Detailed Milestones, Issues, and Epics Report (Group: {group_name})")
         markdown_report.append("")
         markdown_report.append(f"## Execution Date: {datetime.today().strftime('%Y-%m-%d')}")
         markdown_report.append("")
 
-        # Add each milestone in an open <details> tag
         for milestone in milestones:
             markdown_report.append(f"<details open>")
             markdown_report.append(
@@ -1647,7 +1466,6 @@ NceGitLab:
             markdown_report.append("  |-------------|--------|------|")
             if milestone_issues:
                 for issue in milestone_issues:
-                    # Format issue title with a link
                     issue_title = f"[{issue.title}]({issue.web_url})"
                     status = issue.state.capitalize()
 
@@ -1663,8 +1481,8 @@ NceGitLab:
             else:
                 markdown_report.append("  | No issues linked | - | - |")
 
-            markdown_report.append("</details>")  # Close the open details tag
-            markdown_report.append("")  # Add a blank line for spacing
+            markdown_report.append("</details>")
+            markdown_report.append("")
 
         # Add milestones without linked issues in their own section
         all_milestone_ids_with_issues = set(project_issues_by_milestone.keys())
@@ -1680,64 +1498,44 @@ NceGitLab:
                 )
             markdown_report.append("")  # Add a blank line for spacing
 
-        # Combine the markdown report into a single string
+        
         md = "\n".join(markdown_report)
         title = f"{group_name.capitalize()} - Detailed Report"
-
-        # Upload the report to the group's wiki
         self.upload_to_wiki(group, title, md)
 
         return md
 
 
     def generate_epics_report(self, group):
-        """
-        Generates a detailed Markdown/HTML report for a GitLab Group's epics and their associated issues.
-        Each epic includes a "View" link, and issues are listed in a table under each epic.
-        
-        Args:
-            group (object): The GitLab group object.
-
-        Returns:
-            None: The report will be uploaded to the group's wiki.
-        """
-        from collections import defaultdict
-        from datetime import datetime
-
         group_name = group.name
 
-        # Fetch all epics in the group
         try:
             epics = group.epics.list(all=True)
-            epics_dict = {epic.id: epic for epic in epics}  # Create a dictionary for quick lookup
+            epics_dict = {epic.id: epic for epic in epics}
         except Exception as e:
             print(f"Error fetching group epics: {e}")
             return
 
         print(f"Fetched {len(epics)} epics for group '{group_name}'")
 
-        # Fetch all issues and map them to their epics
-        epic_issues = defaultdict(list)  # Epic ID -> List of issues
+        epic_issues = defaultdict(list)
         for project in group.projects.list(all=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
-                # Fetch the full project object
                 full_project = self.gl.projects.get(project.id)
 
-                # Check if issues are enabled for the project
                 if not full_project.issues_enabled:
                     print(f"Issues are disabled for project '{project.name}'. Skipping.")
                     continue
 
-                # Fetch issues for the project
                 project_issues = full_project.issues.list(all=True, include_epics=True)
 
                 # Map issues to their respective epics
                 for issue in project_issues:
-                    if hasattr(issue, 'epic') and issue.epic:  # If the issue is associated with an epic
+                    if hasattr(issue, 'epic') and issue.epic:
                         epic_id = issue.epic['id']
-                        epic_issues[epic_id].append((issue, project))  # Save the issue and its associated project
+                        epic_issues[epic_id].append((issue, project))
 
                 print(f"  Found {len(project_issues)} issues in project '{project.name}'")
 
@@ -1746,16 +1544,12 @@ NceGitLab:
 
         print(f"Total epics with issues fetched: {len(epic_issues)}")
 
-        # Start generating the markdown report
         markdown_report = []
-
-        # Add title and date
         markdown_report.append(f"# Epics and Their Issues Report (Group: {group_name})")
         markdown_report.append("")
         markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
         markdown_report.append("")
 
-        # Organize report content by epic
         for epic_id, epic in epics_dict.items():
             markdown_report.append(f"<details>")
             markdown_report.append(
@@ -1783,10 +1577,9 @@ NceGitLab:
             else:
                 markdown_report.append("  | No issues linked | - | - | - |")
 
-            markdown_report.append("</details>")  # Close the open details tag
-            markdown_report.append("")  # Add a blank line for spacing
+            markdown_report.append("</details>")
+            markdown_report.append("")
 
-        # Handle epics without issues
         epics_without_issues = [epic for epic_id, epic in epics_dict.items() if epic_id not in epic_issues]
         if epics_without_issues:
             markdown_report.append("## Epics Without Linked Issues")
@@ -1796,54 +1589,32 @@ NceGitLab:
                 markdown_report.append(
                     f"| [{epic.title}]({epic.web_url}) | {epic.start_date or 'Not Set'} | {epic.due_date or 'Not Set'} | {epic.state} |"
                 )
-            markdown_report.append("")  # Add a blank line for spacing
+            markdown_report.append("")
 
-        # Combine the markdown report into a single string
         md = "\n".join(markdown_report)
         title = f"{group_name.capitalize()} - Epics Report"
-
-        # Upload the report to the group's wiki
         self.upload_to_wiki(group, title, md)
 
         return md
 
 
     def generate_issue_progress_report(self, group):
-        """
-        Generates an Issue Progress and Status Overview report for a GitLab Group.
-        The report includes a high-level summary of issue statuses across the group, and
-        a detailed breakdown of project-level issue statuses and their milestones.
-
-        Args:
-            group (object): The GitLab group object.
-
-        Returns:
-            None: The report will be uploaded to the group's wiki.
-        """
-        from collections import defaultdict
-        from datetime import datetime
-
         group_name = group.name
 
-        # Initialize dictionaries to store project data for the report
-        project_status_counts = defaultdict(lambda: defaultdict(int))  # Project -> Status -> Count
-        project_issues = defaultdict(list)  # Project -> List of issues
-        milestone_mapping = defaultdict(list)  # Project -> Issues by Milestone
+        project_status_counts = defaultdict(lambda: defaultdict(int))
+        project_issues = defaultdict(list)
+        milestone_mapping = defaultdict(list)
 
-        # Fetch issues for all projects in the group
         for project in group.projects.list(all=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
-                # Fetch the full project object
                 full_project = self.gl.projects.get(project.id)
 
-                # Check if issues are enabled for the project
                 if not full_project.issues_enabled:
                     print(f"Issues are disabled for project '{project.name}'. Skipping.")
                     continue
 
-                # Fetch all issues in the project
                 issues = full_project.issues.list(all=True)
 
                 # Count the issues by status (e.g., open/closed)
@@ -1860,10 +1631,8 @@ NceGitLab:
             except Exception as e:
                 print(f"Failed to process project '{project.name}': {e}")
 
-        # Start generating the markdown report
-        markdown_report = []
 
-        # Add title and date
+        markdown_report = []
         markdown_report.append(f"# Issue Progress and Status Overview (Group: {group_name})")
         markdown_report.append("")
         markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
@@ -1912,27 +1681,20 @@ NceGitLab:
                 markdown_report.append(f"  | {issue_title} | {status} | {milestone_title} |")
 
             markdown_report.append("</details>")
-            markdown_report.append("")  # Add a blank line for spacing
+            markdown_report.append("")
 
-        # Combine the markdown report into a single string
+
         md = "\n".join(markdown_report)
         title = f"{group_name.capitalize()} - Issue Progress and Status Overview"
-
-        # Upload the report to the group's wiki
         self.upload_to_wiki(group, title, md)
 
         return md
 
 
     def generate_and_upload_piid_project_report_to_wiki(self, group):
-        """
-        Generate and upload a PIID vs Project Labels report to the group's Wiki page.
-        The epic status reflects its status as displayed on the Epic Board.
-        """
-        report_data = {project_label: {piid_label: None for piid_label in PIID_LABELS} for project_label in PROJECT_LABELS}
+        report_data = {project_label: {piid_label: None for piid_label in self.PIID_LABELS} for project_label in self.PROJECT_LABELS}
 
         try:
-            # Step 1: Fetch epics for the group
             print(f"Fetching all epics for group: {group.name}")
             all_epics = [group.epics.get(epic.get_id()) for epic in group.epics.list(all=True)]
             print(f"Fetched {len(all_epics)} total epics.")
@@ -1940,16 +1702,14 @@ NceGitLab:
             relevant_epics = []
             for epic in all_epics:
                 # Match epics with the intersection of PIID and project labels
-                project_label = next((label for label in PROJECT_LABELS if label in epic.labels), None)
-                piid_label = next((label for label in PIID_LABELS if label in epic.labels), None)
+                project_label = next((label for label in self.PROJECT_LABELS if label in epic.labels), None)
+                piid_label = next((label for label in self.PIID_LABELS if label in epic.labels), None)
                 if project_label and piid_label:
                     relevant_epics.append((epic, project_label, piid_label))
 
             print(f"Found {len(relevant_epics)} relevant epics with PIID/Project label intersections.")
 
-            # Step 2: Process each relevant epic and calculate metrics
             for epic, project_label, piid_label in relevant_epics:
-                # Initialize the cell if it doesn't already exist
                 if report_data[project_label][piid_label] is None:
                     report_data[project_label][piid_label] = {
                         "epics_open": 0,
@@ -1960,12 +1720,10 @@ NceGitLab:
                     }
 
                 try:
-                    # Update the cell metrics
                     report_data[project_label][piid_label]["epics_total"] += 1
-                    if epic.state == "opened":  # Use the epic's own state instead of deducing from issues
+                    if epic.state == "opened":
                         report_data[project_label][piid_label]["epics_open"] += 1
 
-                    # Fetch linked issues and aggregate weight metrics
                     linked_issues = epic.issues.list(all=True)
                     for issue in linked_issues:
                         issue_weight = issue.weight if issue.weight else 0
@@ -1979,25 +1737,21 @@ NceGitLab:
                 except Exception as issue_error:
                     print(f"Error processing issues for epic ID {epic.get_id()}: {issue_error}")
 
-            # Generate Markdown Report
             markdown_report = []
             markdown_report.append(f"# PIID vs Project Labels Report (Group: {group.name})")
             markdown_report.append("")
             markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
             markdown_report.append("")
 
-            # Add table headers
-            headers = ["| **Project Label → / PIID ↓**"] + [f"| **{piid_label}** " for piid_label in PIID_LABELS]
+            headers = ["| **Project Label → / PIID ↓**"] + [f"| **{piid_label}** " for piid_label in self.PIID_LABELS]
             markdown_report.append("".join(headers) + "|")
-            markdown_report.append("|:" + ":|:".join(["---"] * (len(PIID_LABELS) + 1)) + ":|")
+            markdown_report.append("|:" + ":|:".join(["---"] * (len(self.PIID_LABELS) + 1)) + ":|")
 
-            # Fill the table with data
             for project_label, piid_data in report_data.items():
                 row = [f"| **{project_label}** "]
-                for piid_label in PIID_LABELS:
+                for piid_label in self.PIID_LABELS:
                     data = piid_data[piid_label]
                     if data:
-                        # Construct metrics for this cell
                         epics_open = data["epics_open"]
                         epics_total = data["epics_total"]
                         weight_open = data["weight_open"]
@@ -2019,7 +1773,6 @@ NceGitLab:
 
                 markdown_report.append("".join(row) + "|")
 
-            # Add Quick Links Section
             quick_links = []
             quick_links.append("")
             quick_links.append(f"## Quick Links for {group.name}")
@@ -2031,7 +1784,6 @@ NceGitLab:
             quick_links.append("")
             markdown_report.extend(quick_links)
 
-            # Combine the entire Markdown content
             md_content = "\n".join(markdown_report)
 
             # Upload to the Wiki
@@ -2045,11 +1797,47 @@ NceGitLab:
             print(f"An error occurred while generating or uploading the report: {e}")
 
 
+    def upload_to_wiki(self, group, page_title, content):
+        try:
+            try:
+                existing_page = group.wikis.get(page_title)
+                existing_page.content = content
+                existing_page.save()
+                print(f"Wiki page '{page_title}' was found and overwritten successfully.")
+            except Exception as e:
+                if "404" in str(e):
+                    group.wikis.create({
+                        'title': page_title,
+                        'content': content,
+                    })
+                    print(f"Wiki page '{page_title}' created successfully.")
+                else:
+                    print(f"Error checking or updating wiki page: {e}")
+
+        except Exception as e:
+            print(f"An error occurred while uploading to the wiki: {e}")
+        
+        print()
 
 
+    def delete_all_wiki_pages(self, group):
+        try:
+            wiki_pages = group.wikis.list(all=True)
+        except Exception as e:
+            print(f"Error fetching wiki pages for group '{group.name}': {e}")
+            return
 
+        print(f"Found {len(wiki_pages)} wiki pages in the group '{group.name}'")
 
+        for wiki_page in wiki_pages:
+            try:
+                print(f"Deleting wiki page: {wiki_page.title}")
+                wiki_page.delete()
+                print(f"Successfully deleted wiki page: {wiki_page.title}")
+            except Exception as e:
+                print(f"Failed to delete wiki page '{wiki_page.title}': {e}")
 
+        print(f"All wiki pages for group '{group.name}' have been deleted.")
 
 
     #
@@ -2069,75 +1857,6 @@ NceGitLab:
         except Exception as e:
             return f"Error retrieving obj attributes: {e}"
         
-    
-    def upload_to_wiki(self, group, page_title, content):
-        """
-        Uploads content to a GitLab group's wiki. Overwrites the page if it already exists.
-
-        Args:
-            group (object): A GitLab group object.
-            page_title (str): Title of the wiki page.
-            content (str): Markdown content to upload to the wiki.
-
-        Returns:
-            None
-        """
-        try:
-            try:
-                # Check if the wiki page already exists
-                existing_page = group.wikis.get(page_title)
-                # Overwrite the existing page
-                existing_page.content = content
-                existing_page.save()
-                print(f"Wiki page '{page_title}' was found and overwritten successfully.")
-            except Exception as e:
-                if "404" in str(e):
-                    # If the page does not exist, create a new one
-                    group.wikis.create({
-                        'title': page_title,
-                        'content': content,
-                    })
-                    print(f"Wiki page '{page_title}' created successfully.")
-                else:
-                    # Handle any other errors
-                    print(f"Error checking or updating wiki page: {e}")
-
-        except Exception as e:
-            print(f"An error occurred while uploading to the wiki: {e}")
-        
-        print()
-
-
-    def delete_all_wiki_pages(self, group):
-        """
-        Deletes all wiki pages for a given GitLab group.
-
-        Args:
-            group (object): The GitLab group object.
-
-        Returns:
-            None
-        """
-        try:
-            # Fetch the list of all wiki pages for the group
-            wiki_pages = group.wikis.list(all=True)  # Fetch all wiki pages in the group
-        except Exception as e:
-            print(f"Error fetching wiki pages for group '{group.name}': {e}")
-            return
-
-        print(f"Found {len(wiki_pages)} wiki pages in the group '{group.name}'")
-
-        # Loop through each wiki page and delete it
-        for wiki_page in wiki_pages:
-            try:
-                print(f"Deleting wiki page: {wiki_page.title}")
-                wiki_page.delete()  # Delete the wiki page
-                print(f"Successfully deleted wiki page: {wiki_page.title}")
-            except Exception as e:
-                print(f"Failed to delete wiki page '{wiki_page.title}': {e}")
-
-        print(f"All wiki pages for group '{group.name}' have been deleted.")
-
 
     #
     # Labels
@@ -2168,12 +1887,10 @@ NceGitLab:
 
     def delete_all_labels(self, target):
         try:
-            if hasattr(target, 'labels'):  # Project labels endpoint
-                # print(f"Fetching and deleting labels for project: {target.name}")
+            if hasattr(target, 'labels'):
                 list_labels = target.labels.list(all=True)
                 delete_label = lambda label: label.delete()
-            elif hasattr(target, 'group_labels'):  # Group labels endpoint
-                # print(f"Fetching and deleting labels for group: {target.name}")
+            elif hasattr(target, 'group_labels'): 
                 list_labels = target.group_labels.list(all=True)
                 delete_label = lambda label: label.delete()
             else:
@@ -2194,6 +1911,7 @@ NceGitLab:
         except Exception as e:
             print(f"An error occurred: {e}")
 
+
     #
     # Bootstrapping
     #
@@ -2206,9 +1924,9 @@ NceGitLab:
 
 
     def create_all_lorem_objects(self, group_name, project_name, epic_count=10, issue_count=40):
-        self.create_and_apply_labels(self.get_group_by_name(group_name), PROJECT_LABELS)
-        self.create_and_apply_labels(self.get_group_by_name(group_name), PIID_LABELS)
-        self.create_and_apply_labels(self.get_group_by_name(group_name), EPIC_LABELS)
+        self.create_and_apply_labels(self.get_group_by_name(group_name), self.PROJECT_LABELS)
+        self.create_and_apply_labels(self.get_group_by_name(group_name), self.PIID_LABELS)
+        self.create_and_apply_labels(self.get_group_by_name(group_name), self.EPIC_LABELS)
         lorem_milestones = self.create_lorem_milestones(self.get_project_by_name(project_name))
         lorem_epics = self.create_epics_lorem(group_name, num_epics=epic_count)
         lorem_issues = self.create_issues_lorem(project_name, num_issues=issue_count)
@@ -2217,10 +1935,10 @@ NceGitLab:
 
 
     def create_all_lorem_reports(self, group_name, project_name):
-        # self.generate_summary_report(self.get_group_by_name(group_name))
-        # self.generate_detailed_report(self.get_group_by_name(group_name))
-        # self.generate_epics_report(self.get_group_by_name(group_name))
-        # self.generate_issue_progress_report(self.get_group_by_name(group_name))
+        self.generate_summary_report(self.get_group_by_name(group_name))
+        self.generate_detailed_report(self.get_group_by_name(group_name))
+        self.generate_epics_report(self.get_group_by_name(group_name))
+        self.generate_issue_progress_report(self.get_group_by_name(group_name))
         self.generate_and_upload_piid_project_report_to_wiki(self.get_group_by_name(group_name))  
 
 
@@ -2229,166 +1947,18 @@ NceGitLab:
 def main():
     gl = NceGitLab()
     
-    #
-    # Variables
-    #
-    issues_csv_filename = "test-3-2-epics"
-    epics_csv_filename = "test-3-2-1-epics.csv"
 
+    # Fill in your group
     group_name = "best-1"
+
+    # Fill in your project
     project_name = "best-1-project"
 
-    # epics = gl.get_epics(group_name)
-    # for epic in epics:
-    #     # print(f"{epic.get_id()} - {epic.issues}")
-    #     pprint(epic.issues)
-    #     exit(0)
-
-    # epic_issues = gl.get_issues_and_parent_epics(gl.get_group_by_name(group_name))
-
-    # # Summarize the results
-    # print("\nEpic Issue Mapping:")
-    # for epic_id, issues in epic_issues.items():
-    #     if epic_id is None:
-    #         print(f"Issues without an epic ({len(issues)} issues):")
-    #     else:
-    #         print(f"Epic ID {epic_id} ({len(issues)} issues):")
-    #     for issue in issues:
-    #         print(f"  - Issue #{issue.iid}: {issue.title}")
-
-
-
-    # Bootstrap
     # gl.cleanup_group(group_name, project_name)
-    # gl.create_all_lorem_objects(group_name, project_name, epic_count=30, issue_count=80)
-    # gl.create_all_lorem_reports(group_name, project_name)
-
-    gl.generate_and_upload_piid_project_report_to_wiki(gl.get_group_by_name(group_name))  
-
-    # group_name = "best-1"
-    # group = gl.get_group_by_name(group_name)
-
-    # full_epics = [group.epics.get(epic.get_id()) for epic in group.epics.list(get_all=True)]
-
-    # for epic in full_epics:
-    #     print(f"id: {epic.get_id()}, labels: [{epic.labels}]")
-
-    # for epic in full_epics:
-    #     issues = epic.issues.list()
-    #     print(f"Len: {len(issues)}, {epic.get_id()}: {epic.title},")
-    #     for issue in issues:
-    #         print(f"   - {issue.id} - Weight: {issue.weight}")
-
-
-
-    # gl.delete_all_issues_from_project(project_name)
-    # gl.create_all_lorem_reports(group_name, project_name)
-
-
-
-    # Labels
-    # gl.create_and_apply_labels(gl.get_group_by_name(group_name), PROJECT_LABELS)
-    # gl.create_and_apply_labels(gl.get_group_by_name(group_name), PIID_LABELS)
-
-    # gl.delete_all_labels(gl.get_group_by_name(group_name))
-    # gl.delete_all_group_epics(group_name)
-
-    # lorem_epics = gl.create_epics_lorem(group_name, num_epics=10)
-
-
-
-    # gl.md_group_epics_report(group_name, wiki_page_slug="Lorem Group Report")
-
-
-    #
-    # Milestones
-    # 
-    # epics = gl.get_epics(group_name)
-    # for epic in epics:
-    #     group_id = epic.attributes['group_id']
-    #     group = gl.get_group_by_id(group_id)
-    #     # print(f"epic: {epic.title} of group: {group.name}")
-    #     print(f"Epic: {epic.title} of group: {group.name if group else f'group_id: {epic.group_id} (not found)'}")
-
-    # gl.list_group_milestones(group_name, recursive=True)
-    # milestones = gl.get_group_milestones(group_name, recursive=True)
-    # for milestone in milestones:
-    #     print(f"milestone: {milestone.title}")
-    
-    # group = gl.get_group_by_name(group_name)
-    # result = gl.get_epics_under_milestones(group_name)
-    # gl.upload_milestones_and_epics_to_wiki(group, result)
-
-    
-    # groups = gl.get_all_subgroups(group_name)
-    # for group in groups:
-    #     print(f"group: {group.attributes['full_path']}")
-    
-    # Markdown report functions
-    # gl.md_group_epics_report(group_name)
-
-    #
-    # Issues function tests
-    #
-    # gl.export_project_issues_to_csv(project_name)
-    # gl.export_epics_to_csv(group_name)
-    # gl.import_epics_from_csv(group_name, epics_csv_filename)
-    # gl.delete_all_group_epics(group_name)
-
-
-    # gl.delete_all_issues_from_project(group_name)
-    # gl.delete_all_group_epics(group_name)
-
-    # gl.import_epics_from_csv(group_name, epics_csv_filename)
-    # gl.import_issues_into_project(group_name, issues_csv_filename)
-    # gl.issues_assign_random_weights(group_name, recursive=True)
-    
-    # csv_filename = "test-3-2-1-epics.csv"
-    # gl.import_epics_from_csv(group_name, csv_filename)
-    # gl.delete_all_group_epics(group_name)
-    # gl.export_epics_to_csv(group_name)
-    # gl.delete_all_issues_from_project(project_name)
-    # gl.export_project_issues_to_csv(project_name)
-
-    # Project function tests
-    # gl.list_projects()
-    # projects = gl.get_projects()
-    # print(f"Projects: {len(projects)}")
-    # for project in projects:
-    #     print(f"project name: {type(project)}, name: {project.name}")
-    #     print(f"Milestones:")
-    #     milestones = project.milestones.list(get_all=True)
-    #     for milestone in milestones:
-    #         print(f"title: {milestone.attributes['title']}")
-        
-    # project = gl.get_project_by_name("test-3-1-project")
-    # print(f"project name: {project.name}")
-
-    # milestones = project.milestones
-    # print(milestones)
-
-    # project_name = "test-3-2-1-project"
-    # gl.import_issues_into_project(project_name, "chatbot-project.csv")
-
-    # Epics function tests
-    # group_name = "Test-3-2"
-    # gl.export_epics_to_csv(group_name)
-    # gl.import_epics_from_csv(group_name, "chatbot-epics.csv")
-
-    # Group function tests
-    # gl.list_groups()
-    # gl.get_groups()
-    # group = gl.get_group_by_name(gl.group_name)
-    # print(f"group: {group.name}, type: {type(group)}")
-    # groups = gl.get_all_subgroups(group)
-    # for g in groups:
-    #     print(f"name: {g.name}")
-
-    # Project function tests
-    # gl.list_projects()
-
-    # Search for projects by name (globally)
-    # gl.get_project_by_name("test-3-1-project")
+    # gl.create_all_lorem_objects(group_name, project_name, epic_count=25, issue_count=80)
+    gl.create_all_lorem_reports(group_name, project_name)
 
 if __name__ == "__main__":
     main()
+
+
