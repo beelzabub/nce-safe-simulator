@@ -13,6 +13,7 @@ from pprint import pprint
 import random
 import re
 import requests
+import os
 
 
 
@@ -34,19 +35,88 @@ class NceGitLab:
             ''')
             exit(1)
 
+
         with open(self.config_file, "r", encoding="utf-8") as config_file:
             config = json.load(config_file)
 
+        def parse_label_env(env_var):
+            env_val = os.getenv(env_var)
+            return [item.strip() for item in env_val.split(",") if item.strip()] if env_val else None
+
+        def parse_fibonacci_env(env_var):
+            env_val = os.getenv(env_var)
+            if env_val:
+                try:
+                    return [int(item.strip()) for item in env_val.split(",") if item.strip()]
+                except ValueError:
+                    return None
+            return None
+
         self.url = config.get("url", "")
-        self.private_token = config.get("private_token", "")
-        self.fibonacci_weights = config.get("fibonacci_weights")
+        
+        access_token_env = os.getenv("ACCESS_TOKEN")
+        if access_token_env:
+            self.private_token = access_token_env
+            token_source = "env (ACCESS_TOKEN)"
+        else:
+            self.private_token = config.get("private_token", "")
+            token_source = config_file
+        
+        fibonacci_weights_env = parse_fibonacci_env("FIBONACCI_WEIGHTS")
+        if fibonacci_weights_env:
+            self.fibonacci_weights = fibonacci_weights_env
+            fibonacci_weights_source = "env (FIBONACCI_WEIGHTS)"
+        else:
+            self.fibonacci_weights = config.get("fibonacci_weights")
+            fibonacci_weights_source = config_file
 
-        self.PROJECT_LABELS = config.get("project_labels", [])
-        self.PIID_LABELS = config.get("piid_labels", [])
-        self.EPIC_LABELS = config.get("epic_labels", [])
+        project_labels_env = parse_label_env("PROJECT_LABELS")
+        if project_labels_env:
+            self.PROJECT_LABELS = project_labels_env
+            project_labels_source = "env (PROJECT_LABELS)"
+        else:
+            self.PROJECT_LABELS = config.get("project_labels", [])
+            project_labels_source = config_file
 
-        if not all([self.url, self.private_token, self.fibonacci_weights, self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_LABELS]):
-            print("Missing required fields or label settings in nec_gitlab_config.json")
+        piid_labels_env = parse_label_env("PIID_LABELS")
+        if piid_labels_env:
+            self.PIID_LABELS = piid_labels_env
+            piid_labels_source = "env (PIID_LABELS)"
+        else:
+            self.PIID_LABELS = config.get("piid_labels", [])
+            piid_labels_source = config_file
+
+        epic_labels_env = parse_label_env("EPIC_LABELS")
+        if epic_labels_env:
+            self.EPIC_LABELS = epic_labels_env
+            epic_labels_source = "env (EPIC_LABELS)"
+        else:
+            self.EPIC_LABELS = config.get("epic_labels", [])
+            epic_labels_source = config_file
+
+        token_display = "***" + self.private_token[-8:] if len(self.private_token) > 8 else "***"
+        print(f"ACCESS_TOKEN: {token_display} [source: {token_source}]")
+        print(f"FIBONACCI_WEIGHTS: {self.fibonacci_weights} [source: {fibonacci_weights_source}]")
+        print(f"PROJECT_LABELS: {self.PROJECT_LABELS} [source: {project_labels_source}]")
+        print(f"PIID_LABELS: {self.PIID_LABELS} [source: {piid_labels_source}]")
+        print(f"EPIC_LABELS: {self.EPIC_LABELS} [source: {epic_labels_source}]")
+
+        missing_fields = []
+        if not self.url:
+            missing_fields.append("url")
+        if not self.private_token:
+            missing_fields.append("private_token")
+        if not self.fibonacci_weights:
+            missing_fields.append("fibonacci_weights")
+        if not self.PROJECT_LABELS:
+            missing_fields.append("project_labels")
+        if not self.PIID_LABELS:
+            missing_fields.append("piid_labels")
+        if not self.EPIC_LABELS:
+            missing_fields.append("epic_labels")
+
+        if missing_fields:
+            print(f"ERROR: Missing required fields in nce_gitlab_config.json: {', '.join(missing_fields)}")
             exit(1)
 
         try:
@@ -1872,9 +1942,8 @@ def main():
     # Fill in your project
     project_name = ""
 
-    gl.create_all_lorem_reports(group_name, project_name)
+    # gl.create_all_lorem_reports(group_name, project_name)
 
 if __name__ == "__main__":
     main()
-
 
