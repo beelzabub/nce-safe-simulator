@@ -7,5 +7,6 @@ stages:
 python-version-test:
   stage: build
   script:
-    - python cicd-env.py 
+    - pip install -r requirements.txt
+    - python NceGitLab.py 
 
