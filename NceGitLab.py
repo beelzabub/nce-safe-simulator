@@ -95,11 +95,11 @@ class NceGitLab:
             epic_labels_source = config_file
 
         token_display = "***" + self.private_token[-8:] if len(self.private_token) > 8 else "***"
-        print(f"ACCESS_TOKEN: {token_display} [source: {token_source}]")
-        print(f"FIBONACCI_WEIGHTS: {self.fibonacci_weights} [source: {fibonacci_weights_source}]")
-        print(f"PROJECT_LABELS: {self.PROJECT_LABELS} [source: {project_labels_source}]")
-        print(f"PIID_LABELS: {self.PIID_LABELS} [source: {piid_labels_source}]")
-        print(f"EPIC_TYPE_LABELS: {self.EPIC_TYPE_LABELS} [source: {epic_labels_source}]")
+        # print(f"ACCESS_TOKEN: {token_display} [source: {token_source}]")
+        # print(f"FIBONACCI_WEIGHTS: {self.fibonacci_weights} [source: {fibonacci_weights_source}]")
+        # print(f"PROJECT_LABELS: {self.PROJECT_LABELS} [source: {project_labels_source}]")
+        # print(f"PIID_LABELS: {self.PIID_LABELS} [source: {piid_labels_source}]")
+        # print(f"EPIC_TYPE_LABELS: {self.EPIC_TYPE_LABELS} [source: {epic_labels_source}]")
 
         missing_fields = []
         if not self.url:
@@ -449,7 +449,7 @@ NceGitLab:
             return []
 
 
-    def create_epics_lorem(self, group_name, num_epics=5):
+    def create_epics_lorem(self, group_name, num_epics=15, create_hierarchy=False):
         try:
             group = self.get_group_by_name(group_name)
 
@@ -463,7 +463,7 @@ NceGitLab:
                 # Adjust to the next Monday if not already a Monday
                 while first_of_next_month.weekday() != 0:  # 0 = Monday
                     first_of_next_month += timedelta(days=1)
-                
+
                 return first_of_next_month.date()
 
             def get_random_end_date_from_start(start_date):
@@ -489,7 +489,7 @@ NceGitLab:
                 start_date_str = start_date.isoformat()
                 due_date_str = due_date.isoformat()
 
-                # Randomly select one project label and one PIID label
+                # Randomly select one project label, one PIID label, and an Epic type label (`Epic`, `Capability`, `Feature`)
                 project_label = random.choice(self.PROJECT_LABELS)
                 piid_label = random.choice(self.PIID_LABELS)
                 epic_label = random.choice(self.EPIC_TYPE_LABELS)
@@ -505,15 +505,54 @@ NceGitLab:
 
                 print(
                     f"Created epic #{epic.iid} - Title: {title}, Weight: {weight}, Start: {start_date}, End: {due_date}, "
-                    f"Project Label: **{project_label}**, PIID Label: {piid_label}"
+                    f"Project Label: **{project_label}**, PIID Label: {piid_label}, Type Label: {epic_label}"
                 )
-                created_epics.append(epic)
+
+                created_epics.append((epic, epic_label))
+
+            # If a hierarchy is requested, assign relationships
+            if create_hierarchy:
+                self.build_epic_hierarchy(group, created_epics)
 
             return created_epics
-        
+
         except Exception as e:
             print(f"Error creating epics: {e}")
             return []
+
+    def build_epic_hierarchy(self, group, epics):
+        try:
+            print(f"Building epic hierarchy for group '{group.name}'")
+
+            # Separate epics by type
+            epic_dict = defaultdict(list)
+            for epic, label in epics:
+                epic_dict[label].append(epic)
+
+            # Assign relationships: Epics → Capabilities → Features
+            for epic in epic_dict.get("Epic", []):  # Loop through top-level Epics
+                # Randomly assign capabilities to epics
+                capabilities = random.sample(epic_dict.get("Capability", []), k=min(len(epic_dict.get("Capability", [])), 2))
+                for capability in capabilities:
+                    try:
+                        capability.parent_id = epic.id
+                        capability.save()
+                        print(f"Linked Capability '{capability.title}' as child of Epic '{epic.title}'")
+                    except Exception as e:
+                        print(f"Failed to link Capability '{capability.title}' to Epic '{epic.title}': {e}")
+
+                    # Randomly assign features to capabilities
+                    features = random.sample(epic_dict.get("Feature", []), k=min(len(epic_dict.get("Feature", [])), 3))
+                    for feature in features:
+                        try:
+                            feature.parent_id = capability.id
+                            feature.save()
+                            print(f"Linked Feature '{feature.title}' as child of Capability '{capability.title}'")
+                        except Exception as e:
+                            print(f"Failed to link Feature '{feature.title}' to Capability '{capability.title}': {e}")
+
+        except Exception as e:
+            print(f"Error building epic hierarchy: {e}")
 
 
     def assign_issues_to_epics(self, epics, issues):
@@ -521,19 +560,22 @@ NceGitLab:
             print("No epics available to assign issues to.")
             return {}
 
+        # Extract just the epic objects from the epics with labels
+        epic_objects = [epic_tuple[0] for epic_tuple in epics]
+
         assigned_issues = {}
 
         for issue in issues:
-            selected_epic = random.choice(epics)
+            selected_epic = random.choice(epic_objects)
 
             try:
                 issue.epic_id = selected_epic.id
                 issue.save()
-                
+
                 # Map the assigned issue details to the selected epic
                 if selected_epic.title not in assigned_issues:
                     assigned_issues[selected_epic.title] = []
-                
+
                 assigned_issues[selected_epic.title].append({
                     'issue_id': issue.iid,
                     'issue_title': issue.title,
@@ -1485,91 +1527,111 @@ NceGitLab:
 
         try:
             epics = group.epics.list(all=True)
-            epics_dict = {epic.id: epic for epic in epics}
-        except Exception as e:
-            print(f"Error fetching group epics: {e}")
-            return
+            # Build a parent-child mapping for hierarchy
+            epic_hierarchy = defaultdict(list)
+            epic_dict = {epic.id: epic for epic in epics}
 
-        print(f"Fetched {len(epics)} epics for group '{group_name}'")
+            for epic in epics:
+                if epic.parent_id:  # Found a parent epic
+                    epic_hierarchy[epic.parent_id].append(epic)
 
-        epic_issues = defaultdict(list)
-        for project in group.projects.list(all=True):
-            try:
-                print(f"Processing project: {project.name} (ID: {project.id})")
+            # Emoji/icon mapping to differentiate Epic/Capability/Feature
+            epic_type_icons = {
+                "Epic": "🏆",           # Trophy for strategic goals
+                "Capability": "🧩",     # Puzzle piece for capabilities
+                "Feature": "🛠️"         # Tools for features
+            }
 
-                full_project = self.gl.projects.get(project.id)
+            # Summary counters
+            summary = {key: {"open": 0, "closed": 0, "total": 0} for key in self.EPIC_TYPE_LABELS}
+            for epic in epics:
+                # Match the type label from the Epic's labels
+                epic_type = "Epic"  # Default to "Epic" if no labels match
+                for label in self.EPIC_TYPE_LABELS:
+                    if label in epic.labels:
+                        epic_type = label
+                        break
 
-                if not full_project.issues_enabled:
-                    print(f"Issues are disabled for project '{project.name}'. Skipping.")
-                    continue
+                summary[epic_type]["total"] += 1
+                if epic.state == "opened":
+                    summary[epic_type]["open"] += 1
+                elif epic.state == "closed":
+                    summary[epic_type]["closed"] += 1
 
-                project_issues = full_project.issues.list(all=True, include_epics=True)
-
-                # Map issues to their respective epics
-                for issue in project_issues:
-                    if hasattr(issue, 'epic') and issue.epic:
-                        epic_id = issue.epic['id']
-                        epic_issues[epic_id].append((issue, project))
-
-                print(f"  Found {len(project_issues)} issues in project '{project.name}'")
-
-            except Exception as e:
-                print(f"Failed to process project '{project.name}': {e}")
-
-        print(f"Total epics with issues fetched: {len(epic_issues)}")
-
-        markdown_report = []
-        markdown_report.append(f"# Epics and Their Issues Report (Group: {group_name})")
-        markdown_report.append("")
-        markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
-        markdown_report.append("")
-
-        for epic_id, epic in epics_dict.items():
-            markdown_report.append(f"<details>")
-            markdown_report.append(
-                f"  <summary><strong>Epic: {epic.title}</strong> "
-                f"<a href=\"{epic.web_url}\" target=\"_blank\">[View]</a></summary>"
-            )
+            # Prepare the report header and summary table
+            markdown_report = []
+            markdown_report.append(f"# Epics Hierarchical Report (Group: {group_name})")
+            markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
             markdown_report.append("")
-            markdown_report.append(f"  **Start Date:** {epic.start_date or 'Not Set'}  ")
-            markdown_report.append(f"  **Due Date:** {epic.due_date or 'Not Set'}  ")
-            markdown_report.append(f"  **State:** {epic.state}  ")
-            markdown_report.append(f"  **Description:** {epic.description or 'No description provided.'}  ")
+            markdown_report.append("## 📊 Summary")
             markdown_report.append("")
+            markdown_report.append("| Type         | Open | Closed | Total | % Complete |")
+            markdown_report.append("|--------------|------|--------|-------|------------|")
 
-            # Add table of issues linked to this epic
-            markdown_report.append("  | Issue Title | Status | Milestone | Project |")
-            markdown_report.append("  |-------------|--------|-----------|---------|")
-            if epic_id in epic_issues:
-                for issue, project in epic_issues[epic_id]:
-                    issue_title = f"[{issue.title}]({issue.web_url})"
-                    status = issue.state.capitalize()
-                    milestone_title = issue.milestone['title'] if issue.milestone else "None"
-                    project_name = project.name
+            for epic_type, counts in summary.items():
+                total = counts["total"]
+                open_count = counts["open"]
+                closed_count = counts["closed"]
+                percent_complete = f"{(closed_count / total * 100):.1f}%" if total > 0 else "0.0%"
 
-                    markdown_report.append(f"  | {issue_title} | {status} | {milestone_title} | {project_name} |")
-            else:
-                markdown_report.append("  | No issues linked | - | - | - |")
-
-            markdown_report.append("</details>")
-            markdown_report.append("")
-
-        epics_without_issues = [epic for epic_id, epic in epics_dict.items() if epic_id not in epic_issues]
-        if epics_without_issues:
-            markdown_report.append("## Epics Without Linked Issues")
-            markdown_report.append("| Epic | Start Date | Due Date | State |")
-            markdown_report.append("|------|------------|----------|-------|")
-            for epic in epics_without_issues:
+                icon = epic_type_icons.get(epic_type, "🏆")  # Default to Trophy if type not found
                 markdown_report.append(
-                    f"| [{epic.title}]({epic.web_url}) | {epic.start_date or 'Not Set'} | {epic.due_date or 'Not Set'} | {epic.state} |"
+                    f"| {icon} **{epic_type}** | {open_count} | {closed_count} | {total} | {percent_complete} |"
                 )
+
+            markdown_report.append("")
+            markdown_report.append("In this report:")
+            markdown_report.append("- **🏆 Epic** represents the top-level strategic goals")
+            markdown_report.append("- **🧩 Capability** represents a grouping of related functionality or deliverables")
+            markdown_report.append("- **🛠️ Feature** represents specific deliverables or tasks")
             markdown_report.append("")
 
-        md = "\n".join(markdown_report)
-        title = f"{group_name.capitalize()} - Epics Report"
-        self.upload_to_wiki(group, title, md)
+            def render_epic_details(epic, level=0):
+                """Render the epic details recursively in collapsible <details> tags."""
+                # Determine the right icon for this epic based on its labels
+                icon = epic_type_icons.get("Epic", "🏆")  # Default to Trophy if label isn't found
 
-        return md
+                # Match the type label from the Epic's labels
+                for label in self.EPIC_TYPE_LABELS:
+                    if label in epic.labels and label in epic_type_icons:
+                        icon = epic_type_icons[label]
+                        break
+
+                # Construct the link to the epic's "Work Items" page
+                work_items_url = f"{group.web_url}/-/epics/{epic.iid}#work-items"
+
+                # Add details for the epic
+                markdown_report.append(f"<details>")
+                markdown_report.append(f"<summary>{icon} **[{epic.title}]({epic.web_url})** "
+                                    f"(State: {epic.state.title()})</summary>")
+                markdown_report.append("")
+                markdown_report.append(f"- **Start Date:** {epic.start_date or 'Not Set'}")
+                markdown_report.append(f"- **Due Date:** {epic.due_date or 'Not Set'}")
+                markdown_report.append(
+                    f"- **Linked Issues:** [**{len(epic.issues.list(all=True))}**]({work_items_url})"
+                )
+                markdown_report.append("")
+
+                # Render child epics recursively
+                for child_epic in epic_hierarchy.get(epic.id, []):
+                    render_epic_details(child_epic, level + 1)
+
+                markdown_report.append(f"</details>")
+
+            # Main report: Start with top-level epics (those without a parent_id)
+            for epic in epics:
+                if not epic.parent_id:  # Top-level epic
+                    render_epic_details(epic)
+
+            md = "\n".join(markdown_report)
+            title = f"{group_name.capitalize()} - Epics Hierarchical Report"
+            self.upload_to_wiki(group, title, md)
+
+            return md
+
+        except Exception as e:
+            print(f"Failed to generate epics report for group '{group_name}': {e}")
+
 
 
     def generate_issue_progress_report(self, group):
@@ -1912,11 +1974,11 @@ NceGitLab:
 
 
     def create_all_lorem_objects(self, group_name, project_name, epic_count=10, issue_count=40):
-        self.create_and_apply_labels(self.get_group_by_name(group_name), self.PROJECT_LABELS)
-        self.create_and_apply_labels(self.get_group_by_name(group_name), self.PIID_LABELS)
-        self.create_and_apply_labels(self.get_group_by_name(group_name), self.EPIC_TYPE_LABELS)
+        for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS]:
+            self.create_and_apply_labels(self.get_group_by_name(group_name), label_array)
+
         lorem_milestones = self.create_lorem_milestones(self.get_project_by_name(project_name))
-        lorem_epics = self.create_epics_lorem(group_name, num_epics=epic_count)
+        lorem_epics = self.create_epics_lorem(group_name, num_epics=epic_count, create_hierarchy=True)
         lorem_issues = self.create_issues_lorem(project_name, num_issues=issue_count)
         self.assign_issues_to_epics(lorem_epics, lorem_issues)
         self.assign_issues_to_milestones(lorem_milestones, lorem_issues)
@@ -1942,7 +2004,10 @@ def main():
     # Fill in your project
     project_name = ""
 
+    # gl.cleanup_group(group_name, project_name)
+    # gl.create_all_lorem_objects(group_name, project_name, epic_count=60, issue_count=150)
     # gl.create_all_lorem_reports(group_name, project_name)
+
 
 if __name__ == "__main__":
     main()
