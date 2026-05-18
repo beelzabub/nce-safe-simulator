@@ -82,16 +82,16 @@ class NceGitLab:
         if piid_labels_env:
             self.PIID_LABELS = piid_labels_env
             piid_labels_source = "env (PIID_LABELS)"
-        else:
+        else: 
             self.PIID_LABELS = config.get("piid_labels", [])
             piid_labels_source = config_file
 
-        epic_labels_env = parse_label_env("EPIC_LABELS")
+        epic_labels_env = parse_label_env("EPIC_TYPE_LABELS")
         if epic_labels_env:
-            self.EPIC_LABELS = epic_labels_env
-            epic_labels_source = "env (EPIC_LABELS)"
+            self.EPIC_TYPE_LABELS = epic_labels_env
+            epic_labels_source = "env (EPIC_TYPE_LABELS)"
         else:
-            self.EPIC_LABELS = config.get("epic_labels", [])
+            self.EPIC_TYPE_LABELS = config.get("epic_type_labels", [])
             epic_labels_source = config_file
 
         token_display = "***" + self.private_token[-8:] if len(self.private_token) > 8 else "***"
@@ -99,7 +99,7 @@ class NceGitLab:
         print(f"FIBONACCI_WEIGHTS: {self.fibonacci_weights} [source: {fibonacci_weights_source}]")
         print(f"PROJECT_LABELS: {self.PROJECT_LABELS} [source: {project_labels_source}]")
         print(f"PIID_LABELS: {self.PIID_LABELS} [source: {piid_labels_source}]")
-        print(f"EPIC_LABELS: {self.EPIC_LABELS} [source: {epic_labels_source}]")
+        print(f"EPIC_TYPE_LABELS: {self.EPIC_TYPE_LABELS} [source: {epic_labels_source}]")
 
         missing_fields = []
         if not self.url:
@@ -112,7 +112,7 @@ class NceGitLab:
             missing_fields.append("project_labels")
         if not self.PIID_LABELS:
             missing_fields.append("piid_labels")
-        if not self.EPIC_LABELS:
+        if not self.EPIC_TYPE_LABELS:
             missing_fields.append("epic_labels")
 
         if missing_fields:
@@ -492,7 +492,7 @@ NceGitLab:
                 # Randomly select one project label and one PIID label
                 project_label = random.choice(self.PROJECT_LABELS)
                 piid_label = random.choice(self.PIID_LABELS)
-                epic_label = random.choice(self.EPIC_LABELS)
+                epic_label = random.choice(self.EPIC_TYPE_LABELS)
 
                 epic = group.epics.create({
                     'title': title,
@@ -1914,7 +1914,7 @@ NceGitLab:
     def create_all_lorem_objects(self, group_name, project_name, epic_count=10, issue_count=40):
         self.create_and_apply_labels(self.get_group_by_name(group_name), self.PROJECT_LABELS)
         self.create_and_apply_labels(self.get_group_by_name(group_name), self.PIID_LABELS)
-        self.create_and_apply_labels(self.get_group_by_name(group_name), self.EPIC_LABELS)
+        self.create_and_apply_labels(self.get_group_by_name(group_name), self.EPIC_TYPE_LABELS)
         lorem_milestones = self.create_lorem_milestones(self.get_project_by_name(project_name))
         lorem_epics = self.create_epics_lorem(group_name, num_epics=epic_count)
         lorem_issues = self.create_issues_lorem(project_name, num_issues=issue_count)
