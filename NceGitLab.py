@@ -1823,7 +1823,7 @@ NceGitLab:
             # Step 1: Calculate portfolio metrics
             metrics = self.calculate_portfolio_metrics(group_name)
 
-            pprint(metrics)
+            # pprint(metrics)
 
             # Step 2: Generate portfolio-level summary
             summary_report = self.generate_portfolio_summary(metrics)
@@ -1846,56 +1846,48 @@ NceGitLab:
             all_epics = metrics["Epic"] + metrics["Capability"] + metrics["Feature"]
             epic_hierarchy = defaultdict(list)
 
-            print("Epic Hierarchy Structure:")
-            pprint(epic_hierarchy)
-
-
-            # Build the hierarchy: map `parent_id` to children
+            # Build the hierarchy: map parent_id to its children
             for epic in all_epics:
-                if "parent_id" in epic:  # If the epic has a parent, add it to its parent's list
+                if epic.get("parent_id") is not None:
                     epic_hierarchy[epic["parent_id"]].append(epic)
 
             # Define the helper function to render epics hierarchically
             def render_epic_details(epic, indent_level=0):
-                """Recursive function to render epic details with child capabilities and features."""
                 nonlocal markdown_report
-                indent = "  " * indent_level  # Indentation for nested levels
 
-                # Render the current epic in a <details> block
-                markdown_report.append(f"{indent}<details>")
-                markdown_report.append(
-                    f"{indent}<summary>🏆 **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})</summary>\n"
-                )
-                markdown_report.append(f"{indent}  - **Linked Issues:** {epic.get('linked_issue_count', 0)}")
-                markdown_report.append("")
+                epic_type = next((t for t in ["Epic", "Capability", "Feature"] if t in epic.get("labels", [])), "Epic")
+                icon = self.EPIC_TYPE_ICONS.get(epic_type, "🏆")
 
-                # Add features to the epic, if any
-                if epic.get('features'):
-                    markdown_report.append(f"{indent}  **Features:**")
-                    for feature_id, feature_data in epic['features'].items():
-                        markdown_report.append(f"{indent}  - 🛠️ **{feature_data['title']}** (State: {feature_data['state']})")
-                        markdown_report.append(
-                            f"{indent}    - **Blocks:** {feature_data.get('blocking_count', 0)}, "
-                            f"**Blocked By:** {feature_data.get('blocked_count', 0)}"
-                        )
-                        markdown_report.append("")  # Add extra space for readability
+                if epic_type == "Feature":
+                    markdown_report.append(
+                        f"{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})"
+                    )
+                    markdown_report.append("")
+                else:
+                    # No leading-space indentation on HTML tags or content — CommonMark treats
+                    # 4+ leading spaces as a code block, which breaks rendering at nesting depth >= 2.
+                    # Nested <details> elements provide visual hierarchy on their own.
+                    markdown_report.append("<details>")
+                    markdown_report.append(
+                        f"<summary>{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})</summary>"
+                    )
+                    markdown_report.append("")
 
-                # Render child epics/capabilities recursively
-                if epic['id'] in epic_hierarchy:
-                    for child_epic in epic_hierarchy[epic['id']]:
+                    for child_epic in epic_hierarchy.get(epic['id'], []):
                         render_epic_details(child_epic, indent_level + 1)
 
-                markdown_report.append(f"{indent}</details>\n")  # Close the <details> block
+                    markdown_report.append("</details>")
+                    markdown_report.append("")
 
-            # Render all top-level epics (epics without parents)
-            top_level_epics = [epic for epic in all_epics if "parent_id" not in epic]
+            # Render all top-level epics (epics without a parent)
+            top_level_epics = [epic for epic in all_epics if epic.get("parent_id") is None]
             for epic in top_level_epics:
                 render_epic_details(epic)
 
             # Final markdown generation
             md = "\n".join(markdown_report)
-            print("Generated Markdown:")  # For debugging purposes
-            print(md)
+            # print("Generated Markdown:")  # For debugging purposes
+            # print(md)
 
             # Upload the Markdown to the group's Wiki
             self.upload_to_wiki(group, f"{group_name} - Epics Hierarchical Report", md)
@@ -1911,7 +1903,6 @@ NceGitLab:
             print(f"Group '{group_name}' not found.")
             return {}
 
-        print(f"Calculating metrics for group {group.name}")
         # Fetch all epics in the group
         all_epics = group.epics.list(all=True)
 
@@ -1925,13 +1916,8 @@ NceGitLab:
         # Map to hold epic data by ID for easy lookup
         epic_map = {}
 
-        count = 0
         for epic in all_epics:
             print(f"Processing data for epic: {epic.title}")
-
-            count = count + 1
-            if count > 10:
-                continue
 
             # Prepare the common data structure
             associated_data = {
@@ -1940,11 +1926,9 @@ NceGitLab:
                 "state": epic.state.capitalize(),
                 "linked_issue_count": 0,
                 "closed_issue_count": 0,
-                "blocked_count": 0,
-                "features": {},  # Features will be stored under associated epics/capabilities
                 "web_url": epic.web_url,
                 "labels": epic.labels,
-                "parent_id": None  # Add parent_id placeholder
+                "parent_id": getattr(epic, 'parent_id', None)
             }
 
             # Classify as Epic, Capability, or Feature
@@ -1965,34 +1949,11 @@ NceGitLab:
             # Store this epic's data in the map for linking
             epic_map[epic.id] = associated_data
 
-            # Fetch linked issues for this epic
+            # issue objects from epic.issues.list() already carry state — no per-issue
+            # project lookup or full-issue fetch needed.
             issues = epic.issues.list(all=True)
-            for issue in issues:
-                try:
-                    project_name = issue.references['full'].split('#')[0].split('/')[-1]
-                    project = self.get_project_by_name(project_name)
-                    full_issue = project.issues.get(issue.iid)
-
-                    # Count linked issues and their status
-                    associated_data["linked_issue_count"] += 1
-                    if full_issue.state == "closed":
-                        associated_data["closed_issue_count"] += 1
-
-                    # Count blockers
-                    if hasattr(full_issue, 'links'):  # Use links if available
-                        for link in full_issue.links.list():
-                            if link.link_type == "is_blocked_by":
-                                associated_data["blocked_count"] += 1
-                except Exception as e:
-                    print(f"Failed to retrieve and process issue {issue.iid} for epic '{epic.title}': {e}")
-
-        # Infer parent-child relationships based on labels or data
-        for parent in metrics["Epic"] + metrics["Capability"]:
-            for child in metrics["Capability"] + metrics["Feature"]:
-                # Check if this child should belong to this parent
-                if parent["id"] in child.get('labels', []):  # Example: Epic ID as a label
-                    child["parent_id"] = parent["id"]
-                    parent["features"][child["id"]] = child
+            associated_data["linked_issue_count"] = len(issues)
+            associated_data["closed_issue_count"] = sum(1 for i in issues if i.state == "closed")
 
         return metrics
 
@@ -2006,22 +1967,21 @@ NceGitLab:
         summary = []
         summary.append("## 📊 Portfolio Summary")
         summary.append("")
-        summary.append("| Type         | Open Issues | Closed Issues | Total Issues | Blockers |")
-        summary.append("|--------------|-------------|---------------|--------------|----------|")
+        summary.append("| Type         | Open Issues | Closed Issues | Total Issues |")
+        summary.append("|--------------|-------------|---------------|--------------|")
 
-        for metric_type, data_list in metrics.items():  # All keys (Epic, Capability, Feature) contain lists
-            if not data_list:  # Skip metric_types without data
+        for metric_type, data_list in metrics.items():
+            if not data_list:
                 continue
 
-            total_open = sum(d["linked_issue_count"] - d["closed_issue_count"] for d in data_list if "linked_issue_count" in d)
-            total_closed = sum(d["closed_issue_count"] for d in data_list if "closed_issue_count" in d)
-            total_issues = sum(d["linked_issue_count"] for d in data_list if "linked_issue_count" in d)
-            total_blockers = sum(d["blocked_count"] for d in data_list if "blocked_count" in d)
+            total_open = sum(d["linked_issue_count"] - d["closed_issue_count"] for d in data_list)
+            total_closed = sum(d["closed_issue_count"] for d in data_list)
+            total_issues = sum(d["linked_issue_count"] for d in data_list)
 
             icon = self.EPIC_TYPE_ICONS.get(metric_type, "🏆")
 
             summary.append(
-                f"| {icon} **{metric_type}** | {total_open} | {total_closed} | {total_issues} | {total_blockers} |"
+                f"| {icon} **{metric_type}** | {total_open} | {total_closed} | {total_issues} |"
             )
 
         summary.append("")
