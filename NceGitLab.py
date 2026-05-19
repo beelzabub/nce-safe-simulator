@@ -1375,7 +1375,7 @@ NceGitLab:
         except Exception as e:
             print(f"Error fetching group milestones or epics: {e}")
 
-        for project in group.projects.list(all=True):
+        for project in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_project = self.gl.projects.get(project.id)
                 project_milestones = full_project.milestones.list(all=True)
@@ -1449,7 +1449,7 @@ NceGitLab:
         print(f"Fetched {len(epics)} group-level epics")
 
         # Fetch project-level milestones, issues, and create an epic-to-issues mapping
-        for project in group.projects.list(all=True):
+        for project in group.projects.list(all=True, include_subgroups=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
@@ -1567,7 +1567,7 @@ NceGitLab:
         project_issues = defaultdict(list)
         milestone_mapping = defaultdict(list)
 
-        for project in group.projects.list(all=True):
+        for project in group.projects.list(all=True, include_subgroups=True):
             try:
                 print(f"Processing project: {project.name} (ID: {project.id})")
 
@@ -1906,7 +1906,7 @@ NceGitLab:
         # per level of the hierarchy — so we avoid that call entirely.
         print(f"Fetching all issues from projects in group '{group_name}'...")
         issues_by_epic_id = defaultdict(list)
-        for project in group.projects.list(all=True):
+        for project in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_project = self.gl.projects.get(project.id)
                 for issue in full_project.issues.list(all=True):
@@ -2275,7 +2275,7 @@ def main():
     gl = NceGitLab()
 
     # gl.cleanup_group()
-    gl.create_all_lorem_objects()
+    # gl.create_all_lorem_objects()
     # gl.create_all_lorem_reports()
 
 
