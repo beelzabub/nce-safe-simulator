@@ -1826,7 +1826,7 @@ NceGitLab:
             # pprint(metrics)
 
             # Step 2: Generate portfolio-level summary
-            summary_report = self.generate_portfolio_summary(metrics)
+            summary_report = self.generate_portfolio_summary(metrics, group)
 
             # Start building Markdown
             markdown_report = []
@@ -1879,9 +1879,9 @@ NceGitLab:
                     markdown_report.append("</details>")
                     markdown_report.append("")
 
-            # Render all top-level epics (epics without a parent)
-            top_level_epics = [epic for epic in all_epics if epic.get("parent_id") is None]
-            for epic in top_level_epics:
+            # Only Epics are top-level — Capabilities/Features with no parent_id
+            # are unlinked orphans in GitLab and should not appear at the root.
+            for epic in metrics["Epic"]:
                 render_epic_details(epic)
 
             # Final markdown generation
@@ -1903,36 +1903,45 @@ NceGitLab:
             print(f"Group '{group_name}' not found.")
             return {}
 
+        # Pre-fetch all issues from every project in the group and index them by the
+        # epic they are DIRECTLY assigned to.  epic.issues.list() returns inherited
+        # issues from child epics as well, which causes each issue to be counted once
+        # per level of the hierarchy — so we avoid that call entirely.
+        print(f"Fetching all issues from projects in group '{group_name}'...")
+        issues_by_epic_id = defaultdict(list)
+        for project in group.projects.list(all=True):
+            try:
+                full_project = self.gl.projects.get(project.id)
+                for issue in full_project.issues.list(all=True):
+                    epic_info = getattr(issue, 'epic', None)
+                    if epic_info and epic_info.get('id'):
+                        issues_by_epic_id[epic_info['id']].append(issue)
+            except Exception as e:
+                print(f"Failed to fetch issues for project '{project.name}': {e}")
+
         # Fetch all epics in the group
         all_epics = group.epics.list(all=True)
 
-        # Initialize a hierarchical data structure
         metrics = {
             "Epic": [],
             "Capability": [],
             "Feature": []
         }
 
-        # Map to hold epic data by ID for easy lookup
-        epic_map = {}
-
         for epic in all_epics:
             print(f"Processing data for epic: {epic.title}")
 
-            # Prepare the common data structure
             associated_data = {
                 "id": epic.id,
                 "title": epic.title,
                 "state": epic.state.capitalize(),
-                "linked_issue_count": 0,
-                "closed_issue_count": 0,
+                "blocked_by_count": 0,
+                "blocks_count": 0,
                 "web_url": epic.web_url,
                 "labels": epic.labels,
                 "parent_id": getattr(epic, 'parent_id', None)
             }
 
-            # Classify as Epic, Capability, or Feature
-            epic_type = None
             if "Epic" in epic.labels:
                 epic_type = "Epic"
             elif "Capability" in epic.labels:
@@ -1940,48 +1949,62 @@ NceGitLab:
             elif "Feature" in epic.labels:
                 epic_type = "Feature"
             else:
-                print(f"Skipping epic {epic.title} as it does not match 'Epic', 'Capability', or 'Feature'.")
+                print(f"Skipping epic '{epic.title}' — no matching type label.")
                 continue
 
-            # Append to the appropriate category in metrics
             metrics[epic_type].append(associated_data)
 
-            # Store this epic's data in the map for linking
-            epic_map[epic.id] = associated_data
-
-            # issue objects from epic.issues.list() already carry state — no per-issue
-            # project lookup or full-issue fetch needed.
-            issues = epic.issues.list(all=True)
-            associated_data["linked_issue_count"] = len(issues)
-            associated_data["closed_issue_count"] = sum(1 for i in issues if i.state == "closed")
+            for issue in issues_by_epic_id.get(epic.id, []):
+                try:
+                    project = self.gl.projects.get(issue.project_id)
+                    full_issue = project.issues.get(issue.iid)
+                    for link in full_issue.links.list(all=True):
+                        if link.link_type == "is_blocked_by":
+                            associated_data["blocked_by_count"] += 1
+                        elif link.link_type == "blocks":
+                            associated_data["blocks_count"] += 1
+                except Exception as e:
+                    print(f"Failed to fetch links for issue {issue.iid} in epic '{epic.title}': {e}")
 
         return metrics
 
 
 
 
-    def generate_portfolio_summary(self, metrics):
+    def generate_portfolio_summary(self, metrics, group):
         print(f"Generating portfolio summary")
 
-        """Generate a summary table with progress, workload, and blockers."""
+        base = f"{group.web_url}/-/epics"
+
         summary = []
         summary.append("## 📊 Portfolio Summary")
         summary.append("")
-        summary.append("| Type         | Open Issues | Closed Issues | Total Issues |")
-        summary.append("|--------------|-------------|---------------|--------------|")
+        summary.append("| Type         | Total | Open | Closed | Blocked By | Blocks |")
+        summary.append("|--------------|-------|------|--------|------------|--------|")
 
         for metric_type, data_list in metrics.items():
             if not data_list:
                 continue
 
-            total_open = sum(d["linked_issue_count"] - d["closed_issue_count"] for d in data_list)
-            total_closed = sum(d["closed_issue_count"] for d in data_list)
-            total_issues = sum(d["linked_issue_count"] for d in data_list)
+            total = len(data_list)
+            open_count = sum(1 for d in data_list if d["state"] == "Opened")
+            closed_count = sum(1 for d in data_list if d["state"] == "Closed")
+            total_blocked_by = sum(d["blocked_by_count"] for d in data_list)
+            total_blocks = sum(d["blocks_count"] for d in data_list)
 
             icon = self.EPIC_TYPE_ICONS.get(metric_type, "🏆")
 
+            url_all    = f"{base}?label_name[]={metric_type}&state=all"
+            url_open   = f"{base}?label_name[]={metric_type}&state=opened"
+            url_closed = f"{base}?label_name[]={metric_type}&state=closed"
+
             summary.append(
-                f"| {icon} **{metric_type}** | {total_open} | {total_closed} | {total_issues} |"
+                f"| {icon} **{metric_type}** "
+                f"| [{total}]({url_all}) "
+                f"| [{open_count}]({url_open}) "
+                f"| [{closed_count}]({url_closed}) "
+                f"| {total_blocked_by} "
+                f"| {total_blocks} |"
             )
 
         summary.append("")
