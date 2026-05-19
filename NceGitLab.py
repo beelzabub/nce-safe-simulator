@@ -57,7 +57,8 @@ class NceGitLab:
                     return None
             return None
 
-        self.url = config.get("url", "")
+        self.url        = config.get("url", "")
+        self.group_name = os.getenv("GROUP_NAME") or config.get("group_name", "")
         
         access_token_env = os.getenv("ACCESS_TOKEN")
         if access_token_env:
@@ -109,6 +110,8 @@ class NceGitLab:
         missing_fields = []
         if not self.url:
             missing_fields.append("url")
+        if not self.group_name:
+            missing_fields.append("group_name")
         if not self.private_token:
             missing_fields.append("private_token")
         if not self.fibonacci_weights:
@@ -174,16 +177,10 @@ NceGitLab:
     
 
     def get_group_by_name(self, name):
-        group = None
-        groups = [g for g in self.gl.groups.list(owned=True, all=True) if g.name == name]
-
-        length = len(groups)
-
-        if length == 1:
-            subset_group = groups[0]
-            group = self.gl.groups.get(subset_group.get_id())
-
-        return group
+        groups = [g for g in self.gl.groups.list(search=name, all=True) if g.name == name]
+        if len(groups) == 1:
+            return self.gl.groups.get(groups[0].id)
+        return None
 
 
     def get_all_subgroups(self, obj, include_self=True):
@@ -1830,16 +1827,16 @@ NceGitLab:
 
             # Start building Markdown
             markdown_report = []
-            markdown_report.append(f"# Epics Hierarchical Report (Group: {group_name})")
+            markdown_report.append(f"# SAFe Portfolio Report (Group: {group_name})")
             markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
             markdown_report.append("")
-            markdown_report.append(summary_report)  # Add portfolio summary to the report
+            markdown_report.append(summary_report)
             markdown_report.append("")
 
             markdown_report.append("In this report:")
-            markdown_report.append("- **🏆 Epic** represents the top-level strategic goals")
-            markdown_report.append("- **🧩 Capability** represents a grouping of related functionality or deliverables")
-            markdown_report.append("- **🛠️ Feature** represents specific deliverables or tasks")
+            markdown_report.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+            markdown_report.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+            markdown_report.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
             markdown_report.append("")
 
             # Organize epics into a hierarchy
@@ -1890,7 +1887,7 @@ NceGitLab:
             # print(md)
 
             # Upload the Markdown to the group's Wiki
-            self.upload_to_wiki(group, f"{group_name} - Epics Hierarchical Report", md)
+            self.upload_to_wiki(group, f"{group_name} - SAFe Portfolio Report", md)
 
         except Exception as e:
             print(f"Failed to generate epics report for group '{group_name}': {e}")
@@ -2094,54 +2091,192 @@ NceGitLab:
     #
     # Bootstrapping
     #
-    def cleanup_group(self, group_name, project_name):
-        self.delete_all_labels(self.get_group_by_name(group_name))
-        self.delete_all_issues_from_project(project_name)
-        self.delete_all_group_epics(group_name)
-        self.delete_all_milestones(self.get_project_by_name(project_name))
-        self.delete_all_wiki_pages(self.get_group_by_name(group_name))
+    def cleanup_group(self):
+        group = self.get_group_by_name(self.group_name)
+
+        self.delete_all_labels(group)
+        self.delete_all_wiki_pages(group)
+        self.delete_all_group_epics(self.group_name)
+
+        # Delete all projects directly in the root group.
+        for project in group.projects.list(all=True):
+            try:
+                self.gl.projects.delete(project.id)
+                print(f"Deleted project: {project.path_with_namespace}")
+            except Exception as e:
+                print(f"Failed to delete project '{project.path_with_namespace}': {e}")
+
+        # Deleting a subgroup cascades to all its projects, epics, and issues.
+        for subgroup in group.subgroups.list(all=True):
+            try:
+                self.gl.groups.delete(subgroup.id)
+                print(f"Deleted subgroup: {subgroup.full_path}")
+            except Exception as e:
+                print(f"Failed to delete subgroup '{subgroup.full_path}': {e}")
 
 
-    def create_all_lorem_objects(self, group_name, project_name, epic_count=10, issue_count=40):
+    def _lorem_epics_in_group(self, group, count):
+        """Create lorem epics directly in a group object. Returns [(epic, label)]."""
+        def next_monday_after(d):
+            while d.weekday() != 0:
+                d += timedelta(days=1)
+            return d
+
+        start_base = next_monday_after(
+            (datetime.today().replace(day=1) + relativedelta(months=1)).date()
+        )
+
+        created = []
+        for _ in range(count):
+            start = start_base
+            due   = next_monday_after(start + relativedelta(months=random.randint(1, 6)))
+            project_label = random.choice(self.PROJECT_LABELS)
+            piid_label    = random.choice(self.PIID_LABELS)
+            epic_label    = random.choice(self.EPIC_TYPE_LABELS)
+
+            epic = group.epics.create({
+                'title':       lorem.sentence(),
+                'description': lorem.paragraph(),
+                'start_date':  start.isoformat(),
+                'due_date':    due.isoformat(),
+                'weight':      random.choice(self.fibonacci_weights),
+                'labels':      [project_label, piid_label, epic_label],
+            })
+            print(f"  Epic {epic.iid} [{epic_label}] → {group.full_path}")
+            created.append((epic, epic_label))
+
+        self.build_epic_hierarchy(group, created)
+        return created
+
+
+    def _lorem_issues_in_project(self, project, count):
+        """Create lorem issues directly in a project object. Returns [issue]."""
+        issues = []
+        for _ in range(count):
+            issue = project.issues.create({
+                'title':       lorem.sentence(),
+                'description': lorem.paragraph(),
+                'weight':      random.choice(self.fibonacci_weights),
+            })
+            print(f"  Issue #{issue.iid} → {project.path_with_namespace}")
+            issues.append(issue)
+        return issues
+
+
+    def _lorem_populate_group(self, group, epic_count, issue_count):
+        """Create epics in a group and randomly create a team backlog project with issues linked to those epics."""
+        epics = self._lorem_epics_in_group(group, epic_count)
+
+        if random.choice([True, False]):
+            try:
+                project = self.gl.projects.create({
+                    'name':         f"{group.name} — Team Backlog",
+                    'path':         f"{group.path}-backlog",
+                    'namespace_id': group.id,
+                })
+                print(f"  Team Backlog → {project.path_with_namespace}")
+                milestones = self.create_lorem_milestones(project)
+                issues     = self._lorem_issues_in_project(project, issue_count)
+                self.assign_issues_to_epics(epics, issues)
+                self.assign_issues_to_milestones(milestones, issues)
+            except Exception as e:
+                print(f"  Skipping team backlog for '{group.full_path}': {e}")
+
+
+    def create_all_lorem_objects(self,
+                                  epic_count=10, issue_count=40,
+                                  num_value_streams=2, num_arts=2, num_teams=2,
+                                  epics_per_group=5, issues_per_backlog=10):
+        root_group = self.get_group_by_name(self.group_name)
+
+        # Labels defined on the root group are inherited by all subgroups.
         for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS]:
-            self.create_and_apply_labels(self.get_group_by_name(group_name), label_array)
+            self.create_and_apply_labels(root_group, label_array)
 
-        lorem_milestones = self.create_lorem_milestones(self.get_project_by_name(project_name))
-        lorem_epics = self.create_epics_lorem(group_name, num_epics=epic_count, create_hierarchy=True)
-        lorem_issues = self.create_issues_lorem(project_name, num_issues=issue_count)
-        self.assign_issues_to_epics(lorem_epics, lorem_issues)
-        self.assign_issues_to_milestones(lorem_milestones, lorem_issues)
+        # Auto-create the Portfolio-level team backlog using the same naming
+        # convention as all subgroup backlogs.
+        try:
+            root_project = self.gl.projects.create({
+                'name':         f"{root_group.name} — Team Backlog",
+                'path':         f"{root_group.path}-backlog",
+                'namespace_id': root_group.id,
+            })
+            print(f"Portfolio Backlog → {root_project.path_with_namespace}")
+        except Exception as e:
+            print(f"Portfolio Backlog already exists, skipping: {e}")
+            root_project = None
+        root_epics = self._lorem_epics_in_group(root_group, epic_count)
+        if root_project:
+            root_milestones = self.create_lorem_milestones(root_project)
+            root_issues     = self._lorem_issues_in_project(root_project, issue_count)
+            self.assign_issues_to_epics(root_epics, root_issues)
+            self.assign_issues_to_milestones(root_milestones, root_issues)
+
+        # SAFe 4-level hierarchy: Portfolio > Value Stream > ART > Agile Team
+        #
+        # Naming convention (display name → URL path):
+        #   Value Stream 01                                    vs-01
+        #   Value Stream 01 | ART 01                           vs-01-art-01
+        #   Value Stream 01 | ART 01 | Team 01                 vs-01-art-01-team-01
+        #
+        # Each level randomly gets a Team Backlog project (GitLab project for Stories/issues).
+
+        vis = root_group.visibility
+
+        for vs in range(1, num_value_streams + 1):
+            vs_path = f"vs-{vs:02d}"
+            vs_name = f"Value Stream {vs:02d}"
+            vs_group = self.gl.groups.create({
+                'name':       vs_name,
+                'path':       vs_path,
+                'parent_id':  root_group.id,
+                'visibility': vis,
+            })
+            print(f"\n[Value Stream] {vs_group.full_path}")
+            self._lorem_populate_group(vs_group, epics_per_group, issues_per_backlog)
+
+            for a in range(1, num_arts + 1):
+                art_path = f"{vs_path}-art-{a:02d}"
+                art_name = f"{vs_name} - ART {a:02d}"
+                art_group = self.gl.groups.create({
+                    'name':       art_name,
+                    'path':       art_path,
+                    'parent_id':  vs_group.id,
+                    'visibility': vis,
+                })
+                print(f"\n[ART] {art_group.full_path}")
+                self._lorem_populate_group(art_group, epics_per_group, issues_per_backlog)
+
+                for t in range(1, num_teams + 1):
+                    team_path = f"{art_path}-team-{t:02d}"
+                    team_name = f"{art_name} - Team {t:02d}"
+                    team_group = self.gl.groups.create({
+                        'name':       team_name,
+                        'path':       team_path,
+                        'parent_id':  art_group.id,
+                        'visibility': vis,
+                    })
+                    print(f"\n[Agile Team] {team_group.full_path}")
+                    self._lorem_populate_group(team_group, epics_per_group, issues_per_backlog)
 
 
-    def create_all_lorem_reports(self, group_name, project_name):
-        self.generate_summary_report(self.get_group_by_name(group_name))
-        self.generate_detailed_report(self.get_group_by_name(group_name))
-        self.generate_epics_report(self.get_group_by_name(group_name))
-        self.generate_issue_progress_report(self.get_group_by_name(group_name))
-        self.generate_and_upload_piid_project_report_to_wiki(self.get_group_by_name(group_name))  
+    def create_all_lorem_reports(self):
+        group = self.get_group_by_name(self.group_name)
+        self.generate_summary_report(group)
+        self.generate_detailed_report(group)
+        self.generate_epics_report(group)
+        self.generate_issue_progress_report(group)
+        self.generate_and_upload_piid_project_report_to_wiki(group)  
 
 
 
 # Main
 def main():
     gl = NceGitLab()
-    
 
-    # Fill in your group
-    group_name = "best-1"
-
-    # Fill in your project
-    project_name = "best-1-project"
-
-    # gl.cleanup_group(group_name, project_name)
-    # gl.create_all_lorem_objects(group_name, project_name, epic_count=60, issue_count=150)
-    # gl.create_all_lorem_reports(group_name, project_name)
-    
-
-    # Iteration 2
-    # placeholder_issues = gl.create_feature_placeholders(group_name, num_features=400)
-
-    gl.generate_epics_report(gl.get_group_by_name(group_name))
+    # gl.cleanup_group()
+    gl.create_all_lorem_objects()
+    # gl.create_all_lorem_reports()
 
 
 
