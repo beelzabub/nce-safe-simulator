@@ -1761,34 +1761,17 @@ NceGitLab:
 
     def upload_to_wiki(self, group, page_title, content):
         try:
-            # Convert page title to slug (wiki pages in GitLab use slugs for identifiers)
             page_slug = page_title.replace(" ", "-").lower()
-
             try:
-                # Attempt to retrieve the existing page using the slug
-                existing_page = group.wikis.get(page_slug)
-                print(f"Wiki page '{page_title}' found with slug '{page_slug}'. Deleting it before recreation.")
-
-                # .save() alternative was not updating the page so delete and create each time
-                existing_page.delete()
-                print(f"Wiki page '{page_title}' deleted successfully.")
-
+                group.wikis.get(page_slug).delete()
             except gitlab.exceptions.GitlabGetError as e:
-                if e.response_code == 404:  # Page doesn't exist
-                    print(f"Wiki page '{page_title}' does not exist. Proceeding to create a new one.")
-                else:
+                if e.response_code != 404:
                     print(f"Error fetching wiki page '{page_title}': {e}")
                     return
-
-            print(f"Creating new wiki page '{page_title}' with updated content.")
-            group.wikis.create({
-                'title': page_title,
-                'content': content,
-            })
-            print(f"Wiki page '{page_title}' created successfully with updated content.")
-
+            group.wikis.create({'title': page_title, 'content': content})
+            print(f"Wiki → {page_title}")
         except Exception as e:
-            print(f"An error occurred while uploading to the wiki: {e}")
+            print(f"Failed to upload wiki page '{page_title}': {e}")
 
 
     def delete_all_wiki_pages(self, group):
@@ -1814,7 +1797,7 @@ NceGitLab:
     def generate_epics_report(self, group):
         group_name = group.name
 
-        print(f"Generating metrics report for {group.name}")
+        print(f"Generating epics report for {group.name}...")
 
         try:
             # Step 1: Calculate portfolio metrics
@@ -1853,24 +1836,24 @@ NceGitLab:
                 nonlocal markdown_report
 
                 epic_type = next((t for t in ["Epic", "Capability", "Feature"] if t in epic.get("labels", [])), "Epic")
-                icon = self.EPIC_TYPE_ICONS.get(epic_type, "🏆")
+                icon     = self.EPIC_TYPE_ICONS.get(epic_type, "🏆")
+                children = epic_hierarchy.get(epic['id'], [])
 
-                if epic_type == "Feature":
-                    markdown_report.append(
-                        f"{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})"
-                    )
+                blocked    = epic.get('blocked_by_count', 0) > 0
+                block_icon = '<span style="font-size:0.62em;">⛔</span> ' if blocked else ""
+                label      = f"{block_icon}{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})"
+
+                if not children:
+                    markdown_report.append(label)
                     markdown_report.append("")
                 else:
                     # No leading-space indentation on HTML tags or content — CommonMark treats
                     # 4+ leading spaces as a code block, which breaks rendering at nesting depth >= 2.
-                    # Nested <details> elements provide visual hierarchy on their own.
                     markdown_report.append("<details>")
-                    markdown_report.append(
-                        f"<summary>{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})</summary>"
-                    )
+                    markdown_report.append(f"<summary>{label}</summary>")
                     markdown_report.append("")
 
-                    for child_epic in epic_hierarchy.get(epic['id'], []):
+                    for child_epic in children:
                         render_epic_details(child_epic, indent_level + 1)
 
                     markdown_report.append("</details>")
@@ -1893,6 +1876,218 @@ NceGitLab:
             print(f"Failed to generate epics report for group '{group_name}': {e}")
 
 
+    def graphql_query(self, query, variables=None):
+        payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
+        response = requests.post(
+            f"{self.url}/api/graphql",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {self.private_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        if "errors" in data:
+            for err in data["errors"]:
+                print(f"GraphQL error: {err['message']}")
+            return None
+        return data["data"]
+
+
+    def list_blocking_epics(self):
+        group = self.get_group_by_name(self.group_name)
+        full_path = group.full_path
+
+        query = """
+        query ListAllEpics($fullPath: ID!) {
+          group(fullPath: $fullPath) {
+            epics {
+              nodes {
+                title
+                blocked
+                blockingCount
+                webUrl
+                blockedByCount
+                labels {
+                  nodes {
+                    title
+                  }
+                }
+                blockedByEpics {
+                  edges {
+                    node {
+                      id
+                      title
+                      webUrl
+                      labels {
+                        nodes {
+                          title
+                        }
+                      }
+                    }
+                  }
+                }
+                state
+              }
+            }
+          }
+        }
+        """
+
+        def epic_type(node):
+            label_titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
+            for t in ("Epic", "Capability", "Feature"):
+                if t in label_titles:
+                    return t
+            return "Epic"
+
+        data = self.graphql_query(query, variables={"fullPath": full_path})
+        if data is None:
+            return
+
+        nodes = data["group"]["epics"]["nodes"]
+        blocked_epics = [n for n in nodes if n.get("blockedByCount", 0) > 0]
+
+        if not blocked_epics:
+            print("No blocked epics found.")
+            return
+
+        print(f"\n{'=' * 70}")
+        print(f"  BLOCKED EPICS — {full_path}")
+        print(f"{'=' * 70}\n")
+
+        for epic in blocked_epics:
+            state          = epic.get("state", "").upper()
+            blocked_by_cnt = epic.get("blockedByCount", 0)
+            blocking_cnt   = epic.get("blockingCount", 0)
+            etype          = epic_type(epic)
+            icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+
+            print(f"⛔ {epic['title']}  [{icon} {etype}]")
+            print(f"   State: {state}  |  Blocked by: {blocked_by_cnt}")
+            print(f"   {epic['webUrl']}")
+
+            blockers = epic.get("blockedByEpics", {}).get("edges", [])
+            last = len(blockers) - 1
+            for i, edge in enumerate(blockers):
+                node = edge["node"]
+                connector  = "└─" if i == last else "├─"
+                btype      = epic_type(node)
+                bicon      = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                print(f"   {connector} 🔒 {node['title']}  [{bicon} {btype}]")
+                print(f"        {node['webUrl']}")
+            print()
+
+
+    def generate_blocking_report(self):
+        group     = self.get_group_by_name(self.group_name)
+        full_path = group.full_path
+
+        query = """
+        query ListAllEpics($fullPath: ID!) {
+          group(fullPath: $fullPath) {
+            epics {
+              nodes {
+                title
+                blocked
+                blockingCount
+                webUrl
+                blockedByCount
+                labels {
+                  nodes {
+                    title
+                  }
+                }
+                blockedByEpics {
+                  edges {
+                    node {
+                      id
+                      title
+                      webUrl
+                      labels {
+                        nodes {
+                          title
+                        }
+                      }
+                    }
+                  }
+                }
+                state
+              }
+            }
+          }
+        }
+        """
+
+        def epic_type(node):
+            label_titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
+            for t in ("Epic", "Capability", "Feature"):
+                if t in label_titles:
+                    return t
+            return "Epic"
+
+        def link(title, url):
+            return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
+
+        data = self.graphql_query(query, variables={"fullPath": full_path})
+        if data is None:
+            return
+
+        nodes        = data["group"]["epics"]["nodes"]
+        blocked_epics = [n for n in nodes if n.get("blockedByCount", 0) > 0]
+
+        total_relationships = sum(n.get("blockedByCount", 0) for n in blocked_epics)
+
+        md = []
+        md.append(f"# Blocking Relationships Report (Group: {group.name})")
+        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("In this report:")
+        md.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+        md.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+        md.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
+        md.append("")
+        md.append("## Summary")
+        md.append(f"- **Blocked epics:** {len(blocked_epics)}")
+        md.append(f"- **Total blocking relationships:** {total_relationships}")
+        md.append("")
+
+        if not blocked_epics:
+            md.append("_No blocked epics found._")
+        else:
+            md.append("## Blocked Epics")
+            md.append("")
+            for epic in blocked_epics:
+                etype          = epic_type(epic)
+                icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                state          = epic.get("state", "").capitalize()
+                blocked_by_cnt = epic.get("blockedByCount", 0)
+                blocking_cnt   = epic.get("blockingCount", 0)
+
+                md.append("<details>")
+                md.append(
+                    f"<summary>⛔ {icon} **{link(epic['title'], epic['webUrl'])}**"
+                    f" ({etype}) — State: {state}"
+                    f" — Blocked by: {blocked_by_cnt}</summary>"
+                )
+                md.append("")
+
+                for edge in epic.get("blockedByEpics", {}).get("edges", []):
+                    node  = edge["node"]
+                    btype = epic_type(node)
+                    bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                    md.append(f"🔒 {bicon} **{link(node['title'], node['webUrl'])}** ({btype})")
+                    md.append("")
+
+                md.append("</details>")
+                md.append("")
+
+        title = f"{group.name} - Blocking Relationships Report"
+        self.upload_to_wiki(group, title, "\n".join(md))
+
 
     def calculate_portfolio_metrics(self, group_name):
         group = self.get_group_by_name(group_name)
@@ -1903,20 +2098,31 @@ NceGitLab:
         # Pre-fetch all issues from every project in the group and index them by the
         # epic they are DIRECTLY assigned to.  epic.issues.list() returns inherited
         # issues from child epics as well, which causes each issue to be counted once
-        # per level of the hierarchy — so we avoid that call entirely.
-        print(f"Fetching all issues from projects in group '{group_name}'...")
-        issues_by_epic_id = defaultdict(list)
-        for project in group.projects.list(all=True, include_subgroups=True):
-            try:
-                full_project = self.gl.projects.get(project.id)
-                for issue in full_project.issues.list(all=True):
-                    epic_info = getattr(issue, 'epic', None)
-                    if epic_info and epic_info.get('id'):
-                        issues_by_epic_id[epic_info['id']].append(issue)
-            except Exception as e:
-                print(f"Failed to fetch issues for project '{project.name}': {e}")
+        # Fetch blocked_by and blocks counts directly from GitLab epics via
+        # GraphQL — more accurate and far cheaper than rolling up from issue links.
+        gql_data = self.graphql_query(
+            """
+            query EpicBlockCounts($fullPath: ID!) {
+              group(fullPath: $fullPath) {
+                epics {
+                  nodes {
+                    webUrl
+                    blockedByCount
+                    blockingCount
+                  }
+                }
+              }
+            }
+            """,
+            variables={"fullPath": group.full_path},
+        )
+        epic_blocks = {}
+        if gql_data:
+            epic_blocks = {
+                n["webUrl"]: n
+                for n in gql_data["group"]["epics"]["nodes"]
+            }
 
-        # Fetch all epics in the group
         all_epics = group.epics.list(all=True)
 
         metrics = {
@@ -1925,18 +2131,19 @@ NceGitLab:
             "Feature": []
         }
 
+        print(f"Processing {len(all_epics)} epics...")
         for epic in all_epics:
-            print(f"Processing data for epic: {epic.title}")
+            gql = epic_blocks.get(epic.web_url, {})
 
             associated_data = {
-                "id": epic.id,
-                "title": epic.title,
-                "state": epic.state.capitalize(),
-                "blocked_by_count": 0,
-                "blocks_count": 0,
-                "web_url": epic.web_url,
-                "labels": epic.labels,
-                "parent_id": getattr(epic, 'parent_id', None)
+                "id":             epic.id,
+                "title":          epic.title,
+                "state":          epic.state.capitalize(),
+                "blocked_by_count": gql.get("blockedByCount", 0),
+                "blocks_count":   gql.get("blockingCount", 0),
+                "web_url":        epic.web_url,
+                "labels":         epic.labels,
+                "parent_id":      getattr(epic, 'parent_id', None),
             }
 
             if "Epic" in epic.labels:
@@ -1951,25 +2158,12 @@ NceGitLab:
 
             metrics[epic_type].append(associated_data)
 
-            for issue in issues_by_epic_id.get(epic.id, []):
-                try:
-                    project = self.gl.projects.get(issue.project_id)
-                    full_issue = project.issues.get(issue.iid)
-                    for link in full_issue.links.list(all=True):
-                        if link.link_type == "is_blocked_by":
-                            associated_data["blocked_by_count"] += 1
-                        elif link.link_type == "blocks":
-                            associated_data["blocks_count"] += 1
-                except Exception as e:
-                    print(f"Failed to fetch links for issue {issue.iid} in epic '{epic.title}': {e}")
-
         return metrics
 
 
 
 
     def generate_portfolio_summary(self, metrics, group):
-        print(f"Generating portfolio summary")
 
         base = f"{group.web_url}/-/epics"
 
@@ -2262,11 +2456,12 @@ NceGitLab:
 
     def create_all_lorem_reports(self):
         group = self.get_group_by_name(self.group_name)
-        self.generate_summary_report(group)
-        self.generate_detailed_report(group)
+        # self.generate_summary_report(group)
+        # self.generate_detailed_report(group)
         self.generate_epics_report(group)
-        self.generate_issue_progress_report(group)
-        self.generate_and_upload_piid_project_report_to_wiki(group)  
+        self.generate_blocking_report()
+        # self.generate_issue_progress_report(group)
+        # self.generate_and_upload_piid_project_report_to_wiki(group)
 
 
 
@@ -2276,7 +2471,7 @@ def main():
 
     # gl.cleanup_group()
     # gl.create_all_lorem_objects()
-    # gl.create_all_lorem_reports()
+    gl.create_all_lorem_reports()
 
 
 
