@@ -1,6 +1,7 @@
 {
   "url": "https://gitlab.com",
   "fibonacci_weights": [1, 2, 3, 5, 8, 13],
+  "group_name": "",
   "private_token": "",
   "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
   "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
