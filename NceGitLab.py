@@ -2454,12 +2454,109 @@ NceGitLab:
                     self._lorem_populate_group(team_group, epics_per_group, issues_per_backlog)
 
 
-    def create_all_lorem_reports(self):
+    def generate_orphan_epics_report(self):
+        group = self.get_group_by_name(self.group_name)
+        print(f"Generating orphan report for {group.name}...")
+
+        all_epics = group.epics.list(all=True)
+
+        # Build parent→children map
+        epic_hierarchy = defaultdict(list)
+        for epic in all_epics:
+            pid = getattr(epic, 'parent_id', None)
+            if pid is not None:
+                epic_hierarchy[pid].append(epic)
+
+        epic_ids_with_children = set(epic_hierarchy.keys())
+
+        # Orphan: no parent AND no children — completely disconnected from the hierarchy
+        orphans = [
+            e for e in all_epics
+            if getattr(e, 'parent_id', None) is None and e.id not in epic_ids_with_children
+        ]
+
+        md = []
+        md.append(f"# Orphaned Epics Report (Group: {group.name})")
+        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("An **orphaned epic** has no parent and no children — it is completely disconnected from the portfolio hierarchy.")
+        md.append("")
+
+        if not orphans:
+            md.append("_No orphaned epics found._")
+        else:
+            md.append(f"**{len(orphans)} orphaned epic(s) found.**")
+            md.append("")
+            md.append("| Type | Title | State |")
+            md.append("|------|-------|-------|")
+            for epic in orphans:
+                epic_type = next((t for t in ("Epic", "Capability", "Feature") if t in epic.labels), "Unknown")
+                icon      = self.EPIC_TYPE_ICONS.get(epic_type, "❓")
+                title_link = f"[{epic.title}]({epic.web_url})"
+                md.append(f"| {icon} {epic_type} | {title_link} | {epic.state.capitalize()} |")
+
+        self.upload_to_wiki(group, f"{group.name} - Orphaned Epics Report", "\n".join(md))
+
+
+    def generate_orphan_issues_report(self):
+        group = self.get_group_by_name(self.group_name)
+        print(f"Generating orphan issues report for {group.name}...")
+
+        # Collect issues with no epic, grouped by project
+        orphans_by_project = {}
+        for project in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_project = self.gl.projects.get(project.id)
+                if not full_project.issues_enabled:
+                    continue
+                orphaned = [
+                    i for i in full_project.issues.list(all=True)
+                    if not getattr(i, 'epic', None)
+                ]
+                if orphaned:
+                    orphans_by_project[full_project] = orphaned
+            except Exception as e:
+                print(f"Failed to fetch issues for project '{project.name}': {e}")
+
+        total = sum(len(v) for v in orphans_by_project.values())
+
+        md = []
+        md.append(f"# Orphaned Issues Report (Group: {group.name})")
+        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("An **orphaned issue** has no epic assigned — it is not tracked within the portfolio hierarchy.")
+        md.append("")
+
+        if not orphans_by_project:
+            md.append("_No orphaned issues found._")
+        else:
+            md.append(f"**{total} orphaned issue(s) across {len(orphans_by_project)} project(s).**")
+            md.append("")
+
+            for project, issues in sorted(orphans_by_project.items(), key=lambda x: x[0].name_with_namespace):
+                md.append(f"### {project.name_with_namespace}")
+                md.append("")
+                md.append("| # | Title | State | Milestone | Assignees |")
+                md.append("|---|-------|-------|-----------|-----------|")
+                for issue in issues:
+                    title_link = f"[{issue.title}]({issue.web_url})"
+                    state      = issue.state.capitalize()
+                    milestone  = issue.milestone['title'] if issue.milestone else "_None_"
+                    assignees  = ", ".join(a['name'] for a in issue.assignees) if issue.assignees else "_Unassigned_"
+                    md.append(f"| #{issue.iid} | {title_link} | {state} | {milestone} | {assignees} |")
+                md.append("")
+
+        self.upload_to_wiki(group, f"{group.name} - Orphaned Issues Report", "\n".join(md))
+
+
+    def generate_all_reports(self):
         group = self.get_group_by_name(self.group_name)
         # self.generate_summary_report(group)
         # self.generate_detailed_report(group)
         self.generate_epics_report(group)
         self.generate_blocking_report()
+        self.generate_orphan_epics_report()
+        self.generate_orphan_issues_report()
         # self.generate_issue_progress_report(group)
         # self.generate_and_upload_piid_project_report_to_wiki(group)
 
@@ -2471,7 +2568,7 @@ def main():
 
     # gl.cleanup_group()
     # gl.create_all_lorem_objects()
-    gl.create_all_lorem_reports()
+    gl.generate_all_reports()
 
 
 
