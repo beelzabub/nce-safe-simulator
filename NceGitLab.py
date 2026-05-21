@@ -1804,7 +1804,7 @@ NceGitLab:
         print(f"All wiki pages for group '{group.name}' have been deleted.")
 
 
-    def generate_epics_report(self, group):
+    def generate_portfolio_report(self, group):
         group_name = group.name
 
         print(f"Generating epics report for {group.name}...")
@@ -1825,11 +1825,9 @@ NceGitLab:
             markdown_report.append("")
             markdown_report.append(summary_report)
             markdown_report.append("")
-
-            markdown_report.append("In this report:")
-            markdown_report.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
-            markdown_report.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
-            markdown_report.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
+            markdown_report.append("")
+            markdown_report.append("")
+            markdown_report.append("## Initiative Hierarchy")
             markdown_report.append("")
 
             # Organize epics into a hierarchy
@@ -1892,6 +1890,16 @@ NceGitLab:
             for epic in metrics["Epic"]:
                 render_epic_details(epic)
 
+            markdown_report.append("")
+            markdown_report.append("")
+            markdown_report.append("")
+            markdown_report.append("---")
+            markdown_report.append("## Legend")
+            markdown_report.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+            markdown_report.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+            markdown_report.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
+            markdown_report.append("")
+
             # Final markdown generation
             md = "\n".join(markdown_report)
             # print("Generated Markdown:")  # For debugging purposes
@@ -1902,6 +1910,130 @@ NceGitLab:
 
         except Exception as e:
             print(f"Failed to generate epics report for group '{group_name}': {e}")
+
+
+    def generate_workload_report(self):
+        group = self.get_group_by_name(self.group_name)
+        print(f"Generating workload report for {group.name}...")
+
+        metrics  = self.calculate_portfolio_metrics(self.group_name)
+        features = metrics.get("Feature", [])
+        if not features:
+            print("No features found — skipping workload report.")
+            return
+
+        # Fetch only the groups that actually own Features.
+        group_ids = {f["group_id"] for f in features if f.get("group_id")}
+        groups_by_id = {}
+        for gid in group_ids:
+            try:
+                groups_by_id[gid] = self.gl.groups.get(gid)
+            except Exception as e:
+                print(f"  Could not fetch group {gid}: {e}")
+
+        # Bucket features by (piid, group_id).
+        pi_group_features = defaultdict(lambda: defaultdict(list))
+        for f in features:
+            piid = f.get("piid")
+            gid  = f.get("group_id")
+            if piid and gid:
+                pi_group_features[piid][gid].append(f)
+
+        today = date.today()
+
+        def pi_phase(piid):
+            start, end = self._pi_dates_from_label(piid)
+            if not start:
+                return "unknown"
+            if today < start:
+                return "future"
+            if today > end:
+                return "past"
+            return "current"
+
+        sorted_pis = sorted(
+            pi_group_features.keys(),
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min
+        )
+
+        md = []
+        md.append(f"# ART / Team Workload Report (Group: {group.name})")
+        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+
+        for piid in sorted_pis:
+            phase    = pi_phase(piid)
+            pct_pi   = self._pct_through_pi(piid) or 0
+            start, end = self._pi_dates_from_label(piid)
+            date_range = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
+
+            phase_label = {"current": f"🟢 Current PI — {pct_pi}% elapsed",
+                           "future":  "🔵 Future PI",
+                           "past":    "⚫ Past PI"}.get(phase, "")
+
+            md.append(f"## {piid} — {phase_label}")
+            if date_range:
+                md.append(date_range)
+            md.append("")
+            md.append("| Group | Features | Planned | Actual | Δ | % Done | Status |")
+            md.append("|-------|----------|---------|--------|---|--------|--------|")
+
+            group_data = pi_group_features[piid]
+
+            def _avg_pct(fs, total_planned):
+                if total_planned:
+                    return round(sum(f["planned_weight"] * f["pct_complete"] for f in fs) / total_planned)
+                return round(sum(f["pct_complete"] for f in fs) / len(fs)) if fs else 0
+
+            def _risk_sort(gid):
+                fs            = group_data[gid]
+                total_planned = sum(f["planned_weight"] for f in fs)
+                avg_pct       = _avg_pct(fs, total_planned)
+                if phase == "past":
+                    return (0 if avg_pct < 100 else 2, -len(fs))
+                if phase == "current":
+                    return (0 if avg_pct < pct_pi else 2, -len(fs))
+                return (1, -len(fs))
+
+            for gid in sorted(group_data.keys(), key=_risk_sort):
+                fs            = group_data[gid]
+                grp           = groups_by_id.get(gid)
+                grp_name      = grp.name    if grp else f"Group {gid}"
+                grp_url       = grp.web_url if grp else ""
+                total_planned = sum(f["planned_weight"] for f in fs)
+                total_actual  = sum(f["actual_weight"]  for f in fs)
+                delta         = total_actual - total_planned
+                avg_pct       = _avg_pct(fs, total_planned)
+
+                delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                risk_flag = " ⚠️" if (phase == "current" and avg_pct < pct_pi) else ""
+
+                if phase == "current":
+                    status_str = "⚠️ At Risk"  if avg_pct < pct_pi  else "✅ On Track"
+                elif phase == "past":
+                    status_str = "✅ Complete"  if avg_pct == 100    else f"❌ Incomplete"
+                else:
+                    status_str = "🔵 Planned"
+
+                grp_link = f'<a href="{grp_url}">{grp_name}</a>' if grp_url else grp_name
+
+                md.append(
+                    f"| {grp_link} | {len(fs)} | {total_planned} pt | {total_actual} pt "
+                    f"| {delta_str} | {avg_pct}%{risk_flag} | {status_str} |"
+                )
+
+            md.append("")
+
+        md.append("---")
+        md.append("## Legend")
+        md.append("- **Planned**: sum of Feature epic weights committed to this PI in this group")
+        md.append("- **Actual**: sum of issue weights for those Features (team-entered estimate)")
+        md.append("- **Δ**: Actual − Planned (▲ more work than planned, ▼ less, = matched)")
+        md.append("- **% Done**: weighted average completion across Features (by planned weight)")
+        md.append("- **Status**: ✅ On Track if % Done ≥ % elapsed through PI · ⚠️ At Risk if behind · ❌ Incomplete if PI ended with work remaining")
+        md.append("")
+
+        self.upload_to_wiki(group, f"{group.name} - ART/Team Workload Report", "\n".join(md))
 
 
     def graphql_query(self, query, variables=None):
@@ -2019,6 +2151,7 @@ NceGitLab:
           group(fullPath: $fullPath) {
             epics {
               nodes {
+                id
                 title
                 blocked
                 blockingCount
@@ -2027,6 +2160,16 @@ NceGitLab:
                 labels {
                   nodes {
                     title
+                  }
+                }
+                parent {
+                  id
+                  title
+                  webUrl
+                  labels {
+                    nodes {
+                      title
+                    }
                   }
                 }
                 blockedByEpics {
@@ -2069,31 +2212,77 @@ NceGitLab:
 
         total_relationships = sum(n.get("blockedByCount", 0) for n in blocked_epics)
 
+        # Build id→node and child→parent maps for ancestor walking.
+        id_to_node = {n["id"]: n for n in nodes}
+        parent_of  = {n["id"]: n["parent"]["id"] for n in nodes if n.get("parent")}
+
+        def get_ancestors(epic_id):
+            """Walk up the hierarchy and return ordered list of ancestor nodes (nearest first)."""
+            ancestors = []
+            current   = epic_id
+            visited   = set()
+            while current in parent_of:
+                current = parent_of[current]
+                if current in visited:
+                    break
+                visited.add(current)
+                if current in id_to_node:
+                    ancestors.append(id_to_node[current])
+            return ancestors
+
+        # For each top-level Epic, collect all blocked descendants so we can
+        # build a portfolio-level risk summary.
+        epic_to_blocked_descendants = defaultdict(list)
+        for blocked in blocked_epics:
+            for ancestor in get_ancestors(blocked["id"]):
+                if epic_type(ancestor) == "Epic":
+                    epic_to_blocked_descendants[ancestor["id"]].append(blocked)
+
         md = []
         md.append(f"# Blocking Relationships Report (Group: {group.name})")
         md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
-        md.append("In this report:")
-        md.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
-        md.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
-        md.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
-        md.append("")
         md.append("## Summary")
-        md.append(f"- **Blocked epics:** {len(blocked_epics)}")
+        md.append(f"- **Directly blocked items:** {len(blocked_epics)}")
         md.append(f"- **Total blocking relationships:** {total_relationships}")
+        md.append(f"- **Top-level Epics with blocked descendants:** {len(epic_to_blocked_descendants)}")
         md.append("")
+
+        # Portfolio-level risk summary — which Epics are indirectly at risk.
+        if epic_to_blocked_descendants:
+            md.append("## Portfolio-Level Risk Summary")
+            md.append("")
+            md.append("Top-level Epics that contain one or more blocked descendants:")
+            md.append("")
+            md.append("| Epic | Blocked Descendants |")
+            md.append("|------|---------------------|")
+            for epic_id, descendants in sorted(
+                epic_to_blocked_descendants.items(),
+                key=lambda kv: -len(kv[1])
+            ):
+                epic_node  = id_to_node[epic_id]
+                def _short(title):
+                    return title[:12] + "…" if len(title) > 12 else title
+                desc_links = ", ".join(
+                    f"{self.EPIC_TYPE_ICONS.get(epic_type(d), '🏆')} {link(_short(d['title']), d['webUrl'])}"
+                    for d in descendants
+                )
+                md.append(
+                    f"| ⚠️ 🏆 **{link(epic_node['title'], epic_node['webUrl'])}** "
+                    f"| **{len(descendants)}:** {desc_links} |"
+                )
+            md.append("")
 
         if not blocked_epics:
             md.append("_No blocked epics found._")
         else:
-            md.append("## Blocked Epics")
+            md.append("## Blocked Items (Detail)")
             md.append("")
             for epic in blocked_epics:
                 etype          = epic_type(epic)
                 icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
                 state          = epic.get("state", "").capitalize()
                 blocked_by_cnt = epic.get("blockedByCount", 0)
-                blocking_cnt   = epic.get("blockingCount", 0)
 
                 md.append("<details>")
                 md.append(
@@ -2103,6 +2292,7 @@ NceGitLab:
                 )
                 md.append("")
 
+                md.append("")
                 for edge in epic.get("blockedByEpics", {}).get("edges", []):
                     node  = edge["node"]
                     btype = epic_type(node)
@@ -2110,8 +2300,25 @@ NceGitLab:
                     md.append(f"🔒 {bicon} **{link(node['title'], node['webUrl'])}** ({btype})")
                     md.append("")
 
+                ancestors = get_ancestors(epic["id"])
+                if ancestors:
+                    md.append("**Risk propagates up to:**")
+                    md.append("")
+                    for ancestor in ancestors:
+                        atype = epic_type(ancestor)
+                        aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
+                        md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['webUrl'])}** ({atype})")
+                        md.append("")
+
                 md.append("</details>")
                 md.append("")
+
+        md.append("---")
+        md.append("## Legend")
+        md.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+        md.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+        md.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
+        md.append("")
 
         title = f"{group.name} - Blocking Relationships Report"
         self.upload_to_wiki(group, title, "\n".join(md))
@@ -2185,6 +2392,7 @@ NceGitLab:
                 "pct_complete":     pct_done,
                 "pct_through_pi":   pct_pi,
                 "piid":             piid,
+                "group_id":         getattr(epic, 'group_id', None),
             }
 
             if "Epic" in epic.labels:
@@ -2533,7 +2741,6 @@ NceGitLab:
             print(f"  Epic {epic.iid} [{epic_label}] w={weight} → {group.full_path}")
             created.append((epic, epic_label))
 
-        self.build_epic_hierarchy(group, created)
         return created
 
 
@@ -2603,6 +2810,8 @@ NceGitLab:
         except Exception as e:
             print(f"  Skipping team backlog for '{group.full_path}': {e}")
 
+        return epics
+
 
     def create_all_lorem_objects(self,
                                   num_value_streams=2, num_arts=2, num_teams=2,
@@ -2626,10 +2835,14 @@ NceGitLab:
             self.create_and_apply_labels(root_group, label_array)
 
         # Portfolio level: Epics only, no backlog project (strategic, not execution)
-        self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])
+        all_portfolio_epics = self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])
         print(f"Portfolio: {portfolio_epics} Epics → {root_group.full_path}")
 
         vis = root_group.visibility
+
+        all_vs_caps   = []
+        all_art_caps  = []
+        all_features  = []
 
         for vs in range(1, num_value_streams + 1):
             vs_path = f"vs-{vs:02d}"
@@ -2641,8 +2854,8 @@ NceGitLab:
                 'visibility': vis,
             })
             print(f"\n[Value Stream] {vs_group.full_path}")
-            # Value Stream level: Capabilities only
-            self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
+            vs_caps = self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
+            all_vs_caps.extend(vs_caps)
 
             for a in range(1, num_arts + 1):
                 art_path = f"{vs_path}-art-{a:02d}"
@@ -2654,9 +2867,10 @@ NceGitLab:
                     'visibility': vis,
                 })
                 print(f"\n[ART] {art_group.full_path}")
-                # ART level: mix of Capabilities and Features
-                self._lorem_epics_in_group(art_group, art_epics,
-                                           allowed_types=["Capability", "Feature"])
+                art_created = self._lorem_epics_in_group(art_group, art_epics,
+                                                         allowed_types=["Capability", "Feature"])
+                all_art_caps.extend( (e, l) for e, l in art_created if l == "Capability")
+                all_features.extend( (e, l) for e, l in art_created if l == "Feature")
 
                 for t in range(1, num_teams + 1):
                     team_path = f"{art_path}-team-{t:02d}"
@@ -2668,9 +2882,30 @@ NceGitLab:
                         'visibility': vis,
                     })
                     print(f"\n[Agile Team] {team_group.full_path}")
-                    # Team level: Features only, each backed by 8–15 stories
-                    self._lorem_populate_group(team_group, team_features,
-                                              allowed_types=["Feature"])
+                    team_created = self._lorem_populate_group(team_group, team_features,
+                                                              allowed_types=["Feature"])
+                    if team_created:
+                        all_features.extend(team_created)
+
+        # Link the SAFe hierarchy across group boundaries.
+        # Each child is randomly assigned to one parent at the level above it.
+        def _link_to_parents(children, parents):
+            if not parents or not children:
+                return
+            parent_epics = [e for e, _ in parents]
+            for child_epic, _ in children:
+                parent = random.choice(parent_epics)
+                try:
+                    child_epic.parent_id = parent.id
+                    child_epic.save()
+                    print(f"  Linked '{child_epic.title[:40]}' → '{parent.title[:40]}'")
+                except Exception as e:
+                    print(f"  Failed to link '{child_epic.title[:40]}': {e}")
+
+        print("\nLinking cross-group hierarchy...")
+        _link_to_parents(all_vs_caps,  all_portfolio_epics)   # VS Capabilities → Portfolio Epics
+        _link_to_parents(all_art_caps, all_vs_caps)            # ART Capabilities → VS Capabilities
+        _link_to_parents(all_features, all_art_caps)           # Features → ART Capabilities
 
 
     def generate_orphan_epics_report(self):
@@ -2768,16 +3003,69 @@ NceGitLab:
         self.upload_to_wiki(group, f"{group.name} - Orphaned Issues Report", "\n".join(md))
 
 
+    def generate_unassigned_pi_report(self):
+        group = self.get_group_by_name(self.group_name)
+        print(f"Generating unassigned PI report for {group.name}...")
+
+        all_epics = group.epics.list(all=True)
+
+        # Build parent id → title map for showing hierarchy position.
+        epic_title_by_id = {e.id: e.title for e in all_epics}
+
+        unassigned = [e for e in all_epics if not any(l.startswith("PIID::") for l in e.labels)]
+
+        by_type = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
+        for e in unassigned:
+            etype = next((t for t in ("Epic", "Capability", "Feature") if t in e.labels), "Unknown")
+            by_type[etype].append(e)
+
+        md = []
+        md.append(f"# Unassigned PI Report (Group: {group.name})")
+        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Items listed here have no `PIID::` label and are not committed to any Program Increment.")
+        md.append("")
+        md.append(f"**Total unassigned: {len(unassigned)}**")
+        md.append("")
+
+        for etype in ("Epic", "Capability", "Feature", "Unknown"):
+            items = by_type[etype]
+            if not items:
+                continue
+            icon = self.EPIC_TYPE_ICONS.get(etype, "❓")
+            md.append(f"## {icon} {etype} ({len(items)})")
+            md.append("")
+            md.append("| Title | State | Parent |")
+            md.append("|-------|-------|--------|")
+            for e in sorted(items, key=lambda x: x.title):
+                title_link = f"[{e.title}]({e.web_url})"
+                state      = e.state.capitalize()
+                parent_id  = getattr(e, 'parent_id', None)
+                parent     = f"_{epic_title_by_id[parent_id]}_" if parent_id and parent_id in epic_title_by_id else "—"
+                md.append(f"| {title_link} | {state} | {parent} |")
+            md.append("")
+
+        md.append("---")
+        md.append("## Legend")
+        md.append("- **Parent**: the direct parent epic in the hierarchy, if one exists")
+        md.append("- Items with no parent and no children are also captured by the Orphaned Epics report")
+        md.append("")
+
+        self.upload_to_wiki(group, f"{group.name} - Unassigned PI Report", "\n".join(md))
+
+
     def generate_all_reports(self):
         group = self.get_group_by_name(self.group_name)
-        self.generate_summary_report(group)
-        self.generate_detailed_report(group)
-        self.generate_epics_report(group)
+        #self.generate_summary_report(group)
+        #self.generate_detailed_report(group)
+        self.generate_portfolio_report(group)
         self.generate_blocking_report()
-        self.generate_orphan_epics_report()
-        self.generate_orphan_issues_report()
-        self.generate_issue_progress_report(group)
-        self.generate_and_upload_piid_project_report_to_wiki(group)
+        self.generate_workload_report()
+        self.generate_unassigned_pi_report()
+        #self.generate_orphan_epics_report()
+        #self.generate_orphan_issues_report()
+        #self.generate_issue_progress_report(group)
+        #self.generate_and_upload_piid_project_report_to_wiki(group)
 
 
 
@@ -2786,7 +3074,7 @@ def main():
     gl = NceGitLab()
 
     # gl.cleanup_group()
-    # gl.create_all_lorem_objects()
+    #gl.create_all_lorem_objects()
     gl.generate_all_reports()
 
 
