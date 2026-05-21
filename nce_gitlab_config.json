@@ -1,9 +1,9 @@
 {
   "url": "https://gitlab.com",
+  "group_name": "Powers-Playground",
   "fibonacci_weights": [1, 2, 3, 5, 8, 13],
-  "group_name": "",
-  "private_token": "",
+  "private_token": "glpat-v0WL04-c5nmsR7KPOK008GM6MQpvOjEKdTptaGFueQ8.01.170l5y4xi",
   "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
-  "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
+  "piid_labels": ["PIID::2026Q1", "PIID::2026Q2", "PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
   "epic_type_labels": ["Epic", "Capability", "Feature"]
 }
