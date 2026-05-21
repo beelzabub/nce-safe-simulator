@@ -1,5 +1,5 @@
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from dateutil.relativedelta import relativedelta
 from collections import defaultdict
 import textwrap
@@ -39,6 +39,16 @@ class NceGitLab:
             "Epic": "🏆",           # Trophy for strategic goals
             "Capability": "🧩",     # Puzzle piece for capabilities
             "Feature": "🛠️"         # Tools for features
+        }
+
+        # Planned weight pools per epic type.
+        # Features use story-point scale; Capabilities and Epics use extended Fibonacci
+        # to reflect that they aggregate many children.  The ranges are deliberately
+        # wide so bootstrap data shows both over- and under-plan scenarios.
+        self.EPIC_TYPE_PLANNED_WEIGHTS = {
+            "Feature":    [3, 5, 8, 13],
+            "Capability": [21, 34, 55, 89],
+            "Epic":       [89, 144, 233, 377],
         }
 
         with open(self.config_file, "r", encoding="utf-8") as config_file:
@@ -360,33 +370,33 @@ NceGitLab:
         print()
 
 
-    def delete_all_group_epics(self, group_name, recursive=False):
-        group = self.get_group_by_name(group_name)
-        if group is None:
+    def delete_all_group_epics(self, group_name):
+        root = self.get_group_by_name(group_name)
+        if root is None:
             print(f"Group '{group_name}' not found. Aborting epic deletion.")
             return
 
         print()
-        print(f"Deleting epics from group '{group_name}'{' and its subgroups' if recursive else ''}...")
+        print(f"Deleting epics from '{group_name}' and all subgroups...")
 
-        try:
-            epics = group.epics.list(all=True)
-            for epic in epics:
+        def _delete_epics_in_group(group):
+            # Recurse into subgroups first so children are gone before parents.
+            for sg in group.subgroups.list(all=True):
+                full_sg = self.gl.groups.get(sg.id)
+                _delete_epics_in_group(full_sg)
+            for epic in group.epics.list(all=True):
                 try:
                     epic.delete()
-                    print(f"Deleted Epic: {epic.title} (id: {epic.id}) from group '{group.name}'")
+                    print(f"  Deleted epic '{epic.title}' (id: {epic.id}) from '{group.full_path}'")
                 except Exception as e:
-                    print(f"Failed to delete epic: {epic.title} (ID: {epic.id}). Error: {e}")
+                    print(f"  Failed to delete epic '{epic.title}' (id: {epic.id}): {e}")
 
-            if recursive:
-                subgroups = group.subgroups.list(all=True)
-                for subgroup in subgroups:
-                    self.delete_all_group_epics(subgroup.full_path, recursive=True)
-
+        try:
+            _delete_epics_in_group(root)
         except Exception as e:
-            print(f"Failed to delete epics from group '{group_name}': {e}")
+            print(f"Failed to delete epics: {e}")
 
-        print(f"Completed deleting epics from group '{group_name}'{' and its subgroups' if recursive else ''}.")
+        print(f"Completed deleting epics from '{group_name}'.")
         print()
 
 
@@ -1841,7 +1851,25 @@ NceGitLab:
 
                 blocked    = epic.get('blocked_by_count', 0) > 0
                 block_icon = '<span style="font-size:0.62em;">⛔</span> ' if blocked else ""
-                label      = f"{block_icon}{icon} **[{epic['title']}]({epic['web_url']})** (State: {epic.get('state')})"
+
+                pct_done   = epic.get('pct_complete', 0)
+                pct_pi     = epic.get('pct_through_pi')
+                planned_w  = epic.get('planned_weight', 0)
+                actual_w   = epic.get('actual_weight', 0)
+
+                pi_str  = f" | PI: {pct_pi}%" if pct_pi is not None else ""
+                risk    = " ⚠️" if pct_pi is not None and pct_done < pct_pi else ""
+
+                if planned_w and actual_w:
+                    drift     = actual_w - planned_w
+                    drift_str = f" | Planned: {planned_w}pt  Actual: {actual_w}pt {'▲' if drift > 0 else '▼' if drift < 0 else '='}"
+                elif planned_w:
+                    drift_str = f" | Planned: {planned_w}pt"
+                else:
+                    drift_str = ""
+
+                meta  = f"(State: {epic.get('state')} | {pct_done}%{risk}{pi_str}{drift_str})"
+                label = f"{block_icon}{icon} **[{epic['title']}]({epic['web_url']})** {meta}"
 
                 if not children:
                     markdown_report.append(label)
@@ -2095,21 +2123,13 @@ NceGitLab:
             print(f"Group '{group_name}' not found.")
             return {}
 
-        # Pre-fetch all issues from every project in the group and index them by the
-        # epic they are DIRECTLY assigned to.  epic.issues.list() returns inherited
-        # issues from child epics as well, which causes each issue to be counted once
-        # Fetch blocked_by and blocks counts directly from GitLab epics via
-        # GraphQL — more accurate and far cheaper than rolling up from issue links.
+        # GraphQL: block counts per epic (accurate, cheap).
         gql_data = self.graphql_query(
             """
             query EpicBlockCounts($fullPath: ID!) {
               group(fullPath: $fullPath) {
                 epics {
-                  nodes {
-                    webUrl
-                    blockedByCount
-                    blockingCount
-                  }
+                  nodes { webUrl blockedByCount blockingCount }
                 }
               }
             }
@@ -2119,31 +2139,52 @@ NceGitLab:
         epic_blocks = {}
         if gql_data:
             epic_blocks = {
-                n["webUrl"]: n
-                for n in gql_data["group"]["epics"]["nodes"]
+                n["webUrl"]: n for n in gql_data["group"]["epics"]["nodes"]
             }
 
-        all_epics = group.epics.list(all=True)
+        # Issue weights indexed by directly-assigned epic id (for % complete).
+        print("Fetching issue weights...")
+        issues_by_epic_id = defaultdict(list)
+        for project in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_project = self.gl.projects.get(project.id)
+                for issue in full_project.issues.list(all=True):
+                    epic_info = getattr(issue, 'epic', None)
+                    if epic_info and epic_info.get('id'):
+                        issues_by_epic_id[epic_info['id']].append(issue)
+            except Exception as e:
+                print(f"  Failed to fetch issues for '{project.name}': {e}")
 
-        metrics = {
-            "Epic": [],
-            "Capability": [],
-            "Feature": []
-        }
+        all_epics = group.epics.list(all=True)
+        metrics   = {"Epic": [], "Capability": [], "Feature": []}
+        epic_by_id = {}
 
         print(f"Processing {len(all_epics)} epics...")
         for epic in all_epics:
-            gql = epic_blocks.get(epic.web_url, {})
+            gql    = epic_blocks.get(epic.web_url, {})
+            issues = issues_by_epic_id.get(epic.id, [])
+
+            total_w  = sum(i.weight or 0 for i in issues)
+            closed_w = sum(i.weight or 0 for i in issues if i.state == 'closed')
+            pct_done = round(closed_w / total_w * 100) if total_w > 0 else 0
+
+            piid    = next((l for l in epic.labels if l.startswith("PIID::")), None)
+            pct_pi  = self._pct_through_pi(piid)
 
             associated_data = {
-                "id":             epic.id,
-                "title":          epic.title,
-                "state":          epic.state.capitalize(),
+                "id":               epic.id,
+                "title":            epic.title,
+                "state":            epic.state.capitalize(),
                 "blocked_by_count": gql.get("blockedByCount", 0),
-                "blocks_count":   gql.get("blockingCount", 0),
-                "web_url":        epic.web_url,
-                "labels":         epic.labels,
-                "parent_id":      getattr(epic, 'parent_id', None),
+                "blocks_count":     gql.get("blockingCount", 0),
+                "web_url":          epic.web_url,
+                "labels":           epic.labels,
+                "parent_id":        getattr(epic, 'parent_id', None),
+                "planned_weight":   getattr(epic, 'weight', None) or 0,
+                "actual_weight":    total_w,
+                "pct_complete":     pct_done,
+                "pct_through_pi":   pct_pi,
+                "piid":             piid,
             }
 
             if "Epic" in epic.labels:
@@ -2157,6 +2198,35 @@ NceGitLab:
                 continue
 
             metrics[epic_type].append(associated_data)
+            epic_by_id[epic.id] = associated_data
+
+        # Roll % complete up through the hierarchy:
+        # Capability % = weighted avg of its Features; Epic % = weighted avg of its Capabilities.
+        hierarchy = defaultdict(list)
+        for etype in metrics.values():
+            for e in etype:
+                if e["parent_id"] is not None:
+                    hierarchy[e["parent_id"]].append(e)
+
+        def rollup_pct(e):
+            children = hierarchy.get(e["id"], [])
+            if not children:
+                return e["pct_complete"]
+            child_pcts = [rollup_pct(c) for c in children]
+            return round(sum(child_pcts) / len(child_pcts))
+
+        def rollup_actual(e):
+            children = hierarchy.get(e["id"], [])
+            if not children:
+                return e["actual_weight"]
+            return sum(rollup_actual(c) for c in children)
+
+        for cap in metrics["Capability"]:
+            cap["pct_complete"]  = rollup_pct(cap)
+            cap["actual_weight"] = rollup_actual(cap)
+        for ep in metrics["Epic"]:
+            ep["pct_complete"]  = rollup_pct(ep)
+            ep["actual_weight"] = rollup_actual(ep)
 
         return metrics
 
@@ -2170,21 +2240,29 @@ NceGitLab:
         summary = []
         summary.append("## 📊 Portfolio Summary")
         summary.append("")
-        summary.append("| Type         | Total | Open | Closed | Blocked By | Blocks |")
-        summary.append("|--------------|-------|------|--------|------------|--------|")
+        summary.append("| Type | Total | Open | Closed | Blocked By | Blocks | % Done | % Through PI |")
+        summary.append("|------|-------|------|--------|------------|--------|--------|--------------|")
 
         for metric_type, data_list in metrics.items():
             if not data_list:
                 continue
 
-            total = len(data_list)
-            open_count = sum(1 for d in data_list if d["state"] == "Opened")
+            total       = len(data_list)
+            open_count  = sum(1 for d in data_list if d["state"] == "Opened")
             closed_count = sum(1 for d in data_list if d["state"] == "Closed")
             total_blocked_by = sum(d["blocked_by_count"] for d in data_list)
-            total_blocks = sum(d["blocks_count"] for d in data_list)
+            total_blocks     = sum(d["blocks_count"] for d in data_list)
 
-            icon = self.EPIC_TYPE_ICONS.get(metric_type, "🏆")
+            pcts_done = [d["pct_complete"] for d in data_list]
+            avg_done  = round(sum(pcts_done) / len(pcts_done)) if pcts_done else 0
 
+            pcts_pi   = [d["pct_through_pi"] for d in data_list if d["pct_through_pi"] is not None]
+            avg_pi    = round(sum(pcts_pi) / len(pcts_pi)) if pcts_pi else None
+
+            risk_flag = " ⚠️" if avg_pi is not None and avg_done < avg_pi else ""
+            pi_cell   = f"{avg_pi}%{risk_flag}" if avg_pi is not None else "—"
+
+            icon       = self.EPIC_TYPE_ICONS.get(metric_type, "🏆")
             url_all    = f"{base}?label_name[]={metric_type}&state=all"
             url_open   = f"{base}?label_name[]={metric_type}&state=opened"
             url_closed = f"{base}?label_name[]={metric_type}&state=closed"
@@ -2195,7 +2273,9 @@ NceGitLab:
                 f"| [{open_count}]({url_open}) "
                 f"| [{closed_count}]({url_closed}) "
                 f"| {total_blocked_by} "
-                f"| {total_blocks} |"
+                f"| {total_blocks} "
+                f"| {avg_done}% "
+                f"| {pi_cell} |"
             )
 
         summary.append("")
@@ -2208,6 +2288,30 @@ NceGitLab:
     #
     # Utilities
     #
+    def _pi_dates_from_label(self, piid):
+        """Parse a PIID::YYYYQn label into (start_date, end_date). Returns (None, None) on failure."""
+        if not piid:
+            return None, None
+        m = re.match(r'PIID::(\d{4})Q([1-4])$', piid)
+        if not m:
+            return None, None
+        year, quarter = int(m.group(1)), int(m.group(2))
+        q_starts = {1: (1, 1),  2: (4, 1),  3: (7, 1),  4: (10, 1)}
+        q_ends   = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+        return date(year, *q_starts[quarter]), date(year, *q_ends[quarter])
+
+    def _pct_through_pi(self, piid):
+        """Return integer % elapsed through the PI quarter, or None if label can't be parsed."""
+        start, end = self._pi_dates_from_label(piid)
+        if start is None:
+            return None
+        today = date.today()
+        if today < start:
+            return 0
+        if today >= end:
+            return 100
+        return round((today - start).days / (end - start).days * 100)
+
     def sanitize_name(self, name):
         sanitized_name = re.sub(r'[^a-z0-9\-]', '', name.lower().replace(' ', '-'))
         return sanitized_name
@@ -2285,22 +2389,87 @@ NceGitLab:
     #
     # Bootstrapping
     #
+    def _get_or_create_root_group(self):
+        """Return the root group, creating it (with an interactive parent picker) if absent."""
+        group = self.get_group_by_name(self.group_name)
+        if group is not None:
+            return group
+
+        print(f"\nRoot group '{self.group_name}' not found.")
+
+        # Fetch top-level groups the token has access to as candidate parents.
+        candidates = [g for g in self.gl.groups.list(all=True, top_level_only=True)
+                      if g.visibility in ('public', 'internal', 'private')]
+        if not candidates:
+            print("No accessible parent groups found. Aborting.")
+            return None
+
+        print("\nAvailable parent groups:")
+        for i, g in enumerate(candidates, 1):
+            print(f"  [{i}] {g.full_path}  ({g.visibility})")
+
+        choice = input(f"\nSelect parent [1-{len(candidates)}]: ").strip()
+        try:
+            parent = candidates[int(choice) - 1]
+        except (ValueError, IndexError):
+            print("Invalid selection. Aborting.")
+            return None
+
+        path  = self.group_name.lower().replace(" ", "-")
+        group = self.gl.groups.create({
+            'name':       self.group_name,
+            'path':       path,
+            'parent_id':  parent.id,
+            'visibility': parent.visibility,
+        })
+        print(f"Created root group: {group.full_path}")
+        return group
+
+
     def cleanup_group(self):
         group = self.get_group_by_name(self.group_name)
+        if group is None:
+            print(f"Root group '{self.group_name}' not found. Nothing to clean up.")
+            return
 
         self.delete_all_labels(group)
         self.delete_all_wiki_pages(group)
         self.delete_all_group_epics(self.group_name)
 
-        # Delete all projects directly in the root group.
-        for project in group.projects.list(all=True):
+        # Explicitly delete every issue in every project across the full hierarchy.
+        # Project/group deletion is async on GitLab — issues remain visible until
+        # the deletion job runs.  Deleting issues directly makes cleanup synchronous.
+        # Projects already queued for deletion have '_deletion_scheduled' in their path
+        # and return 403 on all mutations — skip them, they'll disappear on their own.
+        print("Deleting all issues across group hierarchy...")
+        for project in group.projects.list(all=True, include_subgroups=True):
+            if '_deletion_scheduled' in project.path:
+                print(f"  Skipping pending-deletion project: {project.path_with_namespace}")
+                continue
+            try:
+                full_project = self.gl.projects.get(project.id)
+                issues = full_project.issues.list(all=True)
+                for issue in issues:
+                    try:
+                        issue.delete()
+                    except Exception as e:
+                        print(f"  Failed to delete issue #{issue.iid} in '{project.path_with_namespace}': {e}")
+                if issues:
+                    print(f"  Deleted {len(issues)} issues from '{project.path_with_namespace}'")
+            except Exception as e:
+                print(f"  Failed to fetch issues for '{project.path_with_namespace}': {e}")
+
+        # Delete all projects across the hierarchy (skip already-queued ones).
+        for project in group.projects.list(all=True, include_subgroups=True):
+            if '_deletion_scheduled' in project.path:
+                continue
             try:
                 self.gl.projects.delete(project.id)
                 print(f"Deleted project: {project.path_with_namespace}")
             except Exception as e:
                 print(f"Failed to delete project '{project.path_with_namespace}': {e}")
 
-        # Deleting a subgroup cascades to all its projects, epics, and issues.
+        # Delete subgroups to keep the namespace clean.
         for subgroup in group.subgroups.list(all=True):
             try:
                 self.gl.groups.delete(subgroup.id)
@@ -2308,35 +2477,60 @@ NceGitLab:
             except Exception as e:
                 print(f"Failed to delete subgroup '{subgroup.full_path}': {e}")
 
+        # Delete the root group itself.
+        try:
+            self.gl.groups.delete(group.id)
+            print(f"Deleted root group: {group.full_path}")
+        except Exception as e:
+            print(f"Failed to delete root group '{group.full_path}': {e}")
 
-    def _lorem_epics_in_group(self, group, count):
-        """Create lorem epics directly in a group object. Returns [(epic, label)]."""
-        def next_monday_after(d):
+
+    def _lorem_epics_in_group(self, group, count, allowed_types=None):
+        """Create lorem epics directly in a group object. Returns [(epic, label)].
+        allowed_types restricts which epic type labels are used (default: all three)."""
+        def next_monday_on_or_after(d):
             while d.weekday() != 0:
                 d += timedelta(days=1)
             return d
 
-        start_base = next_monday_after(
-            (datetime.today().replace(day=1) + relativedelta(months=1)).date()
-        )
+        type_pool  = allowed_types or self.EPIC_TYPE_LABELS
+        weight_pool = self.EPIC_TYPE_PLANNED_WEIGHTS
 
         created = []
         for _ in range(count):
-            start = start_base
-            due   = next_monday_after(start + relativedelta(months=random.randint(1, 6)))
-            project_label = random.choice(self.PROJECT_LABELS)
             piid_label    = random.choice(self.PIID_LABELS)
-            epic_label    = random.choice(self.EPIC_TYPE_LABELS)
+            epic_label    = random.choice(type_pool)
+            project_label = random.choice(self.PROJECT_LABELS)
+
+            # Align start/due dates to the PI quarter so data reflects real planning.
+            pi_start, pi_end = self._pi_dates_from_label(piid_label)
+            if pi_start:
+                pi_days = (pi_end - pi_start).days
+                start   = next_monday_on_or_after(
+                    pi_start + timedelta(days=random.randint(0, pi_days // 4))
+                )
+                due     = next_monday_on_or_after(
+                    pi_start + timedelta(days=random.randint(pi_days // 2, pi_days))
+                )
+                if due > pi_end:
+                    due = pi_end
+            else:
+                start = next_monday_on_or_after(
+                    (datetime.today().replace(day=1) + relativedelta(months=1)).date()
+                )
+                due = next_monday_on_or_after(start + relativedelta(months=random.randint(1, 6)))
+
+            weight = random.choice(weight_pool.get(epic_label, self.fibonacci_weights))
 
             epic = group.epics.create({
-                'title':       lorem.sentence(),
+                'title':       lorem.sentence().rstrip('.'),
                 'description': lorem.paragraph(),
                 'start_date':  start.isoformat(),
                 'due_date':    due.isoformat(),
-                'weight':      random.choice(self.fibonacci_weights),
+                'weight':      weight,
                 'labels':      [project_label, piid_label, epic_label],
             })
-            print(f"  Epic {epic.iid} [{epic_label}] → {group.full_path}")
+            print(f"  Epic {epic.iid} [{epic_label}] w={weight} → {group.full_path}")
             created.append((epic, epic_label))
 
         self.build_epic_hierarchy(group, created)
@@ -2348,7 +2542,7 @@ NceGitLab:
         issues = []
         for _ in range(count):
             issue = project.issues.create({
-                'title':       lorem.sentence(),
+                'title':       lorem.sentence().rstrip('.'),
                 'description': lorem.paragraph(),
                 'weight':      random.choice(self.fibonacci_weights),
             })
@@ -2357,63 +2551,83 @@ NceGitLab:
         return issues
 
 
-    def _lorem_populate_group(self, group, epic_count, issue_count):
-        """Create epics in a group and randomly create a team backlog project with issues linked to those epics."""
-        epics = self._lorem_epics_in_group(group, epic_count)
+    def _lorem_populate_group(self, group, epic_count, allowed_types=None):
+        """Create epics in a group and a team backlog project with stories per Feature."""
+        epics = self._lorem_epics_in_group(group, epic_count, allowed_types=allowed_types)
 
-        if random.choice([True, False]):
-            try:
-                project = self.gl.projects.create({
-                    'name':         f"{group.name} — Team Backlog",
-                    'path':         f"{group.path}-backlog",
-                    'namespace_id': group.id,
-                })
-                print(f"  Team Backlog → {project.path_with_namespace}")
-                milestones = self.create_lorem_milestones(project)
-                issues     = self._lorem_issues_in_project(project, issue_count)
-                self.assign_issues_to_epics(epics, issues)
-                self.assign_issues_to_milestones(milestones, issues)
-            except Exception as e:
-                print(f"  Skipping team backlog for '{group.full_path}': {e}")
+        feature_epics = [(e, lbl) for e, lbl in epics if lbl == "Feature"]
+        if not feature_epics:
+            return
+
+        try:
+            project = self.gl.projects.create({
+                'name':         f"{group.name} — Team Backlog",
+                'path':         f"{group.path}-backlog",
+                'namespace_id': group.id,
+            })
+            print(f"  Team Backlog → {project.path_with_namespace}")
+            milestones = self.create_lorem_milestones(project)
+            issue_weight_pool = [1, 2, 3, 5, 8, 13]
+
+            for feature_epic, _ in feature_epics:
+                # 8–15 stories per Feature: a realistic sprint backlog
+                total_stories  = random.randint(8, 15)
+                closed_stories = random.randint(1, total_stories - 1)
+                open_stories   = total_stories - closed_stories
+
+                for i in range(open_stories):
+                    ms    = random.choice(milestones) if milestones else None
+                    issue = project.issues.create({
+                        'title':        lorem.sentence().rstrip('.'),
+                        'description':  lorem.paragraph(),
+                        'weight':       random.choice(issue_weight_pool),
+                        'milestone_id': ms.id if ms else None,
+                    })
+                    issue.epic_id = feature_epic.id
+                    issue.save()
+
+                for i in range(closed_stories):
+                    ms    = random.choice(milestones) if milestones else None
+                    issue = project.issues.create({
+                        'title':        lorem.sentence().rstrip('.'),
+                        'description':  lorem.paragraph(),
+                        'weight':       random.choice(issue_weight_pool),
+                        'milestone_id': ms.id if ms else None,
+                    })
+                    issue.epic_id    = feature_epic.id
+                    issue.state_event = 'close'
+                    issue.save()
+
+                print(f"    {total_stories} stories ({closed_stories} closed) → Feature #{feature_epic.iid}")
+
+        except Exception as e:
+            print(f"  Skipping team backlog for '{group.full_path}': {e}")
 
 
     def create_all_lorem_objects(self,
-                                  epic_count=10, issue_count=40,
                                   num_value_streams=2, num_arts=2, num_teams=2,
-                                  epics_per_group=5, issues_per_backlog=10):
-        root_group = self.get_group_by_name(self.group_name)
+                                  portfolio_epics=5,
+                                  vs_epics=3,
+                                  art_epics=4,
+                                  team_features=4):
+        """
+        SAFe level → epic type mapping:
+          Portfolio  → Epic only
+          Value Stream → Capability only
+          ART        → Capability + Feature
+          Team       → Feature only  (each gets 8–15 stories)
+        """
+        root_group = self._get_or_create_root_group()
+        if root_group is None:
+            return
 
         # Labels defined on the root group are inherited by all subgroups.
         for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS]:
             self.create_and_apply_labels(root_group, label_array)
 
-        # Auto-create the Portfolio-level team backlog using the same naming
-        # convention as all subgroup backlogs.
-        try:
-            root_project = self.gl.projects.create({
-                'name':         f"{root_group.name} — Team Backlog",
-                'path':         f"{root_group.path}-backlog",
-                'namespace_id': root_group.id,
-            })
-            print(f"Portfolio Backlog → {root_project.path_with_namespace}")
-        except Exception as e:
-            print(f"Portfolio Backlog already exists, skipping: {e}")
-            root_project = None
-        root_epics = self._lorem_epics_in_group(root_group, epic_count)
-        if root_project:
-            root_milestones = self.create_lorem_milestones(root_project)
-            root_issues     = self._lorem_issues_in_project(root_project, issue_count)
-            self.assign_issues_to_epics(root_epics, root_issues)
-            self.assign_issues_to_milestones(root_milestones, root_issues)
-
-        # SAFe 4-level hierarchy: Portfolio > Value Stream > ART > Agile Team
-        #
-        # Naming convention (display name → URL path):
-        #   Value Stream 01                                    vs-01
-        #   Value Stream 01 | ART 01                           vs-01-art-01
-        #   Value Stream 01 | ART 01 | Team 01                 vs-01-art-01-team-01
-        #
-        # Each level randomly gets a Team Backlog project (GitLab project for Stories/issues).
+        # Portfolio level: Epics only, no backlog project (strategic, not execution)
+        self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])
+        print(f"Portfolio: {portfolio_epics} Epics → {root_group.full_path}")
 
         vis = root_group.visibility
 
@@ -2427,7 +2641,8 @@ NceGitLab:
                 'visibility': vis,
             })
             print(f"\n[Value Stream] {vs_group.full_path}")
-            self._lorem_populate_group(vs_group, epics_per_group, issues_per_backlog)
+            # Value Stream level: Capabilities only
+            self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
 
             for a in range(1, num_arts + 1):
                 art_path = f"{vs_path}-art-{a:02d}"
@@ -2439,7 +2654,9 @@ NceGitLab:
                     'visibility': vis,
                 })
                 print(f"\n[ART] {art_group.full_path}")
-                self._lorem_populate_group(art_group, epics_per_group, issues_per_backlog)
+                # ART level: mix of Capabilities and Features
+                self._lorem_epics_in_group(art_group, art_epics,
+                                           allowed_types=["Capability", "Feature"])
 
                 for t in range(1, num_teams + 1):
                     team_path = f"{art_path}-team-{t:02d}"
@@ -2451,7 +2668,9 @@ NceGitLab:
                         'visibility': vis,
                     })
                     print(f"\n[Agile Team] {team_group.full_path}")
-                    self._lorem_populate_group(team_group, epics_per_group, issues_per_backlog)
+                    # Team level: Features only, each backed by 8–15 stories
+                    self._lorem_populate_group(team_group, team_features,
+                                              allowed_types=["Feature"])
 
 
     def generate_orphan_epics_report(self):
@@ -2551,14 +2770,14 @@ NceGitLab:
 
     def generate_all_reports(self):
         group = self.get_group_by_name(self.group_name)
-        # self.generate_summary_report(group)
-        # self.generate_detailed_report(group)
+        self.generate_summary_report(group)
+        self.generate_detailed_report(group)
         self.generate_epics_report(group)
         self.generate_blocking_report()
         self.generate_orphan_epics_report()
         self.generate_orphan_issues_report()
-        # self.generate_issue_progress_report(group)
-        # self.generate_and_upload_piid_project_report_to_wiki(group)
+        self.generate_issue_progress_report(group)
+        self.generate_and_upload_piid_project_report_to_wiki(group)
 
 
 
