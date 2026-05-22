@@ -17,6 +17,7 @@ import requests
 import os
 import sys
 from importlib.metadata import version as pkg_version
+from urllib.parse import quote
 
 
 
@@ -2016,8 +2017,17 @@ class NceGitLab:
 
                 grp_link = f'<a href="{grp_url}" target="_blank" rel="noopener noreferrer">{grp_name}</a>' if grp_url else grp_name
 
+                if grp:
+                    wi_url = (f"{self.url}/groups/{grp.full_path}/-/work_items"
+                              f"?sort=created_date&state=opened"
+                              f"&label_name%5B%5D={quote(piid, safe='')}"
+                              f"&first_page_size=100")
+                    epics_cell = f'<a href="{wi_url}" target="_blank" rel="noopener noreferrer">{len(fs)}</a>'
+                else:
+                    epics_cell = str(len(fs))
+
                 md.append(
-                    f"| {grp_link} | {len(fs)} | {total_planned} pt | {total_actual} pt "
+                    f"| {grp_link} | {epics_cell} | {total_planned} pt | {total_actual} pt "
                     f"| {delta_str} | {avg_pct}%{risk_flag} | {status_str} |"
                 )
 
@@ -3174,13 +3184,14 @@ class NceGitLab:
 # Main
 def main():
     parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
+    parser.add_argument("--usage",  action="store_true", help="Show this help message and exit")
     parser.add_argument("--clean",  action="store_true", help="Delete all group data")
     parser.add_argument("--create", action="store_true", help="Bootstrap lorem SAFe data")
     parser.add_argument("--report", action="store_true", help="Generate all reports")
     parser.add_argument("--all",    action="store_true", help="Run clean, create, and report in sequence")
     args = parser.parse_args()
 
-    if not any(vars(args).values()):
+    if args.usage or not any(vars(args).values()):
         parser.print_help()
         return
 
