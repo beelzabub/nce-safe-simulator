@@ -1,6 +1,7 @@
 {
   "url": "https://gitlab.com",
-  "group_name": "AMW-120",
+  "parent_group": "AMW-120",
+  "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
   "fibonacci_weights": [1, 2, 3, 5, 8, 13],
   "private_token": "glpat-v0WL04-c5nmsR7KPOK008GM6MQpvOjEKdTptaGFueQ8.01.170l5y4xi",
   "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
