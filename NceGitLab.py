@@ -1,3 +1,4 @@
+import argparse
 import csv
 from datetime import datetime, timedelta, timezone, date
 from dateutil.relativedelta import relativedelta
@@ -3172,12 +3173,25 @@ class NceGitLab:
 
 # Main
 def main():
+    parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
+    parser.add_argument("--clean",  action="store_true", help="Delete all group data")
+    parser.add_argument("--create", action="store_true", help="Bootstrap lorem SAFe data")
+    parser.add_argument("--report", action="store_true", help="Generate all reports")
+    parser.add_argument("--all",    action="store_true", help="Run clean, create, and report in sequence")
+    args = parser.parse_args()
+
+    if not any(vars(args).values()):
+        parser.print_help()
+        return
+
     gl = NceGitLab()
 
-    #gl.cleanup_group()
-    #gl.create_all_lorem_objects()
-    gl.generate_all_reports()
-
+    if args.all or args.clean:
+        gl.cleanup_group()
+    if args.all or args.create:
+        gl.create_all_lorem_objects()
+    if args.all or args.report:
+        gl.generate_all_reports()
 
 
 if __name__ == "__main__":
