@@ -27,7 +27,8 @@ class NceGitLab:
                     {
                         "url": "https://gitlab.com",
                         "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
-                        "group_name": "saic-study-group",
+                        "parent_group": "AMW-120",
+                        "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
                         "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
                         "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
                         "epic_labels": ["Epic", "Capability", "Feature"]
@@ -57,8 +58,9 @@ class NceGitLab:
                     return None
             return None
 
-        self.url        = config.get("url", "")
-        self.group_name = os.getenv("GROUP_NAME") or config.get("group_name", "")
+        self.url              = config.get("url", "")
+        self.parent_group     = os.getenv("GROUP_NAME") or config.get("parent_group", "")
+        self.gitlab_namespace = config.get("gitlab_namespace", "")
         
         access_token_env = os.getenv("ACCESS_TOKEN")
         if access_token_env:
@@ -116,8 +118,8 @@ class NceGitLab:
         missing_fields = []
         if not self.url:
             missing_fields.append("url")
-        if not self.group_name:
-            missing_fields.append("group_name")
+        if not self.parent_group:
+            missing_fields.append("parent_group")
         if not self.private_token:
             missing_fields.append("private_token")
         if not self.fibonacci_weights:
@@ -143,7 +145,7 @@ class NceGitLab:
             print("Authentication failed. Please check your private token.")
             exit(1)
         except gitlab.GitlabGetError as e:
-            print(f"Failed to fetch group '{self.group_name}': {e}")
+            print(f"Failed to fetch group '{self.parent_group}': {e}")
             exit(1)
         
     #
@@ -1905,10 +1907,10 @@ class NceGitLab:
 
 
     def generate_workload_report(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         print(f"  Generating ART/Team Workload Report...")
 
-        metrics  = self.calculate_portfolio_metrics(self.group_name)
+        metrics  = self.calculate_portfolio_metrics(self.parent_group)
         all_epics = metrics.get("Epic", []) + metrics.get("Capability", []) + metrics.get("Feature", [])
         if not all_epics:
             print("No epics found — skipping workload report.")
@@ -2053,7 +2055,7 @@ class NceGitLab:
 
 
     def list_blocking_epics(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         full_path = group.full_path
 
         query = """
@@ -2138,7 +2140,7 @@ class NceGitLab:
 
 
     def generate_blocking_report(self):
-        group     = self.get_group_by_name(self.group_name)
+        group     = self.get_group_by_name(self.parent_group)
         full_path = group.full_path
 
         query = """
@@ -2317,6 +2319,26 @@ class NceGitLab:
 
         title = f"{group.name} - Blocking Relationships Report"
         self.upload_to_wiki(group, title, "\n".join(md))
+
+
+    def _set_epic_weight(self, epic, weight):
+        """Set weight on an epic via GraphQL workItemUpdate (REST API silently ignores weight)."""
+        wid = getattr(epic, 'work_item_id', None)
+        if not wid:
+            return
+        mutation = """
+        mutation UpdateWeight($id: WorkItemID!, $weight: Int!) {
+          workItemUpdate(input: {id: $id, weightWidget: {weight: $weight}}) {
+            workItem { id }
+            errors
+          }
+        }
+        """
+        data = self.graphql_query(mutation, variables={"id": f"gid://gitlab/WorkItem/{wid}", "weight": weight})
+        if data:
+            errors = data.get("workItemUpdate", {}).get("errors", [])
+            if errors:
+                print(f"  Weight error for epic {epic.iid}: {errors}")
 
 
     def _fetch_epic_weights(self, epics):
@@ -2632,34 +2654,47 @@ class NceGitLab:
     # Bootstrapping
     #
     def _get_or_create_root_group(self):
-        """Return the root group, creating it (with an interactive parent picker) if absent."""
-        group = self.get_group_by_name(self.group_name)
+        """Return the root group, creating it if absent.
+
+        Parent selection is automatic when only one top-level group is accessible;
+        otherwise the user is prompted to choose.
+        """
+        group = self.get_group_by_name(self.parent_group)
         if group is not None:
             return group
 
-        print(f"\nRoot group '{self.group_name}' not found.")
+        print(f"\nRoot group '{self.parent_group}' not found — creating it.")
 
-        # Fetch top-level groups the token has access to as candidate parents.
-        candidates = [g for g in self.gl.groups.list(all=True, top_level_only=True)
-                      if g.visibility in ('public', 'internal', 'private')]
-        if not candidates:
-            print("No accessible parent groups found. Aborting.")
-            return None
+        if self.gitlab_namespace:
+            parent = self.get_group_by_name(self.gitlab_namespace)
+            if parent is None:
+                print(f"gitlab_namespace '{self.gitlab_namespace}' not found. Aborting.")
+                return None
+            print(f"  Using namespace: {parent.full_path}")
+        else:
+            candidates = [g for g in self.gl.groups.list(all=True, top_level_only=True)
+                          if g.visibility in ('public', 'internal', 'private')]
+            if not candidates:
+                print("No accessible parent groups found. Aborting.")
+                return None
 
-        print("\nAvailable parent groups:")
-        for i, g in enumerate(candidates, 1):
-            print(f"  [{i}] {g.full_path}  ({g.visibility})")
+            if len(candidates) == 1:
+                parent = candidates[0]
+                print(f"  Using parent: {parent.full_path}")
+            else:
+                print("\nAvailable parent groups:")
+                for i, g in enumerate(candidates, 1):
+                    print(f"  [{i}] {g.full_path}  ({g.visibility})")
+                choice = input(f"\nSelect parent [1-{len(candidates)}]: ").strip()
+                try:
+                    parent = candidates[int(choice) - 1]
+                except (ValueError, IndexError):
+                    print("Invalid selection. Aborting.")
+                    return None
 
-        choice = input(f"\nSelect parent [1-{len(candidates)}]: ").strip()
-        try:
-            parent = candidates[int(choice) - 1]
-        except (ValueError, IndexError):
-            print("Invalid selection. Aborting.")
-            return None
-
-        path  = self.group_name.lower().replace(" ", "-")
+        path  = self.parent_group.lower().replace(" ", "-")
         group = self.gl.groups.create({
-            'name':       self.group_name,
+            'name':       self.parent_group,
             'path':       path,
             'parent_id':  parent.id,
             'visibility': parent.visibility,
@@ -2669,25 +2704,39 @@ class NceGitLab:
 
 
     def cleanup_group(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         if group is None:
-            print(f"Root group '{self.group_name}' not found. Nothing to clean up.")
+            print(f"Root group '{self.parent_group}' not found. Nothing to clean up.")
             return
 
-        self.delete_all_labels(group)
-        self.delete_all_wiki_pages(group)
-        self.delete_all_group_epics(self.group_name)
+        # Post-order traversal: every subgroup with its children listed before itself,
+        # so each group is empty (no child groups) when we attempt to delete it.
+        subgroups = self._groups_deepest_first(group)
 
-        # Explicitly delete every issue in every project across the full hierarchy.
-        # Project/group deletion is async on GitLab — issues remain visible until
-        # the deletion job runs.  Deleting issues directly makes cleanup synchronous.
-        # Projects already queued for deletion have '_deletion_scheduled' in their path
-        # and return 403 on all mutations — skip them, they'll disappear on their own.
+        # Snapshot live projects once; reuse for issues, labels, and project deletion.
+        print("Collecting all projects...")
+        all_projects = group.projects.list(all=True, include_subgroups=True)
+        live_projects = [p for p in all_projects if '_deletion_scheduled' not in p.path]
+        skipped = len(all_projects) - len(live_projects)
+        if skipped:
+            print(f"  Skipping {skipped} pending-deletion project(s).")
+
+        # 1. Wiki pages — root group only (subgroup wikis are cascade-deleted with the group).
+        self.delete_all_wiki_pages(group)
+
+        # 2. Epics — recursive helper already handles children before parents.
+        self.delete_all_group_epics(self.parent_group)
+
+        # 3. Milestones — root group and every subgroup.
+        self.delete_all_milestones(group)
+        for sg in subgroups:
+            self.delete_all_milestones(sg)
+
+        # 4. Issues — every live project across the full hierarchy.
+        # GitLab group/project deletion is async; explicit issue deletion makes
+        # cleanup synchronous so issues disappear immediately.
         print("Deleting all issues across group hierarchy...")
-        for project in group.projects.list(all=True, include_subgroups=True):
-            if '_deletion_scheduled' in project.path:
-                print(f"  Skipping pending-deletion project: {project.path_with_namespace}")
-                continue
+        for project in live_projects:
             try:
                 full_project = self.gl.projects.get(project.id)
                 issues = full_project.issues.list(all=True)
@@ -2701,30 +2750,52 @@ class NceGitLab:
             except Exception as e:
                 print(f"  Failed to fetch issues for '{project.path_with_namespace}': {e}")
 
-        # Delete all projects across the hierarchy (skip already-queued ones).
-        for project in group.projects.list(all=True, include_subgroups=True):
-            if '_deletion_scheduled' in project.path:
-                continue
+        # 5. Labels — root group, every subgroup, every live project.
+        self.delete_all_labels(group)
+        for sg in subgroups:
+            self.delete_all_labels(sg)
+        for project in live_projects:
+            try:
+                full_project = self.gl.projects.get(project.id)
+                self.delete_all_labels(full_project)
+            except Exception as e:
+                print(f"  Failed to delete labels from project '{project.path_with_namespace}': {e}")
+
+        # 6. Projects.
+        for project in live_projects:
             try:
                 self.gl.projects.delete(project.id)
                 print(f"Deleted project: {project.path_with_namespace}")
             except Exception as e:
                 print(f"Failed to delete project '{project.path_with_namespace}': {e}")
 
-        # Delete subgroups to keep the namespace clean.
-        for subgroup in group.subgroups.list(all=True):
+        # 7. Subgroups depth-first (leaves first, so each parent is empty when deleted).
+        for sg in subgroups:
             try:
-                self.gl.groups.delete(subgroup.id)
-                print(f"Deleted subgroup: {subgroup.full_path}")
+                self.gl.groups.delete(sg.id)
+                print(f"Deleted subgroup: {sg.full_path}")
             except Exception as e:
-                print(f"Failed to delete subgroup '{subgroup.full_path}': {e}")
+                print(f"Failed to delete subgroup '{sg.full_path}': {e}")
 
-        # Delete the root group itself.
+        # 8. Root group.
         try:
             self.gl.groups.delete(group.id)
             print(f"Deleted root group: {group.full_path}")
         except Exception as e:
             print(f"Failed to delete root group '{group.full_path}': {e}")
+
+    def _groups_deepest_first(self, group):
+        """Return all subgroups of `group` in post-order (deepest/leaves first).
+
+        Does not include `group` itself. Used by cleanup_group so every group is
+        empty of child groups before we attempt to delete it.
+        """
+        result = []
+        for sg in group.subgroups.list(all=True):
+            full_sg = self.gl.groups.get(sg.id)
+            result.extend(self._groups_deepest_first(full_sg))
+            result.append(full_sg)
+        return result
 
 
     def _lorem_epics_in_group(self, group, count, allowed_types=None):
@@ -2769,9 +2840,9 @@ class NceGitLab:
                 'description': lorem.paragraph(),
                 'start_date':  start.isoformat(),
                 'due_date':    due.isoformat(),
-                'weight':      weight,
                 'labels':      [project_label, piid_label, epic_label],
             })
+            self._set_epic_weight(epic, weight)
             print(f"  Epic {epic.iid} [{epic_label}] w={weight} → {group.full_path}")
             created.append((epic, epic_label))
 
@@ -2892,8 +2963,8 @@ class NceGitLab:
             all_vs_caps.extend(vs_caps)
 
             for a in range(1, num_arts + 1):
-                art_path = f"{vs_path}-art-{a:02d}"
-                art_name = f"{vs_name} - ART {a:02d}"
+                art_path = f"art-{a:02d}"
+                art_name = f"ART {a:02d}"
                 art_group = self.gl.groups.create({
                     'name':       art_name,
                     'path':       art_path,
@@ -2907,8 +2978,8 @@ class NceGitLab:
                 all_features.extend( (e, l) for e, l in art_created if l == "Feature")
 
                 for t in range(1, num_teams + 1):
-                    team_path = f"{art_path}-team-{t:02d}"
-                    team_name = f"{art_name} - Team {t:02d}"
+                    team_path = f"team-{t:02d}"
+                    team_name = f"Team {t:02d}"
                     team_group = self.gl.groups.create({
                         'name':       team_name,
                         'path':       team_path,
@@ -2943,7 +3014,7 @@ class NceGitLab:
 
 
     def generate_orphan_epics_report(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         print(f"Generating orphan report for {group.name}...")
 
         all_epics = group.epics.list(all=True)
@@ -2987,7 +3058,7 @@ class NceGitLab:
 
 
     def generate_orphan_issues_report(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         print(f"Generating orphan issues report for {group.name}...")
 
         # Collect issues with no epic, grouped by project
@@ -3038,7 +3109,7 @@ class NceGitLab:
 
 
     def generate_unassigned_pi_report(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         print(f"  Generating Unassigned PI Report...")
 
         all_epics = group.epics.list(all=True)
@@ -3092,7 +3163,7 @@ class NceGitLab:
 
 
     def generate_all_reports(self):
-        group = self.get_group_by_name(self.group_name)
+        group = self.get_group_by_name(self.parent_group)
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
         print("[1/4] SAFe Portfolio Report")
@@ -3115,9 +3186,9 @@ class NceGitLab:
 def main():
     gl = NceGitLab()
 
-    # gl.cleanup_group()
+    #gl.cleanup_group()
     #gl.create_all_lorem_objects()
-    gl.generate_all_reports()
+    #gl.generate_all_reports()
 
 
 

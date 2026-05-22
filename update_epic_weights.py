@@ -78,7 +78,7 @@ def main():
 
     url          = cfg["url"]
     token        = cfg["private_token"]
-    group_name   = cfg["group_name"]
+    group_name   = cfg["parent_group"]
     weight_pools = cfg.get("epic_type_planned_weights", {
         "Feature":    [20, 30, 40, 50, 60, 80, 100],
         "Capability": [100, 150, 200, 300, 400, 500],
