@@ -41,16 +41,6 @@ class NceGitLab:
             "Feature": "🛠️"         # Tools for features
         }
 
-        # Planned weight pools per epic type.
-        # Features use story-point scale; Capabilities and Epics use extended Fibonacci
-        # to reflect that they aggregate many children.  The ranges are deliberately
-        # wide so bootstrap data shows both over- and under-plan scenarios.
-        self.EPIC_TYPE_PLANNED_WEIGHTS = {
-            "Feature":    [3, 5, 8, 13],
-            "Capability": [21, 34, 55, 89],
-            "Epic":       [89, 144, 233, 377],
-        }
-
         with open(self.config_file, "r", encoding="utf-8") as config_file:
             config = json.load(config_file)
 
@@ -110,6 +100,12 @@ class NceGitLab:
             self.EPIC_TYPE_LABELS = config.get("epic_type_labels", [])
             epic_labels_source = config_file
 
+        self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
+            "Feature":    [3, 5, 8, 13],
+            "Capability": [21, 34, 55, 89],
+            "Epic":       [89, 144, 233, 377],
+        })
+
         token_display = "***" + self.private_token[-8:] if len(self.private_token) > 8 else "***"
         # print(f"ACCESS_TOKEN: {token_display} [source: {token_source}]")
         # print(f"FIBONACCI_WEIGHTS: {self.fibonacci_weights} [source: {fibonacci_weights_source}]")
@@ -141,12 +137,8 @@ class NceGitLab:
             self.gl = gitlab.Gitlab(self.url, private_token=self.private_token)
             self.gl.auth()
 
-            print(f'''
-NceGitLab:
-    Version: {self.gl.version()}
-    api_url: {self.gl.api_url}
-    api_version: {self.gl.api_version}
-                  ''')
+            version, _ = self.gl.version()
+            print(f"Connected to {self.gl.api_url}  (GitLab {version})")
         except gitlab.GitlabAuthenticationError:
             print("Authentication failed. Please check your private token.")
             exit(1)
@@ -1779,7 +1771,7 @@ NceGitLab:
                     print(f"Error fetching wiki page '{page_title}': {e}")
                     return
             group.wikis.create({'title': page_title, 'content': content})
-            print(f"Wiki → {page_title}")
+            print(f"  → Wiki: {page_title}")
         except Exception as e:
             print(f"Failed to upload wiki page '{page_title}': {e}")
 
@@ -1807,7 +1799,7 @@ NceGitLab:
     def generate_portfolio_report(self, group):
         group_name = group.name
 
-        print(f"Generating epics report for {group.name}...")
+        print(f"  Generating SAFe Portfolio Report...")
 
         try:
             # Step 1: Calculate portfolio metrics
@@ -1914,16 +1906,16 @@ NceGitLab:
 
     def generate_workload_report(self):
         group = self.get_group_by_name(self.group_name)
-        print(f"Generating workload report for {group.name}...")
+        print(f"  Generating ART/Team Workload Report...")
 
         metrics  = self.calculate_portfolio_metrics(self.group_name)
-        features = metrics.get("Feature", [])
-        if not features:
-            print("No features found — skipping workload report.")
+        all_epics = metrics.get("Epic", []) + metrics.get("Capability", []) + metrics.get("Feature", [])
+        if not all_epics:
+            print("No epics found — skipping workload report.")
             return
 
-        # Fetch only the groups that actually own Features.
-        group_ids = {f["group_id"] for f in features if f.get("group_id")}
+        # Fetch only the groups that own epics.
+        group_ids = {e["group_id"] for e in all_epics if e.get("group_id")}
         groups_by_id = {}
         for gid in group_ids:
             try:
@@ -1931,13 +1923,13 @@ NceGitLab:
             except Exception as e:
                 print(f"  Could not fetch group {gid}: {e}")
 
-        # Bucket features by (piid, group_id).
+        # Bucket all epics by (piid, group_id).
         pi_group_features = defaultdict(lambda: defaultdict(list))
-        for f in features:
-            piid = f.get("piid")
-            gid  = f.get("group_id")
+        for e in all_epics:
+            piid = e.get("piid")
+            gid  = e.get("group_id")
             if piid and gid:
-                pi_group_features[piid][gid].append(f)
+                pi_group_features[piid][gid].append(e)
 
         today = date.today()
 
@@ -1957,7 +1949,7 @@ NceGitLab:
         )
 
         md = []
-        md.append(f"# ART / Team Workload Report (Group: {group.name})")
+        md.append(f"# ART/Team Workload Report (Group: {group.name})")
         md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
 
@@ -1975,8 +1967,8 @@ NceGitLab:
             if date_range:
                 md.append(date_range)
             md.append("")
-            md.append("| Group | Features | Planned | Actual | Δ | % Done | Status |")
-            md.append("|-------|----------|---------|--------|---|--------|--------|")
+            md.append("| Group | Epics | Planned | Actual | Δ | % Done | Status |")
+            md.append("|-------|-------|---------|--------|---|--------|--------|")
 
             group_data = pi_group_features[piid]
 
@@ -2015,7 +2007,7 @@ NceGitLab:
                 else:
                     status_str = "🔵 Planned"
 
-                grp_link = f'<a href="{grp_url}">{grp_name}</a>' if grp_url else grp_name
+                grp_link = f'<a href="{grp_url}" target="_blank" rel="noopener noreferrer">{grp_name}</a>' if grp_url else grp_name
 
                 md.append(
                     f"| {grp_link} | {len(fs)} | {total_planned} pt | {total_actual} pt "
@@ -2026,7 +2018,10 @@ NceGitLab:
 
         md.append("---")
         md.append("## Legend")
-        md.append("- **Planned**: sum of Feature epic weights committed to this PI in this group")
+        md.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+        md.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+        md.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
+        md.append("- **Planned**: sum of epic planned weights committed to this PI in this group")
         md.append("- **Actual**: sum of issue weights for those Features (team-entered estimate)")
         md.append("- **Δ**: Actual − Planned (▲ more work than planned, ▼ less, = matched)")
         md.append("- **% Done**: weighted average completion across Features (by planned weight)")
@@ -2324,7 +2319,37 @@ NceGitLab:
         self.upload_to_wiki(group, title, "\n".join(md))
 
 
+    def _fetch_epic_weights(self, epics):
+        """Return {web_url: weight} for a list of REST epic objects via GraphQL WorkItem queries."""
+        query = """
+        query GetWorkItemWeight($id: WorkItemID!) {
+            workItem(id: $id) {
+                widgets { ... on WorkItemWidgetWeight { weight } }
+            }
+        }
+        """
+        print(f"  Fetching planned weights for {len(epics)} epics...")
+        weights = {}
+        for epic in epics:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                continue
+            gid = f"gid://gitlab/WorkItem/{wid}"
+            try:
+                data = self.graphql_query(query, variables={"id": gid})
+                if data:
+                    for w in data.get("workItem", {}).get("widgets", []):
+                        if isinstance(w, dict) and w.get("weight") is not None:
+                            weights[epic.web_url] = w["weight"]
+                            break
+            except Exception:
+                pass
+        return weights
+
     def calculate_portfolio_metrics(self, group_name):
+        if hasattr(self, '_metrics_cache') and group_name in self._metrics_cache:
+            return self._metrics_cache[group_name]
+
         group = self.get_group_by_name(group_name)
         if not group:
             print(f"Group '{group_name}' not found.")
@@ -2350,7 +2375,7 @@ NceGitLab:
             }
 
         # Issue weights indexed by directly-assigned epic id (for % complete).
-        print("Fetching issue weights...")
+        print("  Fetching issue weights...")
         issues_by_epic_id = defaultdict(list)
         for project in group.projects.list(all=True, include_subgroups=True):
             try:
@@ -2363,17 +2388,23 @@ NceGitLab:
                 print(f"  Failed to fetch issues for '{project.name}': {e}")
 
         all_epics = group.epics.list(all=True)
+        epic_weights = self._fetch_epic_weights(all_epics)
         metrics   = {"Epic": [], "Capability": [], "Feature": []}
         epic_by_id = {}
 
-        print(f"Processing {len(all_epics)} epics...")
+        print(f"  Processing {len(all_epics)} epics...")
         for epic in all_epics:
             gql    = epic_blocks.get(epic.web_url, {})
             issues = issues_by_epic_id.get(epic.id, [])
 
             total_w  = sum(i.weight or 0 for i in issues)
             closed_w = sum(i.weight or 0 for i in issues if i.state == 'closed')
-            pct_done = round(closed_w / total_w * 100) if total_w > 0 else 0
+            if total_w > 0:
+                pct_done = round(closed_w / total_w * 100)
+            elif epic.state == 'closed':
+                pct_done = 100
+            else:
+                pct_done = 0
 
             piid    = next((l for l in epic.labels if l.startswith("PIID::")), None)
             pct_pi  = self._pct_through_pi(piid)
@@ -2387,7 +2418,7 @@ NceGitLab:
                 "web_url":          epic.web_url,
                 "labels":           epic.labels,
                 "parent_id":        getattr(epic, 'parent_id', None),
-                "planned_weight":   getattr(epic, 'weight', None) or 0,
+                "planned_weight":   epic_weights.get(epic.web_url, 0),
                 "actual_weight":    total_w,
                 "pct_complete":     pct_done,
                 "pct_through_pi":   pct_pi,
@@ -2436,6 +2467,9 @@ NceGitLab:
             ep["pct_complete"]  = rollup_pct(ep)
             ep["actual_weight"] = rollup_actual(ep)
 
+        if not hasattr(self, '_metrics_cache'):
+            self._metrics_cache = {}
+        self._metrics_cache[group_name] = metrics
         return metrics
 
 
@@ -3005,7 +3039,7 @@ NceGitLab:
 
     def generate_unassigned_pi_report(self):
         group = self.get_group_by_name(self.group_name)
-        print(f"Generating unassigned PI report for {group.name}...")
+        print(f"  Generating Unassigned PI Report...")
 
         all_epics = group.epics.list(all=True)
 
@@ -3047,6 +3081,9 @@ NceGitLab:
 
         md.append("---")
         md.append("## Legend")
+        md.append("- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)")
+        md.append("- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs")
+        md.append("- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes")
         md.append("- **Parent**: the direct parent epic in the hierarchy, if one exists")
         md.append("- Items with no parent and no children are also captured by the Orphaned Epics report")
         md.append("")
@@ -3056,16 +3093,21 @@ NceGitLab:
 
     def generate_all_reports(self):
         group = self.get_group_by_name(self.group_name)
-        #self.generate_summary_report(group)
-        #self.generate_detailed_report(group)
+        print(f"\nGenerating reports for group: {group.full_path}\n")
+
+        print("[1/4] SAFe Portfolio Report")
         self.generate_portfolio_report(group)
+
+        print("[2/4] Blocking Relationships Report")
         self.generate_blocking_report()
+
+        print("[3/4] ART/Team Workload Report")
         self.generate_workload_report()
+
+        print("[4/4] Unassigned PI Report")
         self.generate_unassigned_pi_report()
-        #self.generate_orphan_epics_report()
-        #self.generate_orphan_issues_report()
-        #self.generate_issue_progress_report(group)
-        #self.generate_and_upload_piid_project_report_to_wiki(group)
+
+        print("\nAll reports uploaded to wiki.")
 
 
 
