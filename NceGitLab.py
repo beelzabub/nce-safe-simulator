@@ -14,6 +14,8 @@ import random
 import re
 import requests
 import os
+import sys
+from importlib.metadata import version as pkg_version
 
 
 
@@ -140,7 +142,9 @@ class NceGitLab:
             self.gl.auth()
 
             version, _ = self.gl.version()
-            print(f"Connected to {self.gl.api_url}  (GitLab {version})")
+            print(f"GitLab server : {self.gl.api_url}  (v{version})")
+            print(f"python-gitlab : v{pkg_version('python-gitlab')}")
+            print(f"Python        : {sys.version}")
         except gitlab.GitlabAuthenticationError:
             print("Authentication failed. Please check your private token.")
             exit(1)
@@ -2882,12 +2886,9 @@ class NceGitLab:
             issue_weight_pool = [1, 2, 3, 5, 8, 13]
 
             for feature_epic, _ in feature_epics:
-                # 8–15 stories per Feature: a realistic sprint backlog
-                total_stories  = random.randint(8, 15)
-                closed_stories = random.randint(1, total_stories - 1)
-                open_stories   = total_stories - closed_stories
+                total_stories = random.randint(8, 15)
 
-                for i in range(open_stories):
+                for i in range(total_stories):
                     ms    = random.choice(milestones) if milestones else None
                     issue = project.issues.create({
                         'title':        lorem.sentence().rstrip('.'),
@@ -2898,19 +2899,7 @@ class NceGitLab:
                     issue.epic_id = feature_epic.id
                     issue.save()
 
-                for i in range(closed_stories):
-                    ms    = random.choice(milestones) if milestones else None
-                    issue = project.issues.create({
-                        'title':        lorem.sentence().rstrip('.'),
-                        'description':  lorem.paragraph(),
-                        'weight':       random.choice(issue_weight_pool),
-                        'milestone_id': ms.id if ms else None,
-                    })
-                    issue.epic_id    = feature_epic.id
-                    issue.state_event = 'close'
-                    issue.save()
-
-                print(f"    {total_stories} stories ({closed_stories} closed) → Feature #{feature_epic.iid}")
+                print(f"    {total_stories} stories → Feature #{feature_epic.iid}")
 
         except Exception as e:
             print(f"  Skipping team backlog for '{group.full_path}': {e}")
@@ -2926,10 +2915,10 @@ class NceGitLab:
                                   team_features=4):
         """
         SAFe level → epic type mapping:
-          Portfolio  → Epic only
+          Portfolio    → Epic only
           Value Stream → Capability only
-          ART        → Capability + Feature
-          Team       → Feature only  (each gets 8–15 stories)
+          ART          → Capability only
+          Team         → Feature only  (each gets 8–15 stories linked to issues)
         """
         root_group = self._get_or_create_root_group()
         if root_group is None:
@@ -2973,9 +2962,8 @@ class NceGitLab:
                 })
                 print(f"\n[ART] {art_group.full_path}")
                 art_created = self._lorem_epics_in_group(art_group, art_epics,
-                                                         allowed_types=["Capability", "Feature"])
-                all_art_caps.extend( (e, l) for e, l in art_created if l == "Capability")
-                all_features.extend( (e, l) for e, l in art_created if l == "Feature")
+                                                         allowed_types=["Capability"])
+                all_art_caps.extend(art_created)
 
                 for t in range(1, num_teams + 1):
                     team_path = f"team-{t:02d}"
@@ -3188,7 +3176,7 @@ def main():
 
     #gl.cleanup_group()
     #gl.create_all_lorem_objects()
-    #gl.generate_all_reports()
+    gl.generate_all_reports()
 
 
 
