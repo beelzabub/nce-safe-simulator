@@ -8,6 +8,7 @@ from .issues import IssuesMixin
 from .milestones import MilestonesMixin
 from .reports import ReportsMixin
 from .bootstrap import BootstrapMixin
+from .tools import ToolsMixin
 
 __all__ = [
     "UtilitiesMixin",
@@ -20,4 +21,5 @@ __all__ = [
     "MilestonesMixin",
     "ReportsMixin",
     "BootstrapMixin",
+    "ToolsMixin",
 ]
