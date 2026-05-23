@@ -51,6 +51,12 @@ REPORTS = [
         "method":      "generate_piid_project_report",
         "needs_group": False,
     },
+    {
+        "key":         "team-backlog",
+        "description": "Team Backlog Report — issues grouped by Feature for every Team, with weight and completion",
+        "method":      "generate_team_backlog_report",
+        "needs_group": False,
+    },
 ]
 
 
@@ -1070,6 +1076,153 @@ class ReportsMixin:
         ])
 
         self.upload_to_wiki(group, f"{group.name} - Unassigned PI Report", "\n".join(md))
+
+    # ------------------------------------------------------------------
+    # Hierarchy traversal helpers (shared by team/ART/VS reports)
+    # ------------------------------------------------------------------
+
+    def _iter_team_groups(self, root_group):
+        """Yield (vs_group, art_group, team_group) for every team in the hierarchy."""
+        for vs_sg in root_group.subgroups.list(all=True):
+            vs_group = self.gl.groups.get(vs_sg.id)
+            for art_sg in vs_group.subgroups.list(all=True):
+                art_group = self.gl.groups.get(art_sg.id)
+                for team_sg in art_group.subgroups.list(all=True):
+                    team_group = self.gl.groups.get(team_sg.id)
+                    yield vs_group, art_group, team_group
+
+    def _iter_art_groups(self, root_group):
+        """Yield (vs_group, art_group) for every ART in the hierarchy."""
+        for vs_sg in root_group.subgroups.list(all=True):
+            vs_group = self.gl.groups.get(vs_sg.id)
+            for art_sg in vs_group.subgroups.list(all=True):
+                art_group = self.gl.groups.get(art_sg.id)
+                yield vs_group, art_group
+
+    def _iter_vs_groups(self, root_group):
+        """Yield vs_group for every Value Stream under root."""
+        for vs_sg in root_group.subgroups.list(all=True):
+            yield self.gl.groups.get(vs_sg.id)
+
+    # ------------------------------------------------------------------
+    # Team-level reports
+    # ------------------------------------------------------------------
+
+    def generate_team_backlog_report(self):
+        """One wiki page per team: issues grouped by Feature with weight and completion."""
+        root_group = self.get_group_by_name(self.parent_group)
+        print(f"Generating Team Backlog Reports under: {root_group.full_path}")
+
+        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
+            print(f"  Processing {team_group.full_path}")
+            self._generate_team_backlog_page(root_group, vs_group, art_group, team_group)
+
+    def _generate_team_backlog_page(self, root_group, vs_group, art_group, team_group):
+        # Find the team backlog project (path ends with "-backlog")
+        projects = team_group.projects.list(all=True)
+        backlog_project = next(
+            (self.gl.projects.get(p.id) for p in projects if p.path.endswith("-backlog")),
+            None
+        )
+
+        breadcrumb = f"{vs_group.name} / {art_group.name} / {team_group.name}"
+        wiki_title = f"{team_group.name} - Team Backlog"
+
+        if not backlog_project:
+            md = [
+                f"# Team Backlog — {team_group.name}",
+                f"**{breadcrumb}**  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}",
+                "",
+                "_No Team Backlog project found for this team._",
+            ]
+            self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
+            return
+
+        all_issues = backlog_project.issues.list(all=True)
+
+        # Group by linked Feature epic
+        by_feature  = defaultdict(list)
+        unlinked    = []
+        for issue in all_issues:
+            epic = getattr(issue, "epic", None)
+            if epic:
+                by_feature[epic["id"]].append((epic, issue))
+            else:
+                unlinked.append(issue)
+
+        total_w  = sum(i.weight or 0 for i in all_issues)
+        closed_w = sum(i.weight or 0 for i in all_issues if i.state == "closed")
+        open_cnt = sum(1 for i in all_issues if i.state == "opened")
+
+        md = []
+        md.append(f"# Team Backlog — {team_group.name}")
+        md.append(
+            f"**{breadcrumb}**  |  "
+            f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
+            f"[**View Project**]({backlog_project.web_url})"
+        )
+        md.append("")
+        md.append("## Summary")
+        md.append(f"| | Count | Weight |")
+        md.append(f"|---|---|---|")
+        md.append(f"| **Total issues** | {len(all_issues)} | {total_w} pt |")
+        md.append(f"| Open | {open_cnt} | {total_w - closed_w} pt |")
+        md.append(f"| Closed | {len(all_issues) - open_cnt} | {closed_w} pt |")
+        pct = round(closed_w / total_w * 100) if total_w else 0
+        md.append(f"| **% Done** | | **{pct}%** |")
+        md.append("")
+
+        if by_feature:
+            md.append("## Issues by Feature")
+            md.append("")
+            for epic_id, pairs in by_feature.items():
+                epic_info = pairs[0][0]
+                issues    = [i for _, i in pairs]
+                f_total   = sum(i.weight or 0 for i in issues)
+                f_closed  = sum(i.weight or 0 for i in issues if i.state == "closed")
+                f_pct     = round(f_closed / f_total * 100) if f_total else 0
+                f_open    = sum(1 for i in issues if i.state == "opened")
+                f_state   = epic_info.get("state", "").capitalize()
+
+                md.append(
+                    f"<details><summary>🛠️ "
+                    f"<a href=\"{epic_info.get('url', '#')}\">{epic_info.get('title', 'Unknown Feature')}</a>"
+                    f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
+                )
+                md.append("")
+                md.append(f"**Feature state:** {f_state}")
+                md.append("")
+                md.append("| Issue | State | Weight | Milestone |")
+                md.append("|-------|-------|--------|-----------|")
+                for issue in sorted(issues, key=lambda i: i.state):
+                    ms    = issue.milestone["title"] if issue.milestone else "—"
+                    w     = issue.weight or "—"
+                    state = "✅ Closed" if issue.state == "closed" else "🔵 Open"
+                    md.append(
+                        f"| [{issue.title}]({issue.web_url}) "
+                        f"| {state} | {w} pt | {ms} |"
+                    )
+                md.append("")
+                md.append("</details>")
+                md.append("")
+
+        if unlinked:
+            md.append("## Unlinked Issues (no Feature)")
+            md.append("")
+            md.append("| Issue | State | Weight | Milestone |")
+            md.append("|-------|-------|--------|-----------|")
+            for issue in unlinked:
+                ms    = issue.milestone["title"] if issue.milestone else "—"
+                w     = issue.weight or "—"
+                state = "✅ Closed" if issue.state == "closed" else "🔵 Open"
+                md.append(
+                    f"| [{issue.title}]({issue.web_url}) "
+                    f"| {state} | {w} pt | {ms} |"
+                )
+            md.append("")
+
+        self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
+        print(f"    → Wiki: {wiki_title}")
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
