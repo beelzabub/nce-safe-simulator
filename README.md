@@ -1,93 +1,232 @@
-# beelzabub-project
+# NCE GitLab SAFe Tooling
 
+Python automation for GitLab groups organised around the **Scaled Agile Framework (SAFe)** hierarchy. Generates realistic lorem test data, manages the Epic → Capability → Feature → Issue tree across multiple groups, and publishes a suite of portfolio-level reports to a GitLab Group Wiki.
 
+---
 
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## SAFe Hierarchy Model
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/saic-study-group/beelzabub-project.git
-git branch -M main
-git push -uf origin main
+Root Group  (Portfolio)
+│   Epics  🏆
+│
+├── Value Stream 01
+│   Capabilities  🧩
+│   ├── ART 01
+│   │   Capabilities  🧩
+│   │   ├── Team 01
+│   │   │   Features  🛠️
+│   │   │   Team Backlog project  (Issues linked to Features)
+│   │   └── Team 02  ...
+│   └── ART 02  ...
+└── Value Stream 02  ...
 ```
 
-## Integrate with your tools
+Epic types are distinguished by GitLab labels (`Epic`, `Capability`, `Feature`).  
+Items are further tagged with a **project label** (`project::DO`, `project::RTSO`, …) and a **PIID label** (`PIID::2026Q3`, …) that ties each work item to a Program Increment quarter.
 
-* [Set up project integrations](https://gitlab.com/saic-study-group/beelzabub-project/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Project Structure
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```
+NceGitLab.py              # Main class (thin compositor) + CLI entry point
+nce_gitlab_config.json    # Configuration (URL, token, labels, weights)
+requirements.txt
 
-## Test and Deploy
+mixins/                   # Mixin modules — NceGitLab inherits from all of these
+  __init__.py
+  utils.py                # GraphQL helpers, PI math, portfolio metrics calculation
+  groups.py               # Group CRUD
+  projects.py             # Project CRUD
+  epics.py                # Epic operations, CSV import/export, markdown report
+  issues.py               # Issue operations
+  milestones.py           # Milestone operations
+  wiki.py                 # Wiki page upload/delete
+  labels.py               # Label create/delete
+  bootstrap.py            # Lorem data generation, SAFe hierarchy creation, cleanup
+  reports.py              # All portfolio report generators
 
-Use the built-in continuous integration in GitLab.
+utilities/                # Standalone helper scripts
+  _shared.py              # Shared: load_config(), connect(), get_group()
+  close_percent.py        # Randomly close N% of open epics/issues (simulate PI progress)
+  update_epic_weights.py  # Set epic planned weights via GraphQL
+  validate_weights.py     # Validate epic and issue weights against configured pools
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+---
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+
+Requires Python 3.9+.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
+## Configuration
+
+Copy and edit `nce_gitlab_config.json`:
+
+```json
+{
+    "url": "https://gitlab.com",
+    "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
+    "parent_group": "my-portfolio-group",
+    "gitlab_namespace": "my-top-level-namespace",
+    "project_labels": ["project::DO", "project::RTSO", "project::DCGS"],
+    "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1"],
+    "epic_type_labels": ["Epic", "Capability", "Feature"],
+    "fibonacci_weights": [1, 2, 3, 5, 8, 13],
+    "epic_type_planned_weights": {
+        "Feature":    [3, 5, 8, 13],
+        "Capability": [21, 34, 55, 89],
+        "Epic":       [89, 144, 233, 377]
+    }
+}
+```
+
+| Field | Description |
+|---|---|
+| `url` | GitLab instance URL |
+| `private_token` | Personal access token with `api` scope |
+| `parent_group` | Name of the root group to create/manage |
+| `gitlab_namespace` | Parent namespace for root group creation |
+| `project_labels` | Labels representing programmes or workstreams |
+| `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
+| `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
+| `fibonacci_weights` | Valid issue story-point values |
+| `epic_type_planned_weights` | Valid planned-weight pools per epic type |
+
+### Environment Variable Overrides
+
+Any config value can be overridden at runtime without editing the file:
+
+| Variable | Overrides |
+|---|---|
+| `ACCESS_TOKEN` | `private_token` |
+| `GROUP_NAME` | `parent_group` |
+| `PROJECT_LABELS` | `project_labels` (comma-separated) |
+| `PIID_LABELS` | `piid_labels` (comma-separated) |
+| `EPIC_TYPE_LABELS` | `epic_type_labels` (comma-separated) |
+| `FIBONACCI_WEIGHTS` | `fibonacci_weights` (comma-separated integers) |
+
+---
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Main CLI
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+python3 NceGitLab.py --clean     # Delete all data in the root group
+python3 NceGitLab.py --create    # Bootstrap a full SAFe lorem data set
+python3 NceGitLab.py --report    # Generate all reports and publish to wiki
+python3 NceGitLab.py --all       # clean → create → report in sequence
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+A typical demo cycle:
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```bash
+# Tear down yesterday's data, rebuild, and publish fresh reports
+python3 NceGitLab.py --all
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Utility Scripts
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Run from the `utilities/` directory. Each script accepts `--config` to point at a non-default config file.
 
-## License
-For open source projects, say how it is licensed.
+```bash
+cd utilities
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+# Simulate PI progress — close 40% of open epics and issues at random
+python3 close_percent.py --percent 40
+
+# Preview what would be closed without making changes
+python3 close_percent.py --percent 40 --dry-run --seed 42
+
+# Assign random planned weights to all epics (uses GraphQL — REST ignores epic weight)
+python3 update_epic_weights.py
+
+# Dry-run weight assignment
+python3 update_epic_weights.py --dry-run
+
+# Validate that every epic and issue has a weight from the correct pool
+python3 validate_weights.py
+```
+
+---
+
+## What `--create` Builds
+
+`create_all_lorem_objects()` builds a full SAFe group hierarchy under the configured root group:
+
+- Root group with **Portfolio Epics** (🏆)
+- *N* Value Stream subgroups, each with **Capabilities** (🧩)
+- *N* ART subgroups per Value Stream, each with **Capabilities** (🧩)
+- *N* Team subgroups per ART, each with:
+  - **Features** (🛠️)
+  - A `Team Backlog` GitLab project
+  - 8–15 Issues per Feature, linked to milestones, with fibonacci weights
+
+After all objects are created the hierarchy is linked cross-group:  
+`VS Capabilities → Portfolio Epics` → `ART Capabilities → VS Capabilities` → `Features → ART Capabilities`
+
+All epics are labelled with a random project label, PIID label, and type label. Planned weights are set via the GraphQL `workItemUpdate` mutation (the REST API silently ignores epic weight).
+
+---
+
+## Reports
+
+All reports are published as GitLab Wiki pages on the root group. They are generated by `--report` or `generate_all_reports()`.
+
+| Report | Wiki Page | Description |
+|---|---|---|
+| SAFe Portfolio Report | `<group> - SAFe Portfolio Report` | Collapsible Epic → Capability → Feature hierarchy with % complete, planned vs actual weight, PI progress, and risk flags |
+| ART/Team Workload Report | `<group> - ART/Team Workload Report` | Per-PI table of planned vs actual weight per group, with on-track / at-risk / incomplete status |
+| Blocking Relationships Report | `<group> - Blocking Relationships Report` | Blocked epics, their blockers, ancestor risk propagation, and portfolio-level risk summary |
+| Unassigned PI Report | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
+| Orphaned Epics Report | `<group> - Orphaned Epics Report` | Epics with no parent and no children (completely disconnected from hierarchy) |
+| Orphaned Issues Report | `<group> - Orphaned Issues Report` | Issues not linked to any epic, grouped by project |
+
+### PI Progress Calculation
+
+PIID labels follow the pattern `PIID::YYYYQn` (e.g. `PIID::2026Q3`).  
+The tooling maps these to calendar quarters and computes `% elapsed through PI` as of today.  
+Reports flag items as **At Risk** (⚠️) when `% done < % elapsed through PI`.
+
+### % Complete Rollup
+
+- **Feature** % = closed issue weight ÷ total issue weight
+- **Capability** % = average of its Features' %
+- **Epic** % = average of its Capabilities' %
+
+---
+
+## What `--clean` Removes
+
+`cleanup_group()` performs a full teardown in safe dependency order:
+
+1. Wiki pages (root group)
+2. Epics (children before parents, recursively)
+3. Milestones (root group + all subgroups)
+4. Issues (all projects, synchronously)
+5. Labels (root group + subgroups + projects)
+6. Projects
+7. Subgroups (deepest first)
+8. Root group
+
+---
+
+## Design Notes
+
+**Mixin architecture** — `NceGitLab` inherits from ten single-responsibility mixin classes in `mixins/`. The main file contains only `__init__` (config loading and GitLab auth) and the CLI `main()`. Adding new capabilities means adding a new mixin or extending an existing one without touching the core class.
+
+**GraphQL for epic weights** — GitLab's REST API does not expose planned weight on epics; it must be read and written via the GraphQL `workItemUpdate` mutation and `WorkItemWidgetWeight` widget. All weight operations route through `_set_epic_weight()` and `_fetch_epic_weights()` in `mixins/utils.py`.
+
+**Metrics caching** — `calculate_portfolio_metrics()` caches results per group name in `_metrics_cache` so that multiple reports generated in the same session (portfolio, workload, blocking) share a single fetch pass.
+
+**Utilities share a common foundation** — `utilities/_shared.py` provides `load_config()`, `connect()`, and `get_group()` so standalone scripts don't duplicate auth and group-lookup boilerplate.
