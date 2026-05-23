@@ -1,6 +1,51 @@
+import sys
 from collections import defaultdict
 from datetime import date, datetime
 from urllib.parse import quote
+
+# ---------------------------------------------------------------------------
+# Report registry — each entry describes one runnable report.
+# needs_group: True  → method signature is  method(self, group)
+# needs_group: False → method signature is  method(self)
+# ---------------------------------------------------------------------------
+REPORTS = [
+    {
+        "key":         "portfolio",
+        "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
+        "method":      "generate_portfolio_report",
+        "needs_group": True,
+    },
+    {
+        "key":         "workload",
+        "description": "ART/Team Workload Report — planned vs actual weight per group per PI",
+        "method":      "generate_workload_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "blocking",
+        "description": "Blocking Relationships Report — blocked epics and ancestor risk propagation",
+        "method":      "generate_blocking_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "unassigned-pi",
+        "description": "Unassigned PI Report — epics with no PIID label, broken down by type",
+        "method":      "generate_unassigned_pi_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "orphan-epics",
+        "description": "Orphaned Epics Report — epics with no parent and no children",
+        "method":      "generate_orphan_epics_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "orphan-issues",
+        "description": "Orphaned Issues Report — issues not linked to any epic, grouped by project",
+        "method":      "generate_orphan_issues_report",
+        "needs_group": False,
+    },
+]
 
 
 class ReportsMixin:
@@ -990,19 +1035,68 @@ class ReportsMixin:
         self.upload_to_wiki(group, f"{group.name} - Unassigned PI Report", "\n".join(md))
 
     def generate_all_reports(self):
+        self._run_reports(REPORTS)
+
+    def run_reports_menu(self, report_key=None):
+        """Show the reports selection menu or run a specific report by key."""
+        if report_key:
+            report = next((r for r in REPORTS if r["key"] == report_key), None)
+            if report is None:
+                print(f"Unknown report '{report_key}'. Available reports:")
+                for r in REPORTS:
+                    print(f"  {r['key']}")
+                sys.exit(1)
+            self._run_reports([report])
+            return
+
+        print()
+        print("Available Reports")
+        print("=" * 60)
+        print(f"  [0] {'all':<22} Run all reports (default)")
+        for i, report in enumerate(REPORTS, 1):
+            print(f"  [{i}] {report['key']:<22} {report['description']}")
+        print()
+
+        raw = input(f"Select reports [0-{len(REPORTS)}, space-separated, or Enter for all]: ").strip()
+
+        if not raw:
+            self._run_reports(REPORTS)
+            return
+
+        selected = []
+        for token in raw.split():
+            try:
+                idx = int(token)
+                if idx == 0:
+                    selected = REPORTS
+                    break
+                elif 1 <= idx <= len(REPORTS):
+                    report = REPORTS[idx - 1]
+                    if report not in selected:
+                        selected.append(report)
+                else:
+                    print(f"  Ignoring out-of-range selection: {idx}")
+            except ValueError:
+                print(f"  Ignoring unrecognised input: {token!r}")
+
+        if not selected:
+            print("No valid selection — running all reports.")
+            selected = REPORTS
+
+        self._run_reports(selected)
+
+    def _run_reports(self, reports):
+        """Execute a list of report entries from the REPORTS registry."""
         group = self.get_group_by_name(self.parent_group)
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
-        print("[1/4] SAFe Portfolio Report")
-        self.generate_portfolio_report(group)
+        total = len(reports)
+        for i, report in enumerate(reports, 1):
+            print(f"[{i}/{total}] {report['description']}")
+            try:
+                method = getattr(self, report["method"])
+                method(group) if report["needs_group"] else method()
+            except Exception as e:
+                print(f"  ERROR running '{report['key']}': {e}")
 
-        print("[2/4] Blocking Relationships Report")
-        self.generate_blocking_report()
-
-        print("[3/4] ART/Team Workload Report")
-        self.generate_workload_report()
-
-        print("[4/4] Unassigned PI Report")
-        self.generate_unassigned_pi_report()
-
-        print("\nAll reports uploaded to wiki.")
+        print(f"\n{total} report(s) uploaded to wiki.")
