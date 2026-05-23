@@ -105,6 +105,23 @@ class NceGitLab(
             "Epic":       [89, 144, 233, 377],
         })
 
+        _bd = config.get("defaults", {}).get("bootstrap", {})
+        self.default_num_value_streams    = _bd.get("num_value_streams",    2)
+        self.default_num_arts             = _bd.get("num_arts",             2)
+        self.default_num_teams            = _bd.get("num_teams",            2)
+        self.default_portfolio_epics      = _bd.get("portfolio_epics",      5)
+        self.default_vs_caps_per_vs       = _bd.get("vs_caps_per_vs",       3)
+        self.default_art_caps_per_art     = _bd.get("art_caps_per_art",     4)
+        self.default_features_per_team    = _bd.get("features_per_team",    4)
+        self.default_direct_feature_ratio = _bd.get("direct_feature_ratio", 0.70)
+
+        _td = config.get("defaults", {}).get("tools", {})
+        self.default_close_percent             = _td.get("close_percent",                30.0)
+        self.default_generate_blocks_count     = _td.get("generate_epic_blocks_count",   10)
+        self.default_simulate_pi_percent       = _td.get("simulate_pi_progress_percent", 50.0)
+        self.default_generate_issues_count     = _td.get("generate_issues_count",        5)
+        self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
+
         missing_fields = [
             field for field, val in [
                 ("url",              self.url),
