@@ -455,10 +455,10 @@ class ToolsMixin:
         # Collect all existing blocking links across the hierarchy.
         # Each link appears on both sides (blocks / is_blocked_by); deduplicate by link_id.
         # GitLab GET /related_epics response fields:
-        #   id         — related epic's global ID  (NOT the link's ID)
-        #   iid        — related epic's IID within its group
-        #   link_type  — "blocks" | "is_blocked_by" | "relates_to"
-        #   link_id    — the EpicLink record's own ID  ← use this for DELETE
+        #   id                    — related epic's global ID  (NOT the link's ID)
+        #   iid                   — related epic's IID within its group
+        #   link_type             — "blocks" | "is_blocked_by" | "relates_to"
+        #   related_epic_link_id  — the EpicLink record's own ID  ← use this for DELETE
         print(f"\nCollecting existing blocking relationships (to remove {count})...")
         seen_link_ids = set()
         existing      = []  # list of (group_id, epic_iid, link_id, label)
@@ -472,7 +472,7 @@ class ToolsMixin:
                 link_type = rel.get("link_type", "")
                 if link_type not in ("blocks", "is_blocked_by"):
                     continue
-                link_id = rel.get("link_id")
+                link_id = rel.get("related_epic_link_id")
                 if not link_id:
                     continue
                 if link_id in seen_link_ids:
