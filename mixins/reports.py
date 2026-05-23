@@ -1109,16 +1109,44 @@ class ReportsMixin:
     # ------------------------------------------------------------------
 
     def generate_team_backlog_report(self):
-        """One wiki page per team: issues grouped by Feature with weight and completion."""
+        """One wiki page per team (on each team's own wiki) plus a root-level index page."""
         root_group = self.get_group_by_name(self.parent_group)
         print(f"Generating Team Backlog Reports under: {root_group.full_path}")
 
+        index_entries = []  # (vs_name, art_name, team_name, wiki_url, summary_line)
+
         for vs_group, art_group, team_group in self._iter_team_groups(root_group):
             print(f"  Processing {team_group.full_path}")
-            self._generate_team_backlog_page(root_group, vs_group, art_group, team_group)
+            entry = self._generate_team_backlog_page(vs_group, art_group, team_group)
+            if entry:
+                index_entries.append(entry)
 
-    def _generate_team_backlog_page(self, root_group, vs_group, art_group, team_group):
-        # Find the team backlog project (path ends with "-backlog")
+        # Build the root-level index page
+        md = []
+        md.append(f"# Team Backlog Index — {root_group.name}")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Links to each team's backlog report hosted in their own wiki.")
+        md.append("")
+
+        current_vs  = None
+        current_art = None
+        for vs_name, art_name, team_name, wiki_url, summary in index_entries:
+            if vs_name != current_vs:
+                md.append(f"### 🔷 {vs_name}")
+                current_vs  = vs_name
+                current_art = None
+            if art_name != current_art:
+                md.append(f"#### {art_name}")
+                current_art = art_name
+            md.append(f"- [**{team_name} — Team Backlog**]({wiki_url})  {summary}")
+
+        md.append("")
+        self.upload_to_wiki(root_group, f"{root_group.name} - Team Backlog Index", "\n".join(md))
+        print(f"  → Root wiki: {root_group.name} - Team Backlog Index")
+
+    def _generate_team_backlog_page(self, vs_group, art_group, team_group):
+        """Upload the team backlog page to the team's own wiki. Returns an index entry tuple."""
         projects = team_group.projects.list(all=True)
         backlog_project = next(
             (self.gl.projects.get(p.id) for p in projects if p.path.endswith("-backlog")),
@@ -1126,7 +1154,8 @@ class ReportsMixin:
         )
 
         breadcrumb = f"{vs_group.name} / {art_group.name} / {team_group.name}"
-        wiki_title = f"{team_group.name} - Team Backlog"
+        wiki_title = "Team Backlog"
+        wiki_url   = f"{team_group.web_url}/-/wikis/team-backlog"
 
         if not backlog_project:
             md = [
@@ -1135,8 +1164,10 @@ class ReportsMixin:
                 "",
                 "_No Team Backlog project found for this team._",
             ]
-            self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
-            return
+            self.upload_to_wiki(team_group, wiki_title, "\n".join(md))
+            print(f"    → {team_group.full_path} wiki: {wiki_title}")
+            return (vs_group.name, art_group.name, team_group.name, wiki_url, "_(no backlog project)_")
+
 
         all_issues = backlog_project.issues.list(all=True)
 
@@ -1221,8 +1252,11 @@ class ReportsMixin:
                 )
             md.append("")
 
-        self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
-        print(f"    → Wiki: {wiki_title}")
+        self.upload_to_wiki(team_group, wiki_title, "\n".join(md))
+        print(f"    → {team_group.full_path} wiki: {wiki_title}")
+
+        summary = f"· {len(all_issues)} issues · {pct}% done · {total_w} pt total"
+        return (vs_group.name, art_group.name, team_group.name, wiki_url, summary)
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
