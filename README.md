@@ -222,9 +222,9 @@ Planned utilities for seeding test data, simulating PI progress, validating mode
 
 | Utility | Description | Status |
 |---------|-------------|--------|
-| `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one. Feeds the workload, capacity, and PI matrix reports. Options: `--piid`, `--type` filter, `--dry-run` | ⬜ Planned |
-| `set-project-labels` | Bulk-assign a project label to epics missing one. Feeds the Program × PI cross-tab report. Options: `--label`, `--type` filter, `--dry-run` | ⬜ Planned |
-| `generate-issues` | Create N issues in each team backlog project linked to Feature epics. Useful when backlogs are sparse and reports need realistic data. Options: `--count` (default 5 per feature), `--dry-run` | ⬜ Planned |
+| `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one. Feeds the workload, capacity, and PI matrix reports. Options: `--piid`, `--type` filter, `--dry-run` | ✅ Done |
+| `set-project-labels` | Bulk-assign a project label to epics missing one. Feeds the Program × PI cross-tab report. Options: `--label`, `--type` filter, `--dry-run` | ✅ Done |
+| `generate-issues` | Create N issues in each team backlog project linked to Feature epics. Useful when backlogs are sparse and reports need realistic data. Options: `--count` (default 5 per feature), `--dry-run` | ✅ Done |
 
 ### Priority 3 — State Simulation
 
