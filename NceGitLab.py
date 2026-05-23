@@ -35,12 +35,12 @@ class NceGitLab(
     BootstrapMixin,
     ToolsMixin,
 ):
-    def __init__(self, config_file="nce_gitlab_config.json"):
+    def __init__(self, config_file="config.json"):
         self.config_file = Path(config_file)
 
         if not self.config_file.exists():
             print(f"Config file '{self.config_file}' not found!")
-            print('''Please create nce_gitlab_config.json with the following format:
+            print('''Please create config.json with the following format:
                     {
                         "url": "https://gitlab.com",
                         "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
@@ -116,7 +116,7 @@ class NceGitLab(
         ]
 
         if missing_fields:
-            print(f"ERROR: Missing required fields in nce_gitlab_config.json: {', '.join(missing_fields)}")
+            print(f"ERROR: Missing required fields in config.json: {', '.join(missing_fields)}")
             exit(1)
 
         try:

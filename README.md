@@ -31,7 +31,7 @@ Items are further tagged with a **project label** (`project::DO`, `project::RTSO
 
 ```
 NceGitLab.py              # Main class (thin compositor) + CLI entry point
-nce_gitlab_config.json    # Configuration (URL, token, labels, weights)
+config.json    # Configuration (URL, token, labels, weights)
 requirements.txt
 
 mixins/                   # Mixin modules — NceGitLab inherits from all of these
@@ -70,7 +70,7 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Copy and edit `nce_gitlab_config.json`:
+Copy and edit `config.json`:
 
 ```json
 {
