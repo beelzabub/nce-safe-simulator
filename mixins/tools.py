@@ -44,11 +44,11 @@ TOOLS = [
     },
     {
         "key":         "generate-epic-blocks",
-        "description": "Randomly create blocking relationships between epics across the hierarchy",
+        "description": "Randomly create or remove blocking relationships between epics (negative count = remove)",
         "method":      "_tool_generate_epic_blocks",
         "params": [
-            {"name": "count",   "prompt": "Number of blocking relationships to create", "type": int,  "default": 10},
-            {"name": "dry_run", "prompt": "Dry run?",                                   "type": bool, "default": False},
+            {"name": "count",   "prompt": "Relationships to create (positive) or remove (negative)", "type": int,  "default": 10},
+            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False},
         ],
     },
 ]
@@ -363,10 +363,13 @@ class ToolsMixin:
         return all_pass
 
     def _tool_generate_epic_blocks(self, count=10, dry_run=False):
-        """Randomly create 'blocks' or 'is_blocked_by' links between epics across the hierarchy."""
+        """Create (positive count) or remove (negative count) blocking relationships between epics."""
         import requests as _requests
 
-        group = self.get_group_by_name(self.parent_group)
+        group   = self.get_group_by_name(self.parent_group)
+        session = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
         print(f"Group: {group.full_path}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -384,23 +387,23 @@ class ToolsMixin:
         _walk(group)
         print(f"  Found {len(all_epics)} epics")
 
+        if count < 0:
+            self._remove_epic_blocks(session, all_epics, abs(count), dry_run)
+        else:
+            self._create_epic_blocks(session, all_epics, count, dry_run)
+
+    def _create_epic_blocks(self, session, all_epics, count, dry_run):
         if len(all_epics) < 2:
             print("Not enough epics to create blocking relationships (need at least 2).")
             return
 
-        link_types = ["blocks", "is_blocked_by"]
-        session    = _requests.Session()
-        session.headers.update({"PRIVATE-TOKEN": self.private_token})
-
-        created = 0
-        skipped = 0
-        errors  = 0
-
-        # Track pairs already linked to avoid duplicates in this run
+        link_types   = ["blocks", "is_blocked_by"]
+        created      = 0
+        skipped      = 0
+        errors       = 0
         linked_pairs = set()
-
-        attempts = 0
-        max_attempts = count * 10  # allow retries to find non-duplicate pairs
+        attempts     = 0
+        max_attempts = count * 10
 
         while created < count and attempts < max_attempts:
             attempts += 1
@@ -408,7 +411,6 @@ class ToolsMixin:
             source_grp, source_epic = random.choice(all_epics)
             target_grp, target_epic = random.choice(all_epics)
 
-            # Skip self-links and already-processed pairs
             if source_epic.id == target_epic.id:
                 continue
             pair = tuple(sorted([source_epic.id, target_epic.id]))
@@ -418,9 +420,8 @@ class ToolsMixin:
 
             linked_pairs.add(pair)
             link_type = random.choice(link_types)
-
             label = (
-                f"Epic #{source_epic.iid} '{source_epic.title[:40]}' ({source_grp.full_path}) "
+                f"Epic #{source_epic.iid} '{source_epic.title[:40]}' ({source_grp.full_path})"
                 f"  --[{link_type}]-->  "
                 f"Epic #{target_epic.iid} '{target_epic.title[:40]}' ({target_grp.full_path})"
             )
@@ -441,12 +442,67 @@ class ToolsMixin:
                 print(f"  LINKED {label}")
                 created += 1
             elif resp.status_code == 409:
-                # Already linked — skip silently
                 skipped += 1
             else:
                 print(f"  ERROR  [{resp.status_code}] {label}: {resp.text[:120]}")
                 errors += 1
 
         print(f"\nDone.  Created: {created}  Skipped (duplicate): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _remove_epic_blocks(self, session, all_epics, count, dry_run):
+        # Collect all existing blocking links across the hierarchy.
+        # Each link appears on both sides; deduplicate by link_id.
+        print(f"\nCollecting existing blocking relationships (to remove {count})...")
+        seen_link_ids = set()
+        existing      = []  # list of (group_id, epic_iid, link_id, label)
+
+        for grp, epic in all_epics:
+            url  = f"{self.url}/api/v4/groups/{grp.id}/epics/{epic.iid}/related_epics"
+            resp = session.get(url)
+            if not resp.ok:
+                continue
+            for rel in resp.json():
+                link_type = rel.get("link_type", "")
+                if link_type not in ("blocks", "is_blocked_by"):
+                    continue
+                link_id = rel.get("epic_link_id") or rel.get("id")
+                if link_id in seen_link_ids:
+                    continue
+                seen_link_ids.add(link_id)
+                label = (
+                    f"Epic #{epic.iid} '{epic.title[:40]}' ({grp.full_path})"
+                    f"  --[{link_type}]-->  "
+                    f"#{rel.get('iid', '?')} '{rel.get('title', '')[:40]}'"
+                )
+                existing.append((grp.id, epic.iid, link_id, label))
+
+        print(f"  Found {len(existing)} blocking relationship(s)")
+
+        if not existing:
+            print("Nothing to remove.")
+            return
+
+        sample  = random.sample(existing, min(count, len(existing)))
+        removed = 0
+        errors  = 0
+
+        for grp_id, epic_iid, link_id, label in sample:
+            if dry_run:
+                print(f"  DRY   REMOVE {label}")
+                removed += 1
+                continue
+
+            url  = f"{self.url}/api/v4/groups/{grp_id}/epics/{epic_iid}/related_epics/{link_id}"
+            resp = session.delete(url)
+            if resp.status_code in (200, 204):
+                print(f"  REMOVED {label}")
+                removed += 1
+            else:
+                print(f"  ERROR  [{resp.status_code}] {label}: {resp.text[:120]}")
+                errors += 1
+
+        print(f"\nDone.  Removed: {removed}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
