@@ -45,6 +45,12 @@ REPORTS = [
         "method":      "generate_orphan_issues_report",
         "needs_group": False,
     },
+    {
+        "key":         "piid-project",
+        "description": "Programme × PI Report — project label vs PI quarter cross-tab with status and weights",
+        "method":      "generate_piid_project_report",
+        "needs_group": False,
+    },
 ]
 
 
@@ -289,100 +295,131 @@ class ReportsMixin:
         self.upload_to_wiki(group, title, md)
         return md
 
-    def generate_and_upload_piid_project_report_to_wiki(self, group):
-        report_data = {
-            project_label: {piid_label: None for piid_label in self.PIID_LABELS}
-            for project_label in self.PROJECT_LABELS
-        }
+    def generate_piid_project_report(self):
+        """Programme × PI cross-tab: rows = project labels, columns = PIID quarters.
 
-        try:
-            print(f"Fetching all epics for group: {group.name}")
-            all_epics = [group.epics.get(epic.get_id()) for epic in group.epics.list(all=True)]
-            print(f"Fetched {len(all_epics)} total epics.")
+        Each cell shows status, epic counts, % done vs PI elapsed, and planned vs
+        actual weight delta.  Data comes from calculate_portfolio_metrics so no
+        extra API calls are needed beyond what other reports already do.
+        """
+        group   = self.get_group_by_name(self.parent_group)
+        metrics = self.calculate_portfolio_metrics(self.parent_group)
 
-            relevant_epics = []
-            for epic in all_epics:
-                project_label = next((label for label in self.PROJECT_LABELS if label in epic.labels), None)
-                piid_label    = next((label for label in self.PIID_LABELS    if label in epic.labels), None)
-                if project_label and piid_label:
-                    relevant_epics.append((epic, project_label, piid_label))
+        # Flatten all types into one list
+        all_epics = [e for epics in metrics.values() for e in epics]
 
-            print(f"Found {len(relevant_epics)} relevant epics with PIID/Project label intersections.")
+        # Index by (project_label, piid) → list of epic metric dicts
+        piid_set    = set(self.PIID_LABELS)
+        proj_set    = set(self.PROJECT_LABELS)
+        cell_data   = defaultdict(list)
+        for e in all_epics:
+            proj = next((l for l in e["labels"] if l in proj_set), None)
+            piid = e.get("piid")
+            if proj and piid and piid in piid_set:
+                cell_data[(proj, piid)].append(e)
 
-            for epic, project_label, piid_label in relevant_epics:
-                if report_data[project_label][piid_label] is None:
-                    report_data[project_label][piid_label] = {
-                        "epics_open":  0,
-                        "epics_total": 0,
-                        "weight_open": 0,
-                        "weight_total": 0,
-                        "epic_urls":   set(),
-                    }
+        def _aggregate(epics):
+            total    = len(epics)
+            open_cnt = sum(1 for e in epics if e["state"].lower() == "opened")
+            planned  = sum(e["planned_weight"] for e in epics)
+            actual   = sum(e["actual_weight"]  for e in epics)
+            blocked  = sum(1 for e in epics if e["blocked_by_count"] > 0)
+            if planned > 0:
+                avg_pct = round(sum(e["pct_complete"] * (e["planned_weight"] or 1) for e in epics) / planned)
+            elif total > 0:
+                avg_pct = round(sum(e["pct_complete"] for e in epics) / total)
+            else:
+                avg_pct = 0
+            return total, open_cnt, planned, actual, avg_pct, blocked
 
-                try:
-                    report_data[project_label][piid_label]["epics_total"] += 1
-                    if epic.state == "opened":
-                        report_data[project_label][piid_label]["epics_open"] += 1
+        def _status(piid, avg_pct):
+            pct_pi = self._pct_through_pi(piid)
+            if pct_pi is None:
+                return "🔵 Planned", pct_pi
+            if pct_pi == 0:
+                return "🔵 Planned", pct_pi
+            if pct_pi >= 100:
+                return ("✅ Complete" if avg_pct >= 100 else "❌ Incomplete"), pct_pi
+            return ("✅ On Track" if avg_pct >= pct_pi else "⚠️ At Risk"), pct_pi
 
-                    linked_issues = epic.issues.list(all=True)
-                    for issue in linked_issues:
-                        issue_weight = issue.weight if issue.weight else 0
-                        report_data[project_label][piid_label]["weight_total"] += issue_weight
-                        if issue.state == "opened":
-                            report_data[project_label][piid_label]["weight_open"] += issue_weight
+        def _board_url(proj, piid):
+            return (
+                f"{group.web_url}/-/work_items"
+                f"?label_name[]={quote(piid, safe='')}"
+                f"&label_name[]={quote(proj, safe='')}"
+                f"&state=all"
+            )
 
-                    report_data[project_label][piid_label]["epic_urls"].add(epic.web_url)
+        md = []
+        md.append(f"# Programme × PI Report (Group: {group.name})")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Each cell shows: **Status · Epics (open/total) · % Done (PI elapsed%) · Planned pt → Actual pt**")
+        md.append("")
 
-                except Exception as issue_error:
-                    print(f"Error processing issues for epic ID {epic.get_id()}: {issue_error}")
+        # Header row
+        header = "| Programme |" + "".join(f" {p} |" for p in self.PIID_LABELS)
+        sep    = "|---|" + "".join("---|" for _ in self.PIID_LABELS)
+        md.append(header)
+        md.append(sep)
 
-            markdown_report = []
-            markdown_report.append(f"# PIID vs Project Labels Report (Group: {group.name})")
-            markdown_report.append("")
-            markdown_report.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
-            markdown_report.append("")
+        for proj in self.PROJECT_LABELS:
+            cells = []
+            for piid in self.PIID_LABELS:
+                epics = cell_data.get((proj, piid), [])
+                if not epics:
+                    cells.append(" — ")
+                    continue
 
-            headers = ["| **Project Label → / PIID ↓**"] + [f"| **{piid_label}** " for piid_label in self.PIID_LABELS]
-            markdown_report.append("".join(headers) + "|")
-            markdown_report.append("|:" + ":|:".join(["---"] * (len(self.PIID_LABELS) + 1)) + ":|")
+                total, open_cnt, planned, actual, avg_pct, blocked = _aggregate(epics)
+                status, pct_pi                                      = _status(piid, avg_pct)
+                delta     = actual - planned
+                delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                pi_str    = f"{pct_pi}%" if pct_pi is not None else "—"
+                blocked_str = f" · 🔒{blocked}" if blocked else ""
+                board     = _board_url(proj, piid)
 
-            for project_label, piid_data in report_data.items():
-                row = [f"| **{project_label}** "]
-                for piid_label in self.PIID_LABELS:
-                    data = piid_data[piid_label]
-                    if data:
-                        board_url = (
-                            f"{group.web_url}/-/work_items?"
-                            f"label_name={piid_label}&label_name={project_label}&type[]=EPIC&state=all"
-                        )
-                        row.append(
-                            f"| Epics -  Open: {data['epics_open']} / Total: {data['epics_total']} / "
-                            f"Issue Weight Open: {data['weight_open']} / Total Weight: {data['weight_total']} / "
-                            f"[View]({board_url}) "
-                        )
-                    else:
-                        row.append("| - ")
-                markdown_report.append("".join(row) + "|")
+                cells.append(
+                    f" {status}{blocked_str}<br>"
+                    f"{open_cnt}/{total} epics<br>"
+                    f"{avg_pct}% done (PI {pi_str})<br>"
+                    f"Planned {planned}pt → {actual}pt {delta_str}<br>"
+                    f"[View →]({board}) "
+                )
 
-            markdown_report.extend([
-                "",
-                f"## Quick Links for {group.name}",
-                "",
-                f"- [Work Items]({group.web_url}/-/work_items)",
-                f"- [Issue Boards]({group.web_url}/-/boards)",
-                f"- [Epic Boards]({group.web_url}/-/epics?type[]=EPIC)",
-                f"- [Roadmap]({group.web_url}/-/roadmap)",
-                "",
-            ])
+            md.append("| **" + proj + "** |" + "|".join(cells) + "|")
 
-            md_content  = "\n".join(markdown_report)
-            wiki_title  = "PIID_vs_Project_Labels_Report"
-            print(f"Uploading report to wiki: {wiki_title}")
-            self.upload_to_wiki(group, wiki_title, md_content)
-            return md_content
+        md.extend([
+            "",
+            "---",
+            "## Legend",
+            "",
+            "### Status",
+            "| Icon | Meaning |",
+            "|------|---------|",
+            "| ✅ On Track | Current PI: % Done ≥ % of PI quarter elapsed |",
+            "| ⚠️ At Risk  | Current PI: % Done < % of PI quarter elapsed |",
+            "| ✅ Complete | Past PI: all committed work finished (% Done = 100%) |",
+            "| ❌ Incomplete | Past PI: PI ended with work remaining |",
+            "| 🔵 Planned  | Future PI: not yet started |",
+            "| 🔒 N | N epics in this cell are blocked |",
+            "",
+            "### Metrics",
+            "- **% Done** — weighted average completion across all epics in the cell (weighted by planned weight)",
+            "- **PI elapsed%** — `(today − PI start) ÷ (PI end − PI start) × 100`",
+            "- **Planned pt** — sum of planned weights set on those epics (via GraphQL)",
+            "- **Actual pt** — sum of story-point weights on all linked issues",
+            "- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched",
+            "",
+            "## Quick Links",
+            "",
+            f"- [Work Items]({group.web_url}/-/work_items)",
+            f"- [Roadmap]({group.web_url}/-/roadmap)",
+            f"- [Epic Boards]({group.web_url}/-/epics)",
+            "",
+        ])
 
-        except Exception as e:
-            print(f"An error occurred while generating or uploading the report: {e}")
+        self.upload_to_wiki(group, f"{group.name} - Programme PI Report", "\n".join(md))
 
     def generate_portfolio_report(self, group):
         group_name = group.name
