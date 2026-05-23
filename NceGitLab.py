@@ -2,6 +2,8 @@ import argparse
 import json
 import os
 import sys
+import time
+from datetime import datetime
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 
@@ -159,15 +161,34 @@ def main():
         gl.run_tools_menu(tool_key)
         return
 
+    phases = []
+
+    def _run_phase(label, fn):
+        start = datetime.now()
+        t0    = time.monotonic()
+        fn()
+        elapsed = time.monotonic() - t0
+        end     = datetime.now()
+        phases.append((label, start, end, elapsed))
+
     if args.all or args.clean:
-        gl.cleanup_group()
+        _run_phase("cleanup", gl.cleanup_group)
     if args.all or args.create:
-        gl.create_all_lorem_objects()
+        _run_phase("create",  gl.create_all_lorem_objects)
+
     if args.all:
         gl.generate_all_reports()
+        if hasattr(gl, '_last_reports_phase'):
+            phases.append(gl._last_reports_phase)
+        if len(phases) > 1:
+            gl._print_timing_table(phases, "Full Run Summary (--all)")
     elif args.report is not None:
         report_key = None if args.report == "__menu__" else args.report
         gl.run_reports_menu(report_key)
+
+    # single-phase timing summary (--clean or --create alone)
+    if not args.all and phases:
+        gl._print_timing_table(phases)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,19 @@
 import re
+import time
 import requests
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from pprint import pformat
+
+
+def _fmt_duration(seconds):
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(seconds), 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m {s:02d}s"
 
 
 class UtilitiesMixin:
@@ -135,6 +146,7 @@ class UtilitiesMixin:
 
             associated_data = {
                 "id":               epic.id,
+                "iid":              epic.iid,
                 "title":            epic.title,
                 "state":            epic.state.capitalize(),
                 "blocked_by_count": gql.get("blockedByCount", 0),
@@ -216,6 +228,28 @@ class UtilitiesMixin:
         if today >= end:
             return 100
         return round((today - start).days / (end - start).days * 100)
+
+    def _print_timing_table(self, phases, title=""):
+        """Print a formatted timing table.
+
+        phases: list of (label, start_datetime, end_datetime, elapsed_seconds)
+        """
+        if not phases:
+            return
+        W = 62
+        print()
+        print("─" * W)
+        if title:
+            print(f"  {title}")
+        print(f"  {'Phase':<26} {'Started':>8}  {'Finished':>8}  {'Duration':>9}")
+        print(f"  {'─'*26} {'─'*8}  {'─'*8}  {'─'*9}")
+        for label, start, end, elapsed in phases:
+            print(f"  {label:<26} {start.strftime('%H:%M:%S'):>8}  {end.strftime('%H:%M:%S'):>8}  {_fmt_duration(elapsed):>9}")
+        if len(phases) > 1:
+            wall = (phases[-1][2] - phases[0][1]).total_seconds()
+            print(f"  {'─'*26} {'─'*8}  {'─'*8}  {'─'*9}")
+            print(f"  {'TOTAL':<26} {phases[0][1].strftime('%H:%M:%S'):>8}  {phases[-1][2].strftime('%H:%M:%S'):>8}  {_fmt_duration(wall):>9}")
+        print("─" * W)
 
     def sanitize_name(self, name):
         return re.sub(r'[^a-z0-9\-]', '', name.lower().replace(' ', '-'))
