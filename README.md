@@ -206,49 +206,9 @@ Reports flag items as **At Risk** (⚠️) when `% done < % elapsed through PI`.
 
 ---
 
-## Utilities Roadmap
+## Known Issues / TODO
 
-Planned utilities for seeding test data, simulating PI progress, validating model completeness, and resetting state. All will follow the existing `utilities/` pattern with `--config` and `--dry-run` flags.
-
-### Priority 1 — Model Validity
-
-| Utility | Description | Status |
-|---------|-------------|--------|
-| `set-issue-weights` | Assign random story-point weights to issues that have none. Without issue weights, `% done` columns across all reports show 0%. Options: `--fibonacci`, `--min`, `--max`, `--dry-run` | ✅ Done |
-| `audit-labels` | Report every epic missing a required label (type, PIID, or project label). Surfaces gaps that cause blank cells or misleading zeros before running reports. | ✅ Done |
-| `simulate-pi-progress` | Given a PIID label, close X% of issues on epics in that PI. More targeted than the global `close-percent` tool. Options: `--piid`, `--percent`, `--dry-run` | ✅ Done |
-
-### Priority 2 — Data Seeding
-
-| Utility | Description | Status |
-|---------|-------------|--------|
-| `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one. Feeds the workload, capacity, and PI matrix reports. Options: `--piid`, `--type` filter, `--dry-run` | ✅ Done |
-| `set-project-labels` | Bulk-assign a project label to epics missing one. Feeds the Program × PI cross-tab report. Options: `--label`, `--type` filter, `--dry-run` | ✅ Done |
-| `generate-issues` | Create N issues in each team backlog project linked to Feature epics. Useful when backlogs are sparse and reports need realistic data. Options: `--count` (default 5 per feature), `--dry-run` | ✅ Done |
-
-### Priority 3 — State Simulation
-
-| Utility | Description | Status |
-|---------|-------------|--------|
-| `set-epic-states` | Open or close all epics matching a type and/or PI filter. Lets you model past PIs as complete so historical reports render correctly. Options: `--state` (open/close), `--piid`, `--type`, `--dry-run` | ✅ Done |
-
-### Priority 4 — Validation
-
-| Utility | Description | Status |
-|---------|-------------|--------|
-| `audit-hierarchy` | Verify that Features have Capability parents and Capabilities have Epic parents. Flags orphaned or misplaced epics that would skew hierarchy reports. | ✅ Done |
-| `weight-drift-check` | Compare planned weight (GraphQL) vs sum of issue weights (REST) per epic. Flag epics where drift exceeds a configurable threshold. Options: `--threshold` (default 20%), `--type` filter | ✅ Done |
-
-> **Note — Features under Epics:**  
-> In some SAFe configurations a Feature may be parented directly to an Epic (skipping the Capability level). The current `audit-hierarchy` logic treats this as a violation. Several reports (`ART Feature Status`, `ART Capacity Balance`, `VS Capability Dashboard`) also assume the full three-tier chain.  
-> **TODO:** Review and update hierarchy traversal and audit logic across utilities and reports to accommodate the two-tier (Epic → Feature) case where no Capability is present.
-
-### Priority 5 — Reset / Cleanup
-
-| Utility | Description | Status |
-|---------|-------------|--------|
-| `reset-pi-progress` | Reopen all issues in a given PI. Lets you re-run a simulation from scratch without recreating data. Options: `--piid`, `--dry-run` | ✅ Done |
-| `strip-labels` | Remove a specific label from all epics matching a filter. Useful for reassigning PI allocations or clearing test labels. Options: `--label`, `--type` filter, `--dry-run` | ✅ Done |
+- **Features under Epics:** In some SAFe configurations a Feature may be parented directly to an Epic (skipping the Capability level). The current `audit-hierarchy` utility treats this as a violation, and several reports (`ART Feature Status`, `ART Capacity Balance`, `VS Capability Dashboard`) assume the full three-tier chain (Epic → Capability → Feature). Hierarchy traversal and audit logic across utilities and reports should be updated to accommodate the two-tier (Epic → Feature) case.
 
 ---
 
