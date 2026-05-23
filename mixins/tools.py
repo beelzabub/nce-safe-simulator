@@ -42,6 +42,15 @@ TOOLS = [
         "method":      "_tool_validate_weights",
         "params":      [],
     },
+    {
+        "key":         "generate-epic-blocks",
+        "description": "Randomly create blocking relationships between epics across the hierarchy",
+        "method":      "_tool_generate_epic_blocks",
+        "params": [
+            {"name": "count",   "prompt": "Number of blocking relationships to create", "type": int,  "default": 10},
+            {"name": "dry_run", "prompt": "Dry run?",                                   "type": bool, "default": False},
+        ],
+    },
 ]
 
 
@@ -352,3 +361,92 @@ class ToolsMixin:
 
         print(f"\nOverall: {'PASS ✓' if all_pass else 'FAIL ✗'}")
         return all_pass
+
+    def _tool_generate_epic_blocks(self, count=10, dry_run=False):
+        """Randomly create 'blocks' or 'is_blocked_by' links between epics across the hierarchy."""
+        import requests as _requests
+
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Group: {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # Collect all epics with their owning group info
+        print("\nCollecting epics...")
+        all_epics = []  # list of (group_obj, epic_obj)
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                all_epics.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"  Found {len(all_epics)} epics")
+
+        if len(all_epics) < 2:
+            print("Not enough epics to create blocking relationships (need at least 2).")
+            return
+
+        link_types = ["blocks", "is_blocked_by"]
+        session    = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        created = 0
+        skipped = 0
+        errors  = 0
+
+        # Track pairs already linked to avoid duplicates in this run
+        linked_pairs = set()
+
+        attempts = 0
+        max_attempts = count * 10  # allow retries to find non-duplicate pairs
+
+        while created < count and attempts < max_attempts:
+            attempts += 1
+
+            source_grp, source_epic = random.choice(all_epics)
+            target_grp, target_epic = random.choice(all_epics)
+
+            # Skip self-links and already-processed pairs
+            if source_epic.id == target_epic.id:
+                continue
+            pair = tuple(sorted([source_epic.id, target_epic.id]))
+            if pair in linked_pairs:
+                skipped += 1
+                continue
+
+            linked_pairs.add(pair)
+            link_type = random.choice(link_types)
+
+            label = (
+                f"Epic #{source_epic.iid} '{source_epic.title[:40]}' ({source_grp.full_path}) "
+                f"  --[{link_type}]-->  "
+                f"Epic #{target_epic.iid} '{target_epic.title[:40]}' ({target_grp.full_path})"
+            )
+
+            if dry_run:
+                print(f"  DRY   {label}")
+                created += 1
+                continue
+
+            url  = f"{self.url}/api/v4/groups/{source_grp.id}/epics/{source_epic.iid}/related_epics"
+            resp = session.post(url, json={
+                "target_group_id": target_grp.id,
+                "target_epic_iid": target_epic.iid,
+                "link_type":       link_type,
+            })
+
+            if resp.status_code in (200, 201):
+                print(f"  LINKED {label}")
+                created += 1
+            elif resp.status_code == 409:
+                # Already linked — skip silently
+                skipped += 1
+            else:
+                print(f"  ERROR  [{resp.status_code}] {label}: {resp.text[:120]}")
+                errors += 1
+
+        print(f"\nDone.  Created: {created}  Skipped (duplicate): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
