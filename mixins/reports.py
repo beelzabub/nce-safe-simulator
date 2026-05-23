@@ -1725,48 +1725,61 @@ class ReportsMixin:
     # ------------------------------------------------------------------
 
     def generate_vs_capability_dashboard_report(self):
-        """One wiki page per VS showing Capabilities by PI with per-ART breakdown, plus a root index."""
+        """One wiki page per VS showing Capabilities and Direct Features by PI, plus a root index."""
         root_group = self.get_group_by_name(self.parent_group)
         print(f"Generating VS Capability Dashboard Reports under: {root_group.full_path}")
 
         metrics      = self.calculate_portfolio_metrics(self.parent_group)
         capabilities = metrics.get("Capability", [])
-        all_epics_by_id = {
-            e["id"]: e
-            for tier in metrics.values()
-            for e in tier
-        }
+        features     = metrics.get("Feature", [])
 
-        # Maps for hierarchy lookup
-        art_hierarchy  = {}   # art_id  → (vs_group, art_group)
-        team_hierarchy = {}   # team_id → (vs_group, art_group, team_group)
+        art_hierarchy  = {}
+        team_hierarchy = {}
         for vs_group, art_group in self._iter_art_groups(root_group):
             art_hierarchy[art_group.id] = (vs_group, art_group)
         for vs_group, art_group, team_group in self._iter_team_groups(root_group):
             team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
 
-        # vs_id → pi → art_id → [capability_metric]
-        vs_pi_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-
-        for cap in capabilities:
-            gid  = cap.get("group_id")
-            piid = cap.get("piid")
-            if not piid:
-                continue
+        def _vs_art_for(gid):
             if gid in art_hierarchy:
-                vs_grp, art_grp = art_hierarchy[gid]
-                vs_pi_buckets[vs_grp.id][piid][art_grp.id].append(cap)
-            elif gid in team_hierarchy:
-                vs_grp, art_grp, _ = team_hierarchy[gid]
-                vs_pi_buckets[vs_grp.id][piid][art_grp.id].append(cap)
+                return art_hierarchy[gid]
+            if gid in team_hierarchy:
+                vs_g, art_g, _ = team_hierarchy[gid]
+                return vs_g, art_g
+            return None, None
+
+        # vs_id → pi → art_id → [capability_metric]
+        vs_cap_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        for cap in capabilities:
+            vs_g, art_g = _vs_art_for(cap.get("group_id"))
+            piid = cap.get("piid")
+            if vs_g and art_g and piid:
+                vs_cap_buckets[vs_g.id][piid][art_g.id].append(cap)
+
+        # Direct Features: parent is Epic (not Capability) or parentless
+        epic_type_by_id = {e["id"]: t for t, tier in metrics.items() for e in tier}
+        direct_features = [
+            f for f in features
+            if epic_type_by_id.get(f.get("parent_id")) != "Capability"
+        ]
+
+        # vs_id → pi → art_id → [direct_feature_metric]
+        vs_direct_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        for feat in direct_features:
+            vs_g, art_g = _vs_art_for(feat.get("group_id"))
+            piid = feat.get("piid")
+            if vs_g and art_g and piid:
+                vs_direct_buckets[vs_g.id][piid][art_g.id].append(feat)
 
         index_entries = []
         for vs_group in self._iter_vs_groups(root_group):
-            if vs_group.id not in vs_pi_buckets:
+            if vs_group.id not in vs_cap_buckets and vs_group.id not in vs_direct_buckets:
                 continue
             entry = self._generate_vs_capability_dashboard_page(
                 root_group, vs_group,
-                vs_pi_buckets[vs_group.id], art_hierarchy, team_hierarchy,
+                vs_cap_buckets.get(vs_group.id, {}),
+                vs_direct_buckets.get(vs_group.id, {}),
+                art_hierarchy, team_hierarchy,
             )
             if entry:
                 index_entries.append(entry)
@@ -1775,27 +1788,36 @@ class ReportsMixin:
         md.append(f"# VS Capability Dashboard Index — {root_group.name}")
         md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
-        md.append("Capability delivery status per Value Stream, broken down by PI and ART.")
+        md.append("Delivery status per Value Stream, broken down by PI and ART.")
+        md.append("")
+        md.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
         md.append("")
 
-        for vs_name, wiki_url, total_caps, at_risk, blocked in index_entries:
+        for vs_name, wiki_url, total_caps, total_direct, at_risk, blocked in index_entries:
+            parts = []
+            if total_caps:
+                parts.append(f"{total_caps} capabilities")
+            if total_direct:
+                parts.append(f"{total_direct} direct features")
+            counts      = "  · " + "  · ".join(parts) if parts else ""
             risk_str    = f"  · ⚠️ {at_risk} at risk" if at_risk else ""
             blocked_str = f"  · 🔒 {blocked} blocked" if blocked else ""
-            md.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url})  · {total_caps} capabilities{risk_str}{blocked_str}")
+            md.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
 
         md.append("")
         self.upload_to_wiki(root_group, f"{root_group.name} - VS Capability Dashboard Index", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - VS Capability Dashboard Index")
 
-    def _generate_vs_capability_dashboard_page(self, root_group, vs_group, pi_buckets, art_hierarchy, team_hierarchy):
+    def _generate_vs_capability_dashboard_page(self, root_group, vs_group, cap_pi_buckets, direct_pi_buckets, art_hierarchy, team_hierarchy):
         wiki_title = f"VS Capability Dashboard/{vs_group.name}"
         wiki_url   = (
             f"{root_group.web_url}/-/wikis/VS-Capability-Dashboard"
             f"/{vs_group.name.replace(' ', '-')}"
         )
 
-        sorted_pis = sorted(
-            pi_buckets.keys(),
+        all_pis = sorted(
+            set(cap_pi_buckets) | set(direct_pi_buckets),
             key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
         )
 
@@ -1808,127 +1830,159 @@ class ReportsMixin:
         )
         md.append("")
 
-        total_caps = 0
-        at_risk    = 0
-        blocked_c  = 0
+        total_caps   = 0
+        total_direct = 0
+        at_risk      = 0
+        blocked_c    = 0
 
-        for piid in sorted_pis:
-            art_buckets = pi_buckets[piid]
-            pct_pi      = self._pct_through_pi(piid)
-            start, end  = self._pi_dates_from_label(piid)
-            date_range  = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
+        def _art_name_url(art_id):
+            if art_id in art_hierarchy:
+                _, g = art_hierarchy[art_id]
+                return g.name, g.web_url
+            return f"ART {art_id}", ""
+
+        def _row_status(pct_done, pct_pi, blocked_by):
+            nonlocal at_risk, blocked_c
+            if blocked_by:
+                blocked_c += 1
+                return "🔒 Blocked"
+            if pct_pi is None or pct_pi == 0:
+                return "🔵 Planned"
+            if pct_pi >= 100:
+                return "✅ Complete" if pct_done >= 100 else "❌ Incomplete"
+            if pct_done >= pct_pi:
+                return "✅ On Track"
+            at_risk += 1
+            return "⚠️ At Risk"
+
+        def _detail_rows(items, pct_pi):
+            rows = []
+            for item in sorted(items, key=lambda x: x.get("title", "")):
+                status     = _row_status(item["pct_complete"], pct_pi, item.get("blocked_by_count", 0))
+                pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
+                weight_str = f"{item.get('planned_weight', 0)}pt → {item.get('actual_weight', 0)}pt"
+                rows.append(
+                    f"| [{item['title']}]({item['web_url']}) | {item['state'].capitalize()} "
+                    f"| {item['pct_complete']}% | {pi_str} | {weight_str} | {status} |"
+                )
+            return rows
+
+        for piid in all_pis:
+            pct_pi     = self._pct_through_pi(piid)
+            start, end = self._pi_dates_from_label(piid)
+            date_range = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
 
             md.append(f"## {piid}")
             if date_range:
                 md.append(date_range)
             md.append("")
 
-            # Summary table across ARTs
-            md.append("| ART | Capabilities | Planned | Actual | Δ | % Done | Status |")
-            md.append("|-----|-------------|---------|--------|---|--------|--------|")
-
-            art_rows = []
-            for art_id, caps in sorted(art_buckets.items(),
-                                       key=lambda x: art_hierarchy.get(x[0], (None, type('', (), {'name': ''})()))[1].name):
-                if art_id in art_hierarchy:
-                    _, art_grp = art_hierarchy[art_id]
-                    art_name = art_grp.name
-                    art_url  = art_grp.web_url
-                else:
-                    art_name = f"ART {art_id}"
-                    art_url  = ""
-
-                planned  = sum(c.get("planned_weight", 0) for c in caps)
-                actual   = sum(c.get("actual_weight",  0) for c in caps)
-                delta    = actual - planned
-                delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
-                n_blocked = sum(1 for c in caps if c.get("blocked_by_count", 0) > 0)
-
-                if planned > 0:
-                    avg_pct = round(sum(c["planned_weight"] * c["pct_complete"] for c in caps) / planned)
-                else:
-                    avg_pct = round(sum(c["pct_complete"] for c in caps) / len(caps)) if caps else 0
-
-                if n_blocked:
-                    status = "🔒 Blocked"
-                elif pct_pi is None or pct_pi == 0:
-                    status = "🔵 Planned"
-                elif pct_pi >= 100:
-                    status = "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
-                elif avg_pct >= pct_pi:
-                    status = "✅ On Track"
-                else:
-                    status = "⚠️ At Risk"
-
-                art_link = f'<a href="{art_url}">{art_name}</a>' if art_url else art_name
-                md.append(
-                    f"| {art_link} | {len(caps)} | {planned} pt | {actual} pt "
-                    f"| {delta_str} | {avg_pct}% | {status} |"
-                )
-                art_rows.append((art_name, art_url, caps))
-
-            md.append("")
-
-            # Detail section per ART (collapsible)
-            for art_name, art_url, caps in art_rows:
-                md.append(f"<details><summary><strong>{art_name} — Capability Detail</strong></summary>")
+            # --- Capabilities section ---
+            art_cap_buckets = cap_pi_buckets.get(piid, {})
+            if art_cap_buckets:
+                md.append("### 🧩 Capabilities _(cross-ART/VS deliverables)_")
                 md.append("")
-                md.append("| Capability | State | % Done | PI Elapsed | Weight | Status |")
-                md.append("|------------|-------|--------|------------|--------|--------|")
+                md.append("| ART | Capabilities | Planned | Actual | Δ | % Done | Status |")
+                md.append("|-----|-------------|---------|--------|---|--------|--------|")
 
-                for cap in sorted(caps, key=lambda x: x.get("title", "")):
-                    title      = cap["title"]
-                    url        = cap["web_url"]
-                    state      = cap["state"].capitalize()
-                    pct_done   = cap["pct_complete"]
-                    blocked_by = cap.get("blocked_by_count", 0)
-                    planned_w  = cap.get("planned_weight", 0)
-                    actual_w   = cap.get("actual_weight",  0)
-
-                    if blocked_by:
-                        row_status = "🔒 Blocked"
-                        blocked_c += 1
+                art_rows = []
+                for art_id, caps in sorted(art_cap_buckets.items(), key=lambda x: _art_name_url(x[0])[0]):
+                    art_name, art_url = _art_name_url(art_id)
+                    planned   = sum(c.get("planned_weight", 0) for c in caps)
+                    actual    = sum(c.get("actual_weight",  0) for c in caps)
+                    delta     = actual - planned
+                    delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                    n_blocked = sum(1 for c in caps if c.get("blocked_by_count", 0) > 0)
+                    avg_pct   = round(sum(c["planned_weight"] * c["pct_complete"] for c in caps) / planned) if planned else (round(sum(c["pct_complete"] for c in caps) / len(caps)) if caps else 0)
+                    if n_blocked:
+                        status = "🔒 Blocked"
                     elif pct_pi is None or pct_pi == 0:
-                        row_status = "🔵 Planned"
+                        status = "🔵 Planned"
                     elif pct_pi >= 100:
-                        row_status = "✅ Complete" if pct_done >= 100 else "❌ Incomplete"
-                    elif pct_done >= pct_pi:
-                        row_status = "✅ On Track"
+                        status = "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+                    elif avg_pct >= pct_pi:
+                        status = "✅ On Track"
                     else:
-                        row_status = "⚠️ At Risk"
-                        at_risk += 1
-
-                    pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
-                    weight_str = f"{planned_w}pt → {actual_w}pt"
-                    md.append(
-                        f"| [{title}]({url}) | {state} "
-                        f"| {pct_done}% | {pi_str} | {weight_str} | {row_status} |"
-                    )
-                    total_caps += 1
+                        status = "⚠️ At Risk"
+                    art_link = f'<a href="{art_url}">{art_name}</a>' if art_url else art_name
+                    md.append(f"| {art_link} | {len(caps)} | {planned} pt | {actual} pt | {delta_str} | {avg_pct}% | {status} |")
+                    art_rows.append((art_name, art_url, caps))
+                    total_caps += len(caps)
 
                 md.append("")
-                md.append("</details>")
+                for art_name, art_url, caps in art_rows:
+                    md.append(f"<details><summary><strong>{art_name} — Capability Detail</strong></summary>")
+                    md.append("")
+                    md.append("| Capability | State | % Done | PI Elapsed | Weight | Status |")
+                    md.append("|------------|-------|--------|------------|--------|--------|")
+                    md.extend(_detail_rows(caps, pct_pi))
+                    md.append("")
+                    md.append("</details>")
+                    md.append("")
+
+            # --- Direct Features section ---
+            art_direct_buckets = direct_pi_buckets.get(piid, {})
+            if art_direct_buckets:
+                md.append("### 🛠️ Direct Features _(parented to Epic, no Capability wrapper)_")
                 md.append("")
+                md.append("| ART | Features | Planned | Actual | Δ | % Done | Status |")
+                md.append("|-----|----------|---------|--------|---|--------|--------|")
+
+                art_direct_rows = []
+                for art_id, feats in sorted(art_direct_buckets.items(), key=lambda x: _art_name_url(x[0])[0]):
+                    art_name, art_url = _art_name_url(art_id)
+                    planned   = sum(f.get("planned_weight", 0) for f in feats)
+                    actual    = sum(f.get("actual_weight",  0) for f in feats)
+                    delta     = actual - planned
+                    delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                    n_blocked = sum(1 for f in feats if f.get("blocked_by_count", 0) > 0)
+                    avg_pct   = round(sum(f["planned_weight"] * f["pct_complete"] for f in feats) / planned) if planned else (round(sum(f["pct_complete"] for f in feats) / len(feats)) if feats else 0)
+                    if n_blocked:
+                        status = "🔒 Blocked"
+                    elif pct_pi is None or pct_pi == 0:
+                        status = "🔵 Planned"
+                    elif pct_pi >= 100:
+                        status = "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+                    elif avg_pct >= pct_pi:
+                        status = "✅ On Track"
+                    else:
+                        status = "⚠️ At Risk"
+                    art_link = f'<a href="{art_url}">{art_name}</a>' if art_url else art_name
+                    md.append(f"| {art_link} | {len(feats)} | {planned} pt | {actual} pt | {delta_str} | {avg_pct}% | {status} |")
+                    art_direct_rows.append((art_name, art_url, feats))
+                    total_direct += len(feats)
+
+                md.append("")
+                for art_name, art_url, feats in art_direct_rows:
+                    md.append(f"<details><summary><strong>{art_name} — Direct Feature Detail</strong></summary>")
+                    md.append("")
+                    md.append("| Feature | State | % Done | PI Elapsed | Weight | Status |")
+                    md.append("|---------|-------|--------|------------|--------|--------|")
+                    md.extend(_detail_rows(feats, pct_pi))
+                    md.append("")
+                    md.append("</details>")
+                    md.append("")
 
         md.extend([
             "---",
             "## Legend",
-            "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-            "- **% Done** — closed issue weight ÷ total issue weight for all issues linked to this Capability",
+            "- **🧩 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
+            "- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
+            "- **% Done** — closed issue weight ÷ total issue weight",
             "- **PI Elapsed** — `(today − PI start) ÷ (PI end − PI start) × 100`",
             "- **Weight** — Planned pt → Actual pt",
             "- **✅ On Track** — % Done ≥ PI Elapsed",
             "- **⚠️ At Risk** — % Done < PI Elapsed",
             "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
             "- **🔵 Planned** — future PI or not yet started",
-            "- **🔒 Blocked** — Capability has one or more active blocking relationships",
+            "- **🔒 Blocked** — has one or more active blocking relationships",
             "",
         ])
 
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
 
-        return (vs_group.name, wiki_url, total_caps, at_risk, blocked_c)
+        return (vs_group.name, wiki_url, total_caps, total_direct, at_risk, blocked_c)
 
     def generate_vs_cross_art_risk_report(self):
         """One wiki page per VS showing blocking relationships that cross ART boundaries, plus a root index."""
