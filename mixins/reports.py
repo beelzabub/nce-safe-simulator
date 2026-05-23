@@ -17,7 +17,7 @@ REPORTS = [
     },
     {
         "key":         "workload",
-        "description": "ART/Team Workload Report — planned vs actual weight per group per PI",
+        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
         "method":      "generate_workload_report",
         "needs_group": False,
     },
@@ -664,7 +664,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - ART/Team Workload Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{group.name} - ART-Team Workload Report", "\n".join(md))
 
     def list_blocking_epics(self):
         group     = self.get_group_by_name(self.parent_group)
