@@ -51,6 +51,107 @@ TOOLS = [
             {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False},
         ],
     },
+    {
+        "key":         "set-issue-weights",
+        "description": "Assign Fibonacci story-point weights to issues that currently have none",
+        "method":      "_tool_set_issue_weights",
+        "params": [
+            {"name": "fibonacci", "prompt": "Constrain to Fibonacci pool from config?", "type": bool, "default": True},
+            {"name": "min_weight","prompt": "Minimum weight (blank = no min)",          "type": int,  "optional": True},
+            {"name": "max_weight","prompt": "Maximum weight (blank = no max)",          "type": int,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                 "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "audit-labels",
+        "description": "Report every epic missing a type, PIID, or project label",
+        "method":      "_tool_audit_labels",
+        "params":      [],
+    },
+    {
+        "key":         "simulate-pi-progress",
+        "description": "Close X% of open issues linked to epics in a specific PI",
+        "method":      "_tool_simulate_pi_progress",
+        "params": [
+            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,   "default": None, "optional": False},
+            {"name": "percent", "prompt": "Percent of issues to close",     "type": float, "default": 50.0},
+            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "set-piid-labels",
+        "description": "Bulk-assign a PIID label to epics that are missing one",
+        "method":      "_tool_set_piid_labels",
+        "params": [
+            {"name": "piid",      "prompt": "PIID label to assign (e.g. PIID::2026Q3)", "type": str,  "optional": False},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                  "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "set-project-labels",
+        "description": "Bulk-assign a project label to epics that are missing one",
+        "method":      "_tool_set_project_labels",
+        "params": [
+            {"name": "label",     "prompt": "Project label to assign (e.g. project::DO)", "type": str,  "optional": False},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                    "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "generate-issues",
+        "description": "Create issues in team backlog projects linked to Feature epics",
+        "method":      "_tool_generate_issues",
+        "params": [
+            {"name": "count",   "prompt": "Issues to create per Feature (default 5)", "type": int,  "default": 5},
+            {"name": "dry_run", "prompt": "Dry run?",                                  "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "set-epic-states",
+        "description": "Open or close all epics matching an optional type and/or PI filter",
+        "method":      "_tool_set_epic_states",
+        "params": [
+            {"name": "state",     "prompt": "State to set (open/close)",                             "type": str,  "default": "close"},
+            {"name": "piid",      "prompt": "Limit to PIID label (e.g. PIID::2026Q3, blank = all)",  "type": str,  "optional": True},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "audit-hierarchy",
+        "description": "Verify Features have Capability parents and Capabilities have Epic parents",
+        "method":      "_tool_audit_hierarchy",
+        "params":      [],
+    },
+    {
+        "key":         "weight-drift-check",
+        "description": "Flag epics where planned weight vs sum of issue weights drifts beyond a threshold",
+        "method":      "_tool_weight_drift_check",
+        "params": [
+            {"name": "threshold", "prompt": "Drift threshold % to flag (default 20)", "type": float, "default": 20.0},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
+        ],
+    },
+    {
+        "key":         "reset-pi-progress",
+        "description": "Reopen all closed issues linked to epics in a specific PI",
+        "method":      "_tool_reset_pi_progress",
+        "params": [
+            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,  "optional": False},
+            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "strip-labels",
+        "description": "Remove a specific label from all epics (optionally filtered by type)",
+        "method":      "_tool_strip_labels",
+        "params": [
+            {"name": "label",     "prompt": "Label to remove",                                       "type": str,  "optional": False},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
+        ],
+    },
 ]
 
 
@@ -511,5 +612,571 @@ class ToolsMixin:
                 errors += 1
 
         print(f"\nDone.  Removed: {removed}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # Priority 1 — Model Validity
+    # ------------------------------------------------------------------
+
+    def _tool_set_issue_weights(self, fibonacci=True, min_weight=None, max_weight=None, dry_run=False):
+        """Assign weights to issues that currently have none."""
+        group = self.get_group_by_name(self.parent_group)
+        pool  = self.fibonacci_weights if fibonacci else list(range(1, 21))
+        if min_weight is not None:
+            pool = [w for w in pool if w >= min_weight]
+        if max_weight is not None:
+            pool = [w for w in pool if w <= max_weight]
+        if not pool:
+            print("No valid weights in pool — check min/max settings.")
+            return
+
+        print(f"Group : {group.full_path}")
+        print(f"Pool  : {pool}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = skipped = errors = 0
+        for proj in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_p = self.gl.projects.get(proj.id)
+                for issue in full_p.issues.list(all=True):
+                    if issue.weight:
+                        skipped += 1
+                        continue
+                    w = random.choice(pool)
+                    if dry_run:
+                        print(f"  DRY  #{issue.iid} '{issue.title[:50]}' → {w} pt")
+                        updated += 1
+                    else:
+                        issue.weight = w
+                        issue.save()
+                        print(f"  SET  #{issue.iid} '{issue.title[:50]}' → {w} pt")
+                        updated += 1
+            except Exception as e:
+                print(f"  ERROR  project '{proj.path}': {e}")
+                errors += 1
+
+        print(f"\nDone.  Updated: {updated}  Already set (skipped): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_audit_labels(self):
+        """Report every epic missing a type, PIID, or project label."""
+        group     = self.get_group_by_name(self.parent_group)
+        type_set  = set(self.EPIC_TYPE_LABELS)
+        piid_set  = set(self.PIID_LABELS)
+        proj_set  = set(self.PROJECT_LABELS)
+
+        print(f"Auditing labels in: {group.full_path}\n")
+
+        missing = defaultdict(list)   # "type" | "piid" | "project" → [epic]
+        total   = 0
+
+        def _walk(grp):
+            nonlocal total
+            for epic in grp.epics.list(all=True):
+                total += 1
+                labels = set(epic.labels)
+                if not labels & type_set:
+                    missing["type"].append(epic)
+                if not labels & piid_set:
+                    missing["piid"].append(epic)
+                if not labels & proj_set:
+                    missing["project"].append(epic)
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+
+        print(f"Total epics scanned: {total}\n")
+        all_ok = True
+        for kind, label_name in [("type", "Type (Epic/Capability/Feature)"),
+                                  ("piid", "PIID"),
+                                  ("project", "Project")]:
+            epics = missing[kind]
+            if not epics:
+                print(f"  ✓  {label_name} — all epics have a label")
+            else:
+                all_ok = False
+                print(f"  ✗  {label_name} — {len(epics)} epic(s) missing:")
+                for e in epics:
+                    print(f"       #{e.iid}  '{e.title[:60]}'  {e.web_url}")
+        print(f"\nOverall: {'PASS ✓' if all_ok else 'FAIL ✗'}")
+
+    def _tool_simulate_pi_progress(self, piid=None, percent=50.0, dry_run=False):
+        """Close X% of open issues linked to epics in a specific PI."""
+        if not piid:
+            print("ERROR: a PIID label is required.")
+            return
+
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Group : {group.full_path}")
+        print(f"PI    : {piid}  →  closing {percent}% of open issues")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        print("\nCollecting epics for this PI...")
+        pi_epic_ids = set()
+
+        def _walk_epics(grp):
+            for epic in grp.epics.list(all=True):
+                if piid in epic.labels:
+                    pi_epic_ids.add(epic.id)
+            for sg in grp.subgroups.list(all=True):
+                _walk_epics(self.gl.groups.get(sg.id))
+
+        _walk_epics(group)
+        print(f"  Found {len(pi_epic_ids)} epics labelled {piid}")
+
+        if not pi_epic_ids:
+            print(f"No epics found with label '{piid}' — nothing to do.")
+            return
+
+        print("\nCollecting open issues linked to those epics...")
+        candidates = []
+        for proj in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_p = self.gl.projects.get(proj.id)
+                for issue in full_p.issues.list(all=True, state="opened"):
+                    epic = getattr(issue, "epic", None)
+                    if epic and epic.get("id") in pi_epic_ids:
+                        candidates.append((full_p, issue))
+            except Exception as e:
+                print(f"  WARNING: could not fetch issues for '{proj.path}': {e}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, k)
+        print(f"  {len(candidates)} open issues  →  closing {k} ({percent}%)")
+
+        closed = errors = 0
+        for proj, issue in sample:
+            if dry_run:
+                print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
+                closed += 1
+            else:
+                try:
+                    issue.state_event = "close"
+                    issue.save()
+                    print(f"  CLOSED #{issue.iid} '{issue.title[:55]}'")
+                    closed += 1
+                except Exception as e:
+                    print(f"  ERROR  #{issue.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Closed: {closed}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # Priority 2 — Data Seeding
+    # ------------------------------------------------------------------
+
+    def _tool_set_piid_labels(self, piid=None, epic_type=None, dry_run=False):
+        """Assign a PIID label to epics that are missing one."""
+        if not piid:
+            print("ERROR: a PIID label is required.")
+            return
+        if piid not in self.PIID_LABELS:
+            print(f"WARNING: '{piid}' is not in the configured PIID_LABELS: {self.PIID_LABELS}")
+
+        group    = self.get_group_by_name(self.parent_group)
+        piid_set = set(self.PIID_LABELS)
+        print(f"Group : {group.full_path}  →  assigning {piid}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal updated, skipped, errors
+            for epic in grp.epics.list(all=True):
+                if set(epic.labels) & piid_set:
+                    skipped += 1
+                    continue
+                if epic_type and epic_type not in epic.labels:
+                    skipped += 1
+                    continue
+                if dry_run:
+                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{piid}")
+                    updated += 1
+                else:
+                    try:
+                        epic.labels = list(epic.labels) + [piid]
+                        epic.save()
+                        print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{piid}")
+                        updated += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_project_labels(self, label=None, epic_type=None, dry_run=False):
+        """Assign a project label to epics that are missing one."""
+        if not label:
+            print("ERROR: a project label is required.")
+            return
+        if label not in self.PROJECT_LABELS:
+            print(f"WARNING: '{label}' is not in the configured PROJECT_LABELS: {self.PROJECT_LABELS}")
+
+        group    = self.get_group_by_name(self.parent_group)
+        proj_set = set(self.PROJECT_LABELS)
+        print(f"Group : {group.full_path}  →  assigning {label}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal updated, skipped, errors
+            for epic in grp.epics.list(all=True):
+                if set(epic.labels) & proj_set:
+                    skipped += 1
+                    continue
+                if epic_type and epic_type not in epic.labels:
+                    skipped += 1
+                    continue
+                if dry_run:
+                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{label}")
+                    updated += 1
+                else:
+                    try:
+                        epic.labels = list(epic.labels) + [label]
+                        epic.save()
+                        print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{label}")
+                        updated += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_generate_issues(self, count=5, dry_run=False):
+        """Create issues in team backlog projects linked to Feature epics."""
+        import lorem as _lorem  # optional dep — fall back to numbered titles if missing
+
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Group : {group.full_path}  →  {count} issues per Feature")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        fib = self.fibonacci_weights
+
+        def _title(i):
+            try:
+                return _lorem.sentence()[:80]
+            except Exception:
+                return f"Generated issue {i}"
+
+        created = errors = 0
+        for proj_stub in group.projects.list(all=True, include_subgroups=True):
+            if not proj_stub.path.endswith("-backlog"):
+                continue
+            try:
+                proj = self.gl.projects.get(proj_stub.id)
+            except Exception as e:
+                print(f"  ERROR fetching project '{proj_stub.path}': {e}")
+                continue
+
+            # Find the parent team group to get its Feature epics
+            try:
+                team_group = self.gl.groups.get(proj.namespace["id"])
+                features   = [e for e in team_group.epics.list(all=True) if "Feature" in e.labels]
+            except Exception as e:
+                print(f"  ERROR fetching features for '{proj_stub.path}': {e}")
+                continue
+
+            if not features:
+                print(f"  SKIP  {proj.path_with_namespace} — no Feature epics found")
+                continue
+
+            for feat in features:
+                for i in range(1, count + 1):
+                    title = _title(i)
+                    w     = random.choice(fib)
+                    if dry_run:
+                        print(f"  DRY  [{feat.title[:40]}] issue {i}: '{title[:50]}' ({w} pt)")
+                        created += 1
+                    else:
+                        try:
+                            issue = proj.issues.create({
+                                "title":    title,
+                                "weight":   w,
+                                "epic_id":  feat.id,
+                            })
+                            print(f"  CREATED #{issue.iid} '{title[:50]}' → Feature '{feat.title[:40]}' ({w} pt)")
+                            created += 1
+                        except Exception as e:
+                            print(f"  ERROR  Feature '{feat.title[:40]}' issue {i}: {e}")
+                            errors += 1
+
+        print(f"\nDone.  Created: {created}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # Priority 3 — State Simulation
+    # ------------------------------------------------------------------
+
+    def _tool_set_epic_states(self, state="close", piid=None, epic_type=None, dry_run=False):
+        """Open or close epics matching optional type and/or PI filters."""
+        if state not in ("open", "close"):
+            print("ERROR: state must be 'open' or 'close'.")
+            return
+
+        group      = self.get_group_by_name(self.parent_group)
+        state_event = state  # python-gitlab uses "close" / "reopen"
+        if state == "open":
+            state_event = "reopen"
+
+        print(f"Group  : {group.full_path}")
+        print(f"Action : {state}  piid={piid or 'all'}  type={epic_type or 'all'}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal updated, skipped, errors
+            for epic in grp.epics.list(all=True):
+                if piid and piid not in epic.labels:
+                    skipped += 1
+                    continue
+                if epic_type and epic_type not in epic.labels:
+                    skipped += 1
+                    continue
+                current = epic.state.lower()
+                if (state == "close" and current == "closed") or (state == "open" and current == "opened"):
+                    skipped += 1
+                    continue
+                if dry_run:
+                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → {state}")
+                    updated += 1
+                else:
+                    try:
+                        epic.state_event = state_event
+                        epic.save()
+                        print(f"  {state.upper()}D  #{epic.iid} '{epic.title[:55]}'")
+                        updated += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # Priority 4 — Validation
+    # ------------------------------------------------------------------
+
+    def _tool_audit_hierarchy(self):
+        """Verify Features have Capability parents and Capabilities have Epic parents."""
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Auditing SAFe hierarchy in: {group.full_path}\n")
+
+        all_epics  = {}   # id → epic
+        parent_map = {}   # epic_id → parent_id
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                all_epics[epic.id] = epic
+                pid = getattr(epic, "parent_id", None)
+                if pid:
+                    parent_map[epic.id] = pid
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"Total epics: {len(all_epics)}\n")
+
+        violations = []
+        for eid, epic in all_epics.items():
+            labels = set(epic.labels)
+            pid    = parent_map.get(eid)
+
+            if "Feature" in labels:
+                parent = all_epics.get(pid)
+                if parent is None:
+                    violations.append((epic, "Feature has no parent (expected Capability)"))
+                elif "Capability" not in parent.labels:
+                    ptype = next((t for t in ("Epic", "Capability", "Feature") if t in parent.labels), "unknown")
+                    violations.append((epic, f"Feature parent is {ptype}, expected Capability"))
+
+            elif "Capability" in labels:
+                parent = all_epics.get(pid)
+                if parent is None:
+                    violations.append((epic, "Capability has no parent (expected Epic)"))
+                elif "Epic" not in parent.labels:
+                    ptype = next((t for t in ("Epic", "Capability", "Feature") if t in parent.labels), "unknown")
+                    violations.append((epic, f"Capability parent is {ptype}, expected Epic"))
+
+        if not violations:
+            print("  ✓  All hierarchy relationships are valid.")
+        else:
+            print(f"  ✗  {len(violations)} violation(s) found:\n")
+            for epic, reason in violations:
+                print(f"  [{epic.iid}] '{epic.title[:60]}'")
+                print(f"       {reason}  —  {epic.web_url}")
+
+        print(f"\nOverall: {'PASS ✓' if not violations else 'FAIL ✗'}")
+
+    def _tool_weight_drift_check(self, threshold=20.0, epic_type=None):
+        """Flag epics where planned weight vs sum of issue weights drifts beyond a threshold."""
+        group   = self.get_group_by_name(self.parent_group)
+        metrics = self.calculate_portfolio_metrics(self.parent_group)
+
+        tiers = ["Epic", "Capability", "Feature"] if not epic_type else [epic_type]
+        epics = [e for t in tiers if t in metrics for e in metrics[t]]
+
+        print(f"Group    : {group.full_path}")
+        print(f"Threshold: {threshold}%")
+        print(f"Checking : {len(epics)} epic(s)\n")
+
+        flagged  = 0
+        no_plan  = 0
+        ok_count = 0
+
+        for e in sorted(epics, key=lambda x: x.get("title", "")):
+            planned = e.get("planned_weight", 0)
+            actual  = e.get("actual_weight",  0)
+
+            if not planned:
+                no_plan += 1
+                continue
+
+            drift_pct = abs(actual - planned) / planned * 100
+
+            if drift_pct > threshold:
+                flagged += 1
+                direction = "▲ over" if actual > planned else "▼ under"
+                etype = next((t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])), "?")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                print(
+                    f"  !! {icon} [{e['iid']}] '{e['title'][:55]}'  "
+                    f"planned={planned}pt  actual={actual}pt  "
+                    f"drift={drift_pct:.0f}% {direction}"
+                )
+            else:
+                ok_count += 1
+
+        print(f"\nDone.  Flagged: {flagged}  OK: {ok_count}  No planned weight: {no_plan}")
+
+    # ------------------------------------------------------------------
+    # Priority 5 — Reset / Cleanup
+    # ------------------------------------------------------------------
+
+    def _tool_reset_pi_progress(self, piid=None, dry_run=False):
+        """Reopen all closed issues linked to epics in a specific PI."""
+        if not piid:
+            print("ERROR: a PIID label is required.")
+            return
+
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Group : {group.full_path}  →  reopening closed issues for {piid}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        print("\nCollecting epics for this PI...")
+        pi_epic_ids = set()
+
+        def _walk_epics(grp):
+            for epic in grp.epics.list(all=True):
+                if piid in epic.labels:
+                    pi_epic_ids.add(epic.id)
+            for sg in grp.subgroups.list(all=True):
+                _walk_epics(self.gl.groups.get(sg.id))
+
+        _walk_epics(group)
+        print(f"  Found {len(pi_epic_ids)} epics in {piid}")
+
+        if not pi_epic_ids:
+            print(f"No epics found with label '{piid}' — nothing to do.")
+            return
+
+        print("\nCollecting closed issues linked to those epics...")
+        reopened = errors = 0
+        for proj in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_p = self.gl.projects.get(proj.id)
+                for issue in full_p.issues.list(all=True, state="closed"):
+                    epic = getattr(issue, "epic", None)
+                    if not (epic and epic.get("id") in pi_epic_ids):
+                        continue
+                    if dry_run:
+                        print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
+                        reopened += 1
+                    else:
+                        try:
+                            issue.state_event = "reopen"
+                            issue.save()
+                            print(f"  REOPENED #{issue.iid} '{issue.title[:55]}'")
+                            reopened += 1
+                        except Exception as e:
+                            print(f"  ERROR  #{issue.iid}: {e}")
+                            errors += 1
+            except Exception as e:
+                print(f"  WARNING: could not fetch issues for '{proj.path}': {e}")
+
+        print(f"\nDone.  Reopened: {reopened}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_labels(self, label=None, epic_type=None, dry_run=False):
+        """Remove a specific label from all epics matching an optional type filter."""
+        if not label:
+            print("ERROR: a label to remove is required.")
+            return
+
+        group = self.get_group_by_name(self.parent_group)
+        print(f"Group  : {group.full_path}  →  removing label '{label}'")
+        if epic_type:
+            print(f"Filter : type = {epic_type}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal updated, skipped, errors
+            for epic in grp.epics.list(all=True):
+                if epic_type and epic_type not in epic.labels:
+                    skipped += 1
+                    continue
+                if label not in epic.labels:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l != label]
+                if dry_run:
+                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' — remove '{label}'")
+                    updated += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  REMOVED  #{epic.iid} '{epic.title[:55]}' — '{label}' stripped")
+                        updated += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
