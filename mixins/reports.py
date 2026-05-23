@@ -57,6 +57,12 @@ REPORTS = [
         "method":      "generate_team_backlog_report",
         "needs_group": False,
     },
+    {
+        "key":         "art-feature-status",
+        "description": "ART Feature Status Report — all Features per ART grouped by Team, with completion, weight, and risk",
+        "method":      "generate_art_feature_status_report",
+        "needs_group": False,
+    },
 ]
 
 
@@ -1257,6 +1263,142 @@ class ReportsMixin:
 
         summary = f"· {len(all_issues)} issues · {pct}% done · {total_w} pt total"
         return (vs_group.name, art_group.name, team_group.name, wiki_url, summary)
+
+    # ------------------------------------------------------------------
+    # ART-level reports
+    # ------------------------------------------------------------------
+
+    def generate_art_feature_status_report(self):
+        """One wiki page per ART showing all Features grouped by Team, plus a root index."""
+        root_group = self.get_group_by_name(self.parent_group)
+        print(f"Generating ART Feature Status Reports under: {root_group.full_path}")
+
+        metrics  = self.calculate_portfolio_metrics(self.parent_group)
+        features = metrics.get("Feature", [])
+
+        # Map team_group_id → (vs_group, art_group, team_group)
+        team_hierarchy = {}
+        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
+            team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
+
+        # Bucket features: art_id → team_id → [feature_metric]
+        art_buckets = defaultdict(lambda: defaultdict(list))
+        for f in features:
+            gid = f.get("group_id")
+            if gid in team_hierarchy:
+                _, art_grp, _ = team_hierarchy[gid]
+                art_buckets[art_grp.id][gid].append(f)
+
+        index_entries = []
+        for vs_group, art_group in self._iter_art_groups(root_group):
+            if art_group.id not in art_buckets:
+                continue
+            entry = self._generate_art_feature_status_page(
+                root_group, vs_group, art_group,
+                art_buckets[art_group.id], team_hierarchy,
+            )
+            if entry:
+                index_entries.append(entry)
+
+        md = []
+        md.append(f"# ART Feature Status Index — {root_group.name}")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Links to each ART's feature status report.")
+        md.append("")
+
+        current_vs = None
+        for vs_name, art_name, wiki_url, total_f, at_risk, blocked in index_entries:
+            if vs_name != current_vs:
+                md.append(f"### 🔷 {vs_name}")
+                current_vs = vs_name
+            risk_str    = f" · ⚠️ {at_risk} at risk" if at_risk else ""
+            blocked_str = f" · 🔒 {blocked} blocked" if blocked else ""
+            md.append(f"- [**{art_name} — Feature Status**]({wiki_url})  · {total_f} features{risk_str}{blocked_str}")
+
+        md.append("")
+        self.upload_to_wiki(root_group, f"{root_group.name} - ART Feature Status Index", "\n".join(md))
+        print(f"  → Root wiki: {root_group.name} - ART Feature Status Index")
+
+    def _generate_art_feature_status_page(self, root_group, vs_group, art_group, team_buckets, team_hierarchy):
+        wiki_title = f"ART Feature Status/{vs_group.name}/{art_group.name}"
+        wiki_url   = (
+            f"{root_group.web_url}/-/wikis/ART-Feature-Status"
+            f"/{vs_group.name.replace(' ', '-')}/{art_group.name.replace(' ', '-')}"
+        )
+
+        md = []
+        md.append(f"# ART Feature Status — {art_group.name}")
+        md.append(
+            f"**{vs_group.name} / {art_group.name}**  |  "
+            f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
+            f"[View ART Group]({art_group.web_url})"
+        )
+        md.append("")
+
+        total_f   = 0
+        at_risk   = 0
+        blocked_c = 0
+
+        for team_id, feature_list in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2].name):
+            _, _, team_group = team_hierarchy[team_id]
+            md.append(f"## {team_group.name}")
+            md.append("")
+            md.append("| Feature | PI | State | % Done | PI Elapsed | Weight | Status |")
+            md.append("|---------|-----|-------|--------|------------|--------|--------|")
+
+            for f in sorted(feature_list, key=lambda x: x.get("title", "")):
+                title      = f["title"]
+                url        = f["web_url"]
+                piid       = f.get("piid") or "—"
+                state      = f["state"].capitalize()
+                pct_done   = f["pct_complete"]
+                pct_pi     = f.get("pct_through_pi")
+                planned    = f.get("planned_weight", 0)
+                actual     = f.get("actual_weight", 0)
+                blocked_by = f.get("blocked_by_count", 0)
+
+                if blocked_by:
+                    status = "🔒 Blocked"
+                    blocked_c += 1
+                elif pct_pi is None or pct_pi == 0:
+                    status = "🔵 Planned"
+                elif pct_pi >= 100:
+                    status = "✅ Complete" if pct_done >= 100 else "❌ Incomplete"
+                elif pct_done >= pct_pi:
+                    status = "✅ On Track"
+                else:
+                    status = "⚠️ At Risk"
+                    at_risk += 1
+
+                pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
+                weight_str = f"{planned}pt → {actual}pt"
+                md.append(
+                    f"| [{title}]({url}) | {piid} | {state} "
+                    f"| {pct_done}% | {pi_str} | {weight_str} | {status} |"
+                )
+                total_f += 1
+
+            md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "- **% Done** — closed issue weight ÷ total issue weight for all issues linked to this Feature",
+            "- **PI Elapsed** — how far through the PI quarter today falls: `(today − PI start) ÷ (PI end − PI start) × 100`",
+            "- **Weight** — Planned pt → Actual pt (planned set via GraphQL; actual = sum of linked issue weights)",
+            "- **✅ On Track** — % Done ≥ PI Elapsed for the current PI",
+            "- **⚠️ At Risk** — % Done < PI Elapsed for the current PI",
+            "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
+            "- **🔵 Planned** — future PI or PI not yet started",
+            "- **🔒 Blocked** — Feature has one or more active blocking relationships",
+            "",
+        ])
+
+        self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
+        print(f"    → Wiki: {wiki_title}")
+
+        return (vs_group.name, art_group.name, wiki_url, total_f, at_risk, blocked_c)
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
