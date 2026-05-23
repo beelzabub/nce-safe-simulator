@@ -3,13 +3,13 @@ Assigns planned weights to all epics in the configured group based on their
 SAFe hierarchy type label (Epic / Capability / Feature).
 
 Each epic gets a random weight drawn from the pool for its type, as defined
-in epic_type_planned_weights in nce_gitlab_config.json.
+in epic_type_planned_weights in config.json.
 
 The GitLab REST API does not expose epic weight; weights are written via the
 GraphQL workItemUpdate mutation instead.
 
 Usage:
-    python update_epic_weights.py [--config nce_gitlab_config.json] [--dry-run]
+    python update_epic_weights.py [--config config.json] [--dry-run]
 """
 
 import argparse
@@ -69,7 +69,7 @@ def set_weight_gql(session, url, work_item_id, weight):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default="nce_gitlab_config.json")
+    parser.add_argument("--config", default="config.json")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be changed without saving")
     args = parser.parse_args()
