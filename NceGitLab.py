@@ -140,7 +140,8 @@ def main():
     parser.add_argument("--usage",     action="store_true", help="Show this help message and exit")
     parser.add_argument("--clean",     action="store_true", help="Delete all group data")
     parser.add_argument("--create",    action="store_true", help="Bootstrap lorem SAFe data")
-    parser.add_argument("--report",    action="store_true", help="Generate all reports")
+    parser.add_argument("--report",    nargs="?", const="__menu__", metavar="REPORT",
+                        help="Generate reports interactively (omit REPORT to show menu)")
     parser.add_argument("--all",       action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("--utilities", nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
@@ -161,8 +162,11 @@ def main():
         gl.cleanup_group()
     if args.all or args.create:
         gl.create_all_lorem_objects()
-    if args.all or args.report:
+    if args.all:
         gl.generate_all_reports()
+    elif args.report is not None:
+        report_key = None if args.report == "__menu__" else args.report
+        gl.run_reports_menu(report_key)
 
 
 if __name__ == "__main__":
