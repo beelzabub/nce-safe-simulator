@@ -16,6 +16,7 @@ from mixins import (
     MilestonesMixin,
     ProjectsMixin,
     ReportsMixin,
+    ToolsMixin,
     UtilitiesMixin,
     WikiMixin,
 )
@@ -32,6 +33,7 @@ class NceGitLab(
     MilestonesMixin,
     ReportsMixin,
     BootstrapMixin,
+    ToolsMixin,
 ):
     def __init__(self, config_file="nce_gitlab_config.json"):
         self.config_file = Path(config_file)
@@ -135,11 +137,13 @@ class NceGitLab(
 
 def main():
     parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
-    parser.add_argument("--usage",  action="store_true", help="Show this help message and exit")
-    parser.add_argument("--clean",  action="store_true", help="Delete all group data")
-    parser.add_argument("--create", action="store_true", help="Bootstrap lorem SAFe data")
-    parser.add_argument("--report", action="store_true", help="Generate all reports")
-    parser.add_argument("--all",    action="store_true", help="Run clean, create, and report in sequence")
+    parser.add_argument("--usage",     action="store_true", help="Show this help message and exit")
+    parser.add_argument("--clean",     action="store_true", help="Delete all group data")
+    parser.add_argument("--create",    action="store_true", help="Bootstrap lorem SAFe data")
+    parser.add_argument("--report",    action="store_true", help="Generate all reports")
+    parser.add_argument("--all",       action="store_true", help="Run clean, create, and report in sequence")
+    parser.add_argument("--utilities", nargs="?", const="__menu__", metavar="TOOL",
+                        help="Run a utility tool interactively (omit TOOL to show menu)")
     args = parser.parse_args()
 
     if args.usage or not any(vars(args).values()):
@@ -147,6 +151,11 @@ def main():
         return
 
     gl = NceGitLab()
+
+    if args.utilities is not None:
+        tool_key = None if args.utilities == "__menu__" else args.utilities
+        gl.run_tools_menu(tool_key)
+        return
 
     if args.all or args.clean:
         gl.cleanup_group()
