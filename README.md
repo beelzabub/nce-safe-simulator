@@ -230,14 +230,14 @@ Planned utilities for seeding test data, simulating PI progress, validating mode
 
 | Utility | Description | Status |
 |---------|-------------|--------|
-| `set-epic-states` | Open or close all epics matching a type and/or PI filter. Lets you model past PIs as complete so historical reports render correctly. Options: `--state` (open/close), `--piid`, `--type`, `--dry-run` | ⬜ Planned |
+| `set-epic-states` | Open or close all epics matching a type and/or PI filter. Lets you model past PIs as complete so historical reports render correctly. Options: `--state` (open/close), `--piid`, `--type`, `--dry-run` | ✅ Done |
 
 ### Priority 4 — Validation
 
 | Utility | Description | Status |
 |---------|-------------|--------|
-| `audit-hierarchy` | Verify that Features have Capability parents and Capabilities have Epic parents. Flags orphaned or misplaced epics that would skew hierarchy reports. | ⬜ Planned |
-| `weight-drift-check` | Compare planned weight (GraphQL) vs sum of issue weights (REST) per epic. Flag epics where drift exceeds a configurable threshold. Options: `--threshold` (default 20%), `--type` filter | ⬜ Planned |
+| `audit-hierarchy` | Verify that Features have Capability parents and Capabilities have Epic parents. Flags orphaned or misplaced epics that would skew hierarchy reports. | ✅ Done |
+| `weight-drift-check` | Compare planned weight (GraphQL) vs sum of issue weights (REST) per epic. Flag epics where drift exceeds a configurable threshold. Options: `--threshold` (default 20%), `--type` filter | ✅ Done |
 
 > **Note — Features under Epics:**  
 > In some SAFe configurations a Feature may be parented directly to an Epic (skipping the Capability level). The current `audit-hierarchy` logic treats this as a violation. Several reports (`ART Feature Status`, `ART Capacity Balance`, `VS Capability Dashboard`) also assume the full three-tier chain.  
@@ -247,8 +247,8 @@ Planned utilities for seeding test data, simulating PI progress, validating mode
 
 | Utility | Description | Status |
 |---------|-------------|--------|
-| `reset-pi-progress` | Reopen all issues in a given PI. Lets you re-run a simulation from scratch without recreating data. Options: `--piid`, `--dry-run` | ⬜ Planned |
-| `strip-labels` | Remove a specific label from all epics matching a filter. Useful for reassigning PI allocations or clearing test labels. Options: `--label`, `--type` filter, `--dry-run` | ⬜ Planned |
+| `reset-pi-progress` | Reopen all issues in a given PI. Lets you re-run a simulation from scratch without recreating data. Options: `--piid`, `--dry-run` | ✅ Done |
+| `strip-labels` | Remove a specific label from all epics matching a filter. Useful for reassigning PI allocations or clearing test labels. Options: `--label`, `--type` filter, `--dry-run` | ✅ Done |
 
 ---
 
