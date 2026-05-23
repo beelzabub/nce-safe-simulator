@@ -1,0 +1,234 @@
+import re
+import requests
+from collections import defaultdict
+from datetime import date
+from pprint import pformat
+
+
+class UtilitiesMixin:
+
+    def graphql_query(self, query, variables=None):
+        payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
+        response = requests.post(
+            f"{self.url}/api/graphql",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {self.private_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        if "errors" in data:
+            for err in data["errors"]:
+                print(f"GraphQL error: {err['message']}")
+            return None
+        return data["data"]
+
+    def _set_epic_weight(self, epic, weight):
+        """Set weight on an epic via GraphQL workItemUpdate (REST API silently ignores weight)."""
+        wid = getattr(epic, 'work_item_id', None)
+        if not wid:
+            return
+        mutation = """
+        mutation UpdateWeight($id: WorkItemID!, $weight: Int!) {
+          workItemUpdate(input: {id: $id, weightWidget: {weight: $weight}}) {
+            workItem { id }
+            errors
+          }
+        }
+        """
+        data = self.graphql_query(mutation, variables={"id": f"gid://gitlab/WorkItem/{wid}", "weight": weight})
+        if data:
+            errors = data.get("workItemUpdate", {}).get("errors", [])
+            if errors:
+                print(f"  Weight error for epic {epic.iid}: {errors}")
+
+    def _fetch_epic_weights(self, epics):
+        """Return {web_url: weight} for a list of REST epic objects via GraphQL WorkItem queries."""
+        query = """
+        query GetWorkItemWeight($id: WorkItemID!) {
+            workItem(id: $id) {
+                widgets { ... on WorkItemWidgetWeight { weight } }
+            }
+        }
+        """
+        print(f"  Fetching planned weights for {len(epics)} epics...")
+        weights = {}
+        for epic in epics:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                continue
+            gid = f"gid://gitlab/WorkItem/{wid}"
+            try:
+                data = self.graphql_query(query, variables={"id": gid})
+                if data:
+                    for w in data.get("workItem", {}).get("widgets", []):
+                        if isinstance(w, dict) and w.get("weight") is not None:
+                            weights[epic.web_url] = w["weight"]
+                            break
+            except Exception:
+                pass
+        return weights
+
+    def calculate_portfolio_metrics(self, group_name):
+        if hasattr(self, '_metrics_cache') and group_name in self._metrics_cache:
+            return self._metrics_cache[group_name]
+
+        group = self.get_group_by_name(group_name)
+        if not group:
+            print(f"Group '{group_name}' not found.")
+            return {}
+
+        gql_data = self.graphql_query(
+            """
+            query EpicBlockCounts($fullPath: ID!) {
+              group(fullPath: $fullPath) {
+                epics {
+                  nodes { webUrl blockedByCount blockingCount }
+                }
+              }
+            }
+            """,
+            variables={"fullPath": group.full_path},
+        )
+        epic_blocks = {}
+        if gql_data:
+            epic_blocks = {
+                n["webUrl"]: n for n in gql_data["group"]["epics"]["nodes"]
+            }
+
+        print("  Fetching issue weights...")
+        issues_by_epic_id = defaultdict(list)
+        for project in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_project = self.gl.projects.get(project.id)
+                for issue in full_project.issues.list(all=True):
+                    epic_info = getattr(issue, 'epic', None)
+                    if epic_info and epic_info.get('id'):
+                        issues_by_epic_id[epic_info['id']].append(issue)
+            except Exception as e:
+                print(f"  Failed to fetch issues for '{project.name}': {e}")
+
+        all_epics = group.epics.list(all=True)
+        epic_weights = self._fetch_epic_weights(all_epics)
+        metrics = {"Epic": [], "Capability": [], "Feature": []}
+
+        print(f"  Processing {len(all_epics)} epics...")
+        for epic in all_epics:
+            gql    = epic_blocks.get(epic.web_url, {})
+            issues = issues_by_epic_id.get(epic.id, [])
+
+            total_w  = sum(i.weight or 0 for i in issues)
+            closed_w = sum(i.weight or 0 for i in issues if i.state == 'closed')
+            if total_w > 0:
+                pct_done = round(closed_w / total_w * 100)
+            elif epic.state == 'closed':
+                pct_done = 100
+            else:
+                pct_done = 0
+
+            piid   = next((l for l in epic.labels if l.startswith("PIID::")), None)
+            pct_pi = self._pct_through_pi(piid)
+
+            associated_data = {
+                "id":               epic.id,
+                "title":            epic.title,
+                "state":            epic.state.capitalize(),
+                "blocked_by_count": gql.get("blockedByCount", 0),
+                "blocks_count":     gql.get("blockingCount", 0),
+                "web_url":          epic.web_url,
+                "labels":           epic.labels,
+                "parent_id":        getattr(epic, 'parent_id', None),
+                "planned_weight":   epic_weights.get(epic.web_url, 0),
+                "actual_weight":    total_w,
+                "pct_complete":     pct_done,
+                "pct_through_pi":   pct_pi,
+                "piid":             piid,
+                "group_id":         getattr(epic, 'group_id', None),
+            }
+
+            if "Epic" in epic.labels:
+                epic_type = "Epic"
+            elif "Capability" in epic.labels:
+                epic_type = "Capability"
+            elif "Feature" in epic.labels:
+                epic_type = "Feature"
+            else:
+                print(f"Skipping epic '{epic.title}' — no matching type label.")
+                continue
+
+            metrics[epic_type].append(associated_data)
+
+        # Roll % complete up through the hierarchy
+        hierarchy = defaultdict(list)
+        for etype in metrics.values():
+            for e in etype:
+                if e["parent_id"] is not None:
+                    hierarchy[e["parent_id"]].append(e)
+
+        def rollup_pct(e):
+            children = hierarchy.get(e["id"], [])
+            if not children:
+                return e["pct_complete"]
+            return round(sum(rollup_pct(c) for c in children) / len(children))
+
+        def rollup_actual(e):
+            children = hierarchy.get(e["id"], [])
+            if not children:
+                return e["actual_weight"]
+            return sum(rollup_actual(c) for c in children)
+
+        for cap in metrics["Capability"]:
+            cap["pct_complete"]  = rollup_pct(cap)
+            cap["actual_weight"] = rollup_actual(cap)
+        for ep in metrics["Epic"]:
+            ep["pct_complete"]  = rollup_pct(ep)
+            ep["actual_weight"] = rollup_actual(ep)
+
+        if not hasattr(self, '_metrics_cache'):
+            self._metrics_cache = {}
+        self._metrics_cache[group_name] = metrics
+        return metrics
+
+    def _pi_dates_from_label(self, piid):
+        """Parse a PIID::YYYYQn label into (start_date, end_date). Returns (None, None) on failure."""
+        if not piid:
+            return None, None
+        m = re.match(r'PIID::(\d{4})Q([1-4])$', piid)
+        if not m:
+            return None, None
+        year, quarter = int(m.group(1)), int(m.group(2))
+        q_starts = {1: (1, 1),  2: (4, 1),  3: (7, 1),  4: (10, 1)}
+        q_ends   = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+        return date(year, *q_starts[quarter]), date(year, *q_ends[quarter])
+
+    def _pct_through_pi(self, piid):
+        """Return integer % elapsed through the PI quarter, or None if label can't be parsed."""
+        start, end = self._pi_dates_from_label(piid)
+        if start is None:
+            return None
+        today = date.today()
+        if today < start:
+            return 0
+        if today >= end:
+            return 100
+        return round((today - start).days / (end - start).days * 100)
+
+    def sanitize_name(self, name):
+        return re.sub(r'[^a-z0-9\-]', '', name.lower().replace(' ', '-'))
+
+    def truncate_text(self, text, max_length=20):
+        if len(text) > max_length:
+            return text[:max_length - 3] + "..."
+        return text
+
+    def pprint_obj_attrs(self, obj):
+        try:
+            if not hasattr(obj, "attributes"):
+                return "The provided object does not have 'attributes'. Please provide a valid obj object."
+            print(pformat(obj.attributes))
+        except Exception as e:
+            return f"Error retrieving obj attributes: {e}"
