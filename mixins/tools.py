@@ -262,8 +262,10 @@ class ToolsMixin:
     # Tool implementations
     # ------------------------------------------------------------------
 
-    def _tool_close_percent(self, percent=30.0, seed=None, dry_run=False):
+    def _tool_close_percent(self, percent=None, seed=None, dry_run=False):
         """Randomly close N% of open epics and issues across the group hierarchy."""
+        if percent is None:
+            percent = self.default_close_percent
         group = self.get_group_by_name(self.parent_group)
         rng   = random.Random(seed)
 
@@ -463,8 +465,10 @@ class ToolsMixin:
         print(f"\nOverall: {'PASS ✓' if all_pass else 'FAIL ✗'}")
         return all_pass
 
-    def _tool_generate_epic_blocks(self, count=10, dry_run=False):
+    def _tool_generate_epic_blocks(self, count=None, dry_run=False):
         """Create (positive count) or remove (negative count) blocking relationships between epics."""
+        if count is None:
+            count = self.default_generate_blocks_count
         import requests as _requests
 
         group   = self.get_group_by_name(self.parent_group)
@@ -704,8 +708,10 @@ class ToolsMixin:
                     print(f"       #{e.iid}  '{e.title[:60]}'  {e.web_url}")
         print(f"\nOverall: {'PASS ✓' if all_ok else 'FAIL ✗'}")
 
-    def _tool_simulate_pi_progress(self, piid=None, percent=50.0, dry_run=False):
+    def _tool_simulate_pi_progress(self, piid=None, percent=None, dry_run=False):
         """Close X% of open issues linked to epics in a specific PI."""
+        if percent is None:
+            percent = self.default_simulate_pi_percent
         if not piid:
             print("ERROR: a PIID label is required.")
             return
@@ -862,8 +868,10 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_generate_issues(self, count=5, dry_run=False):
+    def _tool_generate_issues(self, count=None, dry_run=False):
         """Create issues in team backlog projects linked to Feature epics."""
+        if count is None:
+            count = self.default_generate_issues_count
         import lorem as _lorem  # optional dep — fall back to numbered titles if missing
 
         group = self.get_group_by_name(self.parent_group)
@@ -1035,8 +1043,10 @@ class ToolsMixin:
 
         print(f"\nOverall: {'PASS ✓' if not violations else 'FAIL ✗'}")
 
-    def _tool_weight_drift_check(self, threshold=20.0, epic_type=None):
+    def _tool_weight_drift_check(self, threshold=None, epic_type=None):
         """Flag epics where planned weight vs sum of issue weights drifts beyond a threshold."""
+        if threshold is None:
+            threshold = self.default_weight_drift_threshold
         group   = self.get_group_by_name(self.parent_group)
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 

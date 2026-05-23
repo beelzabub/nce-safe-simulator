@@ -222,11 +222,21 @@ class BootstrapMixin:
         return epics
 
     def create_all_lorem_objects(self,
-                                  num_value_streams=2, num_arts=2, num_teams=2,
-                                  portfolio_epics=5,
-                                  vs_epics=3,
-                                  art_epics=4,
-                                  team_features=4):
+                                  num_value_streams=None, num_arts=None, num_teams=None,
+                                  portfolio_epics=None,
+                                  vs_epics=None,
+                                  art_epics=None,
+                                  team_features=None,
+                                  direct_feature_ratio=None):
+        num_value_streams    = num_value_streams    if num_value_streams    is not None else self.default_num_value_streams
+        num_arts             = num_arts             if num_arts             is not None else self.default_num_arts
+        num_teams            = num_teams            if num_teams            is not None else self.default_num_teams
+        portfolio_epics      = portfolio_epics      if portfolio_epics      is not None else self.default_portfolio_epics
+        vs_epics             = vs_epics             if vs_epics             is not None else self.default_vs_caps_per_vs
+        art_epics            = art_epics            if art_epics            is not None else self.default_art_caps_per_art
+        team_features        = team_features        if team_features        is not None else self.default_features_per_team
+        direct_feature_ratio = direct_feature_ratio if direct_feature_ratio is not None else self.default_direct_feature_ratio
+
         root_group = self._get_or_create_root_group()
         if root_group is None:
             return
@@ -290,6 +300,14 @@ class BootstrapMixin:
                     print(f"  Failed to link '{child_epic.title[:40]}': {e}")
 
         print("\nLinking cross-group hierarchy...")
-        _link_to_parents(all_vs_caps,  all_portfolio_epics)
+        _link_to_parents(all_vs_caps, all_portfolio_epics)
         _link_to_parents(all_art_caps, all_vs_caps)
-        _link_to_parents(all_features, all_art_caps)
+
+        # Split Features: majority direct to Portfolio Epics, minority via Capability chain
+        random.shuffle(all_features)
+        split           = max(1, round(len(all_features) * direct_feature_ratio)) if all_features else 0
+        direct_features = all_features[:split]
+        cap_features    = all_features[split:]
+        print(f"\nFeature routing: {len(direct_features)} direct → Epic  |  {len(cap_features)} via Capability chain  ({int(direct_feature_ratio*100)}% direct)")
+        _link_to_parents(direct_features, all_portfolio_epics)
+        _link_to_parents(cap_features,    all_art_caps)
