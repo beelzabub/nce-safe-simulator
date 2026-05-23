@@ -1,7 +1,10 @@
 import sys
+import time
 from collections import defaultdict
 from datetime import date, datetime
 from urllib.parse import quote
+
+from .utils import _fmt_duration
 
 # ---------------------------------------------------------------------------
 # Report registry — each entry describes one runnable report.
@@ -2227,13 +2230,27 @@ class ReportsMixin:
         group = self.get_group_by_name(self.parent_group)
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
-        total = len(reports)
+        total  = len(reports)
+        phases = []
+
         for i, report in enumerate(reports, 1):
             print(f"[{i}/{total}] {report['description']}")
+            start = datetime.now()
+            t0    = time.monotonic()
             try:
                 method = getattr(self, report["method"])
                 method(group) if report["needs_group"] else method()
             except Exception as e:
                 print(f"  ERROR running '{report['key']}': {e}")
+            elapsed = time.monotonic() - t0
+            end     = datetime.now()
+            phases.append((report["key"], start, end, elapsed))
+            print(f"  ↳ {start.strftime('%H:%M:%S')} → {end.strftime('%H:%M:%S')}  {_fmt_duration(elapsed)}\n")
 
-        print(f"\n{total} report(s) uploaded to wiki.")
+        self._print_timing_table(phases, f"{total} report(s) completed")
+
+        # expose aggregate for --all phase summary
+        if phases:
+            wall = (phases[-1][2] - phases[0][1]).total_seconds()
+            label = f"reports ({total})" if total > 1 else f"report: {phases[0][0]}"
+            self._last_reports_phase = (label, phases[0][1], phases[-1][2], wall)
