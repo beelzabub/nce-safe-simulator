@@ -1,6 +1,6 @@
 {
   "url": "https://gitlab.com",
-  "parent_group": "AMW-120",
+  "parent_group": "BMW-120",
   "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
   "fibonacci_weights": [1, 2, 3, 5, 8, 13],
   "private_token": "glpat-v0WL04-c5nmsR7KPOK008GM6MQpvOjEKdTptaGFueQ8.01.170l5y4xi",
@@ -11,5 +11,24 @@
     "Feature":    [20, 30, 40, 50, 60, 80, 100],
     "Capability": [100, 150, 200, 300, 400, 500],
     "Epic":       [500, 800, 1000, 1500, 2000, 3000]
+  },
+  "defaults": {
+    "bootstrap": {
+      "num_value_streams":    2,
+      "num_arts":             2,
+      "num_teams":            2,
+      "portfolio_epics":      5,
+      "vs_caps_per_vs":       3,
+      "art_caps_per_art":     4,
+      "features_per_team":    4,
+      "direct_feature_ratio": 0.70
+    },
+    "tools": {
+      "close_percent":                30.0,
+      "generate_epic_blocks_count":   10,
+      "simulate_pi_progress_percent": 50.0,
+      "generate_issues_count":        5,
+      "weight_drift_threshold":       20.0
+    }
   }
 }
