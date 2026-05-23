@@ -63,6 +63,12 @@ REPORTS = [
         "method":      "generate_art_feature_status_report",
         "needs_group": False,
     },
+    {
+        "key":         "art-capacity-balance",
+        "description": "ART Capacity Balance Report — per-team planned vs actual weight per PI with over/under capacity flags",
+        "method":      "generate_art_capacity_balance_report",
+        "needs_group": False,
+    },
 ]
 
 
@@ -1399,6 +1405,159 @@ class ReportsMixin:
         print(f"    → Wiki: {wiki_title}")
 
         return (vs_group.name, art_group.name, wiki_url, total_f, at_risk, blocked_c)
+
+    def generate_art_capacity_balance_report(self):
+        """One wiki page per ART showing per-team capacity balance by PI, plus a root index."""
+        root_group = self.get_group_by_name(self.parent_group)
+        print(f"Generating ART Capacity Balance Reports under: {root_group.full_path}")
+
+        metrics  = self.calculate_portfolio_metrics(self.parent_group)
+        features = metrics.get("Feature", [])
+
+        team_hierarchy = {}
+        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
+            team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
+
+        # art_id → pi → team_id → [feature_metric]
+        art_pi_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        for f in features:
+            gid  = f.get("group_id")
+            piid = f.get("piid")
+            if gid in team_hierarchy and piid:
+                _, art_grp, _ = team_hierarchy[gid]
+                art_pi_buckets[art_grp.id][piid][gid].append(f)
+
+        index_entries = []
+        for vs_group, art_group in self._iter_art_groups(root_group):
+            if art_group.id not in art_pi_buckets:
+                continue
+            entry = self._generate_art_capacity_balance_page(
+                root_group, vs_group, art_group,
+                art_pi_buckets[art_group.id], team_hierarchy,
+            )
+            if entry:
+                index_entries.append(entry)
+
+        md = []
+        md.append(f"# ART Capacity Balance Index — {root_group.name}")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Per-ART view of planned vs actual team capacity by Program Increment.")
+        md.append("")
+
+        current_vs = None
+        for vs_name, art_name, wiki_url, over_cnt, under_cnt in index_entries:
+            if vs_name != current_vs:
+                md.append(f"### 🔷 {vs_name}")
+                current_vs = vs_name
+            flags = []
+            if over_cnt:
+                flags.append(f"🔴 {over_cnt} over-capacity")
+            if under_cnt:
+                flags.append(f"🔵 {under_cnt} under-capacity")
+            flag_str = "  · " + "  · ".join(flags) if flags else ""
+            md.append(f"- [**{art_name} — Capacity Balance**]({wiki_url}){flag_str}")
+
+        md.append("")
+        self.upload_to_wiki(root_group, f"{root_group.name} - ART Capacity Balance Index", "\n".join(md))
+        print(f"  → Root wiki: {root_group.name} - ART Capacity Balance Index")
+
+    def _generate_art_capacity_balance_page(self, root_group, vs_group, art_group, pi_buckets, team_hierarchy):
+        wiki_title = f"ART Capacity Balance/{vs_group.name}/{art_group.name}"
+        wiki_url   = (
+            f"{root_group.web_url}/-/wikis/ART-Capacity-Balance"
+            f"/{vs_group.name.replace(' ', '-')}/{art_group.name.replace(' ', '-')}"
+        )
+
+        sorted_pis = sorted(
+            pi_buckets.keys(),
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+        )
+
+        md = []
+        md.append(f"# ART Capacity Balance — {art_group.name}")
+        md.append(
+            f"**{vs_group.name} / {art_group.name}**  |  "
+            f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
+            f"[View ART Group]({art_group.web_url})"
+        )
+        md.append("")
+
+        total_over  = 0
+        total_under = 0
+
+        for piid in sorted_pis:
+            team_buckets = pi_buckets[piid]
+            pct_pi       = self._pct_through_pi(piid)
+            start, end   = self._pi_dates_from_label(piid)
+            date_range   = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
+
+            md.append(f"## {piid}")
+            if date_range:
+                md.append(date_range)
+            md.append("")
+            md.append("| Team | Planned | Actual | Δ | Load% | Status |")
+            md.append("|------|---------|--------|---|-------|--------|")
+
+            for team_id, fs in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2].name):
+                _, _, team_group = team_hierarchy[team_id]
+                planned  = sum(f.get("planned_weight", 0) for f in fs)
+                actual   = sum(f.get("actual_weight",  0) for f in fs)
+                delta    = actual - planned
+                delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+
+                if planned > 0:
+                    load_pct = round(actual / planned * 100)
+                else:
+                    load_pct = 0
+
+                if load_pct > 120:
+                    status = "🔴 Over"
+                    total_over += 1
+                elif load_pct > 100:
+                    status = "🟡 High"
+                elif load_pct >= 80:
+                    status = "✅ Balanced"
+                elif planned > 0:
+                    status = "🔵 Under"
+                    total_under += 1
+                else:
+                    status = "—"
+
+                team_link = f'<a href="{team_group.web_url}">{team_group.name}</a>'
+                md.append(
+                    f"| {team_link} | {planned} pt | {actual} pt "
+                    f"| {delta_str} | {load_pct}% | {status} |"
+                )
+
+            md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "",
+            "### Load%",
+            "- **Load%** — `Actual ÷ Planned × 100`: how much work is estimated relative to the team's planned capacity",
+            "",
+            "### Status thresholds",
+            "| Status | Load% range | Meaning |",
+            "|--------|-------------|---------|",
+            "| 🔴 Over      | > 120% | Actual work significantly exceeds planned capacity — team is over-committed |",
+            "| 🟡 High      | 101–120% | Slightly over plan — monitor closely |",
+            "| ✅ Balanced  | 80–100% | Actual work aligns with planned capacity |",
+            "| 🔵 Under     | < 80%  | Team has more capacity than committed work — potential to take on more |",
+            "",
+            "### Column definitions",
+            "- **Planned** — sum of planned weights on Features assigned to this team for the PI (set via GraphQL)",
+            "- **Actual** — sum of story-point weights on all issues linked to those Features",
+            "- **Δ** — Actual minus Planned: ▲ more than planned · ▼ less than planned · = matched",
+            "",
+        ])
+
+        self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
+        print(f"    → Wiki: {wiki_title}")
+
+        return (vs_group.name, art_group.name, wiki_url, total_over, total_under)
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
