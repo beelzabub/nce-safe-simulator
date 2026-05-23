@@ -149,6 +149,7 @@ def main():
 
     if args.usage or not any(vars(args).values()):
         parser.print_help()
+        print()
         return
 
     gl = NceGitLab()
