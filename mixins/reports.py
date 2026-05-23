@@ -52,6 +52,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "piid-project-detail",
+        "description": "Program PI Detail Report — per-PI section view of program workload and status",
+        "method":      "generate_piid_project_detail_report",
+        "needs_group": False,
+    },
+    {
         "key":         "team-backlog",
         "description": "Team Backlog Report — issues grouped by Feature for every Team, with weight and completion",
         "method":      "generate_team_backlog_report",
@@ -380,9 +386,12 @@ class ReportsMixin:
                 f"&state=all"
             )
 
+        detail_title = f"{group.name} - Program PI Detail Report"
+        detail_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{detail_title.replace(' ', '-').lower()}"
+
         md = []
         md.append(f"# Program × PI Report (Group: {group.name})")
-        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  [→ Per-PI Detail View]({detail_url})")
         md.append("")
         md.append("Each cell shows: **Status · Epics (open/total) · % Done (PI elapsed%) · Planned pt → Actual pt**")
         md.append("")
@@ -450,6 +459,131 @@ class ReportsMixin:
         ])
 
         self.upload_to_wiki(group, f"{group.name} - Program PI Report", "\n".join(md))
+
+    def generate_piid_project_detail_report(self):
+        """Per-PI section view of program workload — one section per PIID quarter,
+        each with a narrow table of project labels and their metrics for that PI.
+        Cross-linked to the Program × PI matrix report.
+        """
+        group   = self.get_group_by_name(self.parent_group)
+        metrics = self.calculate_portfolio_metrics(self.parent_group)
+
+        all_epics = [e for epics in metrics.values() for e in epics]
+
+        piid_set  = set(self.PIID_LABELS)
+        proj_set  = set(self.PROJECT_LABELS)
+        cell_data = defaultdict(list)
+        for e in all_epics:
+            proj = next((l for l in e["labels"] if l in proj_set), None)
+            piid = e.get("piid")
+            if proj and piid and piid in piid_set:
+                cell_data[(proj, piid)].append(e)
+
+        def _aggregate(epics):
+            total    = len(epics)
+            open_cnt = sum(1 for e in epics if e["state"].lower() == "opened")
+            planned  = sum(e["planned_weight"] for e in epics)
+            actual   = sum(e["actual_weight"]  for e in epics)
+            blocked  = sum(1 for e in epics if e["blocked_by_count"] > 0)
+            if planned > 0:
+                avg_pct = round(sum(e["pct_complete"] * (e["planned_weight"] or 1) for e in epics) / planned)
+            elif total > 0:
+                avg_pct = round(sum(e["pct_complete"] for e in epics) / total)
+            else:
+                avg_pct = 0
+            return total, open_cnt, planned, actual, avg_pct, blocked
+
+        def _status_icon(piid, avg_pct, pct_pi):
+            if pct_pi is None or pct_pi == 0:
+                return "🔵 Planned"
+            if pct_pi >= 100:
+                return "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+            return "✅ On Track" if avg_pct >= pct_pi else "⚠️ At Risk"
+
+        def _phase_label(pct_pi):
+            if pct_pi is None or pct_pi == 0:
+                return "Future"
+            if pct_pi >= 100:
+                return "Past"
+            return "Current"
+
+        matrix_title = f"{group.name} - Program PI Report"
+        matrix_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{matrix_title.replace(' ', '-').lower()}"
+
+        md = []
+        md.append(f"# Program PI Detail Report (Group: {group.name})")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  [→ Program × PI Matrix View]({matrix_url})")
+        md.append("")
+        md.append("One section per Program Increment. Each table row is a project/program workstream.")
+        md.append("")
+
+        for piid in self.PIID_LABELS:
+            pct_pi     = self._pct_through_pi(piid)
+            start, end = self._pi_dates_from_label(piid)
+            phase      = _phase_label(pct_pi)
+            pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
+            date_range = f"{start} → {end}" if start else "unknown dates"
+
+            phase_icon = {"Future": "🔵", "Current": "🟢", "Past": "⬜"}.get(phase, "")
+            md.append(f"## {phase_icon} {piid} — {phase}")
+            md.append(f"**{date_range}** · PI elapsed: {pi_str}")
+            md.append("")
+            md.append("| Project | Epics (open/total) | % Done | Status | Planned | Actual | Δ | Blocked |")
+            md.append("|---------|-------------------|--------|--------|---------|--------|---|---------|")
+
+            any_row = False
+            for proj in self.PROJECT_LABELS:
+                epics = cell_data.get((proj, piid), [])
+                if not epics:
+                    md.append(f"| **{proj}** | — | — | — | — | — | — | — |")
+                    continue
+
+                any_row = True
+                total, open_cnt, planned, actual, avg_pct, blocked = _aggregate(epics)
+                status    = _status_icon(piid, avg_pct, pct_pi)
+                delta     = actual - planned
+                delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                blocked_str = str(blocked) if blocked else "—"
+                board_url = (
+                    f"{group.web_url}/-/work_items"
+                    f"?label_name[]={quote(piid, safe='')}"
+                    f"&label_name[]={quote(proj, safe='')}"
+                    f"&state=all"
+                )
+                md.append(
+                    f"| **[{proj}]({board_url})** "
+                    f"| {open_cnt}/{total} "
+                    f"| {avg_pct}% "
+                    f"| {status} "
+                    f"| {planned} pt "
+                    f"| {actual} pt "
+                    f"| {delta_str} "
+                    f"| {blocked_str} |"
+                )
+
+            md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "",
+            "| Icon | Status | Condition |",
+            "|------|--------|-----------|",
+            "| ✅ On Track   | Current PI | % Done ≥ % of PI quarter elapsed |",
+            "| ⚠️ At Risk    | Current PI | % Done < % of PI quarter elapsed |",
+            "| ✅ Complete   | Past PI    | % Done = 100% |",
+            "| ❌ Incomplete | Past PI    | % Done < 100% at PI end |",
+            "| 🔵 Planned    | Future PI  | PI has not yet started |",
+            "",
+            "- **% Done** — weighted average completion (weighted by planned weight)",
+            "- **Planned** — sum of planned weights set on epics (via GraphQL)",
+            "- **Actual** — sum of story-point weights on linked issues",
+            "- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched",
+            "- **Blocked** — number of epics with at least one active blocker",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{group.name} - Program PI Detail Report", "\n".join(md))
 
     def generate_portfolio_report(self, group):
         group_name = group.name
