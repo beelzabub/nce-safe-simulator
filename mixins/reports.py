@@ -47,7 +47,7 @@ REPORTS = [
     },
     {
         "key":         "piid-project",
-        "description": "Programme × PI Report — project label vs PI quarter cross-tab with status and weights",
+        "description": "Program × PI Report — project label vs PI quarter cross-tab with status and weights",
         "method":      "generate_piid_project_report",
         "needs_group": False,
     },
@@ -296,7 +296,7 @@ class ReportsMixin:
         return md
 
     def generate_piid_project_report(self):
-        """Programme × PI cross-tab: rows = project labels, columns = PIID quarters.
+        """Program × PI cross-tab: rows = project labels, columns = PIID quarters.
 
         Each cell shows status, epic counts, % done vs PI elapsed, and planned vs
         actual weight delta.  Data comes from calculate_portfolio_metrics so no
@@ -351,14 +351,14 @@ class ReportsMixin:
             )
 
         md = []
-        md.append(f"# Programme × PI Report (Group: {group.name})")
+        md.append(f"# Program × PI Report (Group: {group.name})")
         md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
         md.append("Each cell shows: **Status · Epics (open/total) · % Done (PI elapsed%) · Planned pt → Actual pt**")
         md.append("")
 
         # Header row
-        header = "| Programme |" + "".join(f" {p} |" for p in self.PIID_LABELS)
+        header = "| Program |" + "".join(f" {p} |" for p in self.PIID_LABELS)
         sep    = "|---|" + "".join("---|" for _ in self.PIID_LABELS)
         md.append(header)
         md.append(sep)
@@ -419,7 +419,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Programme PI Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{group.name} - Program PI Report", "\n".join(md))
 
     def generate_portfolio_report(self, group):
         group_name = group.name
