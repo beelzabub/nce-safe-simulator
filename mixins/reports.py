@@ -75,6 +75,12 @@ REPORTS = [
         "method":      "generate_vs_capability_dashboard_report",
         "needs_group": False,
     },
+    {
+        "key":         "vs-cross-art-risk",
+        "description": "VS Cross-ART Risk Report — blocking relationships that cross ART boundaries within a Value Stream",
+        "method":      "generate_vs_cross_art_risk_report",
+        "needs_group": False,
+    },
 ]
 
 
@@ -1774,6 +1780,250 @@ class ReportsMixin:
         print(f"    → Wiki: {wiki_title}")
 
         return (vs_group.name, wiki_url, total_caps, at_risk, blocked_c)
+
+    def generate_vs_cross_art_risk_report(self):
+        """One wiki page per VS showing blocking relationships that cross ART boundaries, plus a root index."""
+        root_group = self.get_group_by_name(self.parent_group)
+        print(f"Generating VS Cross-ART Risk Reports under: {root_group.full_path}")
+
+        metrics = self.calculate_portfolio_metrics(self.parent_group)
+
+        # numeric epic id → group_id
+        epic_int_to_group = {
+            e["id"]: e.get("group_id")
+            for tier in metrics.values()
+            for e in tier
+        }
+        # numeric epic id → piid
+        epic_int_to_piid = {
+            e["id"]: e.get("piid")
+            for tier in metrics.values()
+            for e in tier
+        }
+
+        # group_id → art_group, vs_group
+        art_of_group = {}
+        vs_of_group  = {}
+        for vs_group, art_group in self._iter_art_groups(root_group):
+            art_of_group[art_group.id] = art_group
+            vs_of_group[art_group.id]  = vs_group
+        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
+            art_of_group[team_group.id] = art_group
+            vs_of_group[team_group.id]  = vs_group
+
+        def gid_to_int(gid):
+            try:
+                return int(gid.split("/")[-1])
+            except (ValueError, AttributeError):
+                return None
+
+        # GraphQL: fetch all blocked epics with their blockers
+        query = """
+        query ListBlockedEpics($fullPath: ID!) {
+          group(fullPath: $fullPath) {
+            epics {
+              nodes {
+                id title webUrl state
+                labels { nodes { title } }
+                blockedByCount
+                blockedByEpics {
+                  edges {
+                    node { id title webUrl state labels { nodes { title } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        data = self.graphql_query(query, variables={"fullPath": root_group.full_path})
+        if data is None:
+            print("  ERROR: GraphQL query failed.")
+            return
+
+        nodes = data["group"]["epics"]["nodes"]
+        blocked_nodes = [n for n in nodes if n.get("blockedByCount", 0) > 0]
+
+        def epic_type_from_node(node):
+            labels = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
+            for t in ("Epic", "Capability", "Feature"):
+                if t in labels:
+                    return t
+            return "Epic"
+
+        # vs_id → list of cross-ART dependency dicts
+        vs_deps = defaultdict(list)
+
+        for blocked in blocked_nodes:
+            b_int  = gid_to_int(blocked["id"])
+            b_gid  = epic_int_to_group.get(b_int)
+            b_art  = art_of_group.get(b_gid)
+            b_vs   = vs_of_group.get(b_gid)
+            b_piid = epic_int_to_piid.get(b_int)
+            if not b_vs or not b_art:
+                continue
+
+            for edge in blocked.get("blockedByEpics", {}).get("edges", []):
+                blocker       = edge["node"]
+                bl_int        = gid_to_int(blocker["id"])
+                bl_gid        = epic_int_to_group.get(bl_int)
+                bl_art        = art_of_group.get(bl_gid)
+                bl_vs         = vs_of_group.get(bl_gid)
+
+                if not bl_vs or not bl_art:
+                    continue
+                if b_vs.id != bl_vs.id:
+                    continue
+                if b_art.id == bl_art.id:
+                    continue
+
+                vs_deps[b_vs.id].append({
+                    "blocked":      blocked,
+                    "blocked_art":  b_art,
+                    "blocked_piid": b_piid,
+                    "blocker":      blocker,
+                    "blocker_art":  bl_art,
+                })
+
+        index_entries = []
+        for vs_group in self._iter_vs_groups(root_group):
+            deps = vs_deps.get(vs_group.id, [])
+            entry = self._generate_vs_cross_art_risk_page(root_group, vs_group, deps)
+            index_entries.append(entry)
+
+        md = []
+        md.append(f"# VS Cross-ART Risk Index — {root_group.name}")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md.append("")
+        md.append("Blocking relationships that cross ART boundaries within each Value Stream.")
+        md.append("")
+
+        for vs_name, wiki_url, total_deps, critical in index_entries:
+            crit_str = f"  · 🔴 {critical} critical" if critical else ""
+            clear_str = "  · ✅ No cross-ART blocks" if total_deps == 0 else f"  · {total_deps} cross-ART dependencies"
+            md.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
+
+        md.append("")
+        self.upload_to_wiki(root_group, f"{root_group.name} - VS Cross-ART Risk Index", "\n".join(md))
+        print(f"  → Root wiki: {root_group.name} - VS Cross-ART Risk Index")
+
+    def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
+        wiki_title = f"VS Cross-ART Risk/{vs_group.name}"
+        wiki_url   = (
+            f"{root_group.web_url}/-/wikis/VS-Cross-ART-Risk"
+            f"/{vs_group.name.replace(' ', '-')}"
+        )
+
+        today = date.today()
+
+        def pi_phase(piid):
+            if not piid:
+                return "unknown"
+            start, end = self._pi_dates_from_label(piid)
+            if not start:
+                return "unknown"
+            if today < start:
+                return "future"
+            if today > end:
+                return "past"
+            return "current"
+
+        def severity(piid):
+            phase = pi_phase(piid)
+            if phase == "current":
+                return "🔴 Critical", 0
+            if phase == "future":
+                return "🟡 Watch", 1
+            if phase == "past":
+                return "⚫ Past", 2
+            return "⚪ Unknown", 3
+
+        md = []
+        md.append(f"# VS Cross-ART Risk — {vs_group.name}")
+        md.append(
+            f"**{vs_group.name}**  |  "
+            f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
+            f"[View VS Group]({vs_group.web_url})"
+        )
+        md.append("")
+
+        critical = 0
+
+        if not deps:
+            md.append("✅ **No cross-ART blocking relationships found in this Value Stream.**")
+            md.append("")
+        else:
+            md.append(f"**{len(deps)} cross-ART blocking relationship(s) identified.**")
+            md.append("")
+            md.append("> A cross-ART dependency exists when an epic in one ART is blocked by an epic from a different ART within the same Value Stream. These dependencies require active coordination between ART teams.")
+            md.append("")
+
+            # Sort: critical first, then watch, then past
+            sorted_deps = sorted(deps, key=lambda d: severity(d["blocked_piid"])[1])
+
+            md.append("| Severity | Blocked | Blocked ART | Blocker | Blocker ART | PI |")
+            md.append("|----------|---------|-------------|---------|-------------|-----|")
+
+            for dep in sorted_deps:
+                blocked     = dep["blocked"]
+                blocker     = dep["blocker"]
+                b_art       = dep["blocked_art"]
+                bl_art      = dep["blocker_art"]
+                piid        = dep["blocked_piid"] or "—"
+                sev_label, sev_sort = severity(dep["blocked_piid"])
+
+                b_type  = next((t for t in ("Epic", "Capability", "Feature") if t in {l["title"] for l in blocked.get("labels", {}).get("nodes", [])}), "Epic")
+                bl_type = next((t for t in ("Epic", "Capability", "Feature") if t in {l["title"] for l in blocker.get("labels", {}).get("nodes", [])}), "Epic")
+                b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
+                bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
+
+                b_link  = f'[{b_icon} {blocked["title"]}]({blocked["webUrl"]})'
+                bl_link = f'[{bl_icon} {blocker["title"]}]({blocker["webUrl"]})'
+
+                if sev_sort == 0:
+                    critical += 1
+
+                md.append(
+                    f"| {sev_label} | ⛔ {b_link} | {b_art.name} "
+                    f"| 🔒 {bl_link} | {bl_art.name} | {piid} |"
+                )
+
+            md.append("")
+
+            # Group by ART pair for coordination view
+            pair_deps = defaultdict(list)
+            for dep in deps:
+                key = (dep["blocked_art"].name, dep["blocker_art"].name)
+                pair_deps[key].append(dep)
+
+            if len(pair_deps) > 1 or (len(pair_deps) == 1 and list(pair_deps.values())[0]):
+                md.append("## ART Dependency Map")
+                md.append("")
+                md.append("Summary of which ARTs are blocking which:")
+                md.append("")
+                md.append("| Blocked ART | ← Blocked by | Blocker ART | Count |")
+                md.append("|-------------|--------------|-------------|-------|")
+                for (b_art_name, bl_art_name), pair_list in sorted(pair_deps.items(), key=lambda x: -len(x[1])):
+                    md.append(f"| {b_art_name} | ⛔←🔒 | {bl_art_name} | {len(pair_list)} |")
+                md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "| Icon | Meaning |",
+            "|------|---------|",
+            "| 🔴 Critical | Blocked item is in the **current PI** — active risk requiring immediate coordination |",
+            "| 🟡 Watch    | Blocked item is in a **future PI** — dependency to monitor and plan around |",
+            "| ⚫ Past     | Blocked item was in a **past PI** — dependency may be stale or already resolved |",
+            "| ⛔ | The blocked epic (the one that cannot proceed) |",
+            "| 🔒 | The blocker epic (the one causing the block) |",
+            "",
+        ])
+
+        self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
+        print(f"    → Wiki: {wiki_title}")
+
+        return (vs_group.name, wiki_url, len(deps), critical)
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
