@@ -273,6 +273,7 @@ class ToolsMixin:
         print("=" * 50)
         for i, tool in enumerate(TOOLS, 1):
             print(f"  [{i}] {tool['key']:<22} {tool['description']}")
+        print(f"  [q] quit")
         print()
 
         while True:
