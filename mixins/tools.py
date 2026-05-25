@@ -152,6 +152,41 @@ TOOLS = [
             {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
         ],
     },
+    {
+        "key":         "export-epics",
+        "description": "Export all epics from the group hierarchy to CSV or JSON",
+        "method":      "export_epics",
+        "params": [
+            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
+        ],
+    },
+    {
+        "key":         "import-epics",
+        "description": "Import epics from a CSV or JSON file with pre-flight validation",
+        "method":      "import_epics",
+        "params": [
+            {"name": "input_path", "prompt": "Input file path (.csv or .json)",                      "type": str,  "optional": False},
+            {"name": "dry_run",    "prompt": "Dry run? (validate and preview only)",                  "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "export-issues",
+        "description": "Export all issues from the group hierarchy to CSV or JSON",
+        "method":      "export_issues",
+        "params": [
+            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
+        ],
+    },
+    {
+        "key":         "import-issues",
+        "description": "Import issues from a CSV or JSON file with pre-flight validation",
+        "method":      "import_issues",
+        "params": [
+            {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "optional": False},
+            {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
+            {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
+        ],
+    },
 ]
 
 

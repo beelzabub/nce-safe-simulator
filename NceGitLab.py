@@ -13,6 +13,7 @@ from mixins import (
     BootstrapMixin,
     EpicsMixin,
     GroupsMixin,
+    ImportExportMixin,
     IssuesMixin,
     LabelsMixin,
     MilestonesMixin,
@@ -36,6 +37,7 @@ class NceGitLab(
     ReportsMixin,
     BootstrapMixin,
     ToolsMixin,
+    ImportExportMixin,
 ):
     def __init__(self, config_file="config.json"):
         self.config_file = Path(config_file)
