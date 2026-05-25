@@ -279,7 +279,133 @@ class ImportExportMixin:
         print(f"  Validation passed — {len(rows)} row(s) ready")
         return rows, 0
 
-    def import_epics(self, input_path=None, dry_run=False):
+    # ── Unresolvable parent helpers ───────────────────────────────────────────
+
+    def _build_valid_epic_ids(self, root_group):
+        """Return the set of all epic IDs that exist in the target group hierarchy."""
+        return {e.id for e in root_group.epics.list(all=True)}
+
+    def _pick_fallback_parent(self, root_group):
+        """
+        Display the live epic hierarchy grouped by containing group and prompt
+        the user to pick a fallback parent.  Returns (epic_id, epic_title) or
+        (None, None) if the user chooses the label approach instead.
+        """
+        print("\n  Fetching epic hierarchy for fallback parent selection...")
+        all_epics = root_group.epics.list(all=True)
+        gid_map   = self._build_gid_path_map(root_group)
+
+        # Group epics by containing group path
+        by_group = {}
+        for epic in all_epics:
+            gpath = gid_map.get(getattr(epic, "group_id", None), root_group.full_path)
+            by_group.setdefault(gpath, []).append(epic)
+
+        choices = []  # ordered list of (epic_id, epic_title) matching display numbers
+        print()
+        for gpath in sorted(by_group):
+            print(f"  {gpath}")
+            for epic in by_group[gpath]:
+                etype = next((l for l in (epic.labels or [])
+                              if l in ("Epic", "Capability", "Feature")), "—")
+                choices.append((epic.id, epic.title))
+                idx = len(choices)
+                print(f"    [{idx:>3}] [{etype:<11}] {epic.title[:55]}  (#{epic.iid})")
+            print()
+
+        print(f"    [  0] Apply 'import::needs-parent' label instead — no parent set")
+        print()
+
+        while True:
+            raw = input(f"  Select fallback parent [0–{len(choices)}]: ").strip()
+            try:
+                n = int(raw)
+                if n == 0:
+                    return None, None
+                if 1 <= n <= len(choices):
+                    eid, etitle = choices[n - 1]
+                    print(f"  Fallback parent set to: '{etitle}' (id={eid})")
+                    return eid, etitle
+            except ValueError:
+                pass
+            print(f"  Please enter a number between 0 and {len(choices)}.")
+
+    def _resolve_parent_ids(self, rows, valid_epic_ids, root_group, unresolved_parent):
+        """
+        Pre-flight parent_id resolution pass — runs before any creation.
+
+        Scans every row for a parent_id that is not present in valid_epic_ids.
+        If any are found, reports them all, then asks the user once how to
+        proceed (unless unresolved_parent is already 'label' or 'skip').
+
+        Returns a dict {row_index: resolved_parent_id_or_None} and a set of
+        row indices that are marked as orphans (needs-parent label).
+        Rows keyed to None get no parent set.  Returns (None, None) if the
+        caller should abort.
+        """
+        unresolvable = []   # (row_index_1based, title, raw_parent_id)
+        for i, row in enumerate(rows, 1):
+            pid = self._coerce_int(row.get("parent_id"), "parent_id", i, [])
+            if pid is not None and pid not in valid_epic_ids:
+                unresolvable.append((i, str(row.get("title", "")).strip(), pid))
+
+        if not unresolvable:
+            return {}, set()
+
+        print(f"\n  ── {len(unresolvable)} unresolvable parent_id(s) detected ──")
+        print(f"  {'Row':<5} {'parent_id':<12} Title")
+        print(f"  {'─'*5} {'─'*12} {'─'*40}")
+        for row_num, title, pid in unresolvable:
+            print(f"  {row_num:<5} {pid:<12} {title[:50]}")
+
+        fallback_id    = None
+        fallback_title = None
+
+        if unresolved_parent == "skip":
+            print(f"\n  Action: skip — {len(unresolvable)} row(s) will be skipped.")
+            skip_rows = {r for r, _, _ in unresolvable}
+            return {r: None for r in skip_rows}, set()
+
+        if unresolved_parent == "label":
+            print(f"\n  Action: label — 'import::needs-parent' will be added to these epics.")
+        else:
+            # "ask" — let user pick a fallback parent from the hierarchy
+            print(f"\n  Action: ask — select a fallback parent for all {len(unresolvable)} affected row(s).")
+            fallback_id, fallback_title = self._pick_fallback_parent(root_group)
+            if fallback_id:
+                print(f"  Fallback: '{fallback_title}' (id={fallback_id}) — applies to all {len(unresolvable)} row(s).")
+            else:
+                print(f"  No fallback chosen — 'import::needs-parent' label will be applied instead.")
+
+        parent_map = {}   # row_index → resolved parent_id (or None)
+        orphan_rows = set()
+        for row_num, _, _ in unresolvable:
+            if fallback_id:
+                parent_map[row_num] = fallback_id
+            else:
+                parent_map[row_num] = None
+                orphan_rows.add(row_num)
+
+        return parent_map, orphan_rows
+
+    def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False):
+        """
+        Import epics from a CSV or JSON file.
+
+        unresolved_parent controls what happens when a parent_id from the file
+        does not match any epic in the target hierarchy.  The check runs in the
+        pre-flight pass — before any epic is created — so the user decides once
+        and the import runs without interruption:
+
+          'ask'   – show the live hierarchy grouped by group, let the user pick
+                    a single fallback parent for all affected rows; choosing 0
+                    falls back to the label approach
+          'label' – create without a parent and add 'import::needs-parent'
+          'skip'  – skip the affected rows entirely
+        """
+        if unresolved_parent not in ("ask", "label", "skip"):
+            print(f"ERROR: unresolved_parent must be 'ask', 'label', or 'skip' (got '{unresolved_parent}')")
+            return
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -301,25 +427,49 @@ class ImportExportMixin:
             return
 
         print(f"  {len(rows)} record(s) in file")
+
+        # ── Pre-flight: structure + data types ───────────────────────────────
         print("\n  Pre-flight validation...")
         cleaned, err_count = self._validate_epics(rows)
         if cleaned is None:
             return
 
-        root_group   = self.get_group_by_name(self.parent_group)
+        root_group  = self.get_group_by_name(self.parent_group)
         print("\n  Building group cache...")
-        group_cache  = self._build_group_cache(root_group)
+        group_cache = self._build_group_cache(root_group)
         print(f"  {len(group_cache)} group(s) available as targets")
 
+        # ── Pre-flight: parent_id resolution ────────────────────────────────
+        print("\n  Checking parent_ids against target hierarchy...")
+        valid_epic_ids = self._build_valid_epic_ids(root_group)
+        print(f"  {len(valid_epic_ids)} epic(s) in target hierarchy")
+
+        parent_map, orphan_rows = self._resolve_parent_ids(
+            cleaned, valid_epic_ids, root_group, unresolved_parent
+        )
+
+        skip_rows = {r for r, resolved in parent_map.items() if resolved is None and r not in orphan_rows}
+
+        print(f"\n  Ready — beginning import of {len(cleaned)} row(s)...")
+        if skip_rows:
+            print(f"  ({len(skip_rows)} row(s) will be skipped due to unresolvable parents)")
+        if orphan_rows:
+            print(f"  ({len(orphan_rows)} row(s) will receive 'import::needs-parent' label)")
+
         created = skipped = failed = 0
+        orphan_summary = []   # (row_num, title, group_path, original_parent_id)
 
         for i, row in enumerate(cleaned, 1):
+            if i in skip_rows:
+                skipped += 1
+                continue
+
             title       = str(row.get("title", "")).strip()
             description = str(row.get("description", "")).strip()
             labels      = self._coerce_labels(row.get("labels"))
-            start_date  = self._coerce_date(row.get("start_date"),                      "start_date",     i, [])
-            due_date    = self._coerce_date(row.get("due_date") or row.get("end_date"),  "due_date",       i, [])
-            parent_id   = self._coerce_int(row.get("parent_id"),    "parent_id",     i, [])
+            start_date  = self._coerce_date(row.get("start_date"),                      "start_date", i, [])
+            due_date    = self._coerce_date(row.get("due_date") or row.get("end_date"),  "due_date",   i, [])
+            orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
             state       = str(row.get("state", "")).strip().lower()
             gpath       = str(row.get("group_path", "")).strip() or root_group.full_path
@@ -329,26 +479,34 @@ class ImportExportMixin:
                 print(f"  row {i}: WARN group_path '{gpath}' not found — using root group")
                 target = root_group
 
+            is_orphan = i in orphan_rows
+            if is_orphan and "import::needs-parent" not in labels:
+                labels = labels + ["import::needs-parent"]
+
+            # Determine resolved parent_id
+            if orig_pid is not None and orig_pid in valid_epic_ids:
+                resolved_pid = orig_pid
+            else:
+                resolved_pid = parent_map.get(i)  # fallback or None
+
             payload = {"title": title}
-            if description:
-                payload["description"] = description
-            if labels:
-                payload["labels"] = labels
-            if start_date:
-                payload["start_date"] = start_date
-            if due_date:
-                payload["end_date"] = due_date
-            if parent_id:
-                payload["parent_id"] = parent_id
+            if description:       payload["description"] = description
+            if labels:            payload["labels"]      = labels
+            if start_date:        payload["start_date"]  = start_date
+            if due_date:          payload["end_date"]    = due_date
+            if resolved_pid:      payload["parent_id"]   = resolved_pid
 
             if dry_run:
                 parts = [f"'{title}'", f"group={target.full_path}"]
-                if labels:      parts.append(f"labels={labels}")
-                if weight:      parts.append(f"weight={weight}")
-                if parent_id:   parts.append(f"parent_id={parent_id}")
-                if start_date:  parts.append(f"start={start_date}")
-                if due_date:    parts.append(f"due={due_date}")
+                if labels:        parts.append(f"labels={labels}")
+                if weight:        parts.append(f"weight={weight}")
+                if resolved_pid:  parts.append(f"parent_id={resolved_pid}")
+                if is_orphan:     parts.append("⚑ needs-parent")
+                if start_date:    parts.append(f"start={start_date}")
+                if due_date:      parts.append(f"due={due_date}")
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
+                if is_orphan:
+                    orphan_summary.append((i, title, target.full_path, orig_pid))
                 created += 1
                 continue
 
@@ -357,19 +515,29 @@ class ImportExportMixin:
 
                 if weight is not None:
                     self._set_epic_weight(epic, weight)
-
                 if state == "closed":
                     epic.state_event = "close"
                     epic.save()
 
                 print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
                 created += 1
+                if is_orphan:
+                    orphan_summary.append((i, title, target.full_path, orig_pid))
+
             except Exception as ex:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
                 failed += 1
 
         print(f"\n  Done — {created} created  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
+
+        if orphan_summary:
+            print(f"\n  ── Orphan summary ({len(orphan_summary)} epic(s) created without intended parent) ──")
+            print(f"  {'Row':<5} {'Original parent_id':<20} {'Group':<35} Title")
+            print(f"  {'─'*5} {'─'*20} {'─'*35} {'─'*30}")
+            for row_num, etitle, gpath, orig_pid in orphan_summary:
+                print(f"  {row_num:<5} {str(orig_pid):<20} {gpath[:35]:<35} {etitle[:50]}")
+            print(f"\n  Filter by label 'import::needs-parent' in GitLab to find and re-parent these epics.")
 
     # ── Issue export ──────────────────────────────────────────────────────────
 
