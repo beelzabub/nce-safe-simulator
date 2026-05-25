@@ -189,6 +189,15 @@ TOOLS = [
         ],
     },
     {
+        "key":         "set-risk-labels",
+        "description": "Randomly assign risk::high/medium/low labels to open epics that have none",
+        "method":      "_tool_set_risk_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 15)", "type": float, "default": 15.0},
+            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+        ],
+    },
+    {
         "key":         "scaffold",
         "description": "Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content",
         "method":      "create_safe_hierarchy",
@@ -710,10 +719,11 @@ class ToolsMixin:
 
     def _tool_audit_labels(self):
         """Report every epic missing a type, PIID, or project label."""
-        group     = self.get_group_by_name(self.parent_group)
-        type_set  = set(self.EPIC_TYPE_LABELS)
-        piid_set  = set(self.PIID_LABELS)
-        proj_set  = set(self.PROJECT_LABELS)
+        group    = self.get_group_by_name(self.parent_group)
+        all_grp_labels = {l.name for l in group.labels.list(all=True)}
+        type_set = all_grp_labels & {"Epic", "Capability", "Feature"}
+        piid_set = {l for l in all_grp_labels if l.startswith("PIID::")}
+        proj_set = {l for l in all_grp_labels if l.startswith("project::")}
 
         print(f"Auditing labels in: {group.full_path}\n")
 
@@ -826,11 +836,10 @@ class ToolsMixin:
         if not piid:
             print("ERROR: a PIID label is required.")
             return
-        if piid not in self.PIID_LABELS:
-            print(f"WARNING: '{piid}' is not in the configured PIID_LABELS: {self.PIID_LABELS}")
-
         group    = self.get_group_by_name(self.parent_group)
-        piid_set = set(self.PIID_LABELS)
+        piid_set = set(self._discover_labels(group, "PIID::"))
+        if piid_set and piid not in piid_set:
+            print(f"WARNING: '{piid}' not found in group labels. Known PIID labels: {sorted(piid_set)}")
         print(f"Group : {group.full_path}  →  assigning {piid}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -871,11 +880,10 @@ class ToolsMixin:
         if not label:
             print("ERROR: a project label is required.")
             return
-        if label not in self.PROJECT_LABELS:
-            print(f"WARNING: '{label}' is not in the configured PROJECT_LABELS: {self.PROJECT_LABELS}")
-
         group    = self.get_group_by_name(self.parent_group)
-        proj_set = set(self.PROJECT_LABELS)
+        proj_set = set(self._discover_labels(group, "project::"))
+        if proj_set and label not in proj_set:
+            print(f"WARNING: '{label}' not found in group labels. Known project labels: {sorted(proj_set)}")
         print(f"Group : {group.full_path}  →  assigning {label}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -1231,5 +1239,67 @@ class ToolsMixin:
 
         _walk(group)
         print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_risk_labels(self, percent=None, dry_run=False):
+        """Randomly assign risk::high/medium/low labels to open epics that have none."""
+        if percent is None:
+            percent = self.default_set_risk_percent
+
+        group      = self.get_group_by_name(self.parent_group)
+        risk_labels = self._discover_labels(group, "risk::")
+        if not risk_labels:
+            print("No risk::* labels found on group. Create them via bootstrap first.")
+            return
+
+        high_labels = [l for l in risk_labels if "high"   in l]
+        med_labels  = [l for l in risk_labels if "medium" in l]
+        low_labels  = [l for l in risk_labels if "low"    in l]
+
+        # Weighted pool: ~20% high, ~35% medium, ~45% low
+        pool     = high_labels * 2 + med_labels * 3 + low_labels * 4
+        risk_set = set(risk_labels)
+
+        print(f"Group  : {group.full_path}")
+        print(f"Labels : {risk_labels}")
+        print(f"Target : {percent}% of open epics with no existing risk label")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if not set(epic.labels) & risk_set:
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        print(f"  {len(candidates)} open epics without a risk label")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            label = random.choice(pool)
+            if dry_run:
+                print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:55]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = list(epic.labels) + [label]
+                    epic.save()
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:55]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
