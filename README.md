@@ -285,6 +285,66 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 
 ---
 
+## Import / Export
+
+Epic and issue import/export is available via the `--utilities` menu (`export-epics`, `import-epics`, `export-issues`, `import-issues`).
+
+### File Formats
+
+Both CSV and JSON are supported. Format is inferred from the file extension (`.json` → JSON, anything else → CSV). Export filenames are auto-named from the group name when no output path is given (e.g. `bmw-120-epics-export.csv`). Relative and `~`-prefixed input paths are resolved to absolute.
+
+### Export
+
+| Tool | Scope | Key fields exported |
+|---|---|---|
+| `export-epics` | All epics across the full group hierarchy (recursive by default) | `group_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
+| `export-issues` | All issues across the full group hierarchy | `project_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
+
+`planned_weight` on epics is fetched via GraphQL (the REST API does not expose it).
+
+### Import — Pre-flight Validation
+
+Both importers run a full validation pass before creating anything. All errors are reported upfront; if any are found the import aborts without touching the instance.
+
+Checks performed:
+- Required column(s) present (`title` for both; `project_path` for issues unless a target project is provided at the prompt)
+- Unknown columns noted as warnings and silently ignored
+- Blank required fields flagged per row
+- Date fields validated as `YYYY-MM-DD`
+- Numeric fields (`weight`, `parent_id`, `epic_id`, `planned_weight`) validated as integers
+- `state` values validated (`opened` / `closed`)
+- All `parent_id` values checked against live epic IDs in the target hierarchy (see below)
+
+**Minimum required columns:**
+
+| Import | Required | Commonly useful optional |
+|---|---|---|
+| `import-epics` | `title` | `group_path`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
+| `import-issues` | `title`, `project_path` | `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
+
+**Post-create steps applied automatically:**
+- `planned_weight` set via GraphQL after epic creation
+- `milestone` resolved by title lookup in the target project
+- `assignees` resolved by GitLab username lookup (cached per run; unknown usernames warned and skipped)
+- `epic_id` assigned to issues via a post-create save
+- Epics or issues with `state: closed` are closed after creation
+
+Pass `dry_run: yes` to validate and preview every row without creating anything.
+
+### Unresolvable `parent_id` Values
+
+When importing epics from an external system, `parent_id` values will not match IDs in the target GitLab instance. The pre-flight pass identifies all affected rows, reports them as a table, and asks once how to handle them before any creation starts:
+
+| Mode | Behaviour |
+|---|---|
+| `ask` | Displays the live epic hierarchy grouped by containing group; user picks a single fallback parent for all affected rows. Choosing `0` falls back to the `label` approach. |
+| `label` | Creates the epic without a parent and adds the label `import::needs-parent` *(default)* |
+| `skip` | Skips the affected rows entirely |
+
+An **orphan summary table** is printed at the end of any run that produces epics without their intended parent (row number, original `parent_id`, group, title). Filter by label `import::needs-parent` in GitLab to find and re-parent these epics.
+
+---
+
 ## Known Issues / TODO
 
 - **Direct Features in ART-level reports:** `ART Feature Status` and `ART Capacity Balance` still assume the full three-tier chain (Epic → Capability → Feature) and do not surface Features parented directly to a Portfolio Epic. Both reports need hierarchy traversal updates to handle the two-tier (Epic → Feature) case.
