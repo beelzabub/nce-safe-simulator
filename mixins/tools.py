@@ -19,6 +19,18 @@ from collections import defaultdict
 
 TOOLS = [
     {
+        "key":         "audit-hierarchy",
+        "description": "Verify Features have Capability parents and Capabilities have Epic parents",
+        "method":      "_tool_audit_hierarchy",
+        "params":      [],
+    },
+    {
+        "key":         "audit-labels",
+        "description": "Report every epic missing a type, PIID, or project label",
+        "method":      "_tool_audit_labels",
+        "params":      [],
+    },
+    {
         "key":         "close-percent",
         "description": "Randomly close N% of open epics and issues (simulate PI progress)",
         "method":      "_tool_close_percent",
@@ -29,18 +41,20 @@ TOOLS = [
         ],
     },
     {
-        "key":         "update-weights",
-        "description": "Assign planned weights to all epics based on SAFe type label",
-        "method":      "_tool_update_epic_weights",
+        "key":         "export-epics",
+        "description": "Export all epics from the group hierarchy to CSV or JSON",
+        "method":      "export_epics",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
         ],
     },
     {
-        "key":         "validate-weights",
-        "description": "Validate epic and issue weights against configured pools",
-        "method":      "_tool_validate_weights",
-        "params":      [],
+        "key":         "export-issues",
+        "description": "Export all issues from the group hierarchy to CSV or JSON",
+        "method":      "export_issues",
+        "params": [
+            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
+        ],
     },
     {
         "key":         "generate-epic-blocks",
@@ -52,6 +66,61 @@ TOOLS = [
         ],
     },
     {
+        "key":         "generate-issues",
+        "description": "Create issues in team backlog projects linked to Feature epics",
+        "method":      "_tool_generate_issues",
+        "params": [
+            {"name": "count",   "prompt": "Issues to create per Feature (default 5)", "type": int,  "default": 5},
+            {"name": "dry_run", "prompt": "Dry run?",                                  "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "import-epics",
+        "description": "Import epics from a CSV or JSON file with pre-flight validation",
+        "method":      "import_epics",
+        "params": [
+            {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "optional": False},
+            {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
+            {"name": "dry_run",            "prompt": "Dry run? (validate and preview only)",                                    "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "import-issues",
+        "description": "Import issues from a CSV or JSON file with pre-flight validation",
+        "method":      "import_issues",
+        "params": [
+            {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "optional": False},
+            {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
+            {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "reset-pi-progress",
+        "description": "Reopen all closed issues linked to epics in a specific PI",
+        "method":      "_tool_reset_pi_progress",
+        "params": [
+            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,  "optional": False},
+            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "scaffold",
+        "description": "Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content",
+        "method":      "create_safe_hierarchy",
+        "params":      [],
+    },
+    {
+        "key":         "set-epic-states",
+        "description": "Open or close all epics matching an optional type and/or PI filter",
+        "method":      "_tool_set_epic_states",
+        "params": [
+            {"name": "state",     "prompt": "State to set (open/close)",                             "type": str,  "default": "close"},
+            {"name": "piid",      "prompt": "Limit to PIID label (e.g. PIID::2026Q3, blank = all)",  "type": str,  "optional": True},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-issue-weights",
         "description": "Assign Fibonacci story-point weights to issues that currently have none",
         "method":      "_tool_set_issue_weights",
@@ -60,22 +129,6 @@ TOOLS = [
             {"name": "min_weight","prompt": "Minimum weight (blank = no min)",          "type": int,  "optional": True},
             {"name": "max_weight","prompt": "Maximum weight (blank = no max)",          "type": int,  "optional": True},
             {"name": "dry_run",   "prompt": "Dry run?",                                 "type": bool, "default": False},
-        ],
-    },
-    {
-        "key":         "audit-labels",
-        "description": "Report every epic missing a type, PIID, or project label",
-        "method":      "_tool_audit_labels",
-        "params":      [],
-    },
-    {
-        "key":         "simulate-pi-progress",
-        "description": "Close X% of open issues linked to epics in a specific PI",
-        "method":      "_tool_simulate_pi_progress",
-        "params": [
-            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,   "default": None, "optional": False},
-            {"name": "percent", "prompt": "Percent of issues to close",     "type": float, "default": 50.0},
-            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool,  "default": False},
         ],
     },
     {
@@ -99,47 +152,22 @@ TOOLS = [
         ],
     },
     {
-        "key":         "generate-issues",
-        "description": "Create issues in team backlog projects linked to Feature epics",
-        "method":      "_tool_generate_issues",
+        "key":         "set-risk-labels",
+        "description": "Randomly assign risk::high/medium/low labels to open epics that have none",
+        "method":      "_tool_set_risk_labels",
         "params": [
-            {"name": "count",   "prompt": "Issues to create per Feature (default 5)", "type": int,  "default": 5},
-            {"name": "dry_run", "prompt": "Dry run?",                                  "type": bool, "default": False},
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 15)", "type": float, "default": 15.0},
+            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
         ],
     },
     {
-        "key":         "set-epic-states",
-        "description": "Open or close all epics matching an optional type and/or PI filter",
-        "method":      "_tool_set_epic_states",
+        "key":         "simulate-pi-progress",
+        "description": "Close X% of open issues linked to epics in a specific PI",
+        "method":      "_tool_simulate_pi_progress",
         "params": [
-            {"name": "state",     "prompt": "State to set (open/close)",                             "type": str,  "default": "close"},
-            {"name": "piid",      "prompt": "Limit to PIID label (e.g. PIID::2026Q3, blank = all)",  "type": str,  "optional": True},
-            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
-        ],
-    },
-    {
-        "key":         "audit-hierarchy",
-        "description": "Verify Features have Capability parents and Capabilities have Epic parents",
-        "method":      "_tool_audit_hierarchy",
-        "params":      [],
-    },
-    {
-        "key":         "weight-drift-check",
-        "description": "Flag epics where planned weight vs sum of issue weights drifts beyond a threshold",
-        "method":      "_tool_weight_drift_check",
-        "params": [
-            {"name": "threshold", "prompt": "Drift threshold % to flag (default 20)", "type": float, "default": 20.0},
-            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
-        ],
-    },
-    {
-        "key":         "reset-pi-progress",
-        "description": "Reopen all closed issues linked to epics in a specific PI",
-        "method":      "_tool_reset_pi_progress",
-        "params": [
-            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,  "optional": False},
-            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool, "default": False},
+            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,   "default": None, "optional": False},
+            {"name": "percent", "prompt": "Percent of issues to close",     "type": float, "default": 50.0},
+            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool,  "default": False},
         ],
     },
     {
@@ -153,55 +181,27 @@ TOOLS = [
         ],
     },
     {
-        "key":         "export-epics",
-        "description": "Export all epics from the group hierarchy to CSV or JSON",
-        "method":      "export_epics",
+        "key":         "update-weights",
+        "description": "Assign planned weights to all epics based on SAFe type label",
+        "method":      "_tool_update_epic_weights",
         "params": [
-            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
         ],
     },
     {
-        "key":         "import-epics",
-        "description": "Import epics from a CSV or JSON file with pre-flight validation",
-        "method":      "import_epics",
-        "params": [
-            {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "optional": False},
-            {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
-            {"name": "dry_run",            "prompt": "Dry run? (validate and preview only)",                                    "type": bool, "default": False},
-        ],
-    },
-    {
-        "key":         "export-issues",
-        "description": "Export all issues from the group hierarchy to CSV or JSON",
-        "method":      "export_issues",
-        "params": [
-            {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
-        ],
-    },
-    {
-        "key":         "import-issues",
-        "description": "Import issues from a CSV or JSON file with pre-flight validation",
-        "method":      "import_issues",
-        "params": [
-            {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "optional": False},
-            {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
-            {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
-        ],
-    },
-    {
-        "key":         "set-risk-labels",
-        "description": "Randomly assign risk::high/medium/low labels to open epics that have none",
-        "method":      "_tool_set_risk_labels",
-        "params": [
-            {"name": "percent",  "prompt": "Percent of open epics to label (default 15)", "type": float, "default": 15.0},
-            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
-        ],
-    },
-    {
-        "key":         "scaffold",
-        "description": "Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content",
-        "method":      "create_safe_hierarchy",
+        "key":         "validate-weights",
+        "description": "Validate epic and issue weights against configured pools",
+        "method":      "_tool_validate_weights",
         "params":      [],
+    },
+    {
+        "key":         "weight-drift-check",
+        "description": "Flag epics where planned weight vs sum of issue weights drifts beyond a threshold",
+        "method":      "_tool_weight_drift_check",
+        "params": [
+            {"name": "threshold", "prompt": "Drift threshold % to flag (default 20)", "type": float, "default": 20.0},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
+        ],
     },
 ]
 

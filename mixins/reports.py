@@ -23,21 +23,15 @@ def _gid_to_int(gid_str):
 # ---------------------------------------------------------------------------
 REPORTS = [
     {
-        "key":         "health-dashboard",
-        "description": "Portfolio Health Dashboard — Tier 1 executive traffic-light view per Value Stream",
-        "method":      "generate_portfolio_health_dashboard",
+        "key":         "art-capacity-balance",
+        "description": "ART Capacity Balance Report — per-team planned vs actual weight per PI with over/under capacity flags",
+        "method":      "generate_art_capacity_balance_report",
         "needs_group": False,
     },
     {
-        "key":         "portfolio",
-        "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
-        "method":      "generate_portfolio_report",
-        "needs_group": False,
-    },
-    {
-        "key":         "workload",
-        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
-        "method":      "generate_workload_report",
+        "key":         "art-feature-status",
+        "description": "ART Feature Status Report — all Features per ART grouped by Team, with completion, weight, and risk",
+        "method":      "generate_art_feature_status_report",
         "needs_group": False,
     },
     {
@@ -47,9 +41,9 @@ REPORTS = [
         "needs_group": False,
     },
     {
-        "key":         "unassigned-pi",
-        "description": "Unassigned PI Report — epics with no PIID label, broken down by type",
-        "method":      "generate_unassigned_pi_report",
+        "key":         "health-dashboard",
+        "description": "Portfolio Health Dashboard — Tier 1 executive traffic-light view per Value Stream",
+        "method":      "generate_portfolio_health_dashboard",
         "needs_group": False,
     },
     {
@@ -77,21 +71,21 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "portfolio",
+        "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
+        "method":      "generate_portfolio_report",
+        "needs_group": False,
+    },
+    {
         "key":         "team-backlog",
         "description": "Team Backlog Report — issues grouped by Feature for every Team, with weight and completion",
         "method":      "generate_team_backlog_report",
         "needs_group": False,
     },
     {
-        "key":         "art-feature-status",
-        "description": "ART Feature Status Report — all Features per ART grouped by Team, with completion, weight, and risk",
-        "method":      "generate_art_feature_status_report",
-        "needs_group": False,
-    },
-    {
-        "key":         "art-capacity-balance",
-        "description": "ART Capacity Balance Report — per-team planned vs actual weight per PI with over/under capacity flags",
-        "method":      "generate_art_capacity_balance_report",
+        "key":         "unassigned-pi",
+        "description": "Unassigned PI Report — epics with no PIID label, broken down by type",
+        "method":      "generate_unassigned_pi_report",
         "needs_group": False,
     },
     {
@@ -104,6 +98,12 @@ REPORTS = [
         "key":         "vs-cross-art-risk",
         "description": "VS Cross-ART Risk Report — blocking relationships that cross ART boundaries within a Value Stream",
         "method":      "generate_vs_cross_art_risk_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "workload",
+        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
+        "method":      "generate_workload_report",
         "needs_group": False,
     },
 ]
