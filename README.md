@@ -89,13 +89,13 @@ Copy and edit `config.json`:
     },
     "defaults": {
         "bootstrap": {
-            "num_value_streams":    2,
-            "num_arts":             2,
-            "num_teams":            2,
-            "portfolio_epics":      5,
-            "vs_caps_per_vs":       3,
-            "art_caps_per_art":     4,
-            "features_per_team":    4,
+            "num_value_streams":    {"min": 1, "max": 4, "desired": 2},
+            "num_arts":             {"min": 1, "max": 3, "desired": 2},
+            "num_teams":            {"min": 1, "max": 4, "desired": 2},
+            "portfolio_epics":      {"min": 3, "max": 8, "desired": 5},
+            "vs_caps_per_vs":       {"min": 2, "max": 5, "desired": 3},
+            "art_caps_per_art":     {"min": 2, "max": 6, "desired": 4},
+            "features_per_team":    {"min": 3, "max": 6, "desired": 4},
             "direct_feature_ratio": 0.70
         },
         "tools": {
@@ -125,16 +125,27 @@ Copy and edit `config.json`:
 
 #### `defaults.bootstrap`
 
+Each count key accepts either a plain integer **or** a range object:
+
+```json
+"num_value_streams": 2                           // fixed
+"num_value_streams": {"desired": 2}              // always 2
+"num_value_streams": {"min": 1, "max": 4}        // random between 1 and 4
+"num_value_streams": {"min": 1, "max": 4, "desired": 2}  // always 2 (desired takes precedence)
+```
+
+At run time `--create` and `--scaffold` resolve each range to a single integer and print a structure summary before creating anything.
+
 | Key | Default | Description |
 |---|---|---|
-| `num_value_streams` | `2` | Number of Value Stream subgroups to create |
-| `num_arts` | `2` | Number of ART subgroups per Value Stream |
-| `num_teams` | `2` | Number of Team subgroups per ART |
-| `portfolio_epics` | `5` | Number of Portfolio Epics at the root group |
-| `vs_caps_per_vs` | `3` | Capabilities created per Value Stream |
-| `art_caps_per_art` | `4` | Capabilities created per ART |
-| `features_per_team` | `4` | Features created per Team |
-| `direct_feature_ratio` | `0.70` | Fraction of Features linked directly to Portfolio Epics; the remainder link via the Capability chain |
+| `num_value_streams` | `{"min":1,"max":4,"desired":2}` | Value Stream subgroups |
+| `num_arts` | `{"min":1,"max":3,"desired":2}` | ART subgroups per Value Stream |
+| `num_teams` | `{"min":1,"max":4,"desired":2}` | Team subgroups per ART |
+| `portfolio_epics` | `{"min":3,"max":8,"desired":5}` | Portfolio Epics at the root group |
+| `vs_caps_per_vs` | `{"min":2,"max":5,"desired":3}` | Capabilities per Value Stream |
+| `art_caps_per_art` | `{"min":2,"max":6,"desired":4}` | Capabilities per ART |
+| `features_per_team` | `{"min":3,"max":6,"desired":4}` | Features per Team |
+| `direct_feature_ratio` | `0.70` | Fraction of Features linked directly to Portfolio Epics; remainder link via Capability chain |
 
 #### `defaults.tools`
 
@@ -168,6 +179,8 @@ Any config value can be overridden at runtime without editing the file:
 ```bash
 python3 NceGitLab.py --clean              # Delete all data in the root group
 python3 NceGitLab.py --create             # Bootstrap a full SAFe lorem data set
+python3 NceGitLab.py --scaffold           # Create SAFe group structure only (prompted)
+python3 NceGitLab.py --scaffold my/group  # Create SAFe group structure under a specific group
 python3 NceGitLab.py --report             # Show the report menu
 python3 NceGitLab.py --report portfolio   # Run a single report by key
 python3 NceGitLab.py --utilities          # Show the utility tool menu
@@ -206,6 +219,37 @@ Features are then split by `direct_feature_ratio` (default 70%):
 - **Capability-chain Features** (remainder) — linked to ART Capabilities
 
 All epics are labelled with a random project label, PIID label, and type label. Planned weights are set via the GraphQL `workItemUpdate` mutation (the REST API silently ignores epic weight).
+
+---
+
+## What `--scaffold` Builds
+
+`--scaffold` creates only the **SAFe group and project structure** — no epics, issues, milestones, or labels. Use it when you want a clean hierarchy to populate manually or via import.
+
+```bash
+python3 NceGitLab.py --scaffold           # prompted for target group (default from config)
+python3 NceGitLab.py --scaffold my/group  # scaffold directly under an existing group path
+```
+
+Structure created under the target group:
+
+```
+<target group>
+└── Value Stream 01
+    └── ART 01
+        └── Team 01
+            └── Team 01 — Team Backlog  (project)
+        └── Team 02
+            └── Team 02 — Team Backlog  (project)
+    └── ART 02
+        ...
+└── Value Stream 02
+    ...
+```
+
+Group counts are resolved from `defaults.bootstrap` using `num_value_streams`, `num_arts`, and `num_teams`. Scalar, `desired`, and `min`/`max` range formats are all supported (see [defaults.bootstrap](#defaultsbootstrap)).
+
+If the target group does not exist and the path matches `parent_group` from config, it will be created. Otherwise the target group must already exist.
 
 ---
 
@@ -282,6 +326,7 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 | `import-epics` | Import epics from CSV or JSON with pre-flight validation, resilient field handling, dry-run |
 | `export-issues` | Export all issues from the group hierarchy to CSV or JSON (full field set, all subgroups) |
 | `import-issues` | Import issues from CSV or JSON with pre-flight validation, milestone/assignee lookup, dry-run |
+| `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
 
 ---
 
@@ -374,6 +419,6 @@ An **orphan summary table** is printed at the end of any run that produces epics
 
 **Metrics caching** — `calculate_portfolio_metrics()` caches results per group name in `_metrics_cache` so that multiple reports generated in the same session share a single fetch pass.
 
-**Config-driven defaults** — All numeric defaults for bootstrap counts and tool parameters live in `config.json` under `defaults.bootstrap` and `defaults.tools`. Function signatures use `None` sentinels and resolve from `self.default_*` at runtime, so callers can still override individual values programmatically.
+**Config-driven defaults** — All numeric defaults for bootstrap counts and tool parameters live in `config.json` under `defaults.bootstrap` and `defaults.tools`. Function signatures use `None` sentinels and resolve from `self.default_*` at runtime, so callers can still override individual values programmatically. Structure count keys (`num_value_streams`, `num_arts`, `num_teams`, etc.) accept a plain integer, `{"desired": N}`, or `{"min": M, "max": N}` range object. `_resolve_range()` in `mixins/bootstrap.py` handles all three forms; `_range_label()` produces a human-readable annotation for the run summary.
 
 **Job timing** — Each phase (`--clean`, `--create`, individual reports, `--all`) prints start/stop times and duration. `--all` aggregates all phases into a single summary table.
