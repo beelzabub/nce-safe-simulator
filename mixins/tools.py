@@ -95,6 +95,26 @@ TOOLS = [
         ],
     },
     {
+        "key":         "orphan-epics",
+        "description": "Remove parent links from N or X% of epics (simulate orphaned data)",
+        "method":      "_tool_orphan_epics",
+        "params": [
+            {"name": "count",   "prompt": "Number of epics to orphan (blank to use percent instead)", "type": int,   "optional": True},
+            {"name": "percent", "prompt": "Percent of epics to orphan (used when count is blank)",    "type": float, "default": 10.0},
+            {"name": "dry_run", "prompt": "Dry run?",                                                  "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "orphan-issues",
+        "description": "Remove epic links from N or X% of issues (simulate orphaned data)",
+        "method":      "_tool_orphan_issues",
+        "params": [
+            {"name": "count",   "prompt": "Number of issues to orphan (blank to use percent instead)", "type": int,   "optional": True},
+            {"name": "percent", "prompt": "Percent of issues to orphan (used when count is blank)",    "type": float, "default": 10.0},
+            {"name": "dry_run", "prompt": "Dry run?",                                                   "type": bool,  "default": False},
+        ],
+    },
+    {
         "key":         "reset-pi-progress",
         "description": "Reopen all closed issues linked to epics in a specific PI",
         "method":      "_tool_reset_pi_progress",
@@ -1136,6 +1156,150 @@ class ToolsMixin:
                 ok_count += 1
 
         print(f"\nDone.  Flagged: {flagged}  OK: {ok_count}  No planned weight: {no_plan}")
+
+    # ------------------------------------------------------------------
+    # Orphan simulators
+    # ------------------------------------------------------------------
+
+    def _tool_orphan_epics(self, count=None, percent=None, dry_run=False):
+        """Remove the parent link from N or X% of epics that currently have a parent."""
+        import requests as _requests
+
+        group = self.get_group_by_name(self.parent_group)
+
+        if count is None and percent is None:
+            print("ERROR: provide either count or percent.")
+            return
+
+        print(f"Group  : {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # Walk all epics once: build id→(group_id, iid) index and collect candidates
+        epic_index   = {}  # epic_id → (group_id, iid)
+        candidates   = []  # (child_id, child_iid, child_title, parent_id)
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                epic_index[epic.id] = (grp.id, epic.iid)
+                if getattr(epic, 'parent_id', None):
+                    candidates.append((epic.id, epic.iid, epic.title, epic.parent_id))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting epics with parents...")
+        _walk(group)
+        print(f"  {len(candidates)} epics have a parent")
+
+        if count is not None:
+            k = min(int(count), len(candidates))
+        else:
+            k = max(0, round(len(candidates) * float(percent) / 100))
+
+        if k == 0:
+            print("Nothing to orphan.")
+            return
+
+        sample = random.sample(candidates, k)
+        print(f"  Orphaning {k}\n")
+
+        session = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        updated = errors = 0
+        for child_id, child_iid, title, parent_id in sample:
+            if dry_run:
+                print(f"  DRY  #{child_iid} '{title[:55]}'")
+                updated += 1
+                continue
+            parent_info = epic_index.get(parent_id)
+            if not parent_info:
+                print(f"  SKIP #{child_iid} — parent {parent_id} not in index")
+                errors += 1
+                continue
+            parent_gid, parent_iid = parent_info
+            url  = f"{self.url}/api/v4/groups/{parent_gid}/epics/{parent_iid}/epics/{child_id}"
+            resp = session.delete(url)
+            if resp.status_code in (200, 204):
+                print(f"  ORPHANED  #{child_iid} '{title[:55]}'")
+                updated += 1
+            else:
+                print(f"  ERROR #{child_iid}: {resp.status_code} {resp.text[:80]}")
+                errors += 1
+
+        print(f"\nDone.  Orphaned: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_orphan_issues(self, count=None, percent=None, dry_run=False):
+        """Remove the epic link from N or X% of issues currently linked to an epic."""
+        import requests as _requests
+
+        group = self.get_group_by_name(self.parent_group)
+
+        if count is None and percent is None:
+            print("ERROR: provide either count or percent.")
+            return
+
+        print(f"Group  : {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        session = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        # Collect via epic issues endpoint — gives us the epic_issue_id needed for DELETE
+        candidates = []  # (group_id, epic_iid, epic_issue_id, issue_iid, title)
+
+        print("\nCollecting issues linked to epics...")
+        for epic in group.epics.list(all=True):
+            grp_id = getattr(epic, 'group_id', None)
+            if not grp_id:
+                continue
+            url  = f"{self.url}/api/v4/groups/{grp_id}/epics/{epic.iid}/issues"
+            resp = session.get(url)
+            if not resp.ok:
+                continue
+            for item in resp.json():
+                candidates.append((
+                    grp_id, epic.iid,
+                    item['epic_issue_id'],
+                    item['iid'],
+                    item.get('title', ''),
+                ))
+
+        print(f"  {len(candidates)} issues are linked to epics")
+
+        if count is not None:
+            k = min(int(count), len(candidates))
+        else:
+            k = max(0, round(len(candidates) * float(percent) / 100))
+
+        if k == 0:
+            print("Nothing to orphan.")
+            return
+
+        sample = random.sample(candidates, k)
+        print(f"  Orphaning {k}\n")
+
+        updated = errors = 0
+        for grp_id, epic_iid, epic_issue_id, issue_iid, title in sample:
+            if dry_run:
+                print(f"  DRY  #{issue_iid} '{title[:55]}'")
+                updated += 1
+            else:
+                url  = f"{self.url}/api/v4/groups/{grp_id}/epics/{epic_iid}/issues/{epic_issue_id}"
+                resp = session.delete(url)
+                if resp.status_code in (200, 204):
+                    print(f"  ORPHANED  #{issue_iid} '{title[:55]}'")
+                    updated += 1
+                else:
+                    print(f"  ERROR #{issue_iid}: {resp.status_code} {resp.text[:80]}")
+                    errors += 1
+
+        print(f"\nDone.  Orphaned: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
 
     # ------------------------------------------------------------------
     # Priority 5 — Reset / Cleanup

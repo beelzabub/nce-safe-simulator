@@ -2336,6 +2336,7 @@ class ReportsMixin:
         for vs_group in self._iter_vs_groups():
             vs_ids = _all_descendant_ids(vs_group["id"])
 
+            # Typed epics only — used for schedule/capacity (need pct_complete/weights)
             pi_epics = [
                 e for tier in self._rd_metrics.values()
                 for e in tier
@@ -2344,6 +2345,11 @@ class ReportsMixin:
             all_vs_epics = [
                 e for tier in self._rd_metrics.values()
                 for e in tier
+                if e.get("group_id") in vs_ids
+            ]
+            # All epics (typed + untyped) — used for risk and unassigned counts
+            all_vs_epics_raw = [
+                e for e in self._rd_epics_all
                 if e.get("group_id") in vs_ids
             ]
 
@@ -2366,21 +2372,22 @@ class ReportsMixin:
             tl_cap, cap_detail = _tl_capacity(actual_w, planned_w)
 
             risk_labels_found = [
-                lbl for e in all_vs_epics for lbl in e.get("labels", [])
+                lbl for e in all_vs_epics_raw for lbl in e.get("labels", [])
                 if lbl in risk_label_set
             ]
             tl_risk, risk_detail = _tl_risk(risk_labels_found)
 
-            vs_epic_ids = {e["id"] for e in (pi_epics if pi_epics else all_vs_epics)}
+            vs_epic_ids = {e["id"] for e in (pi_epics if pi_epics else all_vs_epics_raw)}
             vs_blocked  = sum(1 for eid in vs_epic_ids if blocked_counts.get(eid, 0) > 0)
             tl_block, block_detail = _tl_blocking(vs_blocked)
 
             overall     = _worst(tl_sched, tl_cap, tl_risk, tl_block)
             unassigned_vs = sum(
-                1 for e in all_vs_epics
+                1 for e in all_vs_epics_raw
                 if not any(l.startswith("PIID::") for l in e.get("labels", []))
             )
-            high_risk_count = len([l for l in risk_labels_found if "high" in l.lower()])
+            risk_epic_count = len({e["id"] for e in all_vs_epics_raw
+                                   for lbl in e.get("labels", []) if lbl in risk_label_set})
 
             vs_rows.append({
                 "vs":          vs_group,
@@ -2397,8 +2404,14 @@ class ReportsMixin:
 
             portfolio_epics_total   += len(all_vs_epics)
             portfolio_blocked_total += vs_blocked
-            portfolio_risk_epics    += high_risk_count
+            portfolio_risk_epics    += risk_epic_count
             portfolio_unassigned    += unassigned_vs
+
+        # ── Portfolio-level risk count (all epics, all groups including root) ── #
+        portfolio_risk_epics = len({
+            e["id"] for e in self._rd_epics_all
+            for lbl in e.get("labels", []) if lbl in risk_label_set
+        })
 
         # ── Portfolio-level current PI progress ─────────────────────────── #
         all_pi_epics = [
@@ -2451,19 +2464,43 @@ class ReportsMixin:
         )
         md.append("")
 
+        # ── Work Items deep links ─────────────────────────────────────────── #
+        from urllib.parse import quote as _pquote
+
+        def _wi(params):
+            parts = [f"{_pquote(k, safe='')}={_pquote(v, safe='')}" for k, v in params]
+            return f"{root_group.web_url}/-/work_items?{'&'.join(parts)}"
+
+        _wi_all   = _wi([("state", "all"),    ("type[]", "epic")])
+        _wi_pi    = (
+            _wi([("state", "opened"), ("type[]", "epic"), ("label_name[]", current_pi)])
+            if current_pi else _wi_all
+        )
+        _wi_block = (
+            _wi([("state", "opened"), ("type[]", "epic"),
+                 ("label_name[]", current_pi), ("blocked", "true")])
+            if current_pi else
+            _wi([("state", "opened"), ("type[]", "epic"), ("blocked", "true")])
+        )
+        _risk_p  = [("state", "opened"), ("type[]", "epic")] + [
+            ("or[label_name][]", lbl) for lbl in self._rd_risk_labels
+        ]
+        _wi_risk  = _wi(_risk_p) if self._rd_risk_labels else _wi_all
+        _wi_unasn = _wi([("state", "opened"), ("type[]", "epic")])
+
         md.append("## Portfolio Summary")
         md.append("")
         md.append("| Metric | Value |")
         md.append("|--------|-------|")
-        md.append(f"| Total Epics (all PIs) | {portfolio_epics_total} |")
-        md.append(f"| Epics in Current PI | {len(all_pi_epics)} |")
+        md.append(f"| Total Epics (all PIs) | [{portfolio_epics_total}]({_wi_all}) |")
+        md.append(f"| Epics in Current PI | [{len(all_pi_epics)}]({_wi_pi}) |")
         md.append(
-            f"| Current PI Progress | {port_pct_done}% done  "
+            f"| Current PI Progress | [{port_pct_done}% done]({_wi_pi})  "
             f"({pct_pi}% elapsed) {port_tl_sched} |"
         )
-        md.append(f"| Blocked Epics (current PI) | {portfolio_blocked_total} |")
-        md.append(f"| High-Risk Epics | {portfolio_risk_epics} |")
-        md.append(f"| Unassigned to PI | {portfolio_unassigned} |")
+        md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_block}) |")
+        md.append(f"| High-Risk Epics | [{portfolio_risk_epics}]({_wi_risk}) |")
+        md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
         md.append("")
 
         md.append("## Value Stream Status")
