@@ -1020,10 +1020,10 @@ class ToolsMixin:
             if "Feature" in labels:
                 parent = all_epics.get(pid)
                 if parent is None:
-                    violations.append((epic, "Feature has no parent (expected Capability)"))
-                elif "Capability" not in parent.labels:
+                    violations.append((epic, "Feature has no parent (expected Capability or Epic)"))
+                elif "Capability" not in parent.labels and "Epic" not in parent.labels:
                     ptype = next((t for t in ("Epic", "Capability", "Feature") if t in parent.labels), "unknown")
-                    violations.append((epic, f"Feature parent is {ptype}, expected Capability"))
+                    violations.append((epic, f"Feature parent is {ptype}, expected Capability or Epic"))
 
             elif "Capability" in labels:
                 parent = all_epics.get(pid)
