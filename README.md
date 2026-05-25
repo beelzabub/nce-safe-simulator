@@ -322,6 +322,7 @@ Reports fall into two structural types:
 | `piid-project` | `<group> - Program × PI Report` | Project label vs PI quarter cross-tab with status and weights |
 | `piid-project-detail` | `<group> - Program PI Detail Report` | Per-PI section view of program workload and status |
 | `portfolio` | `<group> - SAFe Portfolio Report` | Collapsible Epic → Capability/Feature hierarchy with % complete, planned vs actual weight, PI progress, and risk flags |
+| `risk-register` | `<group> - Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI, owning ART, and state; summary counts by level and Value Stream |
 | `team-backlog` | `<group> - Team Backlog Report` | Issues grouped by Feature per Team with weight and completion *(hierarchical)* |
 | `unassigned-pi` | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
 | `vs-capability-dashboard` | `<group> - VS Capability Dashboard` | Capabilities and Direct Features by PI with per-ART breakdown per Value Stream *(hierarchical)* |

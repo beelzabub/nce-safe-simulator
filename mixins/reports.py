@@ -77,6 +77,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "risk-register",
+        "description": "Risk Register — all risk-flagged epics grouped by level (High → Medium → Low) with PI, ART, and state",
+        "method":      "generate_risk_register",
+        "needs_group": False,
+    },
+    {
         "key":         "team-backlog",
         "description": "Team Backlog Report — issues grouped by Feature for every Team, with weight and completion",
         "method":      "generate_team_backlog_report",
@@ -1217,6 +1223,149 @@ class ReportsMixin:
         for vs, art in self._iter_art_groups():
             for team in self._rd_groups_by_parent.get(art["id"], []):
                 yield vs, art, team
+
+    # ------------------------------------------------------------------
+    # Risk Register
+    # ------------------------------------------------------------------
+
+    def generate_risk_register(self):
+        group = self._rd_root_obj
+        today = date.today()
+        print(f"  Generating Risk Register for {group.name}...")
+
+        RISK_ORDER = ["risk::high", "risk::medium", "risk::low"]
+        RISK_ICONS = {"risk::high": "🔴", "risk::medium": "🟡", "risk::low": "🟢"}
+
+        # Canonical order; append any discovered labels not in the standard set
+        active_risk_labels = set(self._rd_risk_labels)
+        ordered_levels = [l for l in RISK_ORDER if l in active_risk_labels] + \
+                         [l for l in self._rd_risk_labels if l not in set(RISK_ORDER)]
+
+        if not ordered_levels:
+            md = [
+                f"# Risk Register — {group.name}",
+                f"## Report Date: {today.strftime('%Y-%m-%d')}",
+                "",
+                "_No risk labels found. Apply `risk::high`, `risk::medium`, or `risk::low` to epics and re-run._",
+            ]
+            self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
+            return
+
+        # Build relative path from root for each epic's owning group
+        root_id = self._rd_root["id"]
+
+        def _group_path(gid):
+            parts = []
+            cur = self._rd_groups_by_id.get(gid)
+            while cur and cur["id"] != root_id:
+                parts.append(cur["name"])
+                cur = self._rd_groups_by_id.get(cur.get("parent_id"))
+            return " / ".join(reversed(parts)) if parts else group.name
+
+        # Assign each epic to its highest risk level (high > medium > low)
+        buckets   = {lbl: [] for lbl in ordered_levels}
+        seen_ids  = set()
+        for lbl in ordered_levels:
+            for epic in self._rd_epics_all:
+                if epic["id"] in seen_ids:
+                    continue
+                if lbl in epic.get("labels", []):
+                    buckets[lbl].append(epic)
+                    seen_ids.add(epic["id"])
+
+        total_risk = len(seen_ids)
+
+        # VS breakdown
+        vs_counts = {}
+        for vs in self._iter_vs_groups():
+            vs_desc_ids = set()
+            def _collect(gid):
+                vs_desc_ids.add(gid)
+                for child in self._rd_groups_by_parent.get(gid, []):
+                    _collect(child["id"])
+            _collect(vs["id"])
+            vs_counts[vs["name"]] = sum(
+                1 for e in self._rd_epics_all
+                if e.get("group_id") in vs_desc_ids
+                and any(l in active_risk_labels for l in e.get("labels", []))
+            )
+
+        # ── Render ──────────────────────────────────────────────────────── #
+        md = []
+        md.append(f"# Risk Register — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(f"**{total_risk} risk-flagged epic(s).** Each epic is assigned to its highest risk level.")
+        md.append("")
+
+        md.append("## Summary")
+        md.append("")
+        md.append("### By Risk Level")
+        md.append("")
+        md.append("| Risk Level | Count |")
+        md.append("|-----------|-------|")
+        for lbl in ordered_levels:
+            icon  = RISK_ICONS.get(lbl, "⚪")
+            level = lbl.split("::")[-1].capitalize()
+            md.append(f"| {icon} {level} | {len(buckets[lbl])} |")
+        md.append("")
+
+        if vs_counts:
+            md.append("### By Value Stream")
+            md.append("")
+            md.append("| Value Stream | Risk-Flagged Epics |")
+            md.append("|-------------|-------------------|")
+            for vs_name, cnt in vs_counts.items():
+                md.append(f"| {vs_name} | {cnt} |")
+            md.append("")
+
+        # ── Per-level tables ─────────────────────────────────────────────── #
+        def _pi_sort_key(e):
+            piid = next((l for l in e.get("labels", []) if l.startswith("PIID::")), "PIID::ZZZZ")
+            return (piid, e["title"])
+
+        for lbl in ordered_levels:
+            epics = buckets[lbl]
+            if not epics:
+                continue
+            icon  = RISK_ICONS.get(lbl, "⚪")
+            level = lbl.split("::")[-1].capitalize()
+            md.append(f"## {icon} {level} Risk ({len(epics)})")
+            md.append("")
+            md.append("| Epic | Type | PI | Group / ART | State |")
+            md.append("|------|------|----|-------------|-------|")
+            for epic in sorted(epics, key=_pi_sort_key):
+                etype      = next((t for t in ("Epic", "Capability", "Feature")
+                                   if t in epic.get("labels", [])), "Unknown")
+                eicon      = self.EPIC_TYPE_ICONS.get(etype, "❓")
+                pi         = next((l for l in epic.get("labels", [])
+                                   if l.startswith("PIID::")), "—")
+                path       = _group_path(epic.get("group_id"))
+                title_link = f"[{epic['title']}]({epic['web_url']})"
+                state      = epic["state"].capitalize()
+                md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} |")
+            md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "",
+            "| Icon | Level | Meaning |",
+            "|------|-------|---------|",
+            "| 🔴 | High   | Immediate attention required — risk to delivery or mission outcome |",
+            "| 🟡 | Medium | Monitor closely — risk exists but is being managed |",
+            "| 🟢 | Low    | Acknowledged risk — low probability or low impact |",
+            "",
+            "Risk labels (`risk::high`, `risk::medium`, `risk::low`) are applied directly to epics.  ",
+            "Each epic is counted once at its highest assigned risk level.  ",
+            "**Group / ART** shows the path from the portfolio root to the owning group.",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
 
     # ------------------------------------------------------------------
     # Team-level reports
