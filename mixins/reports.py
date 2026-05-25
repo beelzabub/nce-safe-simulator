@@ -8,6 +8,14 @@ from urllib.parse import quote
 
 from .utils import _fmt_duration
 
+
+def _gid_to_int(gid_str):
+    """Convert 'gid://gitlab/Epic/123' → 123, or return None."""
+    try:
+        return int(str(gid_str).split("/")[-1])
+    except (ValueError, AttributeError):
+        return None
+
 # ---------------------------------------------------------------------------
 # Report registry — each entry describes one runnable report.
 # needs_group: True  → method signature is  method(self, group)
@@ -18,7 +26,7 @@ REPORTS = [
         "key":         "portfolio",
         "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
         "method":      "generate_portfolio_report",
-        "needs_group": True,
+        "needs_group": False,
     },
     {
         "key":         "workload",
@@ -337,14 +345,9 @@ class ReportsMixin:
         return md
 
     def generate_piid_project_report(self):
-        """Program × PI cross-tab: rows = project labels, columns = PIID quarters.
-
-        Each cell shows status, epic counts, % done vs PI elapsed, and planned vs
-        actual weight delta.  Data comes from calculate_portfolio_metrics so no
-        extra API calls are needed beyond what other reports already do.
-        """
-        group   = self.get_group_by_name(self.parent_group)
-        metrics = self.calculate_portfolio_metrics(self.parent_group)
+        """Program × PI cross-tab: rows = project labels, columns = PIID quarters."""
+        group   = self._rd_root_obj
+        metrics = self._rd_metrics
 
         # Flatten all types into one list
         all_epics = [e for epics in metrics.values() for e in epics]
@@ -466,12 +469,9 @@ class ReportsMixin:
         self.upload_to_wiki(group, f"{group.name} - Program PI Report", "\n".join(md))
 
     def generate_piid_project_detail_report(self):
-        """Per-PI section view of program workload — one section per PIID quarter,
-        each with a narrow table of project labels and their metrics for that PI.
-        Cross-linked to the Program × PI matrix report.
-        """
-        group   = self.get_group_by_name(self.parent_group)
-        metrics = self.calculate_portfolio_metrics(self.parent_group)
+        """Per-PI section view of program workload — one section per PIID quarter."""
+        group   = self._rd_root_obj
+        metrics = self._rd_metrics
 
         all_epics = [e for epics in metrics.values() for e in epics]
 
@@ -590,12 +590,13 @@ class ReportsMixin:
 
         self.upload_to_wiki(group, f"{group.name} - Program PI Detail Report", "\n".join(md))
 
-    def generate_portfolio_report(self, group):
+    def generate_portfolio_report(self):
+        group      = self._rd_root_obj
         group_name = group.name
         print("  Generating SAFe Portfolio Report...")
 
         try:
-            metrics   = self.calculate_portfolio_metrics(group_name)
+            metrics   = self._rd_metrics
             summary   = self.generate_portfolio_summary(metrics, group)
 
             markdown_report = []
@@ -719,22 +720,16 @@ class ReportsMixin:
         return "\n".join(summary)
 
     def generate_workload_report(self):
-        group = self.get_group_by_name(self.parent_group)
+        group = self._rd_root_obj
         print("  Generating ART/Team Workload Report...")
 
-        metrics   = self.calculate_portfolio_metrics(self.parent_group)
+        metrics   = self._rd_metrics
         all_epics = metrics.get("Epic", []) + metrics.get("Capability", []) + metrics.get("Feature", [])
         if not all_epics:
             print("No epics found — skipping workload report.")
             return
 
-        group_ids    = {e["group_id"] for e in all_epics if e.get("group_id")}
-        groups_by_id = {}
-        for gid in group_ids:
-            try:
-                groups_by_id[gid] = self.gl.groups.get(gid)
-            except Exception as e:
-                print(f"  Could not fetch group {gid}: {e}")
+        groups_by_id = self._rd_groups_by_id
 
         pi_group_features = defaultdict(lambda: defaultdict(list))
         for e in all_epics:
@@ -804,8 +799,8 @@ class ReportsMixin:
             for gid in sorted(group_data.keys(), key=_risk_sort):
                 fs            = group_data[gid]
                 grp           = groups_by_id.get(gid)
-                grp_name      = grp.name    if grp else f"Group {gid}"
-                grp_url       = grp.web_url if grp else ""
+                grp_name      = grp["name"]    if grp else f"Group {gid}"
+                grp_url       = grp["web_url"] if grp else ""
                 total_planned = sum(f["planned_weight"] for f in fs)
                 total_actual  = sum(f["actual_weight"]  for f in fs)
                 delta         = total_actual - total_planned
@@ -824,7 +819,7 @@ class ReportsMixin:
 
                 if grp:
                     wi_url = (
-                        f"{self.url}/groups/{grp.full_path}/-/work_items"
+                        f"{self.url}/groups/{grp['full_path']}/-/work_items"
                         f"?sort=created_date&state=opened"
                         f"&label_name%5B%5D={quote(piid, safe='')}"
                         f"&first_page_size=100"
@@ -942,82 +937,30 @@ class ReportsMixin:
             print()
 
     def generate_blocking_report(self):
-        group     = self.get_group_by_name(self.parent_group)
-        full_path = group.full_path
+        group = self._rd_root_obj
 
-        query = """
-        query ListAllEpics($fullPath: ID!) {
-          group(fullPath: $fullPath) {
-            epics {
-              nodes {
-                id title blocked blockingCount webUrl blockedByCount
-                labels { nodes { title } }
-                parent {
-                  id title webUrl
-                  labels { nodes { title } }
-                }
-                blockedByEpics {
-                  edges {
-                    node {
-                      id title webUrl
-                      labels { nodes { title } }
-                    }
-                  }
-                }
-                state
-              }
-            }
-          }
-        }
-        """
+        rels  = self._rd_blocking.get("relationships", [])
+        summ  = self._rd_blocking.get("summary", {})
 
-        def epic_type(node):
-            label_titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
-            for t in ("Epic", "Capability", "Feature"):
-                if t in label_titles:
-                    return t
-            return "Epic"
+        total_relationships = summ.get("total_relationships", 0)
+
+        # Index portfolio-epic ancestors across all relationships
+        id_to_ancestor: dict = {}
+        epic_to_blocked_descendants: defaultdict = defaultdict(list)
+        for rel in rels:
+            for anc in rel.get("at_risk_portfolio_epics", []):
+                id_to_ancestor[anc["id"]] = anc
+                epic_to_blocked_descendants[anc["id"]].append(rel["blocked_epic"])
 
         def link(title, url):
             return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
-
-        data = self.graphql_query(query, variables={"fullPath": full_path})
-        if data is None:
-            return
-
-        nodes         = data["group"]["epics"]["nodes"]
-        blocked_epics = [n for n in nodes if n.get("blockedByCount", 0) > 0]
-
-        total_relationships = sum(n.get("blockedByCount", 0) for n in blocked_epics)
-
-        id_to_node = {n["id"]: n for n in nodes}
-        parent_of  = {n["id"]: n["parent"]["id"] for n in nodes if n.get("parent")}
-
-        def get_ancestors(epic_id):
-            ancestors = []
-            current   = epic_id
-            visited   = set()
-            while current in parent_of:
-                current = parent_of[current]
-                if current in visited:
-                    break
-                visited.add(current)
-                if current in id_to_node:
-                    ancestors.append(id_to_node[current])
-            return ancestors
-
-        epic_to_blocked_descendants = defaultdict(list)
-        for blocked in blocked_epics:
-            for ancestor in get_ancestors(blocked["id"]):
-                if epic_type(ancestor) == "Epic":
-                    epic_to_blocked_descendants[ancestor["id"]].append(blocked)
 
         md = []
         md.append(f"# Blocking Relationships Report (Group: {group.name})")
         md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
         md.append("## Summary")
-        md.append(f"- **Directly blocked items:** {len(blocked_epics)}")
+        md.append(f"- **Directly blocked items:** {len(rels)}")
         md.append(f"- **Total blocking relationships:** {total_relationships}")
         md.append(f"- **Top-level Epics with blocked descendants:** {len(epic_to_blocked_descendants)}")
         md.append("")
@@ -1037,51 +980,51 @@ class ReportsMixin:
                 epic_to_blocked_descendants.items(),
                 key=lambda kv: -len(kv[1])
             ):
-                epic_node  = id_to_node[epic_id]
+                anc_node   = id_to_ancestor[epic_id]
                 desc_links = ", ".join(
-                    f"{self.EPIC_TYPE_ICONS.get(epic_type(d), '🏆')} {link(_short(d['title']), d['webUrl'])}"
+                    f"{self.EPIC_TYPE_ICONS.get(d.get('type', 'Epic'), '🏆')} {link(_short(d['title']), d['web_url'])}"
                     for d in descendants
                 )
                 md.append(
-                    f"| ⚠️ 🏆 **{link(epic_node['title'], epic_node['webUrl'])}** "
+                    f"| ⚠️ 🏆 **{link(anc_node['title'], anc_node['web_url'])}** "
                     f"| **{len(descendants)}:** {desc_links} |"
                 )
             md.append("")
 
-        if not blocked_epics:
+        if not rels:
             md.append("_No blocked epics found._")
         else:
             md.append("## Blocked Items (Detail)")
             md.append("")
-            for epic in blocked_epics:
-                etype          = epic_type(epic)
+            for rel in rels:
+                epic           = rel["blocked_epic"]
+                etype          = epic.get("type", "Epic")
                 icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
                 state          = epic.get("state", "").capitalize()
-                blocked_by_cnt = epic.get("blockedByCount", 0)
+                blocked_by_cnt = len(rel.get("blocked_by", []))
 
                 md.append("<details>")
                 md.append(
-                    f"<summary>⛔ {icon} **{link(epic['title'], epic['webUrl'])}**"
+                    f"<summary>⛔ {icon} **{link(epic['title'], epic['web_url'])}**"
                     f" ({etype}) — State: {state}"
                     f" — Blocked by: {blocked_by_cnt}</summary>"
                 )
                 md.append("")
 
-                for edge in epic.get("blockedByEpics", {}).get("edges", []):
-                    node  = edge["node"]
-                    btype = epic_type(node)
+                for blocker in rel.get("blocked_by", []):
+                    btype = blocker.get("type", "Epic")
                     bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
-                    md.append(f"🔒 {bicon} **{link(node['title'], node['webUrl'])}** ({btype})")
+                    md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}** ({btype})")
                     md.append("")
 
-                ancestors = get_ancestors(epic["id"])
+                ancestors = rel.get("at_risk_portfolio_epics", [])
                 if ancestors:
                     md.append("**Risk propagates up to:**")
                     md.append("")
                     for ancestor in ancestors:
-                        atype = epic_type(ancestor)
+                        atype = ancestor.get("type", "Epic")
                         aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
-                        md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['webUrl'])}** ({atype})")
+                        md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}** ({atype})")
                         md.append("")
 
                 md.append("</details>")
@@ -1111,13 +1054,14 @@ class ReportsMixin:
         self.upload_to_wiki(group, f"{group.name} - Blocking Relationships Report", "\n".join(md))
 
     def generate_orphan_epics_report(self):
-        group = self.get_group_by_name(self.parent_group)
+        group = self._rd_root_obj
         print(f"Generating orphan report for {group.name}...")
 
-        all_epics     = group.epics.list(all=True)
-        epic_hierarchy = defaultdict(list)
+        all_epics = self._rd_epics_all
+
+        epic_hierarchy: defaultdict = defaultdict(list)
         for epic in all_epics:
-            pid = getattr(epic, 'parent_id', None)
+            pid = epic.get("parent_id")
             if pid is not None:
                 epic_hierarchy[pid].append(epic)
 
@@ -1125,7 +1069,7 @@ class ReportsMixin:
 
         orphans = [
             e for e in all_epics
-            if getattr(e, 'parent_id', None) is None and e.id not in epic_ids_with_children
+            if e.get("parent_id") is None and e["id"] not in epic_ids_with_children
         ]
 
         md = []
@@ -1143,33 +1087,28 @@ class ReportsMixin:
             md.append("| Type | Title | State |")
             md.append("|------|-------|-------|")
             for epic in orphans:
-                etype      = next((t for t in ("Epic", "Capability", "Feature") if t in epic.labels), "Unknown")
+                etype      = next((t for t in ("Epic", "Capability", "Feature") if t in epic["labels"]), "Unknown")
                 icon       = self.EPIC_TYPE_ICONS.get(etype, "❓")
-                title_link = f"[{epic.title}]({epic.web_url})"
-                md.append(f"| {icon} {etype} | {title_link} | {epic.state.capitalize()} |")
+                title_link = f"[{epic['title']}]({epic['web_url']})"
+                md.append(f"| {icon} {etype} | {title_link} | {epic['state']} |")
 
         self.upload_to_wiki(group, f"{group.name} - Orphaned Epics Report", "\n".join(md))
 
     def generate_orphan_issues_report(self):
-        group = self.get_group_by_name(self.parent_group)
+        group = self._rd_root_obj
         print(f"Generating orphan issues report for {group.name}...")
 
         orphans_by_project = {}
-        for project in group.projects.list(all=True, include_subgroups=True):
-            try:
-                full_project = self.gl.projects.get(project.id)
-                if not full_project.issues_enabled:
-                    continue
-                orphaned = [
-                    i for i in full_project.issues.list(all=True)
-                    if not getattr(i, 'epic', None)
-                ]
-                if orphaned:
-                    orphans_by_project[full_project] = orphaned
-            except Exception as e:
-                print(f"Failed to fetch issues for project '{project.name}': {e}")
+        all_projects = [p for plist in self._rd_projects_by_nsid.values() for p in plist]
+        for project in all_projects:
+            if not project.get("issues_enabled", True):
+                continue
+            issues   = self._rd_issues_by_project.get(project["path_with_namespace"], [])
+            orphaned = [i for i in issues if not i.get("epic_id")]
+            if orphaned:
+                orphans_by_project[project["path_with_namespace"]] = (project, orphaned)
 
-        total = sum(len(v) for v in orphans_by_project.values())
+        total = sum(len(v[1]) for v in orphans_by_project.values())
 
         md = []
         md.append(f"# Orphaned Issues Report (Group: {group.name})")
@@ -1184,33 +1123,33 @@ class ReportsMixin:
             md.append(f"**{total} orphaned issue(s) across {len(orphans_by_project)} project(s).**")
             md.append("")
 
-            for project, issues in sorted(orphans_by_project.items(), key=lambda x: x[0].name_with_namespace):
-                md.append(f"### {project.name_with_namespace}")
+            for _key, (project, issues) in sorted(orphans_by_project.items()):
+                md.append(f"### {project['name_with_namespace']}")
                 md.append("")
                 md.append("| # | Title | State | Milestone | Assignees |")
                 md.append("|---|-------|-------|-----------|-----------|")
                 for issue in issues:
-                    title_link = f"[{issue.title}]({issue.web_url})"
-                    state      = issue.state.capitalize()
-                    milestone  = issue.milestone['title'] if issue.milestone else "_None_"
-                    assignees  = ", ".join(a['name'] for a in issue.assignees) if issue.assignees else "_Unassigned_"
-                    md.append(f"| #{issue.iid} | {title_link} | {state} | {milestone} | {assignees} |")
+                    title_link = f"[{issue['title']}]({issue['web_url']})"
+                    state      = issue["state"].capitalize()
+                    milestone  = issue["milestone"] or "_None_"
+                    assignees  = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
+                    md.append(f"| #{issue['iid']} | {title_link} | {state} | {milestone} | {assignees} |")
                 md.append("")
 
         self.upload_to_wiki(group, f"{group.name} - Orphaned Issues Report", "\n".join(md))
 
     def generate_unassigned_pi_report(self):
-        group = self.get_group_by_name(self.parent_group)
+        group = self._rd_root_obj
         print("  Generating Unassigned PI Report...")
 
-        all_epics        = group.epics.list(all=True)
-        epic_title_by_id = {e.id: e.title for e in all_epics}
+        all_epics        = self._rd_epics_all
+        epic_title_by_id = {e["id"]: e["title"] for e in all_epics}
 
-        unassigned = [e for e in all_epics if not any(l.startswith("PIID::") for l in e.labels)]
+        unassigned = [e for e in all_epics if not any(l.startswith("PIID::") for l in e["labels"])]
 
-        by_type = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
+        by_type: dict = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
         for e in unassigned:
-            etype = next((t for t in ("Epic", "Capability", "Feature") if t in e.labels), "Unknown")
+            etype = next((t for t in ("Epic", "Capability", "Feature") if t in e["labels"]), "Unknown")
             by_type[etype].append(e)
 
         md = []
@@ -1231,10 +1170,10 @@ class ReportsMixin:
             md.append("")
             md.append("| Title | State | Parent |")
             md.append("|-------|-------|--------|")
-            for e in sorted(items, key=lambda x: x.title):
-                title_link = f"[{e.title}]({e.web_url})"
-                state      = e.state.capitalize()
-                parent_id  = getattr(e, 'parent_id', None)
+            for e in sorted(items, key=lambda x: x["title"]):
+                title_link = f"[{e['title']}]({e['web_url']})"
+                state      = e["state"]
+                parent_id  = e.get("parent_id")
                 parent     = f"_{epic_title_by_id[parent_id]}_" if parent_id and parent_id in epic_title_by_id else "—"
                 md.append(f"| {title_link} | {state} | {parent} |")
             md.append("")
@@ -1256,28 +1195,22 @@ class ReportsMixin:
     # Hierarchy traversal helpers (shared by team/ART/VS reports)
     # ------------------------------------------------------------------
 
-    def _iter_team_groups(self, root_group):
-        """Yield (vs_group, art_group, team_group) for every team in the hierarchy."""
-        for vs_sg in root_group.subgroups.list(all=True):
-            vs_group = self.gl.groups.get(vs_sg.id)
-            for art_sg in vs_group.subgroups.list(all=True):
-                art_group = self.gl.groups.get(art_sg.id)
-                for team_sg in art_group.subgroups.list(all=True):
-                    team_group = self.gl.groups.get(team_sg.id)
-                    yield vs_group, art_group, team_group
+    def _iter_vs_groups(self, _root=None):
+        """Yield vs_group dict for every Value Stream under root."""
+        for g in self._rd_groups_by_parent.get(self._rd_root["id"], []):
+            yield g
 
-    def _iter_art_groups(self, root_group):
-        """Yield (vs_group, art_group) for every ART in the hierarchy."""
-        for vs_sg in root_group.subgroups.list(all=True):
-            vs_group = self.gl.groups.get(vs_sg.id)
-            for art_sg in vs_group.subgroups.list(all=True):
-                art_group = self.gl.groups.get(art_sg.id)
-                yield vs_group, art_group
+    def _iter_art_groups(self, _root=None):
+        """Yield (vs_group, art_group) dicts for every ART in the hierarchy."""
+        for vs in self._iter_vs_groups():
+            for art in self._rd_groups_by_parent.get(vs["id"], []):
+                yield vs, art
 
-    def _iter_vs_groups(self, root_group):
-        """Yield vs_group for every Value Stream under root."""
-        for vs_sg in root_group.subgroups.list(all=True):
-            yield self.gl.groups.get(vs_sg.id)
+    def _iter_team_groups(self, _root=None):
+        """Yield (vs_group, art_group, team_group) dicts for every team in the hierarchy."""
+        for vs, art in self._iter_art_groups():
+            for team in self._rd_groups_by_parent.get(art["id"], []):
+                yield vs, art, team
 
     # ------------------------------------------------------------------
     # Team-level reports
@@ -1285,18 +1218,17 @@ class ReportsMixin:
 
     def generate_team_backlog_report(self):
         """One wiki page per team (on each team's own wiki) plus a root-level index page."""
-        root_group = self.get_group_by_name(self.parent_group)
+        root_group = self._rd_root_obj
         print(f"Generating Team Backlog Reports under: {root_group.full_path}")
 
         index_entries = []  # (vs_name, art_name, team_name, wiki_url, summary_line)
 
-        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
-            print(f"  Processing {team_group.full_path}")
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            print(f"  Processing {team_group['full_path']}")
             entry = self._generate_team_backlog_page(vs_group, art_group, team_group)
             if entry:
                 index_entries.append(entry)
 
-        # Build the root-level index page
         md = []
         md.append(f"# Team Backlog Index — {root_group.name}")
         md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1322,50 +1254,48 @@ class ReportsMixin:
 
     def _generate_team_backlog_page(self, vs_group, art_group, team_group):
         """Upload the team backlog page to the team's own wiki. Returns an index entry tuple."""
-        projects = team_group.projects.list(all=True)
-        backlog_project = next(
-            (self.gl.projects.get(p.id) for p in projects if p.path.endswith("-backlog")),
-            None
-        )
+        projects       = self._rd_projects_by_nsid.get(team_group["id"], [])
+        backlog_project = next((p for p in projects if p["path"].endswith("-backlog")), None)
 
-        breadcrumb = f"{vs_group.name} / {art_group.name} / {team_group.name}"
+        breadcrumb = f"{vs_group['name']} / {art_group['name']} / {team_group['name']}"
         wiki_title = "Team Backlog"
-        wiki_url   = f"{team_group.web_url}/-/wikis/team-backlog"
+        wiki_url   = f"{team_group['web_url']}/-/wikis/team-backlog"
+
+        team_group_live = self.gl.groups.get(team_group["id"])
 
         if not backlog_project:
             md = [
-                f"# Team Backlog — {team_group.name}",
+                f"# Team Backlog — {team_group['name']}",
                 f"**{breadcrumb}**  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}",
                 "",
                 "_No Team Backlog project found for this team._",
             ]
-            self.upload_to_wiki(team_group, wiki_title, "\n".join(md))
-            print(f"    → {team_group.full_path} wiki: {wiki_title}")
-            return (vs_group.name, art_group.name, team_group.name, wiki_url, "_(no backlog project)_")
+            self.upload_to_wiki(team_group_live, wiki_title, "\n".join(md))
+            print(f"    → {team_group['full_path']} wiki: {wiki_title}")
+            return (vs_group["name"], art_group["name"], team_group["name"], wiki_url, "_(no backlog project)_")
 
-
-        all_issues = backlog_project.issues.list(all=True)
+        all_issues = self._rd_issues_by_project.get(backlog_project["path_with_namespace"], [])
 
         # Group by linked Feature epic
-        by_feature  = defaultdict(list)
-        unlinked    = []
+        by_feature: defaultdict = defaultdict(list)
+        unlinked = []
         for issue in all_issues:
-            epic = getattr(issue, "epic", None)
-            if epic:
-                by_feature[epic["id"]].append((epic, issue))
+            eid = issue.get("epic_id")
+            if eid:
+                by_feature[eid].append(issue)
             else:
                 unlinked.append(issue)
 
-        total_w  = sum(i.weight or 0 for i in all_issues)
-        closed_w = sum(i.weight or 0 for i in all_issues if i.state == "closed")
-        open_cnt = sum(1 for i in all_issues if i.state == "opened")
+        total_w  = sum(i.get("weight") or 0 for i in all_issues)
+        closed_w = sum(i.get("weight") or 0 for i in all_issues if i["state"] == "closed")
+        open_cnt = sum(1 for i in all_issues if i["state"] == "opened")
 
         md = []
-        md.append(f"# Team Backlog — {team_group.name}")
+        md.append(f"# Team Backlog — {team_group['name']}")
         md.append(
             f"**{breadcrumb}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[**View Project**]({backlog_project.web_url})"
+            f"[**View Project**]({backlog_project['web_url']})"
         )
         md.append("")
         md.append("## Summary")
@@ -1381,18 +1311,19 @@ class ReportsMixin:
         if by_feature:
             md.append("## Issues by Feature")
             md.append("")
-            for epic_id, pairs in by_feature.items():
-                epic_info = pairs[0][0]
-                issues    = [i for _, i in pairs]
-                f_total   = sum(i.weight or 0 for i in issues)
-                f_closed  = sum(i.weight or 0 for i in issues if i.state == "closed")
+            for epic_id, issues in by_feature.items():
+                epic_info = self._rd_epics_by_id.get(epic_id, {})
+                f_total   = sum(i.get("weight") or 0 for i in issues)
+                f_closed  = sum(i.get("weight") or 0 for i in issues if i["state"] == "closed")
                 f_pct     = round(f_closed / f_total * 100) if f_total else 0
-                f_open    = sum(1 for i in issues if i.state == "opened")
-                f_state   = epic_info.get("state", "").capitalize()
+                f_open    = sum(1 for i in issues if i["state"] == "opened")
+                f_state   = epic_info.get("state", "").capitalize() if epic_info else "Unknown"
+                epic_url  = epic_info.get("web_url", "#") if epic_info else "#"
+                epic_title = epic_info.get("title", f"Epic {epic_id}") if epic_info else f"Epic {epic_id}"
 
                 md.append(
                     f"<details><summary>🛠️ "
-                    f"<a href=\"{epic_info.get('url', '#')}\">{epic_info.get('title', 'Unknown Feature')}</a>"
+                    f"<a href=\"{epic_url}\">{epic_title}</a>"
                     f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
                 )
                 md.append("")
@@ -1400,12 +1331,12 @@ class ReportsMixin:
                 md.append("")
                 md.append("| Issue | State | Weight | Milestone |")
                 md.append("|-------|-------|--------|-----------|")
-                for issue in sorted(issues, key=lambda i: i.state):
-                    ms    = issue.milestone["title"] if issue.milestone else "—"
-                    w     = issue.weight or "—"
-                    state = "✅ Closed" if issue.state == "closed" else "🔵 Open"
+                for issue in sorted(issues, key=lambda i: i["state"]):
+                    ms    = issue.get("milestone") or "—"
+                    w     = issue.get("weight") or "—"
+                    state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                     md.append(
-                        f"| [{issue.title}]({issue.web_url}) "
+                        f"| [{issue['title']}]({issue['web_url']}) "
                         f"| {state} | {w} pt | {ms} |"
                     )
                 md.append("")
@@ -1418,20 +1349,20 @@ class ReportsMixin:
             md.append("| Issue | State | Weight | Milestone |")
             md.append("|-------|-------|--------|-----------|")
             for issue in unlinked:
-                ms    = issue.milestone["title"] if issue.milestone else "—"
-                w     = issue.weight or "—"
-                state = "✅ Closed" if issue.state == "closed" else "🔵 Open"
+                ms    = issue.get("milestone") or "—"
+                w     = issue.get("weight") or "—"
+                state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                 md.append(
-                    f"| [{issue.title}]({issue.web_url}) "
+                    f"| [{issue['title']}]({issue['web_url']}) "
                     f"| {state} | {w} pt | {ms} |"
                 )
             md.append("")
 
-        self.upload_to_wiki(team_group, wiki_title, "\n".join(md))
-        print(f"    → {team_group.full_path} wiki: {wiki_title}")
+        self.upload_to_wiki(team_group_live, wiki_title, "\n".join(md))
+        print(f"    → {team_group['full_path']} wiki: {wiki_title}")
 
         summary = f"· {len(all_issues)} issues · {pct}% done · {total_w} pt total"
-        return (vs_group.name, art_group.name, team_group.name, wiki_url, summary)
+        return (vs_group["name"], art_group["name"], team_group["name"], wiki_url, summary)
 
     # ------------------------------------------------------------------
     # ART-level reports
@@ -1439,32 +1370,29 @@ class ReportsMixin:
 
     def generate_art_feature_status_report(self):
         """One wiki page per ART showing all Features grouped by Team, plus a root index."""
-        root_group = self.get_group_by_name(self.parent_group)
+        root_group = self._rd_root_obj
         print(f"Generating ART Feature Status Reports under: {root_group.full_path}")
 
-        metrics  = self.calculate_portfolio_metrics(self.parent_group)
-        features = metrics.get("Feature", [])
+        features = self._rd_metrics.get("Feature", [])
 
-        # Map team_group_id → (vs_group, art_group, team_group)
         team_hierarchy = {}
-        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
-            team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
 
-        # Bucket features: art_id → team_id → [feature_metric]
-        art_buckets = defaultdict(lambda: defaultdict(list))
+        art_buckets: defaultdict = defaultdict(lambda: defaultdict(list))
         for f in features:
             gid = f.get("group_id")
             if gid in team_hierarchy:
                 _, art_grp, _ = team_hierarchy[gid]
-                art_buckets[art_grp.id][gid].append(f)
+                art_buckets[art_grp["id"]][gid].append(f)
 
         index_entries = []
-        for vs_group, art_group in self._iter_art_groups(root_group):
-            if art_group.id not in art_buckets:
+        for vs_group, art_group in self._iter_art_groups():
+            if art_group["id"] not in art_buckets:
                 continue
             entry = self._generate_art_feature_status_page(
                 root_group, vs_group, art_group,
-                art_buckets[art_group.id], team_hierarchy,
+                art_buckets[art_group["id"]], team_hierarchy,
             )
             if entry:
                 index_entries.append(entry)
@@ -1490,18 +1418,18 @@ class ReportsMixin:
         print(f"  → Root wiki: {root_group.name} - ART Feature Status Index")
 
     def _generate_art_feature_status_page(self, root_group, vs_group, art_group, team_buckets, team_hierarchy):
-        wiki_title = f"ART Feature Status/{vs_group.name}/{art_group.name}"
+        wiki_title = f"ART Feature Status/{vs_group['name']}/{art_group['name']}"
         wiki_url   = (
             f"{root_group.web_url}/-/wikis/ART-Feature-Status"
-            f"/{vs_group.name.replace(' ', '-')}/{art_group.name.replace(' ', '-')}"
+            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
         )
 
         md = []
-        md.append(f"# ART Feature Status — {art_group.name}")
+        md.append(f"# ART Feature Status — {art_group['name']}")
         md.append(
-            f"**{vs_group.name} / {art_group.name}**  |  "
+            f"**{vs_group['name']} / {art_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View ART Group]({art_group.web_url})"
+            f"[View ART Group]({art_group['web_url']})"
         )
         md.append("")
 
@@ -1509,9 +1437,9 @@ class ReportsMixin:
         at_risk   = 0
         blocked_c = 0
 
-        for team_id, feature_list in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2].name):
+        for team_id, feature_list in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2]["name"]):
             _, _, team_group = team_hierarchy[team_id]
-            md.append(f"## {team_group.name}")
+            md.append(f"## {team_group['name']}")
             md.append("")
             md.append("| Feature | PI | State | % Done | PI Elapsed | Weight | Status |")
             md.append("|---------|-----|-------|--------|------------|--------|--------|")
@@ -1567,36 +1495,34 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
 
-        return (vs_group.name, art_group.name, wiki_url, total_f, at_risk, blocked_c)
+        return (vs_group["name"], art_group["name"], wiki_url, total_f, at_risk, blocked_c)
 
     def generate_art_capacity_balance_report(self):
         """One wiki page per ART showing per-team capacity balance by PI, plus a root index."""
-        root_group = self.get_group_by_name(self.parent_group)
+        root_group = self._rd_root_obj
         print(f"Generating ART Capacity Balance Reports under: {root_group.full_path}")
 
-        metrics  = self.calculate_portfolio_metrics(self.parent_group)
-        features = metrics.get("Feature", [])
+        features = self._rd_metrics.get("Feature", [])
 
         team_hierarchy = {}
-        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
-            team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
 
-        # art_id → pi → team_id → [feature_metric]
-        art_pi_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        art_pi_buckets: defaultdict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         for f in features:
             gid  = f.get("group_id")
             piid = f.get("piid")
             if gid in team_hierarchy and piid:
                 _, art_grp, _ = team_hierarchy[gid]
-                art_pi_buckets[art_grp.id][piid][gid].append(f)
+                art_pi_buckets[art_grp["id"]][piid][gid].append(f)
 
         index_entries = []
-        for vs_group, art_group in self._iter_art_groups(root_group):
-            if art_group.id not in art_pi_buckets:
+        for vs_group, art_group in self._iter_art_groups():
+            if art_group["id"] not in art_pi_buckets:
                 continue
             entry = self._generate_art_capacity_balance_page(
                 root_group, vs_group, art_group,
-                art_pi_buckets[art_group.id], team_hierarchy,
+                art_pi_buckets[art_group["id"]], team_hierarchy,
             )
             if entry:
                 index_entries.append(entry)
@@ -1626,10 +1552,10 @@ class ReportsMixin:
         print(f"  → Root wiki: {root_group.name} - ART Capacity Balance Index")
 
     def _generate_art_capacity_balance_page(self, root_group, vs_group, art_group, pi_buckets, team_hierarchy):
-        wiki_title = f"ART Capacity Balance/{vs_group.name}/{art_group.name}"
+        wiki_title = f"ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
         wiki_url   = (
             f"{root_group.web_url}/-/wikis/ART-Capacity-Balance"
-            f"/{vs_group.name.replace(' ', '-')}/{art_group.name.replace(' ', '-')}"
+            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
         )
 
         sorted_pis = sorted(
@@ -1638,11 +1564,11 @@ class ReportsMixin:
         )
 
         md = []
-        md.append(f"# ART Capacity Balance — {art_group.name}")
+        md.append(f"# ART Capacity Balance — {art_group['name']}")
         md.append(
-            f"**{vs_group.name} / {art_group.name}**  |  "
+            f"**{vs_group['name']} / {art_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View ART Group]({art_group.web_url})"
+            f"[View ART Group]({art_group['web_url']})"
         )
         md.append("")
 
@@ -1662,7 +1588,7 @@ class ReportsMixin:
             md.append("| Team | Planned | Actual | Δ | Load% | Status |")
             md.append("|------|---------|--------|---|-------|--------|")
 
-            for team_id, fs in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2].name):
+            for team_id, fs in sorted(team_buckets.items(), key=lambda x: team_hierarchy[x[0]][2]["name"]):
                 _, _, team_group = team_hierarchy[team_id]
                 planned  = sum(f.get("planned_weight", 0) for f in fs)
                 actual   = sum(f.get("actual_weight",  0) for f in fs)
@@ -1687,7 +1613,7 @@ class ReportsMixin:
                 else:
                     status = "—"
 
-                team_link = f'<a href="{team_group.web_url}">{team_group.name}</a>'
+                team_link = f'<a href="{team_group["web_url"]}">{team_group["name"]}</a>'
                 md.append(
                     f"| {team_link} | {planned} pt | {actual} pt "
                     f"| {delta_str} | {load_pct}% | {status} |"
@@ -1720,7 +1646,7 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
 
-        return (vs_group.name, art_group.name, wiki_url, total_over, total_under)
+        return (vs_group["name"], art_group["name"], wiki_url, total_over, total_under)
 
     # ------------------------------------------------------------------
     # Value Stream-level reports
@@ -1728,19 +1654,18 @@ class ReportsMixin:
 
     def generate_vs_capability_dashboard_report(self):
         """One wiki page per VS showing Capabilities and Direct Features by PI, plus a root index."""
-        root_group = self.get_group_by_name(self.parent_group)
+        root_group = self._rd_root_obj
         print(f"Generating VS Capability Dashboard Reports under: {root_group.full_path}")
 
-        metrics      = self.calculate_portfolio_metrics(self.parent_group)
-        capabilities = metrics.get("Capability", [])
-        features     = metrics.get("Feature", [])
+        capabilities = self._rd_metrics.get("Capability", [])
+        features     = self._rd_metrics.get("Feature", [])
 
-        art_hierarchy  = {}
-        team_hierarchy = {}
-        for vs_group, art_group in self._iter_art_groups(root_group):
-            art_hierarchy[art_group.id] = (vs_group, art_group)
-        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
-            team_hierarchy[team_group.id] = (vs_group, art_group, team_group)
+        art_hierarchy: dict  = {}
+        team_hierarchy: dict = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_hierarchy[art_group["id"]] = (vs_group, art_group)
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
 
         def _vs_art_for(gid):
             if gid in art_hierarchy:
@@ -1750,37 +1675,35 @@ class ReportsMixin:
                 return vs_g, art_g
             return None, None
 
-        # vs_id → pi → art_id → [capability_metric]
-        vs_cap_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        vs_cap_buckets: defaultdict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         for cap in capabilities:
             vs_g, art_g = _vs_art_for(cap.get("group_id"))
             piid = cap.get("piid")
             if vs_g and art_g and piid:
-                vs_cap_buckets[vs_g.id][piid][art_g.id].append(cap)
+                vs_cap_buckets[vs_g["id"]][piid][art_g["id"]].append(cap)
 
         # Direct Features: parent is Epic (not Capability) or parentless
-        epic_type_by_id = {e["id"]: t for t, tier in metrics.items() for e in tier}
+        epic_type_by_id = {e["id"]: t for t, tier in self._rd_metrics.items() for e in tier}
         direct_features = [
             f for f in features
             if epic_type_by_id.get(f.get("parent_id")) != "Capability"
         ]
 
-        # vs_id → pi → art_id → [direct_feature_metric]
-        vs_direct_buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        vs_direct_buckets: defaultdict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         for feat in direct_features:
             vs_g, art_g = _vs_art_for(feat.get("group_id"))
             piid = feat.get("piid")
             if vs_g and art_g and piid:
-                vs_direct_buckets[vs_g.id][piid][art_g.id].append(feat)
+                vs_direct_buckets[vs_g["id"]][piid][art_g["id"]].append(feat)
 
         index_entries = []
-        for vs_group in self._iter_vs_groups(root_group):
-            if vs_group.id not in vs_cap_buckets and vs_group.id not in vs_direct_buckets:
+        for vs_group in self._iter_vs_groups():
+            if vs_group["id"] not in vs_cap_buckets and vs_group["id"] not in vs_direct_buckets:
                 continue
             entry = self._generate_vs_capability_dashboard_page(
                 root_group, vs_group,
-                vs_cap_buckets.get(vs_group.id, {}),
-                vs_direct_buckets.get(vs_group.id, {}),
+                vs_cap_buckets.get(vs_group["id"], {}),
+                vs_direct_buckets.get(vs_group["id"], {}),
                 art_hierarchy, team_hierarchy,
             )
             if entry:
@@ -1812,10 +1735,10 @@ class ReportsMixin:
         print(f"  → Root wiki: {root_group.name} - VS Capability Dashboard Index")
 
     def _generate_vs_capability_dashboard_page(self, root_group, vs_group, cap_pi_buckets, direct_pi_buckets, art_hierarchy, team_hierarchy):
-        wiki_title = f"VS Capability Dashboard/{vs_group.name}"
+        wiki_title = f"VS Capability Dashboard/{vs_group['name']}"
         wiki_url   = (
             f"{root_group.web_url}/-/wikis/VS-Capability-Dashboard"
-            f"/{vs_group.name.replace(' ', '-')}"
+            f"/{vs_group['name'].replace(' ', '-')}"
         )
 
         all_pis = sorted(
@@ -1824,11 +1747,11 @@ class ReportsMixin:
         )
 
         md = []
-        md.append(f"# VS Capability Dashboard — {vs_group.name}")
+        md.append(f"# VS Capability Dashboard — {vs_group['name']}")
         md.append(
-            f"**{vs_group.name}**  |  "
+            f"**{vs_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View VS Group]({vs_group.web_url})"
+            f"[View VS Group]({vs_group['web_url']})"
         )
         md.append("")
 
@@ -1840,7 +1763,7 @@ class ReportsMixin:
         def _art_name_url(art_id):
             if art_id in art_hierarchy:
                 _, g = art_hierarchy[art_id]
-                return g.name, g.web_url
+                return g["name"], g["web_url"]
             return f"ART {art_id}", ""
 
         def _row_status(pct_done, pct_pi, blocked_by):
@@ -1984,105 +1907,61 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
 
-        return (vs_group.name, wiki_url, total_caps, total_direct, at_risk, blocked_c)
+        return (vs_group["name"], wiki_url, total_caps, total_direct, at_risk, blocked_c)
 
     def generate_vs_cross_art_risk_report(self):
         """One wiki page per VS showing blocking relationships that cross ART boundaries, plus a root index."""
-        root_group = self.get_group_by_name(self.parent_group)
+        root_group = self._rd_root_obj
         print(f"Generating VS Cross-ART Risk Reports under: {root_group.full_path}")
 
-        metrics = self.calculate_portfolio_metrics(self.parent_group)
-
-        # numeric epic id → group_id
+        # numeric epic id → group_id / piid from snapshot metrics
         epic_int_to_group = {
             e["id"]: e.get("group_id")
-            for tier in metrics.values()
+            for tier in self._rd_metrics.values()
             for e in tier
         }
-        # numeric epic id → piid
         epic_int_to_piid = {
             e["id"]: e.get("piid")
-            for tier in metrics.values()
+            for tier in self._rd_metrics.values()
             for e in tier
         }
 
-        # group_id → art_group, vs_group
-        art_of_group = {}
-        vs_of_group  = {}
-        for vs_group, art_group in self._iter_art_groups(root_group):
-            art_of_group[art_group.id] = art_group
-            vs_of_group[art_group.id]  = vs_group
-        for vs_group, art_group, team_group in self._iter_team_groups(root_group):
-            art_of_group[team_group.id] = art_group
-            vs_of_group[team_group.id]  = vs_group
+        # group_id → art_group dict, vs_group dict
+        art_of_group: dict = {}
+        vs_of_group: dict  = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_of_group[art_group["id"]] = art_group
+            vs_of_group[art_group["id"]]  = vs_group
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            art_of_group[team_group["id"]] = art_group
+            vs_of_group[team_group["id"]]  = vs_group
 
-        def gid_to_int(gid):
-            try:
-                return int(gid.split("/")[-1])
-            except (ValueError, AttributeError):
-                return None
-
-        # GraphQL: fetch all blocked epics with their blockers
-        query = """
-        query ListBlockedEpics($fullPath: ID!) {
-          group(fullPath: $fullPath) {
-            epics {
-              nodes {
-                id title webUrl state
-                labels { nodes { title } }
-                blockedByCount
-                blockedByEpics {
-                  edges {
-                    node { id title webUrl state labels { nodes { title } } }
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-        data = self.graphql_query(query, variables={"fullPath": root_group.full_path})
-        if data is None:
-            print("  ERROR: GraphQL query failed.")
-            return
-
-        nodes = data["group"]["epics"]["nodes"]
-        blocked_nodes = [n for n in nodes if n.get("blockedByCount", 0) > 0]
-
-        def epic_type_from_node(node):
-            labels = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
-            for t in ("Epic", "Capability", "Feature"):
-                if t in labels:
-                    return t
-            return "Epic"
-
-        # vs_id → list of cross-ART dependency dicts
-        vs_deps = defaultdict(list)
-
-        for blocked in blocked_nodes:
-            b_int  = gid_to_int(blocked["id"])
-            b_gid  = epic_int_to_group.get(b_int)
-            b_art  = art_of_group.get(b_gid)
-            b_vs   = vs_of_group.get(b_gid)
-            b_piid = epic_int_to_piid.get(b_int)
+        # Build cross-ART deps from blocking snapshot (no extra API call)
+        vs_deps: defaultdict = defaultdict(list)
+        for rel in self._rd_blocking.get("relationships", []):
+            blocked = rel["blocked_epic"]
+            b_int   = blocked.get("id_int") or _gid_to_int(blocked["id"])
+            b_gid   = epic_int_to_group.get(b_int)
+            b_art   = art_of_group.get(b_gid)
+            b_vs    = vs_of_group.get(b_gid)
+            b_piid  = epic_int_to_piid.get(b_int)
             if not b_vs or not b_art:
                 continue
 
-            for edge in blocked.get("blockedByEpics", {}).get("edges", []):
-                blocker       = edge["node"]
-                bl_int        = gid_to_int(blocker["id"])
-                bl_gid        = epic_int_to_group.get(bl_int)
-                bl_art        = art_of_group.get(bl_gid)
-                bl_vs         = vs_of_group.get(bl_gid)
+            for blocker in rel.get("blocked_by", []):
+                bl_int  = blocker.get("id_int") or _gid_to_int(blocker["id"])
+                bl_gid  = epic_int_to_group.get(bl_int)
+                bl_art  = art_of_group.get(bl_gid)
+                bl_vs   = vs_of_group.get(bl_gid)
 
                 if not bl_vs or not bl_art:
                     continue
-                if b_vs.id != bl_vs.id:
+                if b_vs["id"] != bl_vs["id"]:
                     continue
-                if b_art.id == bl_art.id:
+                if b_art["id"] == bl_art["id"]:
                     continue
 
-                vs_deps[b_vs.id].append({
+                vs_deps[b_vs["id"]].append({
                     "blocked":      blocked,
                     "blocked_art":  b_art,
                     "blocked_piid": b_piid,
@@ -2091,8 +1970,8 @@ class ReportsMixin:
                 })
 
         index_entries = []
-        for vs_group in self._iter_vs_groups(root_group):
-            deps = vs_deps.get(vs_group.id, [])
+        for vs_group in self._iter_vs_groups():
+            deps = vs_deps.get(vs_group["id"], [])
             entry = self._generate_vs_cross_art_risk_page(root_group, vs_group, deps)
             index_entries.append(entry)
 
@@ -2113,10 +1992,10 @@ class ReportsMixin:
         print(f"  → Root wiki: {root_group.name} - VS Cross-ART Risk Index")
 
     def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
-        wiki_title = f"VS Cross-ART Risk/{vs_group.name}"
+        wiki_title = f"VS Cross-ART Risk/{vs_group['name']}"
         wiki_url   = (
             f"{root_group.web_url}/-/wikis/VS-Cross-ART-Risk"
-            f"/{vs_group.name.replace(' ', '-')}"
+            f"/{vs_group['name'].replace(' ', '-')}"
         )
 
         today = date.today()
@@ -2144,11 +2023,11 @@ class ReportsMixin:
             return "⚪ Unknown", 3
 
         md = []
-        md.append(f"# VS Cross-ART Risk — {vs_group.name}")
+        md.append(f"# VS Cross-ART Risk — {vs_group['name']}")
         md.append(
-            f"**{vs_group.name}**  |  "
+            f"**{vs_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View VS Group]({vs_group.web_url})"
+            f"[View VS Group]({vs_group['web_url']})"
         )
         md.append("")
 
@@ -2177,28 +2056,28 @@ class ReportsMixin:
                 piid        = dep["blocked_piid"] or "—"
                 sev_label, sev_sort = severity(dep["blocked_piid"])
 
-                b_type  = next((t for t in ("Epic", "Capability", "Feature") if t in {l["title"] for l in blocked.get("labels", {}).get("nodes", [])}), "Epic")
-                bl_type = next((t for t in ("Epic", "Capability", "Feature") if t in {l["title"] for l in blocker.get("labels", {}).get("nodes", [])}), "Epic")
+                b_type  = blocked.get("type", "Epic")
+                bl_type = blocker.get("type", "Epic")
                 b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
                 bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
 
-                b_link  = f'[{b_icon} {blocked["title"]}]({blocked["webUrl"]})'
-                bl_link = f'[{bl_icon} {blocker["title"]}]({blocker["webUrl"]})'
+                b_link  = f'[{b_icon} {blocked["title"]}]({blocked["web_url"]})'
+                bl_link = f'[{bl_icon} {blocker["title"]}]({blocker["web_url"]})'
 
                 if sev_sort == 0:
                     critical += 1
 
                 md.append(
-                    f"| {sev_label} | ⛔ {b_link} | {b_art.name} "
-                    f"| 🔒 {bl_link} | {bl_art.name} | {piid} |"
+                    f"| {sev_label} | ⛔ {b_link} | {b_art['name']} "
+                    f"| 🔒 {bl_link} | {bl_art['name']} | {piid} |"
                 )
 
             md.append("")
 
             # Group by ART pair for coordination view
-            pair_deps = defaultdict(list)
+            pair_deps: defaultdict = defaultdict(list)
             for dep in deps:
-                key = (dep["blocked_art"].name, dep["blocker_art"].name)
+                key = (dep["blocked_art"]["name"], dep["blocker_art"]["name"])
                 pair_deps[key].append(dep)
 
             if len(pair_deps) > 1 or (len(pair_deps) == 1 and list(pair_deps.values())[0]):
@@ -2228,7 +2107,7 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
 
-        return (vs_group.name, wiki_url, len(deps), critical)
+        return (vs_group["name"], wiki_url, len(deps), critical)
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
@@ -2338,17 +2217,19 @@ class ReportsMixin:
         relationships = []
         for node in blocked_nodes:
             blockers = [
-                {"id": e["node"]["id"], "title": e["node"]["title"],
-                 "type": _type(e["node"]), "web_url": e["node"]["webUrl"]}
+                {"id": e["node"]["id"], "id_int": _gid_to_int(e["node"]["id"]),
+                 "title": e["node"]["title"], "type": _type(e["node"]), "web_url": e["node"]["webUrl"]}
                 for e in node["blockedByEpics"]["edges"]
             ]
             anc = [
-                {"id": a["id"], "title": a["title"], "type": _type(a), "web_url": a["webUrl"]}
+                {"id": a["id"], "id_int": _gid_to_int(a["id"]),
+                 "title": a["title"], "type": _type(a), "web_url": a["webUrl"]}
                 for a in ancestors(node["id"]) if _type(a) == "Epic"
             ]
             relationships.append({
                 "blocked_epic": {
                     "id":      node["id"],
+                    "id_int":  _gid_to_int(node["id"]),
                     "title":   node["title"],
                     "type":    _type(node),
                     "state":   node.get("state"),
@@ -2370,21 +2251,81 @@ class ReportsMixin:
             "relationships": relationships,
         }
 
+    def _collect_snapshot_groups_projects(self, root_group):
+        """Traverse the SAFe hierarchy once and return (groups_list, projects_list) as plain dicts."""
+        all_groups   = []
+        all_projects = []
+
+        root_dict = {
+            "id": root_group.id, "name": root_group.name,
+            "path": root_group.path, "full_path": root_group.full_path,
+            "parent_id": None, "web_url": root_group.web_url, "level": "portfolio",
+        }
+        all_groups.append(root_dict)
+
+        for vs_sg in root_group.subgroups.list(all=True):
+            vs = self.gl.groups.get(vs_sg.id)
+            vs_dict = {
+                "id": vs.id, "name": vs.name, "path": vs.path,
+                "full_path": vs.full_path, "parent_id": root_group.id,
+                "web_url": vs.web_url, "level": "vs",
+            }
+            all_groups.append(vs_dict)
+
+            for art_sg in vs.subgroups.list(all=True):
+                art = self.gl.groups.get(art_sg.id)
+                art_dict = {
+                    "id": art.id, "name": art.name, "path": art.path,
+                    "full_path": art.full_path, "parent_id": vs.id,
+                    "web_url": art.web_url, "level": "art",
+                }
+                all_groups.append(art_dict)
+
+                for team_sg in art.subgroups.list(all=True):
+                    team = self.gl.groups.get(team_sg.id)
+                    team_dict = {
+                        "id": team.id, "name": team.name, "path": team.path,
+                        "full_path": team.full_path, "parent_id": art.id,
+                        "web_url": team.web_url, "level": "team",
+                    }
+                    all_groups.append(team_dict)
+
+                    for proj in team.projects.list(all=True):
+                        try:
+                            fp = self.gl.projects.get(proj.id)
+                            all_projects.append({
+                                "id":                   fp.id,
+                                "name":                 fp.name,
+                                "path":                 fp.path,
+                                "path_with_namespace":  fp.path_with_namespace,
+                                "name_with_namespace":  fp.name_with_namespace,
+                                "namespace_id":         fp.namespace["id"],
+                                "web_url":              fp.web_url,
+                                "issues_enabled":       fp.issues_enabled,
+                            })
+                        except Exception as e:
+                            print(f"  Failed to fetch project {proj.name}: {e}")
+
+        return all_groups, all_projects
+
     def _write_report_data(self, run_dir):
-        """Write epics.json, issues.json, and blocking.json to run_dir."""
-        group = self.get_group_by_name(self.parent_group)
+        """Write epics.json, issues.json, blocking.json, groups.json, projects.json to run_dir."""
+        group = self._rd_root_obj
         ts    = datetime.now().isoformat()
 
         print("  Collecting data snapshot...")
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 
-        # Flatten epics from metrics dict into a single list (type already on each record)
-        all_epics = [e for bucket in metrics.values() for e in bucket]
+        # Epics: typed + untyped
+        typed_epics = [e for bucket in metrics.values() for e in bucket]
+        all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, typed_epics)
         epics_payload = {
-            "generated_at": ts,
-            "group":        self.parent_group,
-            "total":        len(all_epics),
-            "epics":        all_epics,
+            "generated_at":   ts,
+            "group":          self.parent_group,
+            "total":          len(typed_epics),
+            "total_raw":      len(all_epics_raw),
+            "epics":          typed_epics,
+            "all_epics_raw":  all_epics_raw,
         }
         (run_dir / "epics.json").write_text(
             json.dumps(epics_payload, indent=2, default=str), encoding="utf-8"
@@ -2408,15 +2349,81 @@ class ReportsMixin:
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
 
+        print("  Collecting group/project hierarchy...")
+        all_groups, all_projects = self._collect_snapshot_groups_projects(group)
+        groups_payload = {
+            "generated_at": ts,
+            "group":        self.parent_group,
+            "total":        len(all_groups),
+            "groups":       all_groups,
+        }
+        (run_dir / "groups.json").write_text(
+            json.dumps(groups_payload, indent=2, default=str), encoding="utf-8"
+        )
+        projects_payload = {
+            "generated_at": ts,
+            "group":        self.parent_group,
+            "total":        len(all_projects),
+            "projects":     all_projects,
+        }
+        (run_dir / "projects.json").write_text(
+            json.dumps(projects_payload, indent=2, default=str), encoding="utf-8"
+        )
+
         n_blocked = blocking["summary"].get("total_blocked", 0)
         print(f"\n  Data snapshot → {run_dir}/")
-        print(f"    epics.json    ({len(all_epics)} epics)")
+        print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
-        print(f"    blocking.json ({n_blocked} blocked epics)\n")
+        print(f"    blocking.json ({n_blocked} blocked epics)")
+        print(f"    groups.json   ({len(all_groups)} groups)")
+        print(f"    projects.json ({len(all_projects)} projects)\n")
+
+    def _load_report_data(self, run_dir):
+        """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
+        epics_data    = json.loads((run_dir / "epics.json").read_text(encoding="utf-8"))
+        issues_data   = json.loads((run_dir / "issues.json").read_text(encoding="utf-8"))
+        blocking_data = json.loads((run_dir / "blocking.json").read_text(encoding="utf-8"))
+        groups_data   = json.loads((run_dir / "groups.json").read_text(encoding="utf-8"))
+        projects_data = json.loads((run_dir / "projects.json").read_text(encoding="utf-8"))
+
+        # Groups
+        all_groups = groups_data["groups"]
+        self._rd_root = next((g for g in all_groups if g["parent_id"] is None), None)
+        self._rd_groups_by_id: dict = {g["id"]: g for g in all_groups}
+        self._rd_groups_by_parent: defaultdict = defaultdict(list)
+        for g in all_groups:
+            if g["parent_id"] is not None:
+                self._rd_groups_by_parent[g["parent_id"]].append(g)
+
+        # Projects indexed by namespace (group) id
+        self._rd_projects_by_nsid: defaultdict = defaultdict(list)
+        for p in projects_data["projects"]:
+            self._rd_projects_by_nsid[p["namespace_id"]].append(p)
+
+        # Epics
+        self._rd_epics_all: list = epics_data.get("all_epics_raw", epics_data["epics"])
+        self._rd_metrics: dict = {
+            "Epic":       [e for e in epics_data["epics"] if e.get("type") == "Epic"],
+            "Capability": [e for e in epics_data["epics"] if e.get("type") == "Capability"],
+            "Feature":    [e for e in epics_data["epics"] if e.get("type") == "Feature"],
+        }
+        self._rd_epics_by_id: dict = {e["id"]: e for e in epics_data["epics"]}
+
+        # Issues
+        self._rd_issues_by_project: defaultdict = defaultdict(list)
+        self._rd_issues_by_epic: defaultdict    = defaultdict(list)
+        for issue in issues_data["issues"]:
+            self._rd_issues_by_project[issue["project_path"]].append(issue)
+            if issue.get("epic_id"):
+                self._rd_issues_by_epic[issue["epic_id"]].append(issue)
+
+        # Blocking
+        self._rd_blocking: dict = blocking_data
 
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""
         group = self.get_group_by_name(self.parent_group)
+        self._rd_root_obj = group
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
         now     = datetime.now()
@@ -2424,6 +2431,7 @@ class ReportsMixin:
         run_dir.mkdir(parents=True, exist_ok=True)
         self._report_run_dir = run_dir
         self._write_report_data(run_dir)
+        self._load_report_data(run_dir)
 
         total  = len(reports)
         phases = []
