@@ -1417,6 +1417,50 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, f"{root_group.name} - ART Feature Status Index", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - ART Feature Status Index")
 
+        # Intermediate pages — GitLab creates these as blank when nested titles use /
+        # Group entries by VS
+        vs_arts: defaultdict = defaultdict(list)
+        for vs_name, art_name, wiki_url, total_f, at_risk, blocked in index_entries:
+            vs_arts[vs_name].append((art_name, wiki_url, total_f, at_risk, blocked))
+
+        # VS-level pages
+        for vs_name, arts in vs_arts.items():
+            vs_slug     = vs_name.replace(" ", "-")
+            wiki_title  = f"ART Feature Status/{vs_name}"
+            md_vs = []
+            md_vs.append(f"# ART Feature Status — {vs_name}")
+            md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+            md_vs.append("")
+            md_vs.append(f"Feature delivery status for each ART within the **{vs_name}** Value Stream.")
+            md_vs.append("")
+            md_vs.append("| ART | Features | At Risk | Blocked | Detail |")
+            md_vs.append("|-----|----------|---------|---------|--------|")
+            for art_name, art_url, total_f, at_risk, blocked in arts:
+                risk_str    = str(at_risk) if at_risk else "—"
+                blocked_str = str(blocked) if blocked else "—"
+                md_vs.append(f"| **{art_name}** | {total_f} | {risk_str} | {blocked_str} | [View →]({art_url}) |")
+            md_vs.append("")
+            self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
+            print(f"    → Wiki: {wiki_title}")
+
+        # Top-level landing page
+        top_url  = f"{root_group.web_url}/-/wikis/ART-Feature-Status"
+        md_top   = []
+        md_top.append("# ART Feature Status")
+        md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md_top.append("")
+        md_top.append("All Features per ART, grouped by Team, with completion %, PI progress, and risk flags.")
+        md_top.append("Select a Value Stream to browse its ARTs:")
+        md_top.append("")
+        for vs_name, arts in vs_arts.items():
+            vs_slug   = vs_name.replace(" ", "-")
+            vs_url    = f"{root_group.web_url}/-/wikis/ART-Feature-Status/{vs_slug}"
+            art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
+            md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
+        md_top.append("")
+        self.upload_to_wiki(root_group, "ART Feature Status", "\n".join(md_top))
+        print(f"    → Wiki: ART Feature Status")
+
     def _generate_art_feature_status_page(self, root_group, vs_group, art_group, team_buckets, team_hierarchy):
         wiki_title = f"ART Feature Status/{vs_group['name']}/{art_group['name']}"
         wiki_url   = (
@@ -1550,6 +1594,47 @@ class ReportsMixin:
         md.append("")
         self.upload_to_wiki(root_group, f"{root_group.name} - ART Capacity Balance Index", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - ART Capacity Balance Index")
+
+        # Intermediate pages — GitLab creates these as blank when nested titles use /
+        vs_arts: defaultdict = defaultdict(list)
+        for vs_name, art_name, wiki_url, over_cnt, under_cnt in index_entries:
+            vs_arts[vs_name].append((art_name, wiki_url, over_cnt, under_cnt))
+
+        # VS-level pages
+        for vs_name, arts in vs_arts.items():
+            wiki_title = f"ART Capacity Balance/{vs_name}"
+            md_vs = []
+            md_vs.append(f"# ART Capacity Balance — {vs_name}")
+            md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+            md_vs.append("")
+            md_vs.append(f"Planned vs actual team capacity by Program Increment for each ART in the **{vs_name}** Value Stream.")
+            md_vs.append("")
+            md_vs.append("| ART | Over-capacity | Under-capacity | Detail |")
+            md_vs.append("|-----|--------------|----------------|--------|")
+            for art_name, art_url, over_cnt, under_cnt in arts:
+                over_str  = f"🔴 {over_cnt}" if over_cnt else "—"
+                under_str = f"🔵 {under_cnt}" if under_cnt else "—"
+                md_vs.append(f"| **{art_name}** | {over_str} | {under_str} | [View →]({art_url}) |")
+            md_vs.append("")
+            self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
+            print(f"    → Wiki: {wiki_title}")
+
+        # Top-level landing page
+        md_top = []
+        md_top.append("# ART Capacity Balance")
+        md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md_top.append("")
+        md_top.append("Per-ART view of planned vs actual team capacity by Program Increment.")
+        md_top.append("Select a Value Stream to browse its ARTs:")
+        md_top.append("")
+        for vs_name, arts in vs_arts.items():
+            vs_slug   = vs_name.replace(" ", "-")
+            vs_url    = f"{root_group.web_url}/-/wikis/ART-Capacity-Balance/{vs_slug}"
+            art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
+            md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
+        md_top.append("")
+        self.upload_to_wiki(root_group, "ART Capacity Balance", "\n".join(md_top))
+        print(f"    → Wiki: ART Capacity Balance")
 
     def _generate_art_capacity_balance_page(self, root_group, vs_group, art_group, pi_buckets, team_hierarchy):
         wiki_title = f"ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
@@ -1733,6 +1818,32 @@ class ReportsMixin:
         md.append("")
         self.upload_to_wiki(root_group, f"{root_group.name} - VS Capability Dashboard Index", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - VS Capability Dashboard Index")
+
+        # Top-level landing page for the nested wiki section
+        md_top = []
+        md_top.append("# VS Capability Dashboard")
+        md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md_top.append("")
+        md_top.append("Delivery status per Value Stream, broken down by PI and ART.")
+        md_top.append("")
+        md_top.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md_top.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
+        md_top.append("")
+        md_top.append("## Value Streams")
+        md_top.append("")
+        for vs_name, wiki_url, total_caps, total_direct, at_risk, blocked in index_entries:
+            parts = []
+            if total_caps:
+                parts.append(f"{total_caps} capabilities")
+            if total_direct:
+                parts.append(f"{total_direct} direct features")
+            counts      = "  ·  " + "  ·  ".join(parts) if parts else ""
+            risk_str    = f"  ·  ⚠️ {at_risk} at risk" if at_risk else ""
+            blocked_str = f"  ·  🔒 {blocked} blocked" if blocked else ""
+            md_top.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
+        md_top.append("")
+        self.upload_to_wiki(root_group, "VS Capability Dashboard", "\n".join(md_top))
+        print(f"    → Wiki: VS Capability Dashboard")
 
     def _generate_vs_capability_dashboard_page(self, root_group, vs_group, cap_pi_buckets, direct_pi_buckets, art_hierarchy, team_hierarchy):
         wiki_title = f"VS Capability Dashboard/{vs_group['name']}"
@@ -1990,6 +2101,24 @@ class ReportsMixin:
         md.append("")
         self.upload_to_wiki(root_group, f"{root_group.name} - VS Cross-ART Risk Index", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - VS Cross-ART Risk Index")
+
+        # Top-level landing page for the nested wiki section
+        md_top = []
+        md_top.append("# VS Cross-ART Risk")
+        md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+        md_top.append("")
+        md_top.append("Blocking relationships that cross ART boundaries within each Value Stream.")
+        md_top.append("A cross-ART dependency exists when an epic in one ART is blocked by an epic from a different ART within the same Value Stream — these require active coordination.")
+        md_top.append("")
+        md_top.append("## Value Streams")
+        md_top.append("")
+        for vs_name, wiki_url, total_deps, critical in index_entries:
+            crit_str  = f"  ·  🔴 {critical} critical" if critical else ""
+            clear_str = "  ·  ✅ No cross-ART blocks" if total_deps == 0 else f"  ·  {total_deps} cross-ART dependencies"
+            md_top.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
+        md_top.append("")
+        self.upload_to_wiki(root_group, "VS Cross-ART Risk", "\n".join(md_top))
+        print(f"    → Wiki: VS Cross-ART Risk")
 
     def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
         wiki_title = f"VS Cross-ART Risk/{vs_group['name']}"
