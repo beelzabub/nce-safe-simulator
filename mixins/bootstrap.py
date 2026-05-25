@@ -375,8 +375,23 @@ class BootstrapMixin:
             if target_path == self.parent_group:
                 target_group = self._get_or_create_root_group()
             else:
-                print(f"  Group '{target_path}' not found. Aborting scaffold.")
-                return
+                parent = self.get_group_by_name(self.parent_group)
+                if parent is not None and "/" not in target_path:
+                    path_slug = target_path.lower().replace(" ", "-")
+                    try:
+                        target_group = self.gl.groups.create({
+                            'name':       target_path,
+                            'path':       path_slug,
+                            'parent_id':  parent.id,
+                            'visibility': parent.visibility,
+                        })
+                        print(f"  Created target group: {target_group.full_path}")
+                    except Exception as e:
+                        print(f"  Failed to create group '{target_path}' under '{parent.full_path}': {e}")
+                        return
+                else:
+                    print(f"  Group '{target_path}' not found. Aborting scaffold.")
+                    return
 
         if target_group is None:
             return
