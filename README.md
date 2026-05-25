@@ -327,6 +327,7 @@ Reports fall into two structural types:
 | `unassigned-pi` | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
 | `vs-capability-dashboard` | `<group> - VS Capability Dashboard` | Capabilities and Direct Features by PI with per-ART breakdown per Value Stream *(hierarchical)* |
 | `vs-cross-art-risk` | `<group> - VS Cross-ART Risk Report` | Blocking relationships that cross ART boundaries within a Value Stream *(hierarchical)* |
+| `wiki-index` | `home` (wiki home page) | Four-tier navigation index linking all report pages; marks planned reports as _(Planned)_ |
 | `workload` | `<group> - ART-Team Workload Report` | Per-PI table of planned vs actual weight per group with on-track / at-risk / incomplete status |
 
 > **Hierarchical reports** (`art-capacity-balance`, `art-feature-status`, `team-backlog`, `vs-capability-dashboard`, `vs-cross-art-risk`) publish a root index page plus one detail page per group at the relevant hierarchy level. `team-backlog` detail pages are written to each Team group's own wiki; all other hierarchical detail pages are written to the root wiki.
