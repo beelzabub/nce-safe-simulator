@@ -2128,13 +2128,14 @@ class ReportsMixin:
         print()
         print("Available Reports")
         print("=" * 60)
-        print(f"  [0] {'all':<22} Run all reports (default)")
         for i, report in enumerate(REPORTS, 1):
             print(f"  [{i}] {report['key']:<22} {report['description']}")
-        print(f"  [q] quit")
+        print()
+        print("  Enter  — run all reports (default)")
+        print("  q      — quit")
         print()
 
-        raw = input(f"Select reports [0-{len(REPORTS)}, space-separated, Enter for all, q to quit]: ").strip()
+        raw = input(f"Select [1-{len(REPORTS)}, space-separated, or Enter for all]: ").strip()
 
         if raw.lower() in ("q", "quit"):
             return
@@ -2147,10 +2148,7 @@ class ReportsMixin:
         for token in raw.split():
             try:
                 idx = int(token)
-                if idx == 0:
-                    selected = REPORTS
-                    break
-                elif 1 <= idx <= len(REPORTS):
+                if 1 <= idx <= len(REPORTS):
                     report = REPORTS[idx - 1]
                     if report not in selected:
                         selected.append(report)
