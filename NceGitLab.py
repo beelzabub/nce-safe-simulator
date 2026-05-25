@@ -53,7 +53,8 @@ class NceGitLab(
                         "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
                         "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
                         "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
-                        "epic_labels": ["Epic", "Capability", "Feature"]
+                        "epic_labels": ["Epic", "Capability", "Feature"],
+                        "risk_labels": ["risk::high", "risk::medium", "risk::low"]
                     }
             ''')
             exit(1)
@@ -102,6 +103,11 @@ class NceGitLab(
         epic_labels_env = parse_label_env("EPIC_TYPE_LABELS")
         self.EPIC_TYPE_LABELS = epic_labels_env if epic_labels_env else config.get("epic_type_labels", [])
 
+        risk_labels_env = parse_label_env("RISK_LABELS")
+        self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get(
+            "risk_labels", ["risk::high", "risk::medium", "risk::low"]
+        )
+
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],
             "Capability": [21, 34, 55, 89],
@@ -124,6 +130,7 @@ class NceGitLab(
         self.default_simulate_pi_percent       = _td.get("simulate_pi_progress_percent", 50.0)
         self.default_generate_issues_count     = _td.get("generate_issues_count",        5)
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
+        self.default_set_risk_percent          = _td.get("set_risk_labels_percent",       15.0)
 
         missing_fields = [
             field for field, val in [

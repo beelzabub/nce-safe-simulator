@@ -84,6 +84,10 @@ class UtilitiesMixin:
                 pass
         return weights
 
+    def _discover_labels(self, group, prefix):
+        """Return sorted list of label names that exist on the group and start with prefix."""
+        return sorted(l.name for l in group.labels.list(all=True) if l.name.startswith(prefix))
+
     def calculate_portfolio_metrics(self, group_name):
         if hasattr(self, '_metrics_cache') and group_name in self._metrics_cache:
             return self._metrics_cache[group_name]
