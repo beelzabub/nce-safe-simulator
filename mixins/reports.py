@@ -23,15 +23,15 @@ def _gid_to_int(gid_str):
 # ---------------------------------------------------------------------------
 REPORTS = [
     {
-        "key":         "portfolio",
-        "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
-        "method":      "generate_portfolio_report",
+        "key":         "art-capacity-balance",
+        "description": "ART Capacity Balance Report — per-team planned vs actual weight per PI with over/under capacity flags",
+        "method":      "generate_art_capacity_balance_report",
         "needs_group": False,
     },
     {
-        "key":         "workload",
-        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
-        "method":      "generate_workload_report",
+        "key":         "art-feature-status",
+        "description": "ART Feature Status Report — all Features per ART grouped by Team, with completion, weight, and risk",
+        "method":      "generate_art_feature_status_report",
         "needs_group": False,
     },
     {
@@ -41,9 +41,9 @@ REPORTS = [
         "needs_group": False,
     },
     {
-        "key":         "unassigned-pi",
-        "description": "Unassigned PI Report — epics with no PIID label, broken down by type",
-        "method":      "generate_unassigned_pi_report",
+        "key":         "health-dashboard",
+        "description": "Portfolio Health Dashboard — Tier 1 executive traffic-light view per Value Stream",
+        "method":      "generate_portfolio_health_dashboard",
         "needs_group": False,
     },
     {
@@ -71,21 +71,21 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "portfolio",
+        "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
+        "method":      "generate_portfolio_report",
+        "needs_group": False,
+    },
+    {
         "key":         "team-backlog",
         "description": "Team Backlog Report — issues grouped by Feature for every Team, with weight and completion",
         "method":      "generate_team_backlog_report",
         "needs_group": False,
     },
     {
-        "key":         "art-feature-status",
-        "description": "ART Feature Status Report — all Features per ART grouped by Team, with completion, weight, and risk",
-        "method":      "generate_art_feature_status_report",
-        "needs_group": False,
-    },
-    {
-        "key":         "art-capacity-balance",
-        "description": "ART Capacity Balance Report — per-team planned vs actual weight per PI with over/under capacity flags",
-        "method":      "generate_art_capacity_balance_report",
+        "key":         "unassigned-pi",
+        "description": "Unassigned PI Report — epics with no PIID label, broken down by type",
+        "method":      "generate_unassigned_pi_report",
         "needs_group": False,
     },
     {
@@ -98,6 +98,12 @@ REPORTS = [
         "key":         "vs-cross-art-risk",
         "description": "VS Cross-ART Risk Report — blocking relationships that cross ART boundaries within a Value Stream",
         "method":      "generate_vs_cross_art_risk_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "workload",
+        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
+        "method":      "generate_workload_report",
         "needs_group": False,
     },
 ]
@@ -353,8 +359,8 @@ class ReportsMixin:
         all_epics = [e for epics in metrics.values() for e in epics]
 
         # Index by (project_label, piid) → list of epic metric dicts
-        piid_set    = set(self.PIID_LABELS)
-        proj_set    = set(self.PROJECT_LABELS)
+        piid_set    = set(self._rd_piid_labels)
+        proj_set    = set(self._rd_project_labels)
         cell_data   = defaultdict(list)
         for e in all_epics:
             proj = next((l for l in e["labels"] if l in proj_set), None)
@@ -405,14 +411,14 @@ class ReportsMixin:
         md.append("")
 
         # Header row
-        header = "| Program |" + "".join(f" {p} |" for p in self.PIID_LABELS)
-        sep    = "|---|" + "".join("---|" for _ in self.PIID_LABELS)
+        header = "| Program |" + "".join(f" {p} |" for p in self._rd_piid_labels)
+        sep    = "|---|" + "".join("---|" for _ in self._rd_piid_labels)
         md.append(header)
         md.append(sep)
 
-        for proj in self.PROJECT_LABELS:
+        for proj in self._rd_project_labels:
             cells = []
-            for piid in self.PIID_LABELS:
+            for piid in self._rd_piid_labels:
                 epics = cell_data.get((proj, piid), [])
                 if not epics:
                     cells.append(" — ")
@@ -475,8 +481,8 @@ class ReportsMixin:
 
         all_epics = [e for epics in metrics.values() for e in epics]
 
-        piid_set  = set(self.PIID_LABELS)
-        proj_set  = set(self.PROJECT_LABELS)
+        piid_set  = set(self._rd_piid_labels)
+        proj_set  = set(self._rd_project_labels)
         cell_data = defaultdict(list)
         for e in all_epics:
             proj = next((l for l in e["labels"] if l in proj_set), None)
@@ -522,7 +528,7 @@ class ReportsMixin:
         md.append("One section per Program Increment. Each table row is a project/program workstream.")
         md.append("")
 
-        for piid in self.PIID_LABELS:
+        for piid in self._rd_piid_labels:
             pct_pi     = self._pct_through_pi(piid)
             start, end = self._pi_dates_from_label(piid)
             phase      = _phase_label(pct_pi)
@@ -537,7 +543,7 @@ class ReportsMixin:
             md.append("|---------|-------------------|--------|--------|---------|--------|---|---------|")
 
             any_row = False
-            for proj in self.PROJECT_LABELS:
+            for proj in self._rd_project_labels:
                 epics = cell_data.get((proj, piid), [])
                 if not epics:
                     md.append(f"| **{proj}** | — | — | — | — | — | — | — |")
@@ -2238,6 +2244,326 @@ class ReportsMixin:
 
         return (vs_group["name"], wiki_url, len(deps), critical)
 
+    def generate_portfolio_health_dashboard(self):
+        """Tier 1 executive pulse — single wiki page with per-VS traffic-light status."""
+        root_group = self._rd_root_obj
+        print(f"Generating Portfolio Health Dashboard for: {root_group.full_path}")
+
+        today = date.today()
+
+        # ── Identify current PI ──────────────────────────────────────────── #
+        current_pi = None
+        for piid in self._rd_piid_labels:
+            pct = self._pct_through_pi(piid)
+            if pct is not None and 0 < pct < 100:
+                current_pi = piid
+                break
+        if current_pi is None:
+            past_pis = [p for p in self._rd_piid_labels if self._pct_through_pi(p) == 100]
+            if past_pis:
+                current_pi = max(
+                    past_pis,
+                    key=lambda p: self._pi_dates_from_label(p)[1] or date.min
+                )
+        pct_pi             = self._pct_through_pi(current_pi) or 0
+        pi_start, pi_end   = self._pi_dates_from_label(current_pi) if current_pi else (None, None)
+
+        # ── Traffic-light helpers ────────────────────────────────────────── #
+        def _tl_schedule(pct_done, pct_through):
+            if not pct_through:
+                return "⬜", "—"
+            gap = pct_through - pct_done
+            if gap <= 10:
+                return "🟢", f"{pct_done}% done, {pct_through}% elapsed"
+            if gap <= 20:
+                return "🟡", f"{pct_done}% done, {pct_through}% elapsed ({gap}pp behind)"
+            return "🔴", f"{pct_done}% done, {pct_through}% elapsed ({gap}pp behind)"
+
+        def _tl_capacity(actual, planned):
+            if not planned:
+                return "⬜", "—"
+            ratio = actual / planned * 100
+            if 80 <= ratio <= 110:
+                return "🟢", f"{ratio:.0f}% load"
+            if 70 <= ratio <= 120:
+                return "🟡", f"{ratio:.0f}% load"
+            return "🔴", f"{ratio:.0f}% load"
+
+        def _tl_risk(risk_labels_present):
+            high   = [l for l in risk_labels_present if "high"   in l.lower()]
+            medium = [l for l in risk_labels_present if "medium" in l.lower()]
+            if high:
+                return "🔴", f"{len(high)} high-risk epic(s)"
+            if medium:
+                return "🟡", f"{len(medium)} medium-risk epic(s)"
+            if risk_labels_present:
+                return "🟢", f"{len(risk_labels_present)} low-risk"
+            return "🟢", "No risk labels"
+
+        def _tl_blocking(blocked_count):
+            if blocked_count == 0:
+                return "🟢", "No blocks"
+            if blocked_count <= 2:
+                return "🟡", f"{blocked_count} blocked"
+            return "🔴", f"{blocked_count} blocked"
+
+        def _worst(*lights):
+            order = {"🔴": 0, "🟡": 1, "🟢": 2, "⬜": 3}
+            return min(lights, key=lambda l: order.get(l, 3))
+
+        # ── Per-VS lookup helpers ────────────────────────────────────────── #
+        def _all_descendant_ids(parent_id):
+            ids = {parent_id}
+            for child in self._rd_groups_by_parent.get(parent_id, []):
+                ids |= _all_descendant_ids(child["id"])
+            return ids
+
+        blocked_counts: dict = {}
+        for rel in self._rd_blocking.get("relationships", []):
+            eid = rel["blocked_epic"].get("id_int") or rel["blocked_epic"].get("id")
+            if eid:
+                blocked_counts[eid] = len(rel.get("blocked_by", []))
+
+        risk_label_set = set(self._rd_risk_labels)
+
+        # ── Per-VS stats ─────────────────────────────────────────────────── #
+        vs_rows = []
+        portfolio_epics_total   = 0
+        portfolio_blocked_total = 0
+        portfolio_risk_epics    = 0
+        portfolio_unassigned    = 0
+
+        for vs_group in self._iter_vs_groups():
+            vs_ids = _all_descendant_ids(vs_group["id"])
+
+            pi_epics = [
+                e for tier in self._rd_metrics.values()
+                for e in tier
+                if e.get("group_id") in vs_ids and e.get("piid") == current_pi
+            ]
+            all_vs_epics = [
+                e for tier in self._rd_metrics.values()
+                for e in tier
+                if e.get("group_id") in vs_ids
+            ]
+
+            if pi_epics:
+                planned_w_vs = sum(e["planned_weight"] for e in pi_epics)
+                if planned_w_vs:
+                    pct_done_vs = round(
+                        sum(e["planned_weight"] * e["pct_complete"] for e in pi_epics) / planned_w_vs
+                    )
+                else:
+                    pct_done_vs = round(sum(e["pct_complete"] for e in pi_epics) / len(pi_epics))
+            else:
+                pct_done_vs  = 0
+                planned_w_vs = 0
+
+            tl_sched, sched_detail = _tl_schedule(pct_done_vs, pct_pi)
+
+            actual_w  = sum(e["actual_weight"]  for e in pi_epics)
+            planned_w = sum(e["planned_weight"] for e in pi_epics)
+            tl_cap, cap_detail = _tl_capacity(actual_w, planned_w)
+
+            risk_labels_found = [
+                lbl for e in all_vs_epics for lbl in e.get("labels", [])
+                if lbl in risk_label_set
+            ]
+            tl_risk, risk_detail = _tl_risk(risk_labels_found)
+
+            vs_epic_ids = {e["id"] for e in (pi_epics if pi_epics else all_vs_epics)}
+            vs_blocked  = sum(1 for eid in vs_epic_ids if blocked_counts.get(eid, 0) > 0)
+            tl_block, block_detail = _tl_blocking(vs_blocked)
+
+            overall     = _worst(tl_sched, tl_cap, tl_risk, tl_block)
+            unassigned_vs = sum(
+                1 for e in all_vs_epics
+                if not any(l.startswith("PIID::") for l in e.get("labels", []))
+            )
+            high_risk_count = len([l for l in risk_labels_found if "high" in l.lower()])
+
+            vs_rows.append({
+                "vs":          vs_group,
+                "overall":     overall,
+                "tl_sched":    tl_sched,   "sched_detail":  sched_detail,
+                "tl_cap":      tl_cap,     "cap_detail":    cap_detail,
+                "tl_risk":     tl_risk,    "risk_detail":   risk_detail,
+                "tl_block":    tl_block,   "block_detail":  block_detail,
+                "epics_total": len(all_vs_epics),
+                "pi_epics":    len(pi_epics),
+                "blocked":     vs_blocked,
+                "unassigned":  unassigned_vs,
+            })
+
+            portfolio_epics_total   += len(all_vs_epics)
+            portfolio_blocked_total += vs_blocked
+            portfolio_risk_epics    += high_risk_count
+            portfolio_unassigned    += unassigned_vs
+
+        # ── Portfolio-level current PI progress ─────────────────────────── #
+        all_pi_epics = [
+            e for tier in self._rd_metrics.values()
+            for e in tier
+            if e.get("piid") == current_pi
+        ]
+        if all_pi_epics:
+            planned_t = sum(e["planned_weight"] for e in all_pi_epics)
+            if planned_t:
+                port_pct_done = round(
+                    sum(e["planned_weight"] * e["pct_complete"] for e in all_pi_epics) / planned_t
+                )
+            else:
+                port_pct_done = round(sum(e["pct_complete"] for e in all_pi_epics) / len(all_pi_epics))
+        else:
+            port_pct_done = 0
+        port_tl_sched, _ = _tl_schedule(port_pct_done, pct_pi)
+
+        # ── Needs Attention ─────────────────────────────────────────────── #
+        top_blocked = sorted(
+            self._rd_blocking.get("relationships", []),
+            key=lambda r: -len(r.get("blocked_by", []))
+        )[:5]
+
+        at_risk_epics = sorted(
+            [e for e in all_pi_epics if pct_pi - e.get("pct_complete", 0) > 20],
+            key=lambda e: -(pct_pi - e.get("pct_complete", 0))
+        )[:5]
+
+        # ── Render ───────────────────────────────────────────────────────── #
+        pi_label   = current_pi or "—"
+        pi_elapsed = f"{pct_pi}% elapsed" if pct_pi else "Not started"
+        if pi_start and pi_end:
+            pi_range = f"{pi_start.strftime('%d %b %Y')} – {pi_end.strftime('%d %b %Y')}"
+        else:
+            pi_range = "—"
+
+        md = []
+        md.append(f"# Portfolio Health Dashboard — {root_group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{root_group.name}]({root_group.web_url})"
+        )
+        md.append("")
+        md.append(
+            f"**Current PI:** {pi_label}  |  "
+            f"**PI Period:** {pi_range}  |  "
+            f"**PI Elapsed:** {pi_elapsed}"
+        )
+        md.append("")
+
+        md.append("## Portfolio Summary")
+        md.append("")
+        md.append("| Metric | Value |")
+        md.append("|--------|-------|")
+        md.append(f"| Total Epics (all PIs) | {portfolio_epics_total} |")
+        md.append(f"| Epics in Current PI | {len(all_pi_epics)} |")
+        md.append(
+            f"| Current PI Progress | {port_pct_done}% done  "
+            f"({pct_pi}% elapsed) {port_tl_sched} |"
+        )
+        md.append(f"| Blocked Epics (current PI) | {portfolio_blocked_total} |")
+        md.append(f"| High-Risk Epics | {portfolio_risk_epics} |")
+        md.append(f"| Unassigned to PI | {portfolio_unassigned} |")
+        md.append("")
+
+        md.append("## Value Stream Status")
+        md.append("")
+        md.append(
+            "> **Traffic light thresholds:**  "
+            "Schedule — 🟢 ≤10pp behind · 🟡 ≤20pp · 🔴 >20pp  |  "
+            "Capacity — 🟢 80–110% loaded · 🟡 70–120% · 🔴 outside  |  "
+            "Risk — 🟢 none · 🟡 medium/low only · 🔴 any high  |  "
+            "Blocking — 🟢 0 · 🟡 1–2 · 🔴 3+"
+        )
+        md.append("")
+        md.append("| Value Stream | Status | Schedule | Capacity | Risk | Blocking | Epics | Unassigned |")
+        md.append("|---|---|---|---|---|---|---|---|")
+
+        for row in vs_rows:
+            vs      = row["vs"]
+            vs_link = f"[{vs['name']}]({vs['web_url']})"
+            md.append(
+                f"| {vs_link} "
+                f"| {row['overall']} "
+                f"| {row['tl_sched']} {row['sched_detail']} "
+                f"| {row['tl_cap']} {row['cap_detail']} "
+                f"| {row['tl_risk']} {row['risk_detail']} "
+                f"| {row['tl_block']} {row['block_detail']} "
+                f"| {row['pi_epics']} in PI / {row['epics_total']} total "
+                f"| {row['unassigned']} |"
+            )
+
+        md.append("")
+        md.append("## Needs Attention")
+        md.append("")
+
+        md.append("### ⛔ Blocked Epics")
+        md.append("")
+        if top_blocked:
+            md.append("| Epic | Type | Blockers | PI |")
+            md.append("|------|------|---------|-----|")
+            for rel in top_blocked:
+                epic   = rel["blocked_epic"]
+                etype  = epic.get("type", "—")
+                icon   = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                link   = (
+                    f'[{icon} {epic["title"]}]({epic["web_url"]})'
+                    if epic.get("web_url") else f'{icon} {epic["title"]}'
+                )
+                n_blk  = len(rel.get("blocked_by", []))
+                e_meta = self._rd_epics_by_id.get(
+                    epic.get("id_int") or epic.get("id"), {}
+                )
+                piid   = e_meta.get("piid") or "—"
+                md.append(f"| {link} | {etype} | {n_blk} | {piid} |")
+        else:
+            md.append("✅ No blocked epics found.")
+        md.append("")
+
+        md.append("### 🟡 At-Risk Epics (behind schedule)")
+        md.append("")
+        if at_risk_epics:
+            md.append("| Epic | Type | Done | PI Elapsed | Gap | PI |")
+            md.append("|------|------|------|-----------|-----|-----|")
+            for e in at_risk_epics:
+                etype = e.get("type", "—")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                link  = (
+                    f'[{icon} {e["title"]}]({e["web_url"]})'
+                    if e.get("web_url") else f'{icon} {e["title"]}'
+                )
+                gap = pct_pi - e.get("pct_complete", 0)
+                md.append(
+                    f"| {link} | {etype} | {e.get('pct_complete', 0)}% "
+                    f"| {pct_pi}% | {gap}pp | {e.get('piid', '—')} |"
+                )
+        else:
+            md.append("✅ No epics significantly behind schedule.")
+        md.append("")
+
+        md.extend([
+            "---",
+            "## Legend",
+            "",
+            "| Icon | Meaning |",
+            "|------|---------|",
+            "| 🟢 | On track — within threshold |",
+            "| 🟡 | Watch — approaching threshold |",
+            "| 🔴 | At risk — threshold exceeded |",
+            "| ⬜ | No data |",
+            "| ⛔ | Blocked epic |",
+            "",
+            "**Schedule** — % complete vs % of PI calendar elapsed  ",
+            "**Capacity** — actual story-point load vs planned load for current PI  ",
+            "**Risk** — presence of `risk::high` / `risk::medium` / `risk::low` labels  ",
+            "**Blocking** — count of epics with at least one blocker in current PI  ",
+            "",
+        ])
+
+        page_title = "Portfolio Health Dashboard"
+        self.upload_to_wiki(root_group, page_title, "\n".join(md))
+        print(f"  → Wiki: {page_title}")
+
     def generate_all_reports(self):
         self._run_reports(REPORTS)
 
@@ -2569,6 +2895,16 @@ class ReportsMixin:
 
         # Blocking
         self._rd_blocking: dict = blocking_data
+
+        # Derive active label sets from snapshot — not from config
+        all_epic_labels = [lbl for e in self._rd_epics_all for lbl in e.get("labels", [])]
+        label_set       = set(all_epic_labels)
+        self._rd_piid_labels    = sorted(
+            {l for l in label_set if l.startswith("PIID::")},
+            key=lambda p: (self._pi_dates_from_label(p)[0] or date.min),
+        )
+        self._rd_project_labels = sorted({l for l in label_set if l.startswith("project::")})
+        self._rd_risk_labels    = sorted({l for l in label_set if l.startswith("risk::")})
 
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""
