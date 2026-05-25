@@ -35,7 +35,7 @@ _Reviewed in weekly ART syncs and PM stand-ups._
 |--------|--------|-------|
 | Program × PI Matrix | ✅ Keep | Already correct for this level. |
 | Program PI Detail | ✅ Keep | Good companion to the matrix. |
-| Blocking & Cross-ART Risk | ⚠️ Consolidate | Merge the Blocking Relationships report and VS Cross-ART Risk into a single report. Two separate blocking reports is redundant. |
+| Blocking & Cross-ART Risk | ⚠️ Consolidate | Merge the Blocking Relationships report and VS Cross-ART Risk into a single report. Two separate blocking reports is redundant. Once consolidated, link the **Blocked Epics** metric in the Portfolio Health Dashboard Portfolio Summary directly to this report wiki page. |
 | ART Capacity Balance | ✅ Keep | Directly answers "do we have capacity?" |
 | PI Predictability Scorecard | 🆕 New — high priority | See details below. |
 | Risk Register | 🆕 New | See details below. |

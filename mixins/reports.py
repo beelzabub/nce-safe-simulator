@@ -2476,12 +2476,8 @@ class ReportsMixin:
             _wi([("state", "opened"), ("type[]", "epic"), ("label_name[]", current_pi)])
             if current_pi else _wi_all
         )
-        _wi_block = (
-            _wi([("state", "opened"), ("type[]", "epic"),
-                 ("label_name[]", current_pi), ("blocked", "true")])
-            if current_pi else
-            _wi([("state", "opened"), ("type[]", "epic"), ("blocked", "true")])
-        )
+        # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
+        # report wiki page once the Tier 2 blocking report consolidation is complete.
         _risk_p  = [("state", "opened"), ("type[]", "epic")] + [
             ("or[label_name][]", lbl) for lbl in self._rd_risk_labels
         ]
@@ -2498,8 +2494,8 @@ class ReportsMixin:
             f"| Current PI Progress | [{port_pct_done}% done]({_wi_pi})  "
             f"({pct_pi}% elapsed) {port_tl_sched} |"
         )
-        md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_block}) |")
-        md.append(f"| High-Risk Epics | [{portfolio_risk_epics}]({_wi_risk}) |")
+        md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_pi}) |")
+        md.append(f"| Risk-Flagged Epics (any level) | [{portfolio_risk_epics}]({_wi_risk}) |")
         md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
         md.append("")
 
