@@ -2252,9 +2252,13 @@ class ReportsMixin:
         print(f"  [0] {'all':<22} Run all reports (default)")
         for i, report in enumerate(REPORTS, 1):
             print(f"  [{i}] {report['key']:<22} {report['description']}")
+        print(f"  [q] quit")
         print()
 
-        raw = input(f"Select reports [0-{len(REPORTS)}, space-separated, or Enter for all]: ").strip()
+        raw = input(f"Select reports [0-{len(REPORTS)}, space-separated, Enter for all, q to quit]: ").strip()
+
+        if raw.lower() in ("q", "quit"):
+            return
 
         if not raw:
             self._run_reports(REPORTS)
@@ -2426,6 +2430,7 @@ class ReportsMixin:
 
         for i, report in enumerate(reports, 1):
             print(f"[{i}/{total}] {report['description']}")
+            self._current_op = f"report: {report['key']}"
             start = datetime.now()
             t0    = time.monotonic()
             try:
@@ -2435,6 +2440,7 @@ class ReportsMixin:
                 print(f"  ERROR running '{report['key']}': {e}")
             elapsed = time.monotonic() - t0
             end     = datetime.now()
+            self._current_op = None
             phases.append((report["key"], start, end, elapsed))
             print(f"  ↳ {start.strftime('%H:%M:%S')} → {end.strftime('%H:%M:%S')}  {_fmt_duration(elapsed)}\n")
 
