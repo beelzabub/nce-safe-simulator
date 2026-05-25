@@ -53,7 +53,8 @@ class NceGitLab(
                         "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
                         "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
                         "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
-                        "epic_labels": ["Epic", "Capability", "Feature"]
+                        "epic_labels": ["Epic", "Capability", "Feature"],
+                        "risk_labels": ["risk::high", "risk::medium", "risk::low"]
                     }
             ''')
             exit(1)
