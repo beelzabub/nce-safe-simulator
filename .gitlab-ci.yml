@@ -2,11 +2,25 @@ image: python:latest
 
 stages:
   - build
-
+  - report
 
 python-version-test:
   stage: build
   script:
     - pip install -r requirements.txt
-    - python NceGitLab.py 
+    - python NceGitLab.py
 
+generate-reports:
+  stage: report
+  script:
+    - pip install -r requirements.txt
+    - python NceGitLab.py --report all
+  artifacts:
+    name: "reports-${CI_COMMIT_SHORT_SHA}-${CI_JOB_STARTED_AT}"
+    paths:
+      - reports/
+    expire_in: 30 days
+  variables:
+    ACCESS_TOKEN: $ACCESS_TOKEN
+    GROUP_NAME: $GROUP_NAME
+  when: manual

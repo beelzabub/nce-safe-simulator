@@ -1,7 +1,9 @@
+import json
 import sys
 import time
 from collections import defaultdict
 from datetime import date, datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from .utils import _fmt_duration
@@ -2234,11 +2236,12 @@ class ReportsMixin:
     def run_reports_menu(self, report_key=None):
         """Show the reports selection menu or run a specific report by key."""
         if report_key:
+            if report_key == "all":
+                self._run_reports(REPORTS)
+                return
             report = next((r for r in REPORTS if r["key"] == report_key), None)
             if report is None:
-                print(f"Unknown report '{report_key}'. Available reports:")
-                for r in REPORTS:
-                    print(f"  {r['key']}")
+                print(f"Unknown report '{report_key}'. Available: all, " + ", ".join(r['key'] for r in REPORTS))
                 sys.exit(1)
             self._run_reports([report])
             return
@@ -2279,10 +2282,144 @@ class ReportsMixin:
 
         self._run_reports(selected)
 
+    def _fetch_blocking_graph(self, group):
+        """Return the raw blocking relationship graph as a serialisable dict."""
+        query = """
+        query BlockingGraph($fullPath: ID!) {
+          group(fullPath: $fullPath) {
+            epics {
+              nodes {
+                id title webUrl state
+                labels { nodes { title } }
+                parent { id }
+                blockedByCount
+                blockingCount
+                blockedByEpics {
+                  edges {
+                    node { id title webUrl labels { nodes { title } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        data = self.graphql_query(query, variables={"fullPath": group.full_path})
+        if data is None:
+            return {"relationships": [], "summary": {}}
+
+        def _type(node):
+            titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
+            for t in ("Epic", "Capability", "Feature"):
+                if t in titles:
+                    return t
+            return "Unknown"
+
+        nodes        = data["group"]["epics"]["nodes"]
+        id_to_node   = {n["id"]: n for n in nodes}
+        parent_of    = {n["id"]: n["parent"]["id"] for n in nodes if n.get("parent")}
+        blocked_nodes = [n for n in nodes if n.get("blockedByCount", 0) > 0]
+
+        def ancestors(epic_id):
+            result, cur, seen = [], epic_id, set()
+            while cur in parent_of:
+                cur = parent_of[cur]
+                if cur in seen:
+                    break
+                seen.add(cur)
+                if cur in id_to_node:
+                    result.append(id_to_node[cur])
+            return result
+
+        relationships = []
+        for node in blocked_nodes:
+            blockers = [
+                {"id": e["node"]["id"], "title": e["node"]["title"],
+                 "type": _type(e["node"]), "web_url": e["node"]["webUrl"]}
+                for e in node["blockedByEpics"]["edges"]
+            ]
+            anc = [
+                {"id": a["id"], "title": a["title"], "type": _type(a), "web_url": a["webUrl"]}
+                for a in ancestors(node["id"]) if _type(a) == "Epic"
+            ]
+            relationships.append({
+                "blocked_epic": {
+                    "id":      node["id"],
+                    "title":   node["title"],
+                    "type":    _type(node),
+                    "state":   node.get("state"),
+                    "web_url": node["webUrl"],
+                },
+                "blocked_by":            blockers,
+                "at_risk_portfolio_epics": anc,
+            })
+
+        total_rels     = sum(n.get("blockedByCount", 0) for n in blocked_nodes)
+        at_risk_epics  = len({r["id"] for rel in relationships for r in rel["at_risk_portfolio_epics"]})
+
+        return {
+            "summary": {
+                "total_blocked":                len(blocked_nodes),
+                "total_relationships":          total_rels,
+                "portfolio_epics_at_risk":      at_risk_epics,
+            },
+            "relationships": relationships,
+        }
+
+    def _write_report_data(self, run_dir):
+        """Write epics.json, issues.json, and blocking.json to run_dir."""
+        group = self.get_group_by_name(self.parent_group)
+        ts    = datetime.now().isoformat()
+
+        print("  Collecting data snapshot...")
+        metrics = self.calculate_portfolio_metrics(self.parent_group)
+
+        # Flatten epics from metrics dict into a single list (type already on each record)
+        all_epics = [e for bucket in metrics.values() for e in bucket]
+        epics_payload = {
+            "generated_at": ts,
+            "group":        self.parent_group,
+            "total":        len(all_epics),
+            "epics":        all_epics,
+        }
+        (run_dir / "epics.json").write_text(
+            json.dumps(epics_payload, indent=2, default=str), encoding="utf-8"
+        )
+
+        issues = getattr(self, '_issues_cache', {}).get(self.parent_group, [])
+        issues_payload = {
+            "generated_at": ts,
+            "group":        self.parent_group,
+            "total":        len(issues),
+            "issues":       issues,
+        }
+        (run_dir / "issues.json").write_text(
+            json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
+        )
+
+        blocking = self._fetch_blocking_graph(group)
+        blocking["generated_at"] = ts
+        blocking["group"]        = self.parent_group
+        (run_dir / "blocking.json").write_text(
+            json.dumps(blocking, indent=2, default=str), encoding="utf-8"
+        )
+
+        n_blocked = blocking["summary"].get("total_blocked", 0)
+        print(f"\n  Data snapshot → {run_dir}/")
+        print(f"    epics.json    ({len(all_epics)} epics)")
+        print(f"    issues.json   ({len(issues)} issues)")
+        print(f"    blocking.json ({n_blocked} blocked epics)\n")
+
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""
         group = self.get_group_by_name(self.parent_group)
         print(f"\nGenerating reports for group: {group.full_path}\n")
+
+        now     = datetime.now()
+        run_dir = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        self._report_run_dir = run_dir
+        self._write_report_data(run_dir)
 
         total  = len(reports)
         phases = []
