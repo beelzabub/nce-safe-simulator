@@ -182,6 +182,7 @@ python3 NceGitLab.py --create             # Bootstrap a full SAFe lorem data set
 python3 NceGitLab.py --scaffold           # Create SAFe group structure only (prompted)
 python3 NceGitLab.py --scaffold my/group  # Create SAFe group structure under a specific group
 python3 NceGitLab.py --report             # Show the report menu
+python3 NceGitLab.py --report all        # Run all reports non-interactively
 python3 NceGitLab.py --report portfolio   # Run a single report by key
 python3 NceGitLab.py --utilities          # Show the utility tool menu
 python3 NceGitLab.py --utilities audit-labels  # Run a single tool by key
@@ -255,7 +256,47 @@ If the target group does not exist and the path matches `parent_group` from conf
 
 ## Reports
 
-All reports are published as GitLab Wiki pages. Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`).
+All reports are published as GitLab Wiki pages. Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`). Use `--report all` to run every report non-interactively (required for CI).
+
+### Data Snapshot
+
+Every report run — whether a single report or all — makes **one pass through the GitLab API**, writes a complete data snapshot to disk, and then generates all wiki pages from that snapshot with no further API reads. This eliminates redundant queries across the 13 reports.
+
+```
+reports/
+  YYYYMMDD/
+    HHMMSS/
+      epics.json      # typed epics (full fields + rollups) + all_epics_raw (includes untyped)
+      issues.json     # all issues: full fields including assignees, milestone, epic link
+      blocking.json   # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+      groups.json     # SAFe group hierarchy: portfolio → VS → ART → Team, each with level tag
+      projects.json   # Team Backlog projects with namespace_id, path, and issues_enabled flag
+```
+
+The directory is printed to the console at the start of every run:
+
+```
+Data snapshot → reports/20260525/143022/
+  epics.json    (47 typed + 2 untyped)
+  issues.json   (312 issues)
+  blocking.json (5 blocked epics)
+  groups.json   (15 groups)
+  projects.json (8 projects)
+```
+
+**`epics.json` fields:** `id`, `iid`, `type`, `title`, `description`, `state`, `labels`, `parent_id`, `group_id`, `planned_weight`, `actual_weight`, `pct_complete`, `pct_through_pi`, `piid`, `blocked_by_count`, `blocks_count`, `start_date`, `due_date`, `created_at`, `updated_at`, `web_url`
+
+**`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
+
+**`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
+
+**`groups.json` fields:** `id`, `name`, `path`, `full_path`, `parent_id`, `web_url`, `level` (portfolio / vs / art / team)
+
+**`projects.json` fields:** `id`, `name`, `path`, `path_with_namespace`, `name_with_namespace`, `namespace_id`, `web_url`, `issues_enabled`
+
+#### CI Artifact
+
+The `generate-reports` job in `.gitlab-ci.yml` runs `--report all` and publishes the `reports/` directory as a downloadable artifact (30-day retention). The job is `when: manual` to avoid unintended API calls. Trigger it from the GitLab pipeline UI after setting `ACCESS_TOKEN` and `GROUP_NAME` as CI/CD variables in the project settings.
 
 Reports fall into two structural types:
 
@@ -422,3 +463,5 @@ An **orphan summary table** is printed at the end of any run that produces epics
 **Config-driven defaults** — All numeric defaults for bootstrap counts and tool parameters live in `config.json` under `defaults.bootstrap` and `defaults.tools`. Function signatures use `None` sentinels and resolve from `self.default_*` at runtime, so callers can still override individual values programmatically. Structure count keys (`num_value_streams`, `num_arts`, `num_teams`, etc.) accept a plain integer, `{"desired": N}`, or `{"min": M, "max": N}` range object. `_resolve_range()` in `mixins/bootstrap.py` handles all three forms; `_range_label()` produces a human-readable annotation for the run summary.
 
 **Job timing** — Each phase (`--clean`, `--create`, individual reports, `--all`) prints start/stop times and duration. `--all` aggregates all phases into a single summary table.
+
+**Data snapshots** — Every report run writes `epics.json`, `issues.json`, and `blocking.json` to `reports/YYYYMMDD/HHMMSS/` before any wiki pages are generated. The data comes from `calculate_portfolio_metrics()` (which already fetches and caches all epics and issues) plus a dedicated GraphQL call for the full blocking graph. Multiple runs per day each get their own timestamped subdirectory. The `.gitlab-ci.yml` `generate-reports` job exposes this directory as a downloadable CI artifact.
