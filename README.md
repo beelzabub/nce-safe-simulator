@@ -50,7 +50,8 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
   labels.py        # Label create/delete
   bootstrap.py     # Lorem data generation, SAFe hierarchy creation, cleanup
   reports.py       # All portfolio report generators
-  tools.py         # Interactive utility tool menu
+  tools.py         # Interactive utility tool menu and registry
+  importexport.py  # Epic and issue import/export (CSV and JSON)
 ```
 
 ---
@@ -277,6 +278,10 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 | `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
 | `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
 | `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
+| `export-epics` | Export all epics from the group hierarchy to CSV or JSON (full field set, all subgroups) |
+| `import-epics` | Import epics from CSV or JSON with pre-flight validation, resilient field handling, dry-run |
+| `export-issues` | Export all issues from the group hierarchy to CSV or JSON (full field set, all subgroups) |
+| `import-issues` | Import issues from CSV or JSON with pre-flight validation, milestone/assignee lookup, dry-run |
 
 ---
 
@@ -303,7 +308,7 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 
 ## Design Notes
 
-**Mixin architecture** — `NceGitLab` inherits from eleven single-responsibility mixin classes in `mixins/`. The main file contains only `__init__` (config loading and GitLab auth) and the CLI `main()`. Adding new capabilities means adding a new mixin or extending an existing one without touching the core class.
+**Mixin architecture** — `NceGitLab` inherits from twelve single-responsibility mixin classes in `mixins/`. The main file contains only `__init__` (config loading and GitLab auth) and the CLI `main()`. Adding new capabilities means adding a new mixin or extending an existing one without touching the core class.
 
 **GraphQL for epic weights** — GitLab's REST API does not expose planned weight on epics; it must be read and written via the GraphQL `workItemUpdate` mutation and `WorkItemWidgetWeight` widget. All weight operations route through `_set_epic_weight()` and `_fetch_epic_weights()` in `mixins/utils.py`.
 
