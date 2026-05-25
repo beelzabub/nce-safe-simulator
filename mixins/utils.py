@@ -111,7 +111,7 @@ class UtilitiesMixin:
                 n["webUrl"]: n for n in gql_data["group"]["epics"]["nodes"]
             }
 
-        print("  Fetching issue weights...")
+        print("  Fetching issues...")
         issues_by_epic_id  = defaultdict(list)
         all_issues_snapshot = []
         for project in group.projects.list(all=True, include_subgroups=True):

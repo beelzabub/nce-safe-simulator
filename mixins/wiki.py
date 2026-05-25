@@ -1,9 +1,19 @@
+import re
 import gitlab
 
 
 class WikiMixin:
 
     def upload_to_wiki(self, group, page_title, content):
+        # Save a local copy when running inside _run_reports
+        wiki_dir = getattr(self, '_wiki_save_dir', None)
+        if wiki_dir is not None:
+            safe = re.sub(r'[^a-z0-9\-]', '-',
+                          page_title.lower().replace('/', '--').replace(' ', '-'))
+            safe = re.sub(r'-+', '-', safe).strip('-')
+            wiki_dir.mkdir(parents=True, exist_ok=True)
+            (wiki_dir / f"{safe}.md").write_text(content, encoding="utf-8")
+
         try:
             page_slug = page_title.replace(" ", "-").lower()
             try:

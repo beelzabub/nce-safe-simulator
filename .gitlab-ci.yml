@@ -15,10 +15,11 @@ generate-reports:
   script:
     - pip install -r requirements.txt
     - python NceGitLab.py --report all
+    - zip -r reports.zip reports/
   artifacts:
-    name: "reports-${CI_COMMIT_SHORT_SHA}-${CI_JOB_STARTED_AT}"
+    name: "reports-${CI_COMMIT_SHORT_SHA}"
     paths:
-      - reports/
+      - reports.zip
     expire_in: 30 days
   variables:
     ACCESS_TOKEN: $ACCESS_TOKEN

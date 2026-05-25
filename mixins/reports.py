@@ -2293,87 +2293,110 @@ class ReportsMixin:
         self._run_reports(selected)
 
     def _fetch_blocking_graph(self, group):
-        """Return the raw blocking relationship graph as a serialisable dict."""
-        query = """
-        query BlockingGraph($fullPath: ID!) {
-          group(fullPath: $fullPath) {
-            epics {
-              nodes {
-                id title webUrl state
-                labels { nodes { title } }
-                parent { id }
-                blockedByCount
-                blockingCount
-                blockedByEpics {
-                  edges {
-                    node { id title webUrl labels { nodes { title } } }
-                  }
-                }
-              }
-            }
-          }
-        }
+        """Return the raw blocking relationship graph via the REST related_epics API.
+
+        Uses _all_epics_cache (populated by calculate_portfolio_metrics) to avoid
+        an extra hierarchy walk, and queries each epic's /related_epics endpoint
+        directly — the same API used to create blocking relationships.
         """
-        data = self.graphql_query(query, variables={"fullPath": group.full_path})
-        if data is None:
+        import requests as _requests
+
+        all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, [])
+        if not all_epics_raw:
+            print("  WARNING: epic cache empty — cannot collect blocking data.")
             return {"relationships": [], "summary": {}}
 
-        def _type(node):
-            titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
+        session = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        epic_by_id = {e["id"]: e for e in all_epics_raw}
+        parent_of  = {e["id"]: e["parent_id"] for e in all_epics_raw if e.get("parent_id")}
+
+        def _etype(labels):
             for t in ("Epic", "Capability", "Feature"):
-                if t in titles:
+                if t in labels:
                     return t
             return "Unknown"
 
-        nodes        = data["group"]["epics"]["nodes"]
-        id_to_node   = {n["id"]: n for n in nodes}
-        parent_of    = {n["id"]: n["parent"]["id"] for n in nodes if n.get("parent")}
-        blocked_nodes = [n for n in nodes if n.get("blockedByCount", 0) > 0]
-
-        def ancestors(epic_id):
+        def _portfolio_ancestors(epic_id):
             result, cur, seen = [], epic_id, set()
             while cur in parent_of:
                 cur = parent_of[cur]
                 if cur in seen:
                     break
                 seen.add(cur)
-                if cur in id_to_node:
-                    result.append(id_to_node[cur])
+                node = epic_by_id.get(cur)
+                if node and _etype(node.get("labels", [])) == "Epic":
+                    result.append(node)
             return result
 
         relationships = []
-        for node in blocked_nodes:
-            blockers = [
-                {"id": e["node"]["id"], "id_int": _gid_to_int(e["node"]["id"]),
-                 "title": e["node"]["title"], "type": _type(e["node"]), "web_url": e["node"]["webUrl"]}
-                for e in node["blockedByEpics"]["edges"]
-            ]
-            anc = [
-                {"id": a["id"], "id_int": _gid_to_int(a["id"]),
-                 "title": a["title"], "type": _type(a), "web_url": a["webUrl"]}
-                for a in ancestors(node["id"]) if _type(a) == "Epic"
-            ]
+        total_rels    = 0
+
+        for epic in all_epics_raw:
+            grp_id = epic.get("group_id")
+            iid    = epic.get("iid")
+            eid    = epic.get("id")
+            if not (grp_id and iid and eid):
+                continue
+
+            url = f"{self.url}/api/v4/groups/{grp_id}/epics/{iid}/related_epics"
+            try:
+                resp = session.get(url)
+            except Exception:
+                continue
+            if not resp.ok:
+                continue
+
+            blockers = []
+            for rel in resp.json():
+                if rel.get("link_type") != "is_blocked_by":
+                    continue
+                rel_id   = rel["id"]
+                rel_info = epic_by_id.get(rel_id, {})
+                blockers.append({
+                    "id":      rel_id,
+                    "id_int":  rel_id,
+                    "title":   rel.get("title", rel_info.get("title", "")),
+                    "type":    _etype(rel_info.get("labels", [])),
+                    "web_url": rel.get("web_url", rel_info.get("web_url", "")),
+                })
+
+            if not blockers:
+                continue
+
+            total_rels += len(blockers)
+            anc = _portfolio_ancestors(eid)
+
             relationships.append({
                 "blocked_epic": {
-                    "id":      node["id"],
-                    "id_int":  _gid_to_int(node["id"]),
-                    "title":   node["title"],
-                    "type":    _type(node),
-                    "state":   node.get("state"),
-                    "web_url": node["webUrl"],
+                    "id":      eid,
+                    "id_int":  eid,
+                    "title":   epic.get("title", ""),
+                    "type":    _etype(epic.get("labels", [])),
+                    "state":   epic.get("state", ""),
+                    "web_url": epic.get("web_url", ""),
                 },
-                "blocked_by":            blockers,
-                "at_risk_portfolio_epics": anc,
+                "blocked_by":              blockers,
+                "at_risk_portfolio_epics": [
+                    {
+                        "id":      a["id"],
+                        "id_int":  a["id"],
+                        "title":   a["title"],
+                        "type":    _etype(a.get("labels", [])),
+                        "web_url": a.get("web_url", ""),
+                    }
+                    for a in anc
+                ],
             })
 
-        total_rels     = sum(n.get("blockedByCount", 0) for n in blocked_nodes)
-        at_risk_epics  = len({r["id"] for rel in relationships for r in rel["at_risk_portfolio_epics"]})
+        at_risk = len({a["id"] for r in relationships for a in r["at_risk_portfolio_epics"]})
 
         return {
             "summary": {
-                "total_blocked":                len(blocked_nodes),
-                "total_relationships":          total_rels,
-                "portfolio_epics_at_risk":      at_risk_epics,
+                "total_blocked":           len(relationships),
+                "total_relationships":     total_rels,
+                "portfolio_epics_at_risk": at_risk,
             },
             "relationships": relationships,
         }
@@ -2435,8 +2458,8 @@ class ReportsMixin:
 
         return all_groups, all_projects
 
-    def _write_report_data(self, run_dir):
-        """Write epics.json, issues.json, blocking.json, groups.json, projects.json to run_dir."""
+    def _write_report_data(self, data_dir):
+        """Write epics.json, issues.json, blocking.json, groups.json, projects.json to data_dir."""
         group = self._rd_root_obj
         ts    = datetime.now().isoformat()
 
@@ -2454,7 +2477,7 @@ class ReportsMixin:
             "epics":          typed_epics,
             "all_epics_raw":  all_epics_raw,
         }
-        (run_dir / "epics.json").write_text(
+        (data_dir / "epics.json").write_text(
             json.dumps(epics_payload, indent=2, default=str), encoding="utf-8"
         )
 
@@ -2465,14 +2488,14 @@ class ReportsMixin:
             "total":        len(issues),
             "issues":       issues,
         }
-        (run_dir / "issues.json").write_text(
+        (data_dir / "issues.json").write_text(
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
 
         blocking = self._fetch_blocking_graph(group)
         blocking["generated_at"] = ts
         blocking["group"]        = self.parent_group
-        (run_dir / "blocking.json").write_text(
+        (data_dir / "blocking.json").write_text(
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
 
@@ -2484,7 +2507,7 @@ class ReportsMixin:
             "total":        len(all_groups),
             "groups":       all_groups,
         }
-        (run_dir / "groups.json").write_text(
+        (data_dir / "groups.json").write_text(
             json.dumps(groups_payload, indent=2, default=str), encoding="utf-8"
         )
         projects_payload = {
@@ -2493,25 +2516,25 @@ class ReportsMixin:
             "total":        len(all_projects),
             "projects":     all_projects,
         }
-        (run_dir / "projects.json").write_text(
+        (data_dir / "projects.json").write_text(
             json.dumps(projects_payload, indent=2, default=str), encoding="utf-8"
         )
 
         n_blocked = blocking["summary"].get("total_blocked", 0)
-        print(f"\n  Data snapshot → {run_dir}/")
+        print(f"\n  Data snapshot → {data_dir}/")
         print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
         print(f"    blocking.json ({n_blocked} blocked epics)")
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
-    def _load_report_data(self, run_dir):
+    def _load_report_data(self, data_dir):
         """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
-        epics_data    = json.loads((run_dir / "epics.json").read_text(encoding="utf-8"))
-        issues_data   = json.loads((run_dir / "issues.json").read_text(encoding="utf-8"))
-        blocking_data = json.loads((run_dir / "blocking.json").read_text(encoding="utf-8"))
-        groups_data   = json.loads((run_dir / "groups.json").read_text(encoding="utf-8"))
-        projects_data = json.loads((run_dir / "projects.json").read_text(encoding="utf-8"))
+        epics_data    = json.loads((data_dir / "epics.json").read_text(encoding="utf-8"))
+        issues_data   = json.loads((data_dir / "issues.json").read_text(encoding="utf-8"))
+        blocking_data = json.loads((data_dir / "blocking.json").read_text(encoding="utf-8"))
+        groups_data   = json.loads((data_dir / "groups.json").read_text(encoding="utf-8"))
+        projects_data = json.loads((data_dir / "projects.json").read_text(encoding="utf-8"))
 
         # Groups
         all_groups = groups_data["groups"]
@@ -2553,12 +2576,16 @@ class ReportsMixin:
         self._rd_root_obj = group
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
-        now     = datetime.now()
-        run_dir = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
-        run_dir.mkdir(parents=True, exist_ok=True)
+        now      = datetime.now()
+        run_dir  = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
+        data_dir = run_dir / "data"
+        wiki_dir = run_dir / "wiki"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        wiki_dir.mkdir(parents=True, exist_ok=True)
         self._report_run_dir = run_dir
-        self._write_report_data(run_dir)
-        self._load_report_data(run_dir)
+        self._wiki_save_dir  = wiki_dir
+        self._write_report_data(data_dir)
+        self._load_report_data(data_dir)
 
         total  = len(reports)
         phases = []
