@@ -81,6 +81,7 @@ Copy and edit `config.json`:
     "project_labels": ["project::DO", "project::RTSO", "project::DCGS"],
     "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1"],
     "epic_type_labels": ["Epic", "Capability", "Feature"],
+    "risk_labels": ["risk::high", "risk::medium", "risk::low"],
     "fibonacci_weights": [1, 2, 3, 5, 8, 13],
     "epic_type_planned_weights": {
         "Feature":    [3, 5, 8, 13],
@@ -118,6 +119,7 @@ Copy and edit `config.json`:
 | `project_labels` | Labels representing programs or workstreams |
 | `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
 | `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
+| `risk_labels` | `risk::*` labels created at bootstrap; used by the risk simulator tool and discovered from the live group by reports |
 | `fibonacci_weights` | Valid issue story-point values |
 | `epic_type_planned_weights` | Valid planned-weight pools per epic type |
 | `defaults.bootstrap` | Default counts and ratios for `--create` (see below) |
@@ -156,6 +158,7 @@ At run time `--create` and `--scaffold` resolve each range to a single integer a
 | `simulate_pi_progress_percent` | `50.0` | Default % closure for `simulate-pi-progress` |
 | `generate_issues_count` | `5` | Default issues per Feature for `generate-issues` |
 | `weight_drift_threshold` | `20.0` | Default drift % for `weight-drift-check` |
+| `set_risk_labels_percent` | `15.0` | Default % of open epics to label for `set-risk-labels` |
 
 ### Environment Variable Overrides
 
@@ -168,6 +171,7 @@ Any config value can be overridden at runtime without editing the file:
 | `PROJECT_LABELS` | `project_labels` (comma-separated) |
 | `PIID_LABELS` | `piid_labels` (comma-separated) |
 | `EPIC_TYPE_LABELS` | `epic_type_labels` (comma-separated) |
+| `RISK_LABELS` | `risk_labels` (comma-separated) |
 | `FIBONACCI_WEIGHTS` | `fibonacci_weights` (comma-separated integers) |
 
 ---
@@ -303,30 +307,28 @@ Reports fall into two structural types:
 **Flat reports** publish a single page to the root group wiki.  
 **Hierarchical reports** publish a root-level index page to the root group wiki plus one detail page per group at the relevant hierarchy level. The index page summarises every sub-group and links directly to its detail page, so the root wiki is the single entry point for the full picture.
 
+> **Label discovery:** Reports derive `PIID::`, `project::`, and `risk::` label sets from the data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group without reconfiguring the tool.
+
 ### Flat Reports
 
 | Key | Wiki Page | Description |
 |---|---|---|
-| `portfolio` | `<group> - SAFe Portfolio Report` | Collapsible Epic → Capability/Feature hierarchy with % complete, planned vs actual weight, PI progress, and risk flags |
-| `workload` | `<group> - ART-Team Workload Report` | Per-PI table of planned vs actual weight per group with on-track / at-risk / incomplete status |
+| `art-capacity-balance` | `<group> - ART Capacity Balance Report` | Per-team planned vs actual weight per PI with over/under capacity flags *(hierarchical)* |
+| `art-feature-status` | `<group> - ART Feature Status Report` | All Features per ART grouped by Team, with completion, weight, and risk *(hierarchical)* |
 | `blocking` | `<group> - Blocking Relationships Report` | Blocked epics, their blockers, ancestor risk propagation, and portfolio-level risk summary |
-| `unassigned-pi` | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
+| `health-dashboard` | `Portfolio Health Dashboard` | Tier 1 executive view — per-VS traffic-light status across Schedule, Capacity, Risk, and Blocking; Needs Attention section for blocked and behind-schedule epics |
 | `orphan-epics` | `<group> - Orphaned Epics Report` | Epics with no parent and no children (completely disconnected from hierarchy) |
 | `orphan-issues` | `<group> - Orphaned Issues Report` | Issues not linked to any epic, grouped by project |
 | `piid-project` | `<group> - Program × PI Report` | Project label vs PI quarter cross-tab with status and weights |
 | `piid-project-detail` | `<group> - Program PI Detail Report` | Per-PI section view of program workload and status |
+| `portfolio` | `<group> - SAFe Portfolio Report` | Collapsible Epic → Capability/Feature hierarchy with % complete, planned vs actual weight, PI progress, and risk flags |
+| `team-backlog` | `<group> - Team Backlog Report` | Issues grouped by Feature per Team with weight and completion *(hierarchical)* |
+| `unassigned-pi` | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
+| `vs-capability-dashboard` | `<group> - VS Capability Dashboard` | Capabilities and Direct Features by PI with per-ART breakdown per Value Stream *(hierarchical)* |
+| `vs-cross-art-risk` | `<group> - VS Cross-ART Risk Report` | Blocking relationships that cross ART boundaries within a Value Stream *(hierarchical)* |
+| `workload` | `<group> - ART-Team Workload Report` | Per-PI table of planned vs actual weight per group with on-track / at-risk / incomplete status |
 
-### Hierarchical Reports
-
-| Key | Root Index (root group wiki) | Detail Pages | Description |
-|---|---|---|---|
-| `team-backlog` | `<group> - Team Backlog Report` | One page per Team, published to **each Team's own group wiki** | Issues grouped by Feature per Team with weight and completion |
-| `art-feature-status` | `<group> - ART Feature Status Report` | `ART Feature Status/<VS>/<ART>` on root wiki | All Features per ART grouped by Team, with completion, weight, and risk |
-| `art-capacity-balance` | `<group> - ART Capacity Balance Report` | `ART Capacity Balance/<VS>/<ART>` on root wiki | Per-team planned vs actual weight per PI with over/under capacity flags |
-| `vs-capability-dashboard` | `<group> - VS Capability Dashboard` | `VS Capability Dashboard/<VS>` on root wiki | Capabilities and Direct Features by PI with per-ART breakdown per Value Stream |
-| `vs-cross-art-risk` | `<group> - VS Cross-ART Risk Report` | `VS Cross-ART Risk/<VS>` on root wiki | Blocking relationships that cross ART boundaries within a Value Stream |
-
-> **Team Backlog note:** Detail pages are written to each Team group's own wiki (not the root wiki). This keeps team-level work visible in the team's own GitLab group while the root index provides the portfolio roll-up view.
+> **Hierarchical reports** (`art-capacity-balance`, `art-feature-status`, `team-backlog`, `vs-capability-dashboard`, `vs-cross-art-risk`) publish a root index page plus one detail page per group at the relevant hierarchy level. `team-backlog` detail pages are written to each Team group's own wiki; all other hierarchical detail pages are written to the root wiki.
 
 ### PI Progress Calculation
 
@@ -348,26 +350,27 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 
 | Key | Description |
 |---|---|
-| `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
-| `update-weights` | Assign planned weights to all epics based on SAFe type label |
-| `validate-weights` | Validate epic and issue weights against configured pools |
-| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
-| `set-issue-weights` | Assign Fibonacci story-point weights to issues that currently have none |
+| `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
-| `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
+| `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
+| `export-epics` | Export all epics from the group hierarchy to CSV or JSON (full field set, all subgroups) |
+| `export-issues` | Export all issues from the group hierarchy to CSV or JSON (full field set, all subgroups) |
+| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
+| `generate-issues` | Create issues in team backlog projects linked to Feature epics |
+| `import-epics` | Import epics from CSV or JSON with pre-flight validation, resilient field handling, dry-run |
+| `import-issues` | Import issues from CSV or JSON with pre-flight validation, milestone/assignee lookup, dry-run |
+| `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
+| `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
+| `set-epic-states` | Open or close all epics matching an optional type and/or PI filter |
+| `set-issue-weights` | Assign Fibonacci story-point weights to issues that currently have none |
 | `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one |
 | `set-project-labels` | Bulk-assign a project label to epics that are missing one |
-| `generate-issues` | Create issues in team backlog projects linked to Feature epics |
-| `set-epic-states` | Open or close all epics matching an optional type and/or PI filter |
-| `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
-| `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
-| `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
+| `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none (simulation/seeding) |
+| `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
 | `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
-| `export-epics` | Export all epics from the group hierarchy to CSV or JSON (full field set, all subgroups) |
-| `import-epics` | Import epics from CSV or JSON with pre-flight validation, resilient field handling, dry-run |
-| `export-issues` | Export all issues from the group hierarchy to CSV or JSON (full field set, all subgroups) |
-| `import-issues` | Import issues from CSV or JSON with pre-flight validation, milestone/assignee lookup, dry-run |
-| `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
+| `update-weights` | Assign planned weights to all epics based on SAFe type label |
+| `validate-weights` | Validate epic and issue weights against configured pools |
+| `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
 
 ---
 
