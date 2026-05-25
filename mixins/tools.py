@@ -188,6 +188,12 @@ TOOLS = [
             {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
         ],
     },
+    {
+        "key":         "scaffold",
+        "description": "Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content",
+        "method":      "create_safe_hierarchy",
+        "params":      [],
+    },
 ]
 
 

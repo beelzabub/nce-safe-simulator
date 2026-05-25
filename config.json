@@ -14,13 +14,13 @@
   },
   "defaults": {
     "bootstrap": {
-      "num_value_streams":    2,
-      "num_arts":             2,
-      "num_teams":            2,
-      "portfolio_epics":      5,
-      "vs_caps_per_vs":       3,
-      "art_caps_per_art":     4,
-      "features_per_team":    4,
+      "num_value_streams":    {"min": 1, "max": 4, "desired": 2},
+      "num_arts":             {"min": 1, "max": 3, "desired": 2},
+      "num_teams":            {"min": 1, "max": 4, "desired": 2},
+      "portfolio_epics":      {"min": 3, "max": 8, "desired": 5},
+      "vs_caps_per_vs":       {"min": 2, "max": 5, "desired": 3},
+      "art_caps_per_art":     {"min": 2, "max": 6, "desired": 4},
+      "features_per_team":    {"min": 3, "max": 6, "desired": 4},
       "direct_feature_ratio": 0.70
     },
     "tools": {
