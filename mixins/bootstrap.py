@@ -5,6 +5,28 @@ from dateutil.relativedelta import relativedelta
 import lorem
 
 
+def _resolve_range(val):
+    """Return an int from a scalar, {desired}, or {min, max} config value."""
+    if isinstance(val, dict):
+        if "desired" in val:
+            return int(val["desired"])
+        lo = int(val.get("min", 1))
+        hi = int(val.get("max", lo))
+        return random.randint(min(lo, hi), max(lo, hi))
+    return int(val)
+
+
+def _range_label(cfg_val, resolved):
+    """Human-readable label showing how resolved came from cfg_val."""
+    if isinstance(cfg_val, dict):
+        if "desired" in cfg_val:
+            return f"{resolved}  (desired)"
+        lo = cfg_val.get("min", "?")
+        hi = cfg_val.get("max", "?")
+        return f"{resolved}  (random {lo}–{hi})"
+    return str(resolved)
+
+
 class BootstrapMixin:
 
     def _get_or_create_root_group(self):
@@ -228,14 +250,33 @@ class BootstrapMixin:
                                   art_epics=None,
                                   team_features=None,
                                   direct_feature_ratio=None):
-        num_value_streams    = num_value_streams    if num_value_streams    is not None else self.default_num_value_streams
-        num_arts             = num_arts             if num_arts             is not None else self.default_num_arts
-        num_teams            = num_teams            if num_teams            is not None else self.default_num_teams
-        portfolio_epics      = portfolio_epics      if portfolio_epics      is not None else self.default_portfolio_epics
-        vs_epics             = vs_epics             if vs_epics             is not None else self.default_vs_caps_per_vs
-        art_epics            = art_epics            if art_epics            is not None else self.default_art_caps_per_art
-        team_features        = team_features        if team_features        is not None else self.default_features_per_team
+        _cfg_vs    = num_value_streams if num_value_streams is not None else self.default_num_value_streams
+        _cfg_arts  = num_arts          if num_arts          is not None else self.default_num_arts
+        _cfg_teams = num_teams         if num_teams         is not None else self.default_num_teams
+        _cfg_pe    = portfolio_epics   if portfolio_epics   is not None else self.default_portfolio_epics
+        _cfg_vsc   = vs_epics          if vs_epics          is not None else self.default_vs_caps_per_vs
+        _cfg_artc  = art_epics         if art_epics         is not None else self.default_art_caps_per_art
+        _cfg_tf    = team_features     if team_features     is not None else self.default_features_per_team
+
+        num_value_streams    = _resolve_range(_cfg_vs)
+        num_arts             = _resolve_range(_cfg_arts)
+        num_teams            = _resolve_range(_cfg_teams)
+        portfolio_epics      = _resolve_range(_cfg_pe)
+        vs_epics             = _resolve_range(_cfg_vsc)
+        art_epics            = _resolve_range(_cfg_artc)
+        team_features        = _resolve_range(_cfg_tf)
         direct_feature_ratio = direct_feature_ratio if direct_feature_ratio is not None else self.default_direct_feature_ratio
+
+        print("\nSAFe structure (resolved):")
+        print(f"  Value Streams      : {_range_label(_cfg_vs,    num_value_streams)}")
+        print(f"  ARTs / VS          : {_range_label(_cfg_arts,  num_arts)}")
+        print(f"  Teams / ART        : {_range_label(_cfg_teams, num_teams)}")
+        print(f"  Portfolio Epics    : {_range_label(_cfg_pe,    portfolio_epics)}")
+        print(f"  VS Capabilities    : {_range_label(_cfg_vsc,   vs_epics)}")
+        print(f"  ART Capabilities   : {_range_label(_cfg_artc,  art_epics)}")
+        print(f"  Features / Team    : {_range_label(_cfg_tf,    team_features)}")
+        print(f"  Direct feature %   : {int(direct_feature_ratio * 100)}%")
+        print()
 
         root_group = self._get_or_create_root_group()
         if root_group is None:
@@ -311,3 +352,92 @@ class BootstrapMixin:
         print(f"\nFeature routing: {len(direct_features)} direct → Epic  |  {len(cap_features)} via Capability chain  ({int(direct_feature_ratio*100)}% direct)")
         _link_to_parents(direct_features, all_portfolio_epics)
         _link_to_parents(cap_features,    all_art_caps)
+
+    def create_safe_hierarchy(self, target_path=None):
+        if target_path is None:
+            default = self.parent_group
+            print(f"\nScaffold SAFe hierarchy")
+            print(f"  Default target: {default}")
+            raw = input(f"  Group path [press Enter for '{default}']: ").strip()
+            target_path = raw if raw else default
+
+        # Resolve target group — try full path first, then by name
+        target_group = None
+        try:
+            target_group = self.gl.groups.get(target_path)
+        except Exception:
+            pass
+
+        if target_group is None:
+            target_group = self.get_group_by_name(target_path)
+
+        if target_group is None:
+            if target_path == self.parent_group:
+                target_group = self._get_or_create_root_group()
+            else:
+                print(f"  Group '{target_path}' not found. Aborting scaffold.")
+                return
+
+        if target_group is None:
+            return
+
+        _cfg_vs    = self.default_num_value_streams
+        _cfg_arts  = self.default_num_arts
+        _cfg_teams = self.default_num_teams
+
+        num_vs    = _resolve_range(_cfg_vs)
+        num_arts  = _resolve_range(_cfg_arts)
+        num_teams = _resolve_range(_cfg_teams)
+
+        total_teams    = num_vs * num_arts * num_teams
+        total_groups   = num_vs + num_vs * num_arts + total_teams
+        total_projects = total_teams
+
+        print(f"\nScaffolding under: {target_group.full_path}")
+        print(f"  Value Streams  : {_range_label(_cfg_vs,    num_vs)}")
+        print(f"  ARTs / VS      : {_range_label(_cfg_arts,  num_arts)}")
+        print(f"  Teams / ART    : {_range_label(_cfg_teams, num_teams)}")
+        print(f"  Total groups   : {total_groups}   ({num_vs} VS + {num_vs * num_arts} ART + {total_teams} Team)")
+        print(f"  Team Backlogs  : {total_projects}")
+        print()
+
+        vis = target_group.visibility
+
+        for vs in range(1, num_vs + 1):
+            vs_group = self.gl.groups.create({
+                'name':       f"Value Stream {vs:02d}",
+                'path':       f"vs-{vs:02d}",
+                'parent_id':  target_group.id,
+                'visibility': vis,
+            })
+            print(f"  [VS]   {vs_group.full_path}")
+
+            for a in range(1, num_arts + 1):
+                art_group = self.gl.groups.create({
+                    'name':       f"ART {a:02d}",
+                    'path':       f"art-{a:02d}",
+                    'parent_id':  vs_group.id,
+                    'visibility': vis,
+                })
+                print(f"    [ART]  {art_group.full_path}")
+
+                for t in range(1, num_teams + 1):
+                    team_group = self.gl.groups.create({
+                        'name':       f"Team {t:02d}",
+                        'path':       f"team-{t:02d}",
+                        'parent_id':  art_group.id,
+                        'visibility': vis,
+                    })
+                    print(f"      [Team]    {team_group.full_path}")
+
+                    try:
+                        project = self.gl.projects.create({
+                            'name':         f"{team_group.name} — Team Backlog",
+                            'path':         f"{team_group.path}-backlog",
+                            'namespace_id': team_group.id,
+                        })
+                        print(f"      [Backlog]  {project.path_with_namespace}")
+                    except Exception as e:
+                        print(f"      Failed to create Team Backlog for '{team_group.full_path}': {e}")
+
+        print(f"\nScaffold complete.")
