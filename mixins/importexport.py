@@ -1,5 +1,6 @@
 import csv
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -314,10 +315,14 @@ class ImportExportMixin:
             print()
 
         print(f"    [  0] Apply 'import::needs-parent' label instead — no parent set")
+        print(f"    [  q] Quit — abort the import entirely")
         print()
 
         while True:
-            raw = input(f"  Select fallback parent [0–{len(choices)}]: ").strip()
+            raw = input(f"  Select fallback parent [0–{len(choices)}, q to abort]: ").strip()
+            if raw.lower() in ("q", "quit"):
+                print("  Import aborted.")
+                sys.exit(0)
             try:
                 n = int(raw)
                 if n == 0:

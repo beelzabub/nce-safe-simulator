@@ -111,8 +111,9 @@ class UtilitiesMixin:
                 n["webUrl"]: n for n in gql_data["group"]["epics"]["nodes"]
             }
 
-        print("  Fetching issue weights...")
-        issues_by_epic_id = defaultdict(list)
+        print("  Fetching issues...")
+        issues_by_epic_id  = defaultdict(list)
+        all_issues_snapshot = []
         for project in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_project = self.gl.projects.get(project.id)
@@ -120,12 +121,31 @@ class UtilitiesMixin:
                     epic_info = getattr(issue, 'epic', None)
                     if epic_info and epic_info.get('id'):
                         issues_by_epic_id[epic_info['id']].append(issue)
+                    all_issues_snapshot.append({
+                        "id":           issue.id,
+                        "iid":          issue.iid,
+                        "title":        issue.title,
+                        "description":  getattr(issue, 'description', None),
+                        "state":        issue.state,
+                        "labels":       getattr(issue, 'labels', []),
+                        "weight":       getattr(issue, 'weight', None),
+                        "milestone":    issue.milestone['title'] if issue.milestone else None,
+                        "assignees":    [a['username'] for a in getattr(issue, 'assignees', [])],
+                        "epic_id":      epic_info['id']  if epic_info else None,
+                        "epic_iid":     epic_info['iid'] if epic_info else None,
+                        "project_path": project.path_with_namespace,
+                        "web_url":      issue.web_url,
+                        "created_at":   getattr(issue, 'created_at', None),
+                        "updated_at":   getattr(issue, 'updated_at', None),
+                        "closed_at":    getattr(issue, 'closed_at', None),
+                    })
             except Exception as e:
                 print(f"  Failed to fetch issues for '{project.name}': {e}")
 
         all_epics = group.epics.list(all=True)
         epic_weights = self._fetch_epic_weights(all_epics)
-        metrics = {"Epic": [], "Capability": [], "Feature": []}
+        metrics       = {"Epic": [], "Capability": [], "Feature": []}
+        all_epics_raw = []
 
         print(f"  Processing {len(all_epics)} epics...")
         for epic in all_epics:
@@ -148,18 +168,23 @@ class UtilitiesMixin:
                 "id":               epic.id,
                 "iid":              epic.iid,
                 "title":            epic.title,
+                "description":      getattr(epic, 'description', None),
                 "state":            epic.state.capitalize(),
                 "blocked_by_count": gql.get("blockedByCount", 0),
                 "blocks_count":     gql.get("blockingCount", 0),
                 "web_url":          epic.web_url,
                 "labels":           epic.labels,
                 "parent_id":        getattr(epic, 'parent_id', None),
+                "group_id":         getattr(epic, 'group_id', None),
                 "planned_weight":   epic_weights.get(epic.web_url, 0),
                 "actual_weight":    total_w,
                 "pct_complete":     pct_done,
                 "pct_through_pi":   pct_pi,
                 "piid":             piid,
-                "group_id":         getattr(epic, 'group_id', None),
+                "start_date":       getattr(epic, 'start_date', None),
+                "due_date":         getattr(epic, 'due_date', None),
+                "created_at":       getattr(epic, 'created_at', None),
+                "updated_at":       getattr(epic, 'updated_at', None),
             }
 
             if "Epic" in epic.labels:
@@ -170,9 +195,12 @@ class UtilitiesMixin:
                 epic_type = "Feature"
             else:
                 print(f"Skipping epic '{epic.title}' — no matching type label.")
+                all_epics_raw.append(associated_data)
                 continue
 
+            associated_data["type"] = epic_type
             metrics[epic_type].append(associated_data)
+            all_epics_raw.append(associated_data)
 
         # Roll % complete up through the hierarchy
         hierarchy = defaultdict(list)
@@ -203,6 +231,15 @@ class UtilitiesMixin:
         if not hasattr(self, '_metrics_cache'):
             self._metrics_cache = {}
         self._metrics_cache[group_name] = metrics
+
+        if not hasattr(self, '_issues_cache'):
+            self._issues_cache = {}
+        self._issues_cache[group_name] = all_issues_snapshot
+
+        if not hasattr(self, '_all_epics_cache'):
+            self._all_epics_cache = {}
+        self._all_epics_cache[group_name] = all_epics_raw
+
         return metrics
 
     def _pi_dates_from_label(self, piid):
