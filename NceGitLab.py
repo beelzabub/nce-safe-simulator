@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from datetime import datetime
@@ -157,6 +158,24 @@ class NceGitLab(
 
 
 def main():
+    # ------------------------------------------------------------------ #
+    # Signal handler — installed before NceGitLab() so it covers init too #
+    # ------------------------------------------------------------------ #
+    _phase = ["starting"]   # mutable so the closure can see updates
+    _gl    = [None]
+
+    def _sigint_handler(sig, frame):
+        phase  = _phase[0]
+        gl_ref = _gl[0]
+        detail = getattr(gl_ref, '_current_op', None) if gl_ref else None
+        msg    = f"Interrupted: {phase}"
+        if detail:
+            msg += f" — {detail}"
+        print(f"\n{msg}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
     parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
     parser.add_argument("--usage",     action="store_true", help="Show this help message and exit")
     parser.add_argument("--clean",     action="store_true", help="Delete all group data")
@@ -175,14 +194,18 @@ def main():
         print()
         return
 
+    _phase[0] = "connecting to GitLab"
     gl = NceGitLab()
+    _gl[0] = gl
 
     if args.utilities is not None:
+        _phase[0] = "utilities menu"
         tool_key = None if args.utilities == "__menu__" else args.utilities
         gl.run_tools_menu(tool_key)
         return
 
     if args.scaffold is not None:
+        _phase[0] = "scaffold"
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
         return
@@ -190,6 +213,7 @@ def main():
     phases = []
 
     def _run_phase(label, fn):
+        _phase[0] = label
         start = datetime.now()
         t0    = time.monotonic()
         fn()
@@ -203,12 +227,14 @@ def main():
         _run_phase("create",  gl.create_all_lorem_objects)
 
     if args.all:
+        _phase[0] = "reports"
         gl.generate_all_reports()
         if hasattr(gl, '_last_reports_phase'):
             phases.append(gl._last_reports_phase)
         if len(phases) > 1:
             gl._print_timing_table(phases, "Full Run Summary (--all)")
     elif args.report is not None:
+        _phase[0] = "reports"
         report_key = None if args.report == "__menu__" else args.report
         gl.run_reports_menu(report_key)
 
