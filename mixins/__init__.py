@@ -9,6 +9,7 @@ from .milestones import MilestonesMixin
 from .reports import ReportsMixin
 from .bootstrap import BootstrapMixin
 from .tools import ToolsMixin
+from .importexport import ImportExportMixin
 
 __all__ = [
     "UtilitiesMixin",
@@ -22,4 +23,5 @@ __all__ = [
     "ReportsMixin",
     "BootstrapMixin",
     "ToolsMixin",
+    "ImportExportMixin",
 ]
