@@ -144,7 +144,8 @@ class UtilitiesMixin:
 
         all_epics = group.epics.list(all=True)
         epic_weights = self._fetch_epic_weights(all_epics)
-        metrics = {"Epic": [], "Capability": [], "Feature": []}
+        metrics       = {"Epic": [], "Capability": [], "Feature": []}
+        all_epics_raw = []
 
         print(f"  Processing {len(all_epics)} epics...")
         for epic in all_epics:
@@ -194,10 +195,12 @@ class UtilitiesMixin:
                 epic_type = "Feature"
             else:
                 print(f"Skipping epic '{epic.title}' — no matching type label.")
+                all_epics_raw.append(associated_data)
                 continue
 
             associated_data["type"] = epic_type
             metrics[epic_type].append(associated_data)
+            all_epics_raw.append(associated_data)
 
         # Roll % complete up through the hierarchy
         hierarchy = defaultdict(list)
@@ -232,6 +235,10 @@ class UtilitiesMixin:
         if not hasattr(self, '_issues_cache'):
             self._issues_cache = {}
         self._issues_cache[group_name] = all_issues_snapshot
+
+        if not hasattr(self, '_all_epics_cache'):
+            self._all_epics_cache = {}
+        self._all_epics_cache[group_name] = all_epics_raw
 
         return metrics
 
