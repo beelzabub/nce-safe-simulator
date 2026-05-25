@@ -166,6 +166,8 @@ def main():
     parser.add_argument("--all",       action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("--utilities", nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
+    parser.add_argument("--scaffold", nargs="?", const="__prompt__", metavar="GROUP",
+                        help="Create SAFe group/project structure only (omit GROUP to be prompted)")
     args = parser.parse_args()
 
     if args.usage or not any(vars(args).values()):
@@ -178,6 +180,11 @@ def main():
     if args.utilities is not None:
         tool_key = None if args.utilities == "__menu__" else args.utilities
         gl.run_tools_menu(tool_key)
+        return
+
+    if args.scaffold is not None:
+        target = None if args.scaffold == "__prompt__" else args.scaffold
+        gl.create_safe_hierarchy(target)
         return
 
     phases = []
