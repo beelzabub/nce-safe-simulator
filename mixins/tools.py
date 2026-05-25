@@ -165,8 +165,9 @@ TOOLS = [
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",
         "params": [
-            {"name": "input_path", "prompt": "Input file path (.csv or .json)",                      "type": str,  "optional": False},
-            {"name": "dry_run",    "prompt": "Dry run? (validate and preview only)",                  "type": bool, "default": False},
+            {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "optional": False},
+            {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
+            {"name": "dry_run",            "prompt": "Dry run? (validate and preview only)",                                    "type": bool, "default": False},
         ],
     },
     {
