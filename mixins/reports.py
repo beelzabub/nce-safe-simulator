@@ -36,8 +36,20 @@ REPORTS = [
     },
     {
         "key":         "blocking",
-        "description": "Blocking Relationships Report — blocked epics and ancestor risk propagation",
+        "description": "Blocking & Cross-ART Risk — blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown",
         "method":      "generate_blocking_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "epic-lifecycle",
+        "description": "Epic Lifecycle / Portfolio Kanban — epics by SAFe lifecycle state with bottleneck and age analysis",
+        "method":      "generate_epic_lifecycle_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "flow-metrics",
+        "description": "Flow Metrics Report — velocity, load, distribution, and cycle time across the portfolio",
+        "method":      "generate_flow_metrics_report",
         "needs_group": False,
     },
     {
@@ -71,6 +83,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "pi-predictability",
+        "description": "PI Predictability Scorecard — % of committed Features/Capabilities delivered per PI, trended by ART",
+        "method":      "generate_pi_predictability_scorecard",
+        "needs_group": False,
+    },
+    {
         "key":         "portfolio",
         "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
         "method":      "generate_portfolio_report",
@@ -101,15 +119,15 @@ REPORTS = [
         "needs_group": False,
     },
     {
-        "key":         "vs-cross-art-risk",
-        "description": "VS Cross-ART Risk Report — blocking relationships that cross ART boundaries within a Value Stream",
-        "method":      "generate_vs_cross_art_risk_report",
-        "needs_group": False,
-    },
-    {
         "key":         "wiki-index",
         "description": "Portfolio Wiki Home — four-tier navigation index linking all report pages",
         "method":      "generate_wiki_index",
+        "needs_group": False,
+    },
+    {
+        "key":         "wsjf",
+        "description": "WSJF Priority Board — portfolio backlog epics ranked by Weighted Shortest Job First score",
+        "method":      "generate_wsjf_priority_board",
         "needs_group": False,
     },
     {
@@ -119,6 +137,35 @@ REPORTS = [
         "needs_group": False,
     },
 ]
+
+# Wiki tier prefixes are set as instance attributes in _run_reports:
+#   self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
+#   self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
+#   self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
+#   self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
+
+
+def _wiki_slug(page_title: str) -> str:
+    """Convert a page title to a GitLab wiki URL slug.
+
+    Rules (applied in order):
+      1. Drop non-ASCII characters (e.g. em-dash —, multiplication ×).
+      2. Replace any remaining character that isn't alphanumeric, a slash, a
+         dash, or a space with a space (e.g. ampersand &).
+      3. Collapse runs of whitespace to a single space.
+      4. Convert spaces to dashes.
+      5. Collapse runs of dashes (produced by steps 1-4) to a single dash.
+      6. Strip leading/trailing dashes from each segment.
+
+    Forward slashes are preserved as GitLab wiki path separators.
+    """
+    import re as _re
+    s = _re.sub(r'[^\x00-\x7F]', '', page_title)      # 1. drop non-ASCII
+    s = _re.sub(r'[^a-zA-Z0-9/\- ]', ' ', s)           # 2. special ASCII → space
+    s = _re.sub(r' +', ' ', s).strip()                  # 3. collapse spaces
+    s = s.replace(' ', '-')                              # 4. spaces → dashes
+    s = _re.sub(r'-+', '-', s)                           # 5. collapse dashes
+    return s.strip('-')
 
 
 class ReportsMixin:
@@ -412,8 +459,8 @@ class ReportsMixin:
                 f"&state=all"
             )
 
-        detail_title = f"{group.name} - Program PI Detail Report"
-        detail_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{detail_title.replace(' ', '-').lower()}"
+        detail_title = f"{self._wiki_t2}/Program PI Detail"
+        detail_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{_wiki_slug(detail_title)}"
 
         md = []
         md.append(f"# Program × PI Report (Group: {group.name})")
@@ -484,7 +531,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Program PI Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Program × PI Matrix", "\n".join(md))
 
     def generate_piid_project_detail_report(self):
         """Per-PI section view of program workload — one section per PIID quarter."""
@@ -530,8 +577,8 @@ class ReportsMixin:
                 return "Past"
             return "Current"
 
-        matrix_title = f"{group.name} - Program PI Report"
-        matrix_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{matrix_title.replace(' ', '-').lower()}"
+        matrix_title = f"{self._wiki_t2}/Program × PI Matrix"
+        matrix_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{_wiki_slug(matrix_title)}"
 
         md = []
         md.append(f"# Program PI Detail Report (Group: {group.name})")
@@ -606,7 +653,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Program PI Detail Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Program PI Detail", "\n".join(md))
 
     def generate_portfolio_report(self):
         group      = self._rd_root_obj
@@ -685,7 +732,7 @@ class ReportsMixin:
             ])
 
             md = "\n".join(markdown_report)
-            self.upload_to_wiki(group, f"{group_name} - SAFe Portfolio Report", md)
+            self.upload_to_wiki(group, f"{self._wiki_t3}/SAFe Portfolio Hierarchy", md)
 
         except Exception as e:
             print(f"Failed to generate epics report for group '{group_name}': {e}")
@@ -883,7 +930,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - ART-Team Workload Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t3}/ART-Team Workload", "\n".join(md))
 
     def list_blocking_epics(self):
         group     = self.get_group_by_name(self.parent_group)
@@ -956,6 +1003,7 @@ class ReportsMixin:
 
     def generate_blocking_report(self):
         group = self._rd_root_obj
+        today = date.today()
 
         rels  = self._rd_blocking.get("relationships", [])
         summ  = self._rd_blocking.get("summary", {})
@@ -970,21 +1018,92 @@ class ReportsMixin:
                 id_to_ancestor[anc["id"]] = anc
                 epic_to_blocked_descendants[anc["id"]].append(rel["blocked_epic"])
 
+        # ── Cross-ART dep computation (same logic as generate_vs_cross_art_risk_report) ── #
+        epic_int_to_group = {
+            e["id"]: e.get("group_id")
+            for tier in self._rd_metrics.values()
+            for e in tier
+        }
+        epic_int_to_piid = {
+            e["id"]: e.get("piid")
+            for tier in self._rd_metrics.values()
+            for e in tier
+        }
+        art_of_group: dict = {}
+        vs_of_group: dict  = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_of_group[art_group["id"]] = art_group
+            vs_of_group[art_group["id"]]  = vs_group
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            art_of_group[team_group["id"]] = art_group
+            vs_of_group[team_group["id"]]  = vs_group
+
+        vs_deps: defaultdict = defaultdict(list)
+        for rel in rels:
+            blocked = rel["blocked_epic"]
+            b_int   = blocked.get("id_int") or _gid_to_int(blocked["id"])
+            b_gid   = epic_int_to_group.get(b_int)
+            b_art   = art_of_group.get(b_gid)
+            b_vs    = vs_of_group.get(b_gid)
+            b_piid  = epic_int_to_piid.get(b_int)
+            if not b_vs or not b_art:
+                continue
+            for blocker in rel.get("blocked_by", []):
+                bl_int = blocker.get("id_int") or _gid_to_int(blocker["id"])
+                bl_gid = epic_int_to_group.get(bl_int)
+                bl_art = art_of_group.get(bl_gid)
+                bl_vs  = vs_of_group.get(bl_gid)
+                if not bl_vs or not bl_art:
+                    continue
+                if b_vs["id"] != bl_vs["id"]:
+                    continue
+                if b_art["id"] == bl_art["id"]:
+                    continue
+                vs_deps[b_vs["id"]].append({
+                    "blocked":      blocked,
+                    "blocked_art":  b_art,
+                    "blocked_piid": b_piid,
+                    "blocker":      blocker,
+                    "blocker_art":  bl_art,
+                })
+
+        cross_art_base = f"{self._wiki_t2}/Blocking & Cross-ART Risk"
+
+        # Generate per-VS detail pages (nested under T2) and collect index entries
+        vs_index_entries = []
+        for vs_group in self._iter_vs_groups():
+            deps  = vs_deps.get(vs_group["id"], [])
+            entry = self._generate_vs_cross_art_risk_page(group, vs_group, deps, parent_path=cross_art_base)
+            vs_index_entries.append(entry)
+
+        total_cross_art = sum(len(vs_deps.get(vs["id"], [])) for vs in self._iter_vs_groups())
+
         def link(title, url):
             return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
 
+        # ── Build T2 consolidated page ──────────────────────────────────────── #
         md = []
-        md.append(f"# Blocking Relationships Report (Group: {group.name})")
-        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
-        md.append("")
-        md.append("## Summary")
-        md.append(f"- **Directly blocked items:** {len(rels)}")
-        md.append(f"- **Total blocking relationships:** {total_relationships}")
-        md.append(f"- **Top-level Epics with blocked descendants:** {len(epic_to_blocked_descendants)}")
+        md.append(f"# Blocking & Cross-ART Risk — {group.name}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
         md.append("")
 
+        # ── Summary bar ────────────────────────────────────────────────────── #
+        md.append("## Summary")
+        md.append("")
+        md.append("| Metric | Count |")
+        md.append("|--------|-------|")
+        md.append(f"| Directly blocked epics | **{len(rels)}** |")
+        md.append(f"| Total blocking relationships | **{total_relationships}** |")
+        md.append(f"| Portfolio Epics with blocked descendants | **{len(epic_to_blocked_descendants)}** |")
+        md.append(f"| Cross-ART dependencies (within VS) | **{total_cross_art}** |")
+        md.append("")
+
+        # ── Portfolio-level risk table ──────────────────────────────────────── #
         if epic_to_blocked_descendants:
-            md.append("## Portfolio-Level Risk Summary")
+            md.append("## Portfolio-Level Risk")
             md.append("")
             md.append("Top-level Epics that contain one or more blocked descendants:")
             md.append("")
@@ -1009,8 +1128,29 @@ class ReportsMixin:
                 )
             md.append("")
 
+        # ── Cross-ART Risk section ──────────────────────────────────────────── #
+        md.append("## Cross-ART Risk by Value Stream")
+        md.append("")
+        md.append(
+            "Blocking relationships where an epic in one ART is blocked by an epic from a "
+            "different ART within the same Value Stream. These require active ART-to-ART "
+            "coordination. Click a Value Stream link for the full dependency breakdown."
+        )
+        md.append("")
+        md.append("| Value Stream | Cross-ART Deps | Critical |")
+        md.append("|--------------|---------------|----------|")
+        for vs_name, vs_wiki_url, total_deps, critical in vs_index_entries:
+            crit_str  = f"🔴 {critical}" if critical else "—"
+            deps_str  = f"{total_deps}" if total_deps else "✅ None"
+            md.append(f"| [🔷 {vs_name}]({vs_wiki_url}) | {deps_str} | {crit_str} |")
+        md.append("")
+
+        # ── Blocked items detail ────────────────────────────────────────────── #
         if not rels:
+            md.append("## Blocked Items")
+            md.append("")
             md.append("_No blocked epics found._")
+            md.append("")
         else:
             md.append("## Blocked Items (Detail)")
             md.append("")
@@ -1060,16 +1200,24 @@ class ReportsMixin:
             "| ⬆️ | **Risk propagation** — a blocked descendant causes risk to bubble up to this ancestor |",
             "| ⚠️ | **Portfolio risk flag** — a top-level Epic contains one or more blocked descendants |",
             "",
+            "### Cross-ART Severity",
+            "| Icon | Meaning |",
+            "|------|---------|",
+            "| 🔴 Critical | Blocked item is in the **current PI** — requires immediate cross-ART coordination |",
+            "| 🟡 Watch    | Blocked item is in a **future PI** — dependency to monitor and plan around |",
+            "| ⚫ Past     | Blocked item was in a **past PI** — dependency may be stale or resolved |",
+            "",
             "### SAFe Hierarchy",
             "| Icon | Type | Description |",
             "|------|------|-------------|",
             "| 🏆 | **Epic** | Portfolio-level initiative; may span multiple PIs and ARTs |",
-            "| 🧩 | **Capability** | Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs |",
-            "| 🛠️ | **Feature** | Service or function delivered by a single ART within one PI; directly enables business or technical outcomes |",
+            "| 🧩 | **Capability** | Large Solution-level deliverable decomposed from an Epic |",
+            "| 🛠️ | **Feature** | Service or function delivered by a single ART within one PI |",
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Blocking Relationships Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Blocking & Cross-ART Risk", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/Blocking & Cross-ART Risk")
 
     def generate_orphan_epics_report(self):
         group = self._rd_root_obj
@@ -1110,7 +1258,7 @@ class ReportsMixin:
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 md.append(f"| {icon} {etype} | {title_link} | {epic['state']} |")
 
-        self.upload_to_wiki(group, f"{group.name} - Orphaned Epics Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Epics", "\n".join(md))
 
     def generate_orphan_issues_report(self):
         group = self._rd_root_obj
@@ -1154,7 +1302,7 @@ class ReportsMixin:
                     md.append(f"| #{issue['iid']} | {title_link} | {state} | {milestone} | {assignees} |")
                 md.append("")
 
-        self.upload_to_wiki(group, f"{group.name} - Orphaned Issues Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Issues", "\n".join(md))
 
     def generate_unassigned_pi_report(self):
         group = self._rd_root_obj
@@ -1207,7 +1355,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Unassigned PI Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Unassigned PI", "\n".join(md))
 
     # ------------------------------------------------------------------
     # Hierarchy traversal helpers (shared by team/ART/VS reports)
@@ -1254,7 +1402,7 @@ class ReportsMixin:
                 "",
                 "_No risk labels found. Apply `risk::high`, `risk::medium`, or `risk::low` to epics and re-run._",
             ]
-            self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
+            self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
             return
 
         # Build relative path from root for each epic's owning group
@@ -1371,7 +1519,147 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
+
+    # ------------------------------------------------------------------
+    # PI Predictability Scorecard
+    # ------------------------------------------------------------------
+
+    def generate_pi_predictability_scorecard(self):
+        """PI Predictability Scorecard — % of committed Features/Capabilities delivered per PI."""
+        group = self._rd_root_obj
+        today = date.today()
+        print(f"  Generating PI Predictability Scorecard for {group.name}...")
+
+        # ART → set of group_ids it contains (ART + its teams)
+        art_group_ids: dict = {}
+        for vs_group, art_group in self._iter_art_groups():
+            ids = {art_group["id"]}
+            for team in self._rd_groups_by_parent.get(art_group["id"], []):
+                ids.add(team["id"])
+            art_group_ids[art_group["id"]] = ids
+
+        # Bucket: art_id → piid → [epic, ...]  (Features + Capabilities as commitment units)
+        commitment_epics = (
+            self._rd_metrics.get("Feature", []) +
+            self._rd_metrics.get("Capability", [])
+        )
+        art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
+        for epic in commitment_epics:
+            gid  = epic.get("group_id")
+            piid = epic.get("piid")
+            if not piid:
+                continue
+            for art_id, gids in art_group_ids.items():
+                if gid in gids:
+                    art_pi_data[art_id][piid].append(epic)
+                    break
+
+        all_pis = sorted(
+            {piid for pi_map in art_pi_data.values() for piid in pi_map},
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+        )
+
+        if not all_pis:
+            md = [
+                f"# PI Predictability Scorecard — {group.name}",
+                f"**Report Date:** {today.strftime('%Y-%m-%d')}",
+                "",
+                "_No PI-committed Features or Capabilities found. Ensure epics carry `PIID::` labels._",
+            ]
+            self.upload_to_wiki(group, f"{self._wiki_t2}/PI Predictability Scorecard", "\n".join(md))
+            return
+
+        def _pred(epics):
+            total  = len(epics)
+            closed = sum(1 for e in epics if e["state"].lower() == "closed")
+            pct    = round(closed / total * 100) if total else None
+            return closed, total, pct
+
+        def _cell(closed, total, pct, piid):
+            if total == 0:
+                return " — "
+            pct_pi = self._pct_through_pi(piid)
+            if pct_pi is None or pct_pi == 0:
+                return f" 🔵 {total} planned "
+            if pct_pi < 100:
+                # Current PI — in-flight, no final score yet
+                icon = "✅" if pct >= 80 else ("⚠️" if pct and pct >= 60 else "🟡")
+                return f" {icon} {closed}/{total} in progress "
+            # Past PI — final predictability
+            icon = "✅" if pct >= 80 else ("⚠️" if pct >= 60 else "❌")
+            return f" {icon} {pct}% ({closed}/{total}) "
+
+        md = []
+        md.append(f"# PI Predictability Scorecard — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "Percentage of committed Features and Capabilities that were delivered in each PI.  "
+            "Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a systemic problem."
+        )
+        md.append("")
+
+        header = "| ART |" + "".join(f" {p} |" for p in all_pis)
+        sep    = "|---|" + "".join("---|" for _ in all_pis)
+        md.append(header)
+        md.append(sep)
+
+        portfolio_by_pi: defaultdict = defaultdict(list)
+        any_rows = False
+
+        for vs_group, art_group in self._iter_art_groups():
+            art_id  = art_group["id"]
+            pi_data = art_pi_data.get(art_id)
+            if not pi_data:
+                continue
+            any_rows = True
+            art_link = f"[{art_group['name']}]({art_group['web_url']})"
+            cells = []
+            for piid in all_pis:
+                epics = pi_data.get(piid, [])
+                closed, total, pct = _pred(epics)
+                portfolio_by_pi[piid].extend(epics)
+                cells.append(_cell(closed, total, pct, piid))
+            md.append("| **" + art_link + "** |" + "|".join(cells) + "|")
+
+        if not any_rows:
+            md.append("_No ART-level commitment data found._")
+            md.append("")
+        else:
+            # Portfolio aggregate row
+            cells = []
+            for piid in all_pis:
+                epics = portfolio_by_pi.get(piid, [])
+                closed, total, pct = _pred(epics)
+                cells.append(_cell(closed, total, pct, piid))
+            md.append("| **Portfolio Total** |" + "|".join(cells) + "|")
+
+        md.extend([
+            "",
+            "---",
+            "## Legend",
+            "",
+            "**Predictability %** = closed Features + Capabilities ÷ total committed to PI × 100",
+            "",
+            "| Icon | Range | Meaning |",
+            "|------|-------|---------|",
+            "| ✅ | ≥ 80% | On target — team reliably delivers commitments |",
+            "| ⚠️ | 60–79% | Watch — delivery shortfall, investigate root cause |",
+            "| ❌ | < 60%  | At risk — systemic delivery problem, escalate |",
+            "| 🟡 | Current PI | In progress — final score not yet determined |",
+            "| 🔵 | Future PI  | Not yet started — shows planned commitment count |",
+            "",
+            "> **Sandbagging signal:** an ART consistently at 100% across multiple past PIs "
+            "may be under-committing. Healthy predictability is typically 80–90%.",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{self._wiki_t2}/PI Predictability Scorecard", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/PI Predictability Scorecard")
 
     # ------------------------------------------------------------------
     # Team-level reports
@@ -1410,7 +1698,7 @@ class ReportsMixin:
             md.append(f"- [**{team_name} — Team Backlog**]({wiki_url})  {summary}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - Team Backlog Index", "\n".join(md))
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/Team Backlogs", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - Team Backlog Index")
 
     def _generate_team_backlog_page(self, vs_group, art_group, team_group):
@@ -1575,19 +1863,16 @@ class ReportsMixin:
             md.append(f"- [**{art_name} — Feature Status**]({wiki_url})  · {total_f} features{risk_str}{blocked_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - ART Feature Status Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - ART Feature Status Index")
+        # (flat index page removed — navigation is via the nested wiki tree)
 
-        # Intermediate pages — GitLab creates these as blank when nested titles use /
-        # Group entries by VS
+        # Group entries by VS for the tier-nested pages
         vs_arts: defaultdict = defaultdict(list)
         for vs_name, art_name, wiki_url, total_f, at_risk, blocked in index_entries:
             vs_arts[vs_name].append((art_name, wiki_url, total_f, at_risk, blocked))
 
         # VS-level pages
         for vs_name, arts in vs_arts.items():
-            vs_slug     = vs_name.replace(" ", "-")
-            wiki_title  = f"ART Feature Status/{vs_name}"
+            wiki_title  = f"{self._wiki_t3}/ART Feature Status/{vs_name}"
             md_vs = []
             md_vs.append(f"# ART Feature Status — {vs_name}")
             md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1605,7 +1890,7 @@ class ReportsMixin:
             print(f"    → Wiki: {wiki_title}")
 
         # Top-level landing page
-        top_url  = f"{root_group.web_url}/-/wikis/ART-Feature-Status"
+        top_url  = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/ART Feature Status')}"
         md_top   = []
         md_top.append("# ART Feature Status")
         md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1614,20 +1899,16 @@ class ReportsMixin:
         md_top.append("Select a Value Stream to browse its ARTs:")
         md_top.append("")
         for vs_name, arts in vs_arts.items():
-            vs_slug   = vs_name.replace(" ", "-")
-            vs_url    = f"{root_group.web_url}/-/wikis/ART-Feature-Status/{vs_slug}"
+            vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/ART Feature Status/{vs_name}')}"
             art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
             md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "ART Feature Status", "\n".join(md_top))
-        print(f"    → Wiki: ART Feature Status")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/ART Feature Status", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/ART Feature Status")
 
     def _generate_art_feature_status_page(self, root_group, vs_group, art_group, team_buckets, team_hierarchy):
-        wiki_title = f"ART Feature Status/{vs_group['name']}/{art_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/ART-Feature-Status"
-            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t3}/ART Feature Status/{vs_group['name']}/{art_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         md = []
         md.append(f"# ART Feature Status — {art_group['name']}")
@@ -1753,8 +2034,7 @@ class ReportsMixin:
             md.append(f"- [**{art_name} — Capacity Balance**]({wiki_url}){flag_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - ART Capacity Balance Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - ART Capacity Balance Index")
+        # (flat legacy index removed — top-level landing page is the T2 page below)
 
         # Intermediate pages — GitLab creates these as blank when nested titles use /
         vs_arts: defaultdict = defaultdict(list)
@@ -1763,7 +2043,7 @@ class ReportsMixin:
 
         # VS-level pages
         for vs_name, arts in vs_arts.items():
-            wiki_title = f"ART Capacity Balance/{vs_name}"
+            wiki_title = f"{self._wiki_t2}/ART Capacity Balance/{vs_name}"
             md_vs = []
             md_vs.append(f"# ART Capacity Balance — {vs_name}")
             md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1780,7 +2060,7 @@ class ReportsMixin:
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
 
-        # Top-level landing page
+        # Top-level landing page (Tier 2)
         md_top = []
         md_top.append("# ART Capacity Balance")
         md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1789,20 +2069,16 @@ class ReportsMixin:
         md_top.append("Select a Value Stream to browse its ARTs:")
         md_top.append("")
         for vs_name, arts in vs_arts.items():
-            vs_slug   = vs_name.replace(" ", "-")
-            vs_url    = f"{root_group.web_url}/-/wikis/ART-Capacity-Balance/{vs_slug}"
+            vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/ART Capacity Balance/{vs_name}')}"
             art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
             md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "ART Capacity Balance", "\n".join(md_top))
-        print(f"    → Wiki: ART Capacity Balance")
+        self.upload_to_wiki(root_group, f"{self._wiki_t2}/ART Capacity Balance", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t2}/ART Capacity Balance")
 
     def _generate_art_capacity_balance_page(self, root_group, vs_group, art_group, pi_buckets, team_hierarchy):
-        wiki_title = f"ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/ART-Capacity-Balance"
-            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t2}/ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         sorted_pis = sorted(
             pi_buckets.keys(),
@@ -1977,8 +2253,7 @@ class ReportsMixin:
             md.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - VS Capability Dashboard Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - VS Capability Dashboard Index")
+        # (flat legacy index removed — top-level landing page is the T3 page below)
 
         # Top-level landing page for the nested wiki section
         md_top = []
@@ -2003,15 +2278,12 @@ class ReportsMixin:
             blocked_str = f"  ·  🔒 {blocked} blocked" if blocked else ""
             md_top.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "VS Capability Dashboard", "\n".join(md_top))
-        print(f"    → Wiki: VS Capability Dashboard")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Capability Dashboard", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/VS Capability Dashboard")
 
     def _generate_vs_capability_dashboard_page(self, root_group, vs_group, cap_pi_buckets, direct_pi_buckets, art_hierarchy, team_hierarchy):
-        wiki_title = f"VS Capability Dashboard/{vs_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/VS-Capability-Dashboard"
-            f"/{vs_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t3}/VS Capability Dashboard/{vs_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         all_pis = sorted(
             set(cap_pi_buckets) | set(direct_pi_buckets),
@@ -2260,8 +2532,7 @@ class ReportsMixin:
             md.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - VS Cross-ART Risk Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - VS Cross-ART Risk Index")
+        # (flat legacy index removed — top-level landing page is the T3 page below)
 
         # Top-level landing page for the nested wiki section
         md_top = []
@@ -2278,15 +2549,14 @@ class ReportsMixin:
             clear_str = "  ·  ✅ No cross-ART blocks" if total_deps == 0 else f"  ·  {total_deps} cross-ART dependencies"
             md_top.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "VS Cross-ART Risk", "\n".join(md_top))
-        print(f"    → Wiki: VS Cross-ART Risk")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Cross-ART Risk", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/VS Cross-ART Risk")
 
-    def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
-        wiki_title = f"VS Cross-ART Risk/{vs_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/VS-Cross-ART-Risk"
-            f"/{vs_group['name'].replace(' ', '-')}"
-        )
+    def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps, parent_path=None):
+        if parent_path is None:
+            parent_path = self._wiki_t3
+        wiki_title = f"{parent_path}/VS Cross-ART Risk/{vs_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         today = date.today()
 
@@ -2748,9 +3018,695 @@ class ReportsMixin:
             "",
         ])
 
-        page_title = "Portfolio Health Dashboard"
+        page_title = f"{self._wiki_t1}/Portfolio Health Dashboard"
         self.upload_to_wiki(root_group, page_title, "\n".join(md))
         print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
+    # Epic Lifecycle / Portfolio Kanban
+    # ------------------------------------------------------------------
+
+    def generate_epic_lifecycle_report(self):
+        """Epic Lifecycle / Portfolio Kanban — epics by SAFe lifecycle state."""
+        group = self._rd_root_obj
+        today = date.today()
+        gn    = group.name
+        print(f"  Generating Epic Lifecycle / Portfolio Kanban for {gn}...")
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+
+        STATES = [
+            ("lifecycle::funnel",       "💡 Funnel",             "Ideas submitted, not yet analyzed"),
+            ("lifecycle::analyzing",    "🔍 Analyzing",          "Lean Business Case in development"),
+            ("lifecycle::backlog",      "📋 Portfolio Backlog",  "Approved, awaiting capacity"),
+            ("lifecycle::implementing", "⚙️ Implementing",       "Active in a Program Increment"),
+            ("lifecycle::done",         "✅ Done",               "Delivered"),
+        ]
+        STATE_KEYS = {s[0] for s in STATES}
+
+        STUCK_THRESHOLDS = {
+            "lifecycle::funnel":    90,   # days before flagged
+            "lifecycle::analyzing": 30,
+            "lifecycle::backlog":   60,
+        }
+
+        def _age_days(epic):
+            raw = epic.get("created_at")
+            if not raw:
+                return None
+            try:
+                c = date.fromisoformat(str(raw)[:10])
+                return (today - c).days
+            except ValueError:
+                return None
+
+        def _group_name(epic):
+            gid = epic.get("group_id")
+            if gid and hasattr(self, '_rd_groups_by_id'):
+                g = self._rd_groups_by_id.get(gid)
+                return g["name"] if g else "—"
+            return "—"
+
+        def _pi(epic):
+            return epic.get("piid") or "—"
+
+        # Partition epics by lifecycle state
+        buckets = {key: [] for key, _, _ in STATES}
+        buckets["_unlabelled"] = []
+        for epic in all_typed:
+            labels  = set(epic.get("labels", []))
+            matched = labels & STATE_KEYS
+            if not matched:
+                buckets["_unlabelled"].append(epic)
+            else:
+                # If multiple lifecycle labels, pick the first in state order
+                for key, _, _ in STATES:
+                    if key in matched:
+                        buckets[key].append(epic)
+                        break
+
+        # ── build page ───────────────────────────────────────────────── #
+        md = []
+        md.append(f"# Epic Lifecycle / Portfolio Kanban — {gn}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{gn}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "> The SAFe Portfolio Kanban tracks where epics are in their approval-to-delivery "
+            "lifecycle. Use this report to identify bottlenecks in the funding and approval "
+            "pipeline — not just delivery progress. Epics stuck in **Analyzing** or "
+            "**Portfolio Backlog** signal decision-making delays that block downstream delivery."
+        )
+        md.append("")
+        md.append("---")
+
+        # ── Summary table ─────────────────────────────────────────────── #
+        md.append("## Portfolio Kanban — Current State")
+        md.append("")
+
+        def _avg_age(epics):
+            ages = [_age_days(e) for e in epics]
+            ages = [a for a in ages if a is not None]
+            return round(sum(ages) / len(ages)) if ages else None
+
+        def _max_age(epics):
+            ages = [_age_days(e) for e in epics]
+            ages = [a for a in ages if a is not None]
+            return max(ages) if ages else None
+
+        md.append("| State | Count | Avg Age | Oldest | Threshold |")
+        md.append("|-------|-------|---------|--------|-----------|")
+        for key, label, _ in STATES:
+            epics   = buckets[key]
+            avg     = _avg_age(epics)
+            oldest  = _max_age(epics)
+            thresh  = STUCK_THRESHOLDS.get(key)
+            t_str   = f"{thresh}d" if thresh else "—"
+            avg_str = f"{avg}d" if avg is not None else "—"
+            old_str = f"{oldest}d" if oldest is not None else "—"
+            warn    = " ⚠️" if (thresh and oldest and oldest > thresh) else ""
+            md.append(
+                f"| {label} | {len(epics)} | {avg_str} | {old_str}{warn} | {t_str} |"
+            )
+        unlab = buckets["_unlabelled"]
+        avg_u = _avg_age(unlab)
+        md.append(
+            f"| _(unlabelled)_ | {len(unlab)} | "
+            f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
+        )
+        md.append("")
+
+        no_labels = not self._rd_lifecycle_labels
+        if no_labels:
+            md.append(
+                "> ℹ️ No `lifecycle::` labels found. Apply `lifecycle::funnel`, "
+                "`lifecycle::analyzing`, `lifecycle::backlog`, `lifecycle::implementing`, "
+                "or `lifecycle::done` labels to epics to enable this view. "
+                "Use the `set-lifecycle-labels` utility to assign labels in bulk."
+            )
+            md.append("")
+
+        md.append("---")
+
+        # ── Stuck items ───────────────────────────────────────────────── #
+        stuck_sections = [
+            ("lifecycle::analyzing", "🔍 Stuck in Analyzing",
+             "Lean Business Case is overdue for a decision. Review and either approve to backlog or cancel."),
+            ("lifecycle::backlog",   "📋 Stuck in Portfolio Backlog",
+             "Approved work waiting too long for capacity. Consider re-sequencing or rescoping."),
+            ("lifecycle::funnel",    "💡 Stale in Funnel",
+             "Ideas not yet analyzed beyond the threshold. Either analyze or close."),
+        ]
+
+        has_stuck = False
+        for key, heading, guidance in stuck_sections:
+            thresh = STUCK_THRESHOLDS[key]
+            stuck  = [e for e in buckets[key] if (_age_days(e) or 0) > thresh]
+            if not stuck:
+                continue
+            has_stuck = True
+            md.append(f"## ⚠️ {heading} (> {thresh} days)")
+            md.append("")
+            md.append(f"_{guidance}_")
+            md.append("")
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(stuck, key=lambda x: _age_days(x) or 0, reverse=True):
+                age = _age_days(e) or 0
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | **{age}d** "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+            md.append("---")
+
+        if not has_stuck:
+            md.append("## ✅ No Stuck Items")
+            md.append("")
+            md.append("No epics have exceeded their state thresholds. Kanban is flowing.")
+            md.append("")
+            md.append("---")
+
+        # ── Detail by state ───────────────────────────────────────────── #
+        md.append("## Kanban Detail — By State")
+        md.append("")
+
+        STATE_ICONS = {
+            "lifecycle::funnel":       "💡",
+            "lifecycle::analyzing":    "🔍",
+            "lifecycle::backlog":      "📋",
+            "lifecycle::implementing": "⚙️",
+            "lifecycle::done":         "✅",
+        }
+
+        for key, label, description in STATES:
+            epics = buckets[key]
+            md.append(f"### {label}")
+            md.append("")
+            md.append(f"_{description}_")
+            md.append("")
+            if not epics:
+                md.append("_No epics in this state._")
+                md.append("")
+                continue
+            thresh = STUCK_THRESHOLDS.get(key)
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(epics, key=lambda x: _age_days(x) or 0, reverse=True):
+                age     = _age_days(e)
+                age_str = f"**{age}d** ⚠️" if (thresh and age and age > thresh) else (f"{age}d" if age else "—")
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | {age_str} "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+
+        if unlab:
+            md.append("### _(Unlabelled)_")
+            md.append("")
+            md.append(
+                "_Epics without a `lifecycle::` label. These cannot be placed in the Kanban view. "
+                "Apply a lifecycle label or use `set-lifecycle-labels` to assign in bulk._"
+            )
+            md.append("")
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(unlab, key=lambda x: _age_days(x) or 0, reverse=True):
+                age = _age_days(e)
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | {age or '—'} "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+
+        md.append("---")
+
+        # ── About section ─────────────────────────────────────────────── #
+        md.append("## ℹ️ SAFe Portfolio Kanban States")
+        md.append("")
+        md.append("| State | Label | Meaning | Flag if > |")
+        md.append("|-------|-------|---------|-----------|")
+        for key, label, desc in STATES:
+            thresh = STUCK_THRESHOLDS.get(key)
+            t_str  = f"{thresh} days" if thresh else "—"
+            md.append(f"| {label} | `{key}` | {desc} | {t_str} |")
+        md.append("")
+        md.append(
+            "**Why it matters for DoD programs:** Portfolio Kanban visibility is required "
+            "by SAFe 6.0 to manage the flow of Epics from idea to implementation. "
+            "For DoD acquisition programs, delays in the Analyzing and Backlog states "
+            "often map to contract modification cycles, funding decisions, or requirements "
+            "reviews — identifying them early enables proactive stakeholder engagement."
+        )
+        md.append("")
+
+        page_title = f"{self._wiki_t3}/Epic Lifecycle"
+        self.upload_to_wiki(group, page_title, "\n".join(md))
+        print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
+    # Flow Metrics Report
+    # ------------------------------------------------------------------
+
+    def generate_flow_metrics_report(self):
+        """Flow Metrics Report — velocity, load, distribution, and cycle time."""
+        group = self._rd_root_obj
+        today = date.today()
+        gn    = group.name
+        base  = f"{self.url}/groups/{group.full_path}/-/wikis"
+        print(f"  Generating Flow Metrics Report for {gn}...")
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+        piids     = self._rd_piid_labels  # chronologically sorted
+
+        # ── helpers ──────────────────────────────────────────────────── #
+        def _parse_dt(s):
+            if not s:
+                return None
+            try:
+                return date.fromisoformat(str(s)[:10])
+            except ValueError:
+                return None
+
+        def _age(epic):
+            """Days since created_at (open) or approx cycle time (closed)."""
+            c = _parse_dt(epic.get("created_at"))
+            if not c:
+                return None
+            if epic.get("state", "").lower() == "closed":
+                u = _parse_dt(epic.get("updated_at"))
+                return (u - c).days if u else None
+            return (today - c).days
+
+        def _avg(vals):
+            v = [x for x in vals if x is not None]
+            return round(sum(v) / len(v)) if v else None
+
+        def _pct(n, total):
+            return f"{round(n / total * 100)}%" if total else "—"
+
+        # ── partition by state ────────────────────────────────────────── #
+        open_epics   = [e for e in all_typed if e.get("state", "").lower() != "closed"]
+        closed_epics = [e for e in all_typed if e.get("state", "").lower() == "closed"]
+
+        # ── build page ───────────────────────────────────────────────── #
+        md = []
+        md.append(f"# Flow Metrics — {gn}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{gn}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "> SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
+            "not just whether it is on schedule. Five of the six metrics are reported here; "
+            "Flow Efficiency requires time-tracking data not yet available."
+        )
+        md.append("")
+        md.append("---")
+
+        # ── Section 1: Flow Velocity ──────────────────────────────────── #
+        md.append("## 📈 Flow Velocity — Delivered per PI")
+        md.append("")
+        md.append(
+            "Features and Capabilities closed per PI. "
+            "Consistent delivery of committed items is the primary ART health signal."
+        )
+        md.append("")
+
+        feat_types = {"Feature", "Capability"}
+        vel_rows = []
+        for pi in piids:
+            pi_closed = [
+                e for e in closed_epics
+                if e.get("piid") == pi and e.get("type") in feat_types
+            ]
+            feat_c = sum(1 for e in pi_closed if e["type"] == "Feature")
+            cap_c  = sum(1 for e in pi_closed if e["type"] == "Capability")
+            vel_rows.append((pi, feat_c, cap_c, feat_c + cap_c))
+
+        md.append("| PI | Features | Capabilities | Total Delivered |")
+        md.append("|----|----------|--------------|-----------------|")
+        for pi, f, c, t in vel_rows:
+            md.append(f"| `{pi}` | {f} | {c} | **{t}** |")
+
+        total_delivered = sum(r[3] for r in vel_rows)
+        if total_delivered == 0:
+            md.append("")
+            md.append(
+                "> ℹ️ No closed epics found — velocity will populate as PIs complete. "
+                "Use `simulate-pi-progress` and `close-percent` tools to generate demo data."
+            )
+        md.append("")
+        md.append("---")
+
+        # ── Section 2: Flow Load (WIP) ────────────────────────────────── #
+        md.append("## 📦 Flow Load — Work in Progress")
+        md.append("")
+        md.append(
+            "Open epics by PI. High WIP signals overloaded PIs and increases "
+            "the risk of context-switching and delayed delivery."
+        )
+        md.append("")
+
+        md.append("| PI | Features | Capabilities | Epics | Total | Planned Weight |")
+        md.append("|----|----------|--------------|-------|-------|----------------|")
+        no_pi_open = [e for e in open_epics if not e.get("piid")]
+        for pi in piids:
+            pi_open = [e for e in open_epics if e.get("piid") == pi]
+            f   = sum(1 for e in pi_open if e["type"] == "Feature")
+            c   = sum(1 for e in pi_open if e["type"] == "Capability")
+            ep  = sum(1 for e in pi_open if e["type"] == "Epic")
+            pw  = sum(e.get("planned_weight") or 0 for e in pi_open)
+            md.append(f"| `{pi}` | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+        if no_pi_open:
+            f   = sum(1 for e in no_pi_open if e["type"] == "Feature")
+            c   = sum(1 for e in no_pi_open if e["type"] == "Capability")
+            ep  = sum(1 for e in no_pi_open if e["type"] == "Epic")
+            pw  = sum(e.get("planned_weight") or 0 for e in no_pi_open)
+            md.append(f"| _(no PI)_ | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+        md.append("")
+        md.append("---")
+
+        # ── Section 3: Flow Distribution ──────────────────────────────── #
+        md.append("## 🔀 Flow Distribution — Work Type Mix")
+        md.append("")
+
+        # 3a: by SAFe hierarchy level (always available)
+        md.append("### By SAFe Hierarchy Level")
+        md.append("")
+        total_epics = len(all_typed)
+        total_pw    = sum(e.get("planned_weight") or 0 for e in all_typed)
+        md.append("| Type | Count | % Items | Planned Weight | % Weight |")
+        md.append("|------|-------|---------|----------------|----------|")
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = self._rd_metrics.get(t, [])
+            pw     = sum(e.get("planned_weight") or 0 for e in bucket)
+            md.append(
+                f"| {t} | {len(bucket)} | {_pct(len(bucket), total_epics)} "
+                f"| {pw:,} | {_pct(pw, total_pw)} |"
+            )
+        md.append(f"| **Total** | **{total_epics}** | | **{total_pw:,}** | |")
+        md.append("")
+
+        # 3b: by work type label (type::*)
+        md.append("### By Work Type Label")
+        md.append("")
+        work_type_set = set(self._rd_work_type_labels)
+        if work_type_set:
+            wt_counts = {}
+            for lbl in sorted(work_type_set):
+                wt_counts[lbl] = [e for e in all_typed if lbl in e.get("labels", [])]
+
+            labeled   = [e for e in all_typed if set(e.get("labels", [])) & work_type_set]
+            unlabeled = len(all_typed) - len(labeled)
+
+            md.append("| Work Type | Count | % of Labelled | SAFe Target |")
+            md.append("|-----------|-------|---------------|-------------|")
+            targets = {
+                "type::feature":        "~50%",
+                "type::enabler":        "~30%",
+                "type::infrastructure": "~20%",
+                "type::defect":         "minimize",
+            }
+            n_lab = len(labeled) or 1
+            for lbl, epics in sorted(wt_counts.items()):
+                tgt = targets.get(lbl, "—")
+                md.append(f"| `{lbl}` | {len(epics)} | {_pct(len(epics), n_lab)} | {tgt} |")
+            if unlabeled:
+                md.append(f"| _(unlabelled)_ | {unlabeled} | — | — |")
+        else:
+            md.append(
+                "> ℹ️ No `type::` labels found. Apply `type::feature`, `type::enabler`, "
+                "`type::infrastructure`, or `type::defect` labels to epics to enable this view. "
+                "Use the `set-work-type-labels` utility to assign labels in bulk."
+            )
+            md.append("")
+            md.append("**SAFe 6.0 target distribution:**")
+            md.append("")
+            md.append("| Work Type | Target | Risk if Skewed |")
+            md.append("|-----------|--------|----------------|")
+            md.append("| Features (business value) | ~50% | Under-delivery of outcomes |")
+            md.append("| Enablers (tech / architecture) | ~30% | Accumulating technical debt |")
+            md.append("| Infrastructure / DevSecOps | ~20% | Platform stability erosion |")
+            md.append("| Defects | minimize | Quality signal; high % = systemic issues |")
+        md.append("")
+        md.append("---")
+
+        # ── Section 4: Flow Time (Cycle Time) ────────────────────────── #
+        md.append("## ⏱ Flow Time — Cycle Time Analysis")
+        md.append("")
+        md.append(
+            "How long epics spend in-flight. Shorter, more consistent cycle times "
+            "indicate a healthy flow system."
+        )
+        md.append("")
+
+        md.append("### Age of Open Epics (days since created)")
+        md.append("")
+        md.append("| Type | Count | Avg Age | Min | Max |")
+        md.append("|------|-------|---------|-----|-----|")
+        has_open_data = False
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = [e for e in open_epics if e.get("type") == t]
+            ages   = [_age(e) for e in bucket]
+            ages   = [a for a in ages if a is not None]
+            if ages:
+                has_open_data = True
+                md.append(
+                    f"| {t} | {len(bucket)} | {_avg(ages)} days "
+                    f"| {min(ages)} | {max(ages)} |"
+                )
+            elif bucket:
+                md.append(f"| {t} | {len(bucket)} | — | — | — |")
+        if not has_open_data:
+            md.append("| — | — | — | — | — |")
+        md.append("")
+
+        if closed_epics:
+            md.append(
+                "### Cycle Time — Closed Epics "
+                "_(updated\\_at used as close\\_date proxy)_"
+            )
+            md.append("")
+            md.append("| Type | Count | Avg Cycle Time | Min | Max |")
+            md.append("|------|-------|----------------|-----|-----|")
+            for t in ("Feature", "Capability", "Epic"):
+                bucket = [e for e in closed_epics if e.get("type") == t]
+                times  = [_age(e) for e in bucket]
+                times  = [a for a in times if a is not None]
+                if times:
+                    md.append(
+                        f"| {t} | {len(bucket)} | {_avg(times)} days "
+                        f"| {min(times)} | {max(times)} |"
+                    )
+                elif bucket:
+                    md.append(f"| {t} | {len(bucket)} | — | — | — |")
+            md.append("")
+        else:
+            md.append(
+                "> ℹ️ No closed epics — cycle time will populate as work completes."
+            )
+            md.append("")
+
+        md.append("---")
+
+        # ── Section 5: Flow Predictability ───────────────────────────── #
+        md.append("## 🎯 Flow Predictability")
+        md.append("")
+        md.append(
+            "Percentage of PI objectives met as committed. "
+            "SAFe guidance: 80–100% is the healthy range. "
+            "Consistently at 100% may indicate sandbagging."
+        )
+        md.append("")
+        scorecard_slug = _wiki_slug(f"{self._wiki_t2}/PI Predictability Scorecard")
+        md.append(
+            f"Full predictability trend by ART → "
+            f"[PI Predictability Scorecard]({base}/{scorecard_slug})"
+        )
+        md.append("")
+
+        # Summary row from snapshot data
+        pi_pred_rows = []
+        for pi in piids:
+            pi_epics = [
+                e for e in all_typed
+                if e.get("piid") == pi and e.get("type") in feat_types
+            ]
+            if not pi_epics:
+                continue
+            committed = len(pi_epics)
+            delivered = sum(1 for e in pi_epics if e.get("state", "").lower() == "closed")
+            pct       = round(delivered / committed * 100) if committed else 0
+            pi_pred_rows.append((pi, committed, delivered, pct))
+
+        if pi_pred_rows:
+            md.append("| PI | Committed | Delivered | Predictability |")
+            md.append("|----|-----------|-----------|----------------|")
+            for pi, com, dlv, pct in pi_pred_rows:
+                icon = "🟢" if pct >= 80 else ("🟡" if pct >= 60 else "🔴")
+                md.append(f"| `{pi}` | {com} | {dlv} | {icon} {pct}% |")
+            md.append("")
+
+        md.append("---")
+
+        # ── About section ─────────────────────────────────────────────── #
+        md.append("## ℹ️ About Flow Metrics")
+        md.append("")
+        md.append("SAFe 6.0 defines six flow metrics measured at Team, ART, and Portfolio level:")
+        md.append("")
+        md.append("| Metric | This Report | Status |")
+        md.append("|--------|-------------|--------|")
+        md.append("| Flow Velocity | Delivered epics per PI | ✅ |")
+        md.append("| Flow Load | Open epics per PI (WIP) | ✅ |")
+        md.append("| Flow Distribution | Work type mix | ✅ |")
+        md.append("| Flow Time | Cycle time (open age + closed proxy) | ✅ |")
+        md.append("| Flow Predictability | % PI objectives met | ✅ (link to Scorecard) |")
+        md.append("| Flow Efficiency | Value-added vs wait time | ⬜ Requires time tracking |")
+        md.append("")
+
+        page_title = f"{self._wiki_t3}/Flow Metrics"
+        self.upload_to_wiki(group, page_title, "\n".join(md))
+        print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
+    # WSJF Priority Board
+    # ------------------------------------------------------------------
+
+    def generate_wsjf_priority_board(self):
+        """WSJF Priority Board — portfolio backlog epics ranked by Weighted Shortest Job First score."""
+        group = self._rd_root_obj
+        today = date.today()
+        print(f"  Generating WSJF Priority Board for {group.name}...")
+
+        def _label_val(labels, prefix):
+            for lbl in labels:
+                if lbl.startswith(prefix):
+                    try:
+                        return int(lbl.split("::")[-1])
+                    except ValueError:
+                        pass
+            return None
+
+        # Scan all typed epics — only these have computed planned_weight
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+
+        candidates = []
+        for epic in all_typed:
+            if epic.get("state", "").lower() != "opened":
+                continue
+            labels  = epic.get("labels", [])
+            value   = _label_val(labels, "wsjf-value::")
+            urgency = _label_val(labels, "wsjf-urgency::")
+            risk    = _label_val(labels, "wsjf-risk::")
+            if value is None and urgency is None and risk is None:
+                continue
+            size  = epic.get("planned_weight") or None  # None → partial score
+            v, u, r = (value or 0), (urgency or 0), (risk or 0)
+            score = round((v + u + r) / size, 2) if size else None
+            candidates.append({
+                "epic":    epic,
+                "type":    epic.get("type", "Unknown"),
+                "value":   value,
+                "urgency": urgency,
+                "risk":    risk,
+                "size":    size,
+                "score":   score,
+                "piid":    epic.get("piid"),
+            })
+
+        # Fully scored first (highest → lowest), then partial, then no-size
+        candidates.sort(key=lambda x: (x["score"] is None, -(x["score"] or 0)))
+
+        md = []
+        md.append(f"# WSJF Priority Board — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "Weighted Shortest Job First (WSJF) ranks portfolio backlog items by the ratio of "
+            "Cost of Delay to Job Size. Higher score = should be sequenced first."
+        )
+        md.append("")
+
+        if not candidates:
+            md.append(
+                "_No WSJF-scored epics found. Apply `wsjf-value::N`, `wsjf-urgency::N`, and "
+                "`wsjf-risk::N` labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
+            )
+        else:
+            scored    = [c for c in candidates if c["score"] is not None]
+            partial   = [c for c in candidates if c["score"] is None]
+            backlog   = [c for c in candidates if not c["piid"]]
+            in_flight = [c for c in candidates if c["piid"]]
+
+            md.append("## Summary")
+            md.append("")
+            md.append("| | Count |")
+            md.append("|---|---|")
+            md.append(f"| Fully scored | {len(scored)} |")
+            md.append(f"| Partially scored (missing component or job size) | {len(partial)} |")
+            md.append(f"| Portfolio Backlog (no PI) | {len(backlog)} |")
+            md.append(f"| In-flight (PI assigned) | {len(in_flight)} |")
+            md.append("")
+
+            md.append("## Ranked Board")
+            md.append("")
+            md.append("| Rank | Epic | Type | PI | Value | Urgency | Risk | Size | WSJF |")
+            md.append("|------|------|------|----|-------|---------|------|------|------|")
+
+            for rank, c in enumerate(candidates, 1):
+                epic   = c["epic"]
+                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "🏆")
+                link   = f"[{epic['title']}]({epic['web_url']})"
+                piid   = c["piid"] or "_backlog_"
+                v_str  = str(c["value"])   if c["value"]   is not None else "—"
+                u_str  = str(c["urgency"]) if c["urgency"] is not None else "—"
+                r_str  = str(c["risk"])    if c["risk"]    is not None else "—"
+                s_str  = str(c["size"])    if c["size"]    is not None else "—"
+                sc_str = f"**{c['score']}**" if c["score"] is not None else "_partial_"
+                md.append(
+                    f"| {rank} | {link} | {icon} {c['type']} | {piid} "
+                    f"| {v_str} | {u_str} | {r_str} | {s_str} | {sc_str} |"
+                )
+
+            md.append("")
+
+        md.extend([
+            "---",
+            "## How WSJF Works",
+            "",
+            "**WSJF = (User/Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
+            "",
+            "| Component | Label | What it measures |",
+            "|-----------|-------|-----------------|",
+            "| User/Business Value | `wsjf-value::N` | Economic benefit of delivering this work |",
+            "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how fast does value decay? |",
+            "| Risk Reduction | `wsjf-risk::N` | Risk reduced or opportunity enabled by this work |",
+            "| Job Size | Epic planned weight | Relative effort (set the epic's weight field) |",
+            "",
+            "**Fibonacci scale:** 1 · 2 · 3 · 5 · 8 · 13  _(higher = more)_",
+            "",
+            "A score of 8.0 means the item delivers 8× more value per unit of effort than a score-1 item.",
+            "",
+            "> **Calibration signal:** Scores should spread across the range. If most items cluster "
+            "at 13/13/13 the scale has lost meaning — challenge the team to differentiate.",
+            "",
+            "### Scoring Status",
+            "| Status | Condition |",
+            "|--------|-----------|",
+            "| **N.NN** (bold score) | All three label components present and job size > 0 |",
+            "| _partial_ | One or more label components missing, or job size not set |",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{self._wiki_t2}/WSJF Priority Board", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/WSJF Priority Board")
 
     # ------------------------------------------------------------------
     # Wiki Index
@@ -2763,13 +3719,7 @@ class ReportsMixin:
         base  = f"{self.url}/groups/{group.full_path}/-/wikis"
 
         def _wl(page_title, display=None):
-            """Return a markdown link to a wiki page using GitLab's slug rules:
-            non-ASCII dropped, multiple spaces collapsed, spaces → '-', case preserved."""
-            import re as _re
-            slug = _re.sub(r'[^\x00-\x7F]', '', page_title)  # drop non-ASCII (e.g. ×)
-            slug = _re.sub(r' +', ' ', slug).strip()          # collapse double-spaces left by removal
-            slug = slug.replace(" ", "-")                     # spaces → dashes; ' - ' → '---'
-            return f"[{display or page_title}]({base}/{slug})"
+            return f"[{display or page_title}]({base}/{_wiki_slug(page_title)})"
 
         md = []
         md.append(f"# {gn} — Portfolio Home")
@@ -2789,7 +3739,7 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl('Portfolio Health Dashboard')} "
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |"
         )
         md.append("")
@@ -2802,27 +3752,33 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl(f'{gn} - Program × PI Report', 'Program × PI Matrix')} "
+            f"| {_wl(f'{self._wiki_t2}/Program × PI Matrix', 'Program × PI Matrix')} "
             f"| Project label vs PI quarter cross-tab with status and weights |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Program PI Detail Report', 'Program PI Detail')} "
+            f"| {_wl(f'{self._wiki_t2}/Program PI Detail', 'Program PI Detail')} "
             f"| Per-PI section view of program workload and status |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Risk Register', 'Risk Register')} "
+            f"| {_wl(f'{self._wiki_t2}/PI Predictability Scorecard', 'PI Predictability Scorecard')} "
+            f"| % of committed Features and Capabilities delivered per PI, trended by ART |"
+        )
+        md.append(
+            f"| {_wl(f'{self._wiki_t2}/Risk Register', 'Risk Register')} "
             f"| All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |"
         )
         md.append(
-            f"| {_wl('ART Capacity Balance')} "
+            f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
             f"| Per-team planned vs actual weight per PI *(index → VS → ART)* |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Blocking Relationships Report', 'Blocking Relationships')} "
-            f"| Blocked epics, blockers, and ancestor risk propagation |"
+            f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
+            f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |"
         )
-        md.append("| ~~PI Predictability Scorecard~~ | _Planned_ |")
-        md.append("| ~~WSJF Priority Board~~ | _Planned_ |")
+        md.append(
+            f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
+            f"| Portfolio backlog epics ranked by (Value + Urgency + Risk) ÷ Job Size |"
+        )
         md.append("")
 
         # ── Tier 3 ──────────────────────────────────────────────────────── #
@@ -2833,32 +3789,33 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl('ART Feature Status')} "
+            f"| {_wl(f'{self._wiki_t3}/ART Feature Status', 'ART Feature Status')} "
             f"| Features per ART grouped by Team with completion and risk *(index → VS → ART)* |"
         )
         md.append(
-            f"| {_wl('VS Capability Dashboard')} "
+            f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
             f"| Capabilities by PI with per-ART breakdown *(index → VS)* |"
         )
         md.append(
-            f"| {_wl('VS Cross-ART Risk')} "
-            f"| Blocking relationships that cross ART boundaries *(index → VS)* |"
-        )
-        md.append(
-            f"| {_wl(f'{gn} - Team Backlog Index', 'Team Backlog')} "
+            f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
             f"| Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |"
         )
         md.append(
-            f"| {_wl(f'{gn} - SAFe Portfolio Report', 'SAFe Portfolio Hierarchy')} "
+            f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
             f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |"
         )
         md.append(
-            f"| {_wl(f'{gn} - ART-Team Workload Report', 'ART-Team Workload')} "
+            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
             f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |"
         )
-        md.append("| ~~Flow Metrics~~ | _Planned_ |")
-        md.append("| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |")
-        md.append("| ~~PI Planning Program Board~~ | _Planned_ |")
+        md.append(
+            f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
+            f"| Velocity, WIP load, work type distribution, and cycle time across the portfolio |"
+        )
+        md.append(
+            f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
+            f"| Epics by SAFe lifecycle state with bottleneck detection and age analysis |"
+        )
         md.append("")
 
         # ── Tier 4 ──────────────────────────────────────────────────────── #
@@ -2869,21 +3826,300 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl(f'{gn} - Unassigned PI Report', 'Unassigned PI')} "
+            f"| {_wl(f'{self._wiki_t4}/Unassigned PI', 'Unassigned PI')} "
             f"| Epics with no `PIID::` label, broken down by type |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Orphaned Epics Report', 'Orphaned Epics')} "
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Epics', 'Orphaned Epics')} "
             f"| Epics with no parent and no children (disconnected from hierarchy) |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Orphaned Issues Report', 'Orphaned Issues')} "
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
             f"| Issues not linked to any epic, grouped by project |"
         )
         md.append("")
 
         self.upload_to_wiki(group, "home", "\n".join(md))
         print(f"  ↳ Wiki home page updated for {gn}")
+
+        home_url  = f"{self.url}/groups/{group.full_path}/-/wikis/home"
+        _back     = f"[← Portfolio Home]({home_url})"
+        root_name = f"{gn} — Portfolio Home"
+
+        # ── Root folder page (in case GitLab surfaces it as blank) ────────── #
+        root_folder_md = [
+            f"# {root_name}",
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** [{gn}]({group.web_url})",
+            "",
+            f"This is the SAFe portfolio wiki for **{gn}**. Reports are organized into four tiers "
+            f"by audience and cadence — start with the tier that matches your role, then drill down "
+            f"as needed. Return to the [Portfolio Home]({home_url}) index at any time.",
+            "",
+            "## How to navigate",
+            "",
+            "Each tier is a folder in this wiki. Click a tier link to see the landing page with "
+            "a full description of that tier's purpose, audience, and questions answered — "
+            "then follow the links to individual reports.",
+            "",
+            f"| Tier | Audience | Cadence | Purpose |",
+            f"|------|----------|---------|---------|",
+            f"| [📊 00 Executive Pulse]({base}/{_wiki_slug(self._wiki_t1)}) "
+            f"| Executives, Portfolio Managers | Daily | At-a-glance portfolio health |",
+            f"| [🗂️ 01 Program Management]({base}/{_wiki_slug(self._wiki_t2)}) "
+            f"| Release Train Engineers, PMs | Weekly | Predictability, risk, and prioritisation |",
+            f"| [🔍 02 Operational Detail]({base}/{_wiki_slug(self._wiki_t3)}) "
+            f"| ART and Team leads | On demand | Root-cause drill-down and hierarchy view |",
+            f"| [🔧 03 Data Quality]({base}/{_wiki_slug(self._wiki_t4)}) "
+            f"| All — fix labeling gaps | As needed | Find and fix missing labels and broken links |",
+            "",
+        ]
+        self.upload_to_wiki(group, root_name, "\n".join(root_folder_md))
+
+        # ── Tier landing pages (so folder pages are never blank) ─────────── #
+
+        t1_md = [
+            f"# 📊 Executive Pulse — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_One page. Viewed daily. Read in 90 seconds._",
+            "",
+            "## Purpose",
+            "",
+            "Executive Pulse gives portfolio leadership an at-a-glance health check across all "
+            "Value Streams. The single report in this tier is designed to be consumed in under "
+            "two minutes — it surfaces traffic-light status rather than detail, so decision-makers "
+            "can quickly spot which Value Streams need attention before drilling into Tier 2.",
+            "",
+            "## Audience",
+            "",
+            "Portfolio Managers, Product Management leadership, and programme sponsors who need "
+            "a daily situational-awareness view without wading through operational detail.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Are any Value Streams behind schedule this PI?",
+            "- Which ARTs are at capacity risk or blocked?",
+            "- Has any high risk been raised since yesterday's briefing?",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
+            f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
+            "",
+            "## Metric Reference",
+            "",
+            "The Portfolio Health Dashboard uses four traffic-light columns per Value Stream:",
+            "",
+            "| Column | 🟢 Green | 🟡 Yellow | 🔴 Red |",
+            "|--------|----------|-----------|--------|",
+            "| **Schedule** | % done ≥ % elapsed − 10 pp | 10–20 pp behind PI elapsed | > 20 pp behind PI elapsed |",
+            "| **Capacity** | Team load 80–110% of planned weight | Load 70–80% or 110–120% | Load < 70% or > 120% |",
+            "| **Risk** | No high-risk epics | 1–2 high-risk epics | 3+ high-risk epics |",
+            "| **Blocking** | No blocked epics | 1–2 blocked | 3+ blocked |",
+            "",
+            "> **% elapsed through PI** is computed from the `PIID::YYYYQn` label mapped to its calendar quarter. "
+            "A PI labelled `2026Q3` runs 1 Jul – 30 Sep; on 1 Aug the PI is ~48% elapsed.",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t1, "\n".join(t1_md))
+
+        t2_md = [
+            f"# 🗂️ Program Management — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Reviewed in weekly ART syncs and PM stand-ups._",
+            "",
+            "## Purpose",
+            "",
+            "Program Management reports give Release Train Engineers, Product Managers, and "
+            "Delivery leads the information they need to manage commitments across Program "
+            "Increments. Each report answers a distinct programme-level question: are we "
+            "predictable, where is risk concentrated, what should we work on next, and do "
+            "our ARTs have the capacity to deliver what we have committed?",
+            "",
+            "## Audience",
+            "",
+            "Release Train Engineers (RTEs), Product Management, Portfolio Managers, and "
+            "ART leadership. Reviewed weekly in ART sync cadences and pre-PI planning.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which programmes are over-committed or under-weight this PI?",
+            "- How predictable has each ART been across recent PIs?",
+            "- Which epics carry the highest WSJF score and should be prioritised next?",
+            "- Where are our blockers and are any crossing ART boundaries?",
+            "- Do we have balanced capacity across teams and ARTs?",
+            "",
+            "## Reports in this tier",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
+            f"| {_wl(f'{self._wiki_t2}/Program × PI Matrix', 'Program × PI Matrix')} "
+            f"| Project label vs PI quarter cross-tab — see workload and status at a glance |",
+            f"| {_wl(f'{self._wiki_t2}/Program PI Detail', 'Program PI Detail')} "
+            f"| Per-PI section view — drill into workload and completion for a single PI |",
+            f"| {_wl(f'{self._wiki_t2}/PI Predictability Scorecard', 'PI Predictability Scorecard')} "
+            f"| % of committed Features/Capabilities delivered — ART predictability trend |",
+            f"| {_wl(f'{self._wiki_t2}/Risk Register', 'Risk Register')} "
+            f"| All risk-flagged epics grouped by severity with PI and owning ART |",
+            f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
+            f"| Per-team planned vs actual weight per PI — spot over/under-capacity early |",
+            f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
+            f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |",
+            f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
+            f"| Portfolio backlog ranked by (Value + Urgency + Risk) ÷ Job Size |",
+            "",
+            "## Metric Reference",
+            "",
+            "### PI Predictability",
+            "Measures ART reliability — the % of committed Features and Capabilities that were "
+            "actually delivered by the end of the PI they were assigned to.",
+            "",
+            "| Range | Interpretation |",
+            "|-------|----------------|",
+            "| ≥ 80% | Healthy — ART is delivering to its commitments |",
+            "| 60–79% | Caution — consistent over-commitment or scope changes mid-PI |",
+            "| < 60% | At risk — underlying capacity or planning problem |",
+            "| 100% every PI | Investigate — team may be sandbagging (under-committing to guarantee 100%) |",
+            "",
+            "### WSJF (Weighted Shortest Job First)",
+            "Ranks backlog epics by economic priority. Formula: `WSJF = (Value + Urgency + Risk) ÷ Job Size`",
+            "",
+            "| Component | Label family | Meaning |",
+            "|-----------|-------------|---------|",
+            "| Business Value | `wsjf-value::N` | Revenue, mission impact, or customer satisfaction |",
+            "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how quickly does value decay if deferred? |",
+            "| Risk Reduction | `wsjf-risk::N` | Risk or opportunity enabled by doing this item |",
+            "| Job Size | `planned_weight` | Relative effort (from epic planned weight) |",
+            "",
+            "Fibonacci scores 1–13 apply to each label. Higher WSJF = do this first.",
+            "",
+            "### ART Capacity Balance",
+            "Compares **planned weight** (story points assigned to epics) against **actual weight** "
+            "(story points on closed issues). A team at 80–110% load is on track; below 70% may "
+            "indicate under-commitment or blocked work; above 120% is over-loaded.",
+            "",
+            "### Risk Register thresholds",
+            "Epics carrying `risk::high`, `risk::medium`, or `risk::low` labels are included. "
+            "Risk labels are applied manually or via the `set-risk-labels` utility. "
+            "High-risk epics in the current PI should be reviewed every ART sync.",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t2, "\n".join(t2_md))
+
+        t3_md = [
+            f"# 🔍 Operational Detail — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Drill-down from Tier 2. Available on demand._",
+            "",
+            "## Purpose",
+            "",
+            "Operational Detail reports provide the granular view that team leads and RTEs "
+            "need when a Tier 2 metric raises a question. These pages are not meant for daily "
+            "monitoring — they exist to answer 'why' and 'where exactly' once a problem has "
+            "been spotted in the programme-level view.",
+            "",
+            "## Audience",
+            "",
+            "ART leads, Team leads, Value Stream Engineers, and anyone conducting a root-cause "
+            "investigation. Also useful before PI planning when teams are sizing and scheduling.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which specific Features are behind, and which team owns them?",
+            "- How is work distributed across type (feature vs. enabler vs. infrastructure)?",
+            "- How long have epics been sitting in each lifecycle stage — are any stuck?",
+            "- What does the full Epic → Capability → Feature hierarchy look like right now?",
+            "- Which Capabilities are at risk within a Value Stream this PI?",
+            "- Are our flow metrics showing a WIP bottleneck or a velocity drop?",
+            "",
+            "## Reports in this tier",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
+            f"| {_wl(f'{self._wiki_t3}/ART Feature Status', 'ART Feature Status')} "
+            f"| Features per ART grouped by Team — completion, weight, and risk flags |",
+            f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
+            f"| Capabilities by PI with per-ART breakdown for each Value Stream |",
+            f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
+            f"| Issues grouped by Feature per Team — story-point progress and open/closed count |",
+            f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
+            f"| Full Epic → Capability → Feature hierarchy with % complete and PI labels |",
+            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
+            f"| Planned vs actual weight per group per PI — on-track / at-risk flags |",
+            f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
+            f"| SAFe flow metrics: velocity, WIP load, work type distribution, and cycle time |",
+            f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
+            f"| Epics by SAFe Portfolio Kanban state — bottleneck detection and age analysis |",
+            "",
+            "## Metric Reference",
+            "",
+            "### Flow Metrics (SAFe 6.0)",
+            "",
+            "| Metric | Unit | What to watch |",
+            "|--------|------|---------------|",
+            "| **Flow Velocity** | Story points / PI | Is throughput stable or growing? A declining trend signals a delivery problem. |",
+            "| **Flow Load (WIP)** | Open Features in `implementing` | Rising WIP with flat velocity = bottleneck. SAFe guidance: limit WIP to sustain flow. |",
+            "| **Flow Distribution** | % by work type | Target ~50% feature, ~30% enabler, ~20% infra. > 80% feature = technical debt accumulating. |",
+            "| **Flow Time** | Days open-to-close | Average days a Feature spends from first `implementing` label to close. Shorter = faster delivery cycle. |",
+            "| **Flow Predictability** | Planned vs actual weight % | Ratio of delivered weight to planned weight for closed Features. < 80% = systematic over-commitment. |",
+            "",
+            "### Epic Lifecycle — Stuck Thresholds",
+            "",
+            "Epics are flagged ⚠️ when they have remained in a pre-implementing state beyond these thresholds:",
+            "",
+            "| State | Label | Stuck after |",
+            "|-------|-------|-------------|",
+            "| 💡 Funnel | `lifecycle::funnel` | 90 days — idea submitted but not yet analyzed |",
+            "| 🔍 Analyzing | `lifecycle::analyzing` | 30 days — Lean Business Case taking too long |",
+            "| 📋 Portfolio Backlog | `lifecycle::backlog` | 60 days — approved but no PI capacity assigned |",
+            "",
+            "Use `set-lifecycle-labels` to bulk-seed lifecycle labels and `strip-lifecycle-labels` to reset.",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t3, "\n".join(t3_md))
+
+        t4_md = [
+            f"# 🔧 Data Quality — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Maintenance views — labeling and setup problems, not delivery status._",
+            "",
+            "## Purpose",
+            "",
+            "Data Quality reports surface the configuration and labeling gaps that would "
+            "cause incorrect or misleading results in Tier 1–3 reports. The SAFe portfolio "
+            "reporting model depends on every epic having the right type, PI, project, and "
+            "lifecycle labels — and on issues being linked to the hierarchy. These reports "
+            "make those gaps visible so they can be fixed.",
+            "",
+            "## Audience",
+            "",
+            "Anyone responsible for GitLab data stewardship: RTEs, Portfolio Managers, or "
+            "Scrum Masters who own the backlog hygiene process. These reports are most useful "
+            "after a bootstrap, after a PI boundary, or before generating executive-facing reports.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which epics have never been assigned to a PI — are they sitting in limbo?",
+            "- Are there epics with no parent and no children that are invisible to the hierarchy?",
+            "- Are there issues sitting in projects with no link to the epic portfolio?",
+            "",
+            "> **Note:** These reports identify data hygiene issues to fix. They are not delivery "
+            "status indicators — a long list here means labeling work to do, not programme problems.",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
+            f"| {_wl(f'{self._wiki_t4}/Unassigned PI', 'Unassigned PI')} "
+            f"| Epics missing a `PIID::` label — not yet scheduled to any PI |",
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Epics', 'Orphaned Epics')} "
+            f"| Epics with no parent and no children — disconnected from the hierarchy |",
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
+            f"| Issues in team projects not linked to any epic — invisible to portfolio reporting |",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t4, "\n".join(t4_md))
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
@@ -3224,13 +4460,20 @@ class ReportsMixin:
             {l for l in label_set if l.startswith("PIID::")},
             key=lambda p: (self._pi_dates_from_label(p)[0] or date.min),
         )
-        self._rd_project_labels = sorted({l for l in label_set if l.startswith("project::")})
-        self._rd_risk_labels    = sorted({l for l in label_set if l.startswith("risk::")})
+        self._rd_project_labels    = sorted({l for l in label_set if l.startswith("project::")})
+        self._rd_risk_labels       = sorted({l for l in label_set if l.startswith("risk::")})
+        self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
+        self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""
         group = self.get_group_by_name(self.parent_group)
         self._rd_root_obj = group
+        gn = group.name
+        self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
+        self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
+        self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
+        self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
         now      = datetime.now()

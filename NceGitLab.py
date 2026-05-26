@@ -51,10 +51,12 @@ class NceGitLab(
                         "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
                         "parent_group": "AMW-120",
                         "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
-                        "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
-                        "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
-                        "epic_labels": ["Epic", "Capability", "Feature"],
-                        "risk_labels": ["risk::high", "risk::medium", "risk::low"]
+                        "project_labels": ["project::DO", "project::RTSO"],
+                        "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1"],
+                        "epic_type_labels": ["Epic", "Capability", "Feature"],
+                        "risk_labels": ["risk::high", "risk::medium", "risk::low"],
+                        "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
+                        "wsjf_labels": { "value": ["wsjf-value::1", "..."], "urgency": [...], "risk": [...] }
                     }
             ''')
             exit(1)
@@ -104,9 +106,21 @@ class NceGitLab(
         self.EPIC_TYPE_LABELS = epic_labels_env if epic_labels_env else config.get("epic_type_labels", [])
 
         risk_labels_env = parse_label_env("RISK_LABELS")
-        self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get(
-            "risk_labels", ["risk::high", "risk::medium", "risk::low"]
+        self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
+
+        _wsjf = config.get("wsjf_labels", {})
+        self.WSJF_LABELS = (
+            _wsjf.get("value", []) + _wsjf.get("urgency", []) + _wsjf.get("risk", [])
         )
+        self.WSJF_VALUE_LABELS   = _wsjf.get("value",   [])
+        self.WSJF_URGENCY_LABELS = _wsjf.get("urgency", [])
+        self.WSJF_RISK_LABELS    = _wsjf.get("risk",    [])
+
+        work_type_env = parse_label_env("WORK_TYPE_LABELS")
+        self.WORK_TYPE_LABELS = work_type_env if work_type_env else config.get("work_type_labels", [])
+
+        lifecycle_env = parse_label_env("LIFECYCLE_LABELS")
+        self.LIFECYCLE_LABELS = lifecycle_env if lifecycle_env else config.get("lifecycle_labels", [])
 
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],
@@ -131,6 +145,7 @@ class NceGitLab(
         self.default_generate_issues_count     = _td.get("generate_issues_count",        5)
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
         self.default_set_risk_percent          = _td.get("set_risk_labels_percent",       15.0)
+        self.default_set_wsjf_percent          = _td.get("set_wsjf_labels_percent",       20.0)
 
         missing_fields = [
             field for field, val in [

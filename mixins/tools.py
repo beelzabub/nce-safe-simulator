@@ -31,6 +31,15 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "clean-wikis",
+        "description": "Delete all wiki pages from: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
+        "method":      "_tool_clean_wikis",
+        "params": [
+            {"name": "scope",   "prompt": "Scope — portfolio / teams / all / <group-path>", "type": str,  "default": "portfolio"},
+            {"name": "dry_run", "prompt": "Dry run?",                                        "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "close-percent",
         "description": "Randomly close N% of open epics and issues (simulate PI progress)",
         "method":      "_tool_close_percent",
@@ -142,13 +151,40 @@ TOOLS = [
     },
     {
         "key":         "set-issue-weights",
-        "description": "Assign Fibonacci story-point weights to issues that currently have none",
+        "description": "Assign Fibonacci story-point weights to issues that have none (or all when reassign=True)",
         "method":      "_tool_set_issue_weights",
         "params": [
-            {"name": "fibonacci", "prompt": "Constrain to Fibonacci pool from config?", "type": bool, "default": True},
-            {"name": "min_weight","prompt": "Minimum weight (blank = no min)",          "type": int,  "optional": True},
-            {"name": "max_weight","prompt": "Maximum weight (blank = no max)",          "type": int,  "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                 "type": bool, "default": False},
+            {"name": "fibonacci",  "prompt": "Constrain to Fibonacci pool from config?",  "type": bool, "default": True},
+            {"name": "min_weight", "prompt": "Minimum weight (blank = no min)",            "type": int,  "optional": True},
+            {"name": "max_weight", "prompt": "Maximum weight (blank = no max)",            "type": int,  "optional": True},
+            {"name": "reassign",   "prompt": "Replace existing weights too?",              "type": bool, "default": False},
+            {"name": "dry_run",    "prompt": "Dry run?",                                   "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "strip-issue-weights",
+        "description": "Zero out all issue weights across every team project (clean slate for testing)",
+        "method":      "_tool_strip_issue_weights",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "set-lifecycle-labels",
+        "description": "Randomly assign lifecycle::funnel/analyzing/backlog/implementing/done labels to open epics (or all when reassign=True)",
+        "method":      "_tool_set_lifecycle_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing lifecycle:: labels too?",     "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-lifecycle-labels",
+        "description": "Remove all lifecycle::* labels from every epic (clean slate for testing)",
+        "method":      "_tool_strip_lifecycle_labels",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
         ],
     },
     {
@@ -178,6 +214,42 @@ TOOLS = [
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to label (default 15)", "type": float, "default": 15.0},
             {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "set-work-type-labels",
+        "description": "Randomly assign type::feature/enabler/infrastructure/defect labels to open epics that have none (or all when reassign=True)",
+        "method":      "_tool_set_work_type_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing type:: labels too?",          "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-work-type-labels",
+        "description": "Remove all type::* labels from every epic (clean slate for testing)",
+        "method":      "_tool_strip_work_type_labels",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "set-wsjf-labels",
+        "description": "Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
+        "method":      "_tool_set_wsjf_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing wsjf labels too?",           "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-wsjf-labels",
+        "description": "Remove all wsjf-value/urgency/risk labels from every epic (clean slate for testing)",
+        "method":      "_tool_strip_wsjf_labels",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
         ],
     },
     {
@@ -333,6 +405,92 @@ class ToolsMixin:
     # ------------------------------------------------------------------
     # Tool implementations
     # ------------------------------------------------------------------
+
+    def _tool_clean_wikis(self, scope="portfolio", dry_run=False):
+        """Delete all wiki pages from target groups.
+
+        scope:
+          'portfolio'  — root group wiki only
+          'teams'      — every team-level group wiki
+          'all'        — root + every group in the hierarchy
+          <group-path> — a specific group by path (relative to root or absolute)
+        """
+        root = self.get_group_by_name(self.parent_group)
+
+        # ── Collect target groups ─────────────────────────────────────── #
+        def _all_groups(grp):
+            """Recursively yield grp and every subgroup."""
+            yield grp
+            for sg in grp.subgroups.list(all=True):
+                yield from _all_groups(self.gl.groups.get(sg.id))
+
+        def _team_groups(grp, depth=0):
+            """Yield leaf groups (no subgroups) — these are the team groups."""
+            sgs = grp.subgroups.list(all=True)
+            if not sgs:
+                yield grp
+            else:
+                for sg in sgs:
+                    yield from _team_groups(self.gl.groups.get(sg.id), depth + 1)
+
+        scope_lc = scope.strip().lower()
+        if scope_lc == "portfolio":
+            targets = [root]
+        elif scope_lc == "teams":
+            targets = list(_team_groups(root))
+        elif scope_lc == "all":
+            targets = list(_all_groups(root))
+        else:
+            # Treat as an explicit group path: try relative to namespace, then absolute
+            candidates = [
+                f"{self.gitlab_namespace}/{self.parent_group}/{scope.strip('/')}",
+                f"{self.gitlab_namespace}/{scope.strip('/')}",
+                scope.strip("/"),
+            ]
+            resolved = None
+            for path in candidates:
+                try:
+                    resolved = self.gl.groups.get(path)
+                    break
+                except Exception:
+                    continue
+            if resolved is None:
+                print(f"Group not found for scope '{scope}'. "
+                      f"Use 'portfolio', 'teams', 'all', or a valid group path.")
+                return
+            targets = [resolved]
+
+        # ── Inventory ─────────────────────────────────────────────────── #
+        print(f"\nScope : {scope}")
+        if dry_run:
+            print("Mode  : DRY RUN — no pages will be deleted")
+        print()
+
+        total_groups = total_pages = 0
+        for grp in targets:
+            try:
+                pages = grp.wikis.list(all=True)
+            except Exception as e:
+                print(f"  {grp.full_path}: could not list wiki pages — {e}")
+                continue
+            if not pages:
+                continue
+            total_groups += 1
+            total_pages  += len(pages)
+            print(f"  {grp.full_path}  ({len(pages)} page(s))")
+            for page in pages:
+                print(f"    • {page.slug}")
+                if not dry_run:
+                    try:
+                        page.delete()
+                    except Exception as e:
+                        print(f"      ERROR deleting '{page.slug}': {e}")
+
+        print()
+        if dry_run:
+            print(f"Dry run complete — {total_pages} page(s) across {total_groups} group(s) would be deleted.")
+        else:
+            print(f"Done — deleted {total_pages} page(s) across {total_groups} group(s).")
 
     def _tool_close_percent(self, percent=None, seed=None, dry_run=False):
         """Randomly close N% of open epics and issues across the group hierarchy."""
@@ -695,8 +853,13 @@ class ToolsMixin:
     # Priority 1 — Model Validity
     # ------------------------------------------------------------------
 
-    def _tool_set_issue_weights(self, fibonacci=True, min_weight=None, max_weight=None, dry_run=False):
-        """Assign weights to issues that currently have none."""
+    def _tool_set_issue_weights(self, fibonacci=True, min_weight=None, max_weight=None,
+                                reassign=False, dry_run=False):
+        """Assign weights to issues.
+
+        By default skips issues that already have a weight.
+        Pass reassign=True to overwrite existing weights too.
+        """
         group = self.get_group_by_name(self.parent_group)
         pool  = self.fibonacci_weights if fibonacci else list(range(1, 21))
         if min_weight is not None:
@@ -707,8 +870,9 @@ class ToolsMixin:
             print("No valid weights in pool — check min/max settings.")
             return
 
-        print(f"Group : {group.full_path}")
-        print(f"Pool  : {pool}")
+        print(f"Group    : {group.full_path}")
+        print(f"Pool     : {pool}")
+        print(f"Reassign : {reassign}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
@@ -717,7 +881,7 @@ class ToolsMixin:
             try:
                 full_p = self.gl.projects.get(proj.id)
                 for issue in full_p.issues.list(all=True):
-                    if issue.weight:
+                    if issue.weight and not reassign:
                         skipped += 1
                         continue
                     w = random.choice(pool)
@@ -734,6 +898,38 @@ class ToolsMixin:
                 errors += 1
 
         print(f"\nDone.  Updated: {updated}  Already set (skipped): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_issue_weights(self, dry_run=False):
+        """Zero out all issue weights across every team project."""
+        group = self.get_group_by_name(self.parent_group)
+
+        print(f"Group : {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        cleared = skipped = errors = 0
+        for proj in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_p = self.gl.projects.get(proj.id)
+                for issue in full_p.issues.list(all=True):
+                    if not issue.weight:
+                        skipped += 1
+                        continue
+                    if dry_run:
+                        print(f"  DRY  #{issue.iid} '{issue.title[:50]}' ({issue.weight} pt → 0)")
+                        cleared += 1
+                    else:
+                        issue.weight = 0
+                        issue.save()
+                        print(f"  CLEAR  #{issue.iid} '{issue.title[:50]}'")
+                        cleared += 1
+            except Exception as e:
+                print(f"  ERROR  project '{proj.path}': {e}")
+                errors += 1
+
+        print(f"\nDone.  Cleared: {cleared}  Already zero (skipped): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
@@ -1465,5 +1661,371 @@ class ToolsMixin:
                     errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_wsjf_labels(self, percent=None, reassign=False, dry_run=False):
+        """Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics.
+
+        By default skips epics that already have any wsjf label.
+        Pass reassign=True to replace existing wsjf labels too.
+        """
+        if percent is None:
+            percent = self.default_set_wsjf_percent
+
+        group = self.get_group_by_name(self.parent_group)
+
+        value_labels   = self._discover_labels(group, "wsjf-value::")
+        urgency_labels = self._discover_labels(group, "wsjf-urgency::")
+        risk_labels    = self._discover_labels(group, "wsjf-risk::")
+
+        if not value_labels and not urgency_labels and not risk_labels:
+            print("No wsjf-* labels found on group. Create them via bootstrap first.")
+            return
+
+        all_wsjf = set(value_labels + urgency_labels + risk_labels)
+
+        print(f"Group          : {group.full_path}")
+        print(f"Value labels   : {value_labels}")
+        print(f"Urgency labels : {urgency_labels}")
+        print(f"Risk labels    : {risk_labels}")
+        mode = "ALL open epics (reassign mode)" if reassign else "open epics with no existing wsjf label"
+        print(f"Target         : {percent}% of {mode}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if reassign or not (set(epic.labels) & all_wsjf):
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        label_state = "total" if reassign else "without wsjf labels"
+        print(f"  {len(candidates)} open epics {label_state}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            # Strip any existing wsjf labels before assigning new ones
+            new_labels = [l for l in epic.labels if l not in all_wsjf]
+            chosen = []
+            if value_labels:
+                v = random.choice(value_labels)
+                new_labels.append(v)
+                chosen.append(v)
+            if urgency_labels:
+                u = random.choice(urgency_labels)
+                new_labels.append(u)
+                chosen.append(u)
+            if risk_labels:
+                r = random.choice(risk_labels)
+                new_labels.append(r)
+                chosen.append(r)
+
+            tag = " ".join(f"[{c}]" for c in chosen)
+            if dry_run:
+                print(f"  DRY  {tag}  #{epic.iid} '{epic.title[:45]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_wsjf_labels(self, dry_run=False):
+        """Remove all wsjf-value::*, wsjf-urgency::*, and wsjf-risk::* labels from every open epic."""
+        group = self.get_group_by_name(self.parent_group)
+
+        value_labels   = self._discover_labels(group, "wsjf-value::")
+        urgency_labels = self._discover_labels(group, "wsjf-urgency::")
+        risk_labels    = self._discover_labels(group, "wsjf-risk::")
+        all_wsjf = set(value_labels + urgency_labels + risk_labels)
+
+        if not all_wsjf:
+            print("No wsjf-* labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(all_wsjf)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal stripped, skipped, errors
+            for epic in grp.epics.list(all=True, state="opened"):
+                existing = set(epic.labels) & all_wsjf
+                if not existing:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l not in all_wsjf]
+                if dry_run:
+                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
+                    stripped += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
+                        stripped += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nWalking epics...")
+        _walk(group)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no wsjf): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_work_type_labels(self, percent=None, reassign=False, dry_run=False):
+        """Randomly assign type::feature/enabler/infrastructure/defect labels to open epics."""
+        if percent is None:
+            percent = 20.0
+
+        group       = self.get_group_by_name(self.parent_group)
+        work_labels = self._discover_labels(group, "type::")
+        if not work_labels:
+            print("No type::* labels found on group. Create them via bootstrap first.")
+            return
+
+        all_work = set(work_labels)
+
+        # Weighted pool matching SAFe targets: ~50% feature, ~30% enabler, ~20% infra, defect rare
+        feat_l  = [l for l in work_labels if "feature"        in l]
+        en_l    = [l for l in work_labels if "enabler"        in l]
+        infra_l = [l for l in work_labels if "infrastructure" in l]
+        def_l   = [l for l in work_labels if "defect"         in l]
+        pool    = feat_l * 5 + en_l * 3 + infra_l * 2 + def_l * 1
+
+        if not pool:
+            pool = work_labels  # fallback: uniform
+
+        print(f"Group   : {group.full_path}")
+        print(f"Labels  : {work_labels}")
+        mode = "ALL open epics (reassign mode)" if reassign else "open epics without type:: label"
+        print(f"Target  : {percent}% of {mode}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if reassign or not (set(epic.labels) & all_work):
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        label_state = "total" if reassign else "without type:: label"
+        print(f"  {len(candidates)} open epics {label_state}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            new_labels = [l for l in epic.labels if l not in all_work]
+            label      = random.choice(pool)
+            new_labels.append(label)
+            if dry_run:
+                print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_work_type_labels(self, dry_run=False):
+        """Remove all type::* labels from every open epic."""
+        group       = self.get_group_by_name(self.parent_group)
+        work_labels = self._discover_labels(group, "type::")
+        all_work    = set(work_labels)
+
+        if not all_work:
+            print("No type::* labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(all_work)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal stripped, skipped, errors
+            for epic in grp.epics.list(all=True, state="opened"):
+                existing = set(epic.labels) & all_work
+                if not existing:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l not in all_work]
+                if dry_run:
+                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    stripped += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                        stripped += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nWalking epics...")
+        _walk(group)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no type::): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_lifecycle_labels(self, percent=None, reassign=False, dry_run=False):
+        """Randomly assign lifecycle::* labels to open epics using SAFe Kanban state distribution."""
+        if percent is None:
+            percent = 20.0
+
+        group          = self.get_group_by_name(self.parent_group)
+        lifecycle_lbls = self._discover_labels(group, "lifecycle::")
+        if not lifecycle_lbls:
+            print("No lifecycle::* labels found on group. Create them via bootstrap first.")
+            return
+
+        all_lc = set(lifecycle_lbls)
+
+        # Weighted pool: funnel/analyzing/backlog heavier than implementing/done (realistic portfolio)
+        funnel_l  = [l for l in lifecycle_lbls if "funnel"       in l]
+        anlyz_l   = [l for l in lifecycle_lbls if "analyzing"    in l]
+        backlog_l = [l for l in lifecycle_lbls if "backlog"      in l]
+        impl_l    = [l for l in lifecycle_lbls if "implementing" in l]
+        done_l    = [l for l in lifecycle_lbls if "done"         in l]
+        pool      = funnel_l * 3 + anlyz_l * 2 + backlog_l * 3 + impl_l * 3 + done_l * 1
+
+        if not pool:
+            pool = lifecycle_lbls  # fallback: uniform
+
+        print(f"Group   : {group.full_path}")
+        print(f"Labels  : {lifecycle_lbls}")
+        mode = "ALL open epics (reassign mode)" if reassign else "open epics without lifecycle:: label"
+        print(f"Target  : {percent}% of {mode}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if reassign or not (set(epic.labels) & all_lc):
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        label_state = "total" if reassign else "without lifecycle:: label"
+        print(f"  {len(candidates)} open epics {label_state}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            new_labels = [l for l in epic.labels if l not in all_lc]
+            label      = random.choice(pool)
+            new_labels.append(label)
+            if dry_run:
+                print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_lifecycle_labels(self, dry_run=False):
+        """Remove all lifecycle::* labels from every open epic."""
+        group          = self.get_group_by_name(self.parent_group)
+        lifecycle_lbls = self._discover_labels(group, "lifecycle::")
+        all_lc         = set(lifecycle_lbls)
+
+        if not all_lc:
+            print("No lifecycle::* labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(all_lc)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal stripped, skipped, errors
+            for epic in grp.epics.list(all=True, state="opened"):
+                existing = set(epic.labels) & all_lc
+                if not existing:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l not in all_lc]
+                if dry_run:
+                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    stripped += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                        stripped += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nWalking epics...")
+        _walk(group)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no lifecycle::): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
