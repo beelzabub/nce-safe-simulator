@@ -82,6 +82,13 @@ Copy and edit `config.json`:
     "piid_labels": ["PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1"],
     "epic_type_labels": ["Epic", "Capability", "Feature"],
     "risk_labels": ["risk::high", "risk::medium", "risk::low"],
+    "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
+    "lifecycle_labels": ["lifecycle::funnel", "lifecycle::analyzing", "lifecycle::backlog", "lifecycle::implementing", "lifecycle::done"],
+    "wsjf_labels": {
+        "value":   ["wsjf-value::1", "wsjf-value::2", "wsjf-value::3", "wsjf-value::5", "wsjf-value::8", "wsjf-value::13"],
+        "urgency": ["wsjf-urgency::1", "wsjf-urgency::2", "wsjf-urgency::3", "wsjf-urgency::5", "wsjf-urgency::8", "wsjf-urgency::13"],
+        "risk":    ["wsjf-risk::1", "wsjf-risk::2", "wsjf-risk::3", "wsjf-risk::5", "wsjf-risk::8", "wsjf-risk::13"]
+    },
     "fibonacci_weights": [1, 2, 3, 5, 8, 13],
     "epic_type_planned_weights": {
         "Feature":    [3, 5, 8, 13],
@@ -104,7 +111,9 @@ Copy and edit `config.json`:
             "generate_epic_blocks_count":   10,
             "simulate_pi_progress_percent": 50.0,
             "generate_issues_count":        5,
-            "weight_drift_threshold":       20.0
+            "weight_drift_threshold":       20.0,
+            "set_risk_labels_percent":      15.0,
+            "set_wsjf_labels_percent":      20.0
         }
     }
 }
@@ -116,14 +125,31 @@ Copy and edit `config.json`:
 | `private_token` | Personal access token with `api` scope |
 | `parent_group` | Name of the root group to create/manage |
 | `gitlab_namespace` | Parent namespace for root group creation |
-| `project_labels` | Labels representing programs or workstreams |
+| `project_labels` | Labels representing programs or workstreams (`project::*`) |
 | `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
 | `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
-| `risk_labels` | `risk::*` labels created at bootstrap; used by the risk simulator tool and discovered from the live group by reports |
+| `risk_labels` | `risk::*` labels used by the Risk Register report and `set-risk-labels` tool |
+| `work_type_labels` | `type::*` labels classifying epics by SAFe work type (feature, enabler, infrastructure, defect) |
+| `lifecycle_labels` | `lifecycle::*` labels representing SAFe Portfolio Kanban states (funnel → done) |
+| `wsjf_labels` | Fibonacci label sets for WSJF scoring — `wsjf-value::N`, `wsjf-urgency::N`, `wsjf-risk::N` (N from 1–13) |
 | `fibonacci_weights` | Valid issue story-point values |
 | `epic_type_planned_weights` | Valid planned-weight pools per epic type |
 | `defaults.bootstrap` | Default counts and ratios for `--create` (see below) |
 | `defaults.tools` | Default parameter values for utility tools (see below) |
+
+### Label Conventions
+
+All label families are defined in `config.json` and created in GitLab at bootstrap time. Reports discover labels dynamically from the live snapshot rather than from config, so they work on any group.
+
+| Family | Prefix | Purpose |
+|---|---|---|
+| **Project** | `project::` | Maps epics to programmes/workstreams (e.g. `project::DO`, `project::RTSO`) |
+| **PIID** | `PIID::` | Maps work to Program Increment quarters (`PIID::2026Q3`) |
+| **Epic type** | _(bare label)_ | `Epic`, `Capability`, `Feature` — defines hierarchy level |
+| **Risk** | `risk::` | `risk::high`, `risk::medium`, `risk::low` — feeds the Risk Register |
+| **Work type** | `type::` | `type::feature`, `type::enabler`, `type::infrastructure`, `type::defect` — SAFe work classification for Flow Distribution metric |
+| **Lifecycle** | `lifecycle::` | `lifecycle::funnel` → `lifecycle::analyzing` → `lifecycle::backlog` → `lifecycle::implementing` → `lifecycle::done` — SAFe Portfolio Kanban states for Epic Lifecycle report |
+| **WSJF** | `wsjf-value::`, `wsjf-urgency::`, `wsjf-risk::` | Fibonacci 1–13 scores for WSJF priority calculation; job size comes from planned weight |
 
 #### `defaults.bootstrap`
 
@@ -159,6 +185,7 @@ At run time `--create` and `--scaffold` resolve each range to a single integer a
 | `generate_issues_count` | `5` | Default issues per Feature for `generate-issues` |
 | `weight_drift_threshold` | `20.0` | Default drift % for `weight-drift-check` |
 | `set_risk_labels_percent` | `15.0` | Default % of open epics to label for `set-risk-labels` |
+| `set_wsjf_labels_percent` | `20.0` | Default % of open epics to label for `set-wsjf-labels` |
 
 ### Environment Variable Overrides
 
@@ -172,6 +199,8 @@ Any config value can be overridden at runtime without editing the file:
 | `PIID_LABELS` | `piid_labels` (comma-separated) |
 | `EPIC_TYPE_LABELS` | `epic_type_labels` (comma-separated) |
 | `RISK_LABELS` | `risk_labels` (comma-separated) |
+| `WORK_TYPE_LABELS` | `work_type_labels` (comma-separated) |
+| `LIFECYCLE_LABELS` | `lifecycle_labels` (comma-separated) |
 | `FIBONACCI_WEIGHTS` | `fibonacci_weights` (comma-separated integers) |
 
 ---
@@ -260,11 +289,41 @@ If the target group does not exist and the path matches `parent_group` from conf
 
 ## Reports
 
-All reports are published as GitLab Wiki pages. Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`). Use `--report all` to run every report non-interactively (required for CI).
+All reports are published as GitLab Wiki pages under the root group wiki. Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`). Use `--report all` to run every report non-interactively (required for CI).
+
+### Wiki Structure — Four-Tier Portfolio Home
+
+Reports are organized into four tiers by audience and cadence. The wiki home page (`home`) is the entry point; from there, all tier landing pages and individual reports are linked.
+
+```
+home  (Portfolio Home index)
+├── 00 Executive Pulse        — daily, executives
+│   └── Portfolio Health Dashboard
+├── 01 Program Management     — weekly, RTEs and PMs
+│   ├── Program × PI Matrix
+│   ├── Program PI Detail
+│   ├── PI Predictability Scorecard
+│   ├── Risk Register
+│   ├── ART Capacity Balance
+│   ├── Blocking & Cross-ART Risk
+│   └── WSJF Priority Board
+├── 02 Operational Detail      — on demand, team leads
+│   ├── ART Feature Status
+│   ├── VS Capability Dashboard
+│   ├── Team Backlogs
+│   ├── SAFe Portfolio Hierarchy
+│   ├── ART-Team Workload
+│   ├── Flow Metrics
+│   └── Epic Lifecycle / Portfolio Kanban
+└── 03 Data Quality            — as needed, data stewards
+    ├── Unassigned PI
+    ├── Orphaned Epics
+    └── Orphaned Issues
+```
 
 ### Data Snapshot
 
-Every report run — whether a single report or all — makes **one pass through the GitLab API**, writes a complete data snapshot to disk, and then generates all wiki pages from that snapshot with no further API reads. This eliminates redundant queries across the 13 reports.
+Every report run — whether a single report or all — makes **one pass through the GitLab API**, writes a complete data snapshot to disk, and then generates all wiki pages from that snapshot with no further API reads. This eliminates redundant queries across all reports.
 
 ```
 reports/
@@ -302,35 +361,73 @@ Data snapshot → reports/20260525/143022/
 
 The `generate-reports` job in `.gitlab-ci.yml` runs `--report all` and publishes the `reports/` directory as a downloadable artifact (30-day retention). The job is `when: manual` to avoid unintended API calls. Trigger it from the GitLab pipeline UI after setting `ACCESS_TOKEN` and `GROUP_NAME` as CI/CD variables in the project settings.
 
-Reports fall into two structural types:
+### Report Index
 
-**Flat reports** publish a single page to the root group wiki.  
-**Hierarchical reports** publish a root-level index page to the root group wiki plus one detail page per group at the relevant hierarchy level. The index page summarises every sub-group and links directly to its detail page, so the root wiki is the single entry point for the full picture.
+> **Label discovery:** Reports derive label sets (`PIID::`, `project::`, `risk::`, `type::`, `lifecycle::`, `wsjf-*`) from the live data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group.
 
-> **Label discovery:** Reports derive `PIID::`, `project::`, and `risk::` label sets from the data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group without reconfiguring the tool.
+| Key | Tier | Wiki Page | What it conveys |
+|---|---|---|---|
+| `wiki-index` | — | `home` | Four-tier navigation index linking all report pages |
+| `health-dashboard` | T1 | `00 Executive Pulse/Portfolio Health Dashboard` | Per-VS traffic-light status across Schedule, Capacity, Risk, and Blocking |
+| `piid-project` | T2 | `01 Program Management/Program × PI Matrix` | Project label vs PI quarter cross-tab with status and weights |
+| `piid-project-detail` | T2 | `01 Program Management/Program PI Detail` | Per-PI section view of program workload and status |
+| `pi-predictability` | T2 | `01 Program Management/PI Predictability Scorecard` | % of committed Features/Capabilities delivered per PI, trended by ART |
+| `risk-register` | T2 | `01 Program Management/Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |
+| `art-capacity-balance` | T2 | `01 Program Management/ART Capacity Balance` | Per-team planned vs actual weight per PI — spot over/under-capacity *(index → VS → ART)* |
+| `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown *(index → VS)* |
+| `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next |
+| `art-feature-status` | T3 | `02 Operational Detail/ART Feature Status` | Features per ART grouped by Team with completion and risk *(index → VS → ART)* |
+| `vs-capability-dashboard` | T3 | `02 Operational Detail/VS Capability Dashboard` | Capabilities by PI with per-ART breakdown per VS *(index → VS)* |
+| `team-backlog` | T3 | `02 Operational Detail/Team Backlogs` | Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |
+| `portfolio` | T3 | `02 Operational Detail/SAFe Portfolio Hierarchy` | Collapsible Epic → Capability/Feature hierarchy with % complete, PI progress, and risk flags |
+| `workload` | T3 | `02 Operational Detail/ART-Team Workload` | Per-PI planned vs actual weight per group with on-track / at-risk flags |
+| `flow-metrics` | T3 | `02 Operational Detail/Flow Metrics` | SAFe flow metrics: velocity, WIP load, work type distribution, and cycle time |
+| `epic-lifecycle` | T3 | `02 Operational Detail/Epic Lifecycle` | Epics by SAFe Portfolio Kanban state with bottleneck detection and age analysis |
+| `unassigned-pi` | T4 | `03 Data Quality/Unassigned PI` | Epics with no `PIID::` label, broken down by type |
+| `orphan-epics` | T4 | `03 Data Quality/Orphaned Epics` | Epics with no parent and no children (disconnected from hierarchy) |
+| `orphan-issues` | T4 | `03 Data Quality/Orphaned Issues` | Issues not linked to any epic, grouped by project |
 
-### Flat Reports
+### Report Detail — New Reports
 
-| Key | Wiki Page | Description |
-|---|---|---|
-| `art-capacity-balance` | `<group> - ART Capacity Balance Report` | Per-team planned vs actual weight per PI with over/under capacity flags *(hierarchical)* |
-| `art-feature-status` | `<group> - ART Feature Status Report` | All Features per ART grouped by Team, with completion, weight, and risk *(hierarchical)* |
-| `blocking` | `<group> - Blocking Relationships Report` | Blocked epics, their blockers, ancestor risk propagation, and portfolio-level risk summary |
-| `health-dashboard` | `Portfolio Health Dashboard` | Tier 1 executive view — per-VS traffic-light status across Schedule, Capacity, Risk, and Blocking; Needs Attention section for blocked and behind-schedule epics |
-| `orphan-epics` | `<group> - Orphaned Epics Report` | Epics with no parent and no children (completely disconnected from hierarchy) |
-| `orphan-issues` | `<group> - Orphaned Issues Report` | Issues not linked to any epic, grouped by project |
-| `piid-project` | `<group> - Program × PI Report` | Project label vs PI quarter cross-tab with status and weights |
-| `piid-project-detail` | `<group> - Program PI Detail Report` | Per-PI section view of program workload and status |
-| `portfolio` | `<group> - SAFe Portfolio Report` | Collapsible Epic → Capability/Feature hierarchy with % complete, planned vs actual weight, PI progress, and risk flags |
-| `risk-register` | `<group> - Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI, owning ART, and state; summary counts by level and Value Stream |
-| `team-backlog` | `<group> - Team Backlog Report` | Issues grouped by Feature per Team with weight and completion *(hierarchical)* |
-| `unassigned-pi` | `<group> - Unassigned PI Report` | Epics with no `PIID::` label, broken down by type |
-| `vs-capability-dashboard` | `<group> - VS Capability Dashboard` | Capabilities and Direct Features by PI with per-ART breakdown per Value Stream *(hierarchical)* |
-| `vs-cross-art-risk` | `<group> - VS Cross-ART Risk Report` | Blocking relationships that cross ART boundaries within a Value Stream *(hierarchical)* |
-| `wiki-index` | `home` (wiki home page) | Four-tier navigation index linking all report pages; marks planned reports as _(Planned)_ |
-| `workload` | `<group> - ART-Team Workload Report` | Per-PI table of planned vs actual weight per group with on-track / at-risk / incomplete status |
+#### Portfolio Health Dashboard (T1)
+Executive traffic-light view for daily situational awareness. Each Value Stream gets a single row with coloured status indicators (🟢 / 🟡 / 🔴) across four dimensions: Schedule (% done vs % elapsed through PI), Capacity (team weight load), Risk (high-risk epics), and Blocking (blocked work count). A "Needs Attention" section lists specific blocked and at-risk epics below the summary table.
 
-> **Hierarchical reports** (`art-capacity-balance`, `art-feature-status`, `team-backlog`, `vs-capability-dashboard`, `vs-cross-art-risk`) publish a root index page plus one detail page per group at the relevant hierarchy level. `team-backlog` detail pages are written to each Team group's own wiki; all other hierarchical detail pages are written to the root wiki.
+#### Risk Register (T2)
+All epics carrying a `risk::high`, `risk::medium`, or `risk::low` label, sorted severity-first within each level. Columns show PI assignment, owning ART, epic type, state (open/closed), and a direct link to the GitLab epic. Summary counts by level and by Value Stream are at the top.
+
+#### PI Predictability Scorecard (T2)
+Measures ART predictability — the % of Features and Capabilities that were committed at PI planning and actually delivered by PI close. One row per ART per PI. Trend arrows show whether predictability is improving or declining. Useful for identifying systemic over-commitment.
+
+#### WSJF Priority Board (T2)
+Ranks portfolio backlog epics by Weighted Shortest Job First score: `(Business Value + Time Criticality + Risk Reduction) ÷ Job Size`. The three numerator components come from `wsjf-value::N`, `wsjf-urgency::N`, and `wsjf-risk::N` Fibonacci labels. Job size is the epic's planned weight. Higher scores should be scheduled first. Epics missing WSJF labels are listed separately with a prompt to use `set-wsjf-labels`.
+
+#### Flow Metrics (T3)
+Five SAFe 6.0 flow metrics across the portfolio:
+
+| Metric | What it measures |
+|---|---|
+| **Flow Velocity** | Story points delivered per PI (closed Feature weight) — is throughput increasing? |
+| **Flow Load (WIP)** | Open Features in `implementing` state — is WIP growing faster than delivery? |
+| **Flow Distribution** | Proportion of work by type (`type::feature`, `type::enabler`, `type::infrastructure`, `type::defect`) — is the portfolio balanced? |
+| **Flow Time (Cycle Time)** | Days from first `implementing` label to close for completed Features — is lead time shrinking? |
+| **Flow Predictability** | Planned vs actual weight ratio for closed Features — how reliable are estimates? |
+
+Features are the primary unit of analysis (not issues). Labels `type::*` must be applied for Distribution; `lifecycle::implementing` must be applied for Load. Use `set-work-type-labels` and `set-lifecycle-labels` to seed these labels.
+
+#### Epic Lifecycle / Portfolio Kanban (T3)
+Maps every epic to a SAFe Portfolio Kanban state via `lifecycle::*` labels:
+
+| State | Label | Description | Stuck threshold |
+|---|---|---|---|
+| 💡 Funnel | `lifecycle::funnel` | Ideas submitted, not yet analyzed | 90 days |
+| 🔍 Analyzing | `lifecycle::analyzing` | Lean Business Case in development | 30 days |
+| 📋 Portfolio Backlog | `lifecycle::backlog` | Approved, awaiting PI capacity | 60 days |
+| ⚙️ Implementing | `lifecycle::implementing` | Active in a Program Increment | — |
+| ✅ Done | `lifecycle::done` | Delivered | — |
+
+Epics that have remained in a pre-implementing state longer than the threshold are flagged with ⚠️ in a dedicated "Stuck Items" section. The report also shows epics with no lifecycle label and explains how to apply them.
+
+Use `set-lifecycle-labels` to bulk-assign lifecycle labels across existing epics, and `strip-lifecycle-labels` to reset them for testing.
 
 ### PI Progress Calculation
 
@@ -354,25 +451,49 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 |---|---|
 | `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
+| `clean-wikis` | Delete all wiki pages from a specified scope (portfolio / teams / all / group-path) |
 | `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
-| `export-epics` | Export all epics from the group hierarchy to CSV or JSON (full field set, all subgroups) |
-| `export-issues` | Export all issues from the group hierarchy to CSV or JSON (full field set, all subgroups) |
+| `export-epics` | Export all epics from the group hierarchy to CSV or JSON |
+| `export-issues` | Export all issues from the group hierarchy to CSV or JSON |
 | `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
 | `generate-issues` | Create issues in team backlog projects linked to Feature epics |
-| `import-epics` | Import epics from CSV or JSON with pre-flight validation, resilient field handling, dry-run |
-| `import-issues` | Import issues from CSV or JSON with pre-flight validation, milestone/assignee lookup, dry-run |
+| `import-epics` | Import epics from CSV or JSON with pre-flight validation and dry-run |
+| `import-issues` | Import issues from CSV or JSON with pre-flight validation and dry-run |
+| `orphan-epics` | Remove parent links from N or X% of epics (simulate orphaned data) |
+| `orphan-issues` | Remove epic links from N or X% of issues (simulate orphaned data) |
 | `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
 | `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
 | `set-epic-states` | Open or close all epics matching an optional type and/or PI filter |
-| `set-issue-weights` | Assign Fibonacci story-point weights to issues that currently have none |
+| `set-issue-weights` | Assign Fibonacci story-point weights to issues (skip already-weighted unless `reassign=True`) |
+| `strip-issue-weights` | Zero out all issue weights across every team project (clean slate for testing) |
+| `set-lifecycle-labels` | Randomly assign `lifecycle::*` labels to open epics (skip already-labelled unless `reassign=True`) |
+| `strip-lifecycle-labels` | Remove all `lifecycle::*` labels from every epic (clean slate for testing) |
 | `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one |
 | `set-project-labels` | Bulk-assign a project label to epics that are missing one |
-| `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none (simulation/seeding) |
+| `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none |
+| `set-work-type-labels` | Randomly assign `type::*` labels to open epics (skip already-labelled unless `reassign=True`) |
+| `strip-work-type-labels` | Remove all `type::*` labels from every epic (clean slate for testing) |
+| `set-wsjf-labels` | Randomly assign `wsjf-value::N`, `wsjf-urgency::N`, `wsjf-risk::N` Fibonacci labels to open epics |
+| `strip-wsjf-labels` | Remove all `wsjf-*` labels from every epic (clean slate for testing) |
 | `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
 | `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
 | `update-weights` | Assign planned weights to all epics based on SAFe type label |
 | `validate-weights` | Validate epic and issue weights against configured pools |
 | `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
+
+### Test Data Seeding Pattern
+
+The `set-*` and `strip-*` utility pairs are designed for rapid test-data cycling. A typical pattern:
+
+```bash
+# Seed WSJF labels on 50% of epics, run WSJF report, strip and repeat
+python3 NceGitLab.py --utilities set-wsjf-labels    # percent=50, reassign=False
+python3 NceGitLab.py --report wsjf
+python3 NceGitLab.py --utilities strip-wsjf-labels  # clean slate
+python3 NceGitLab.py --utilities set-wsjf-labels    # percent=80, reassign=False
+
+# Same pattern works for lifecycle, work-type, and risk labels
+```
 
 ---
 
@@ -439,6 +560,7 @@ An **orphan summary table** is printed at the end of any run that produces epics
 ## Known Issues / TODO
 
 - **Direct Features in ART-level reports:** `ART Feature Status` and `ART Capacity Balance` still assume the full three-tier chain (Epic → Capability → Feature) and do not surface Features parented directly to a Portfolio Epic. Both reports need hierarchy traversal updates to handle the two-tier (Epic → Feature) case.
+- **Wiki folder page links:** Folder pages (tier landing pages) rely on GitLab's wiki slug matching the slug passed at creation time. If a page was created before the explicit-slug fix, its URL may differ from what the index links expect. Re-running `--report wiki-index` will recreate all tier pages with correct slugs.
 
 ---
 
