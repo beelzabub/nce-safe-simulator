@@ -71,6 +71,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "pi-predictability",
+        "description": "PI Predictability Scorecard — % of committed Features/Capabilities delivered per PI, trended by ART",
+        "method":      "generate_pi_predictability_scorecard",
+        "needs_group": False,
+    },
+    {
         "key":         "portfolio",
         "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
         "method":      "generate_portfolio_report",
@@ -113,12 +119,47 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "wsjf",
+        "description": "WSJF Priority Board — portfolio backlog epics ranked by Weighted Shortest Job First score",
+        "method":      "generate_wsjf_priority_board",
+        "needs_group": False,
+    },
+    {
         "key":         "workload",
         "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
         "method":      "generate_workload_report",
         "needs_group": False,
     },
 ]
+
+# Wiki tier prefixes are set as instance attributes in _run_reports:
+#   self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
+#   self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
+#   self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
+#   self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
+
+
+def _wiki_slug(page_title: str) -> str:
+    """Convert a page title to a GitLab wiki URL slug.
+
+    Rules (applied in order):
+      1. Drop non-ASCII characters (e.g. em-dash —, multiplication ×).
+      2. Replace any remaining character that isn't alphanumeric, a slash, a
+         dash, or a space with a space (e.g. ampersand &).
+      3. Collapse runs of whitespace to a single space.
+      4. Convert spaces to dashes.
+      5. Collapse runs of dashes (produced by steps 1-4) to a single dash.
+      6. Strip leading/trailing dashes from each segment.
+
+    Forward slashes are preserved as GitLab wiki path separators.
+    """
+    import re as _re
+    s = _re.sub(r'[^\x00-\x7F]', '', page_title)      # 1. drop non-ASCII
+    s = _re.sub(r'[^a-zA-Z0-9/\- ]', ' ', s)           # 2. special ASCII → space
+    s = _re.sub(r' +', ' ', s).strip()                  # 3. collapse spaces
+    s = s.replace(' ', '-')                              # 4. spaces → dashes
+    s = _re.sub(r'-+', '-', s)                           # 5. collapse dashes
+    return s.strip('-')
 
 
 class ReportsMixin:
@@ -412,8 +453,8 @@ class ReportsMixin:
                 f"&state=all"
             )
 
-        detail_title = f"{group.name} - Program PI Detail Report"
-        detail_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{detail_title.replace(' ', '-').lower()}"
+        detail_title = f"{self._wiki_t2}/Program PI Detail"
+        detail_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{_wiki_slug(detail_title)}"
 
         md = []
         md.append(f"# Program × PI Report (Group: {group.name})")
@@ -484,7 +525,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Program PI Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Program × PI Matrix", "\n".join(md))
 
     def generate_piid_project_detail_report(self):
         """Per-PI section view of program workload — one section per PIID quarter."""
@@ -530,8 +571,8 @@ class ReportsMixin:
                 return "Past"
             return "Current"
 
-        matrix_title = f"{group.name} - Program PI Report"
-        matrix_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{matrix_title.replace(' ', '-').lower()}"
+        matrix_title = f"{self._wiki_t2}/Program × PI Matrix"
+        matrix_url   = f"{self.url}/groups/{group.full_path}/-/wikis/{_wiki_slug(matrix_title)}"
 
         md = []
         md.append(f"# Program PI Detail Report (Group: {group.name})")
@@ -606,7 +647,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Program PI Detail Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Program PI Detail", "\n".join(md))
 
     def generate_portfolio_report(self):
         group      = self._rd_root_obj
@@ -685,7 +726,7 @@ class ReportsMixin:
             ])
 
             md = "\n".join(markdown_report)
-            self.upload_to_wiki(group, f"{group_name} - SAFe Portfolio Report", md)
+            self.upload_to_wiki(group, f"{self._wiki_t3}/SAFe Portfolio Hierarchy", md)
 
         except Exception as e:
             print(f"Failed to generate epics report for group '{group_name}': {e}")
@@ -883,7 +924,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - ART-Team Workload Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t3}/ART-Team Workload", "\n".join(md))
 
     def list_blocking_epics(self):
         group     = self.get_group_by_name(self.parent_group)
@@ -1069,7 +1110,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Blocking Relationships Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Blocking & Cross-ART Risk", "\n".join(md))
 
     def generate_orphan_epics_report(self):
         group = self._rd_root_obj
@@ -1110,7 +1151,7 @@ class ReportsMixin:
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 md.append(f"| {icon} {etype} | {title_link} | {epic['state']} |")
 
-        self.upload_to_wiki(group, f"{group.name} - Orphaned Epics Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Epics", "\n".join(md))
 
     def generate_orphan_issues_report(self):
         group = self._rd_root_obj
@@ -1154,7 +1195,7 @@ class ReportsMixin:
                     md.append(f"| #{issue['iid']} | {title_link} | {state} | {milestone} | {assignees} |")
                 md.append("")
 
-        self.upload_to_wiki(group, f"{group.name} - Orphaned Issues Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Issues", "\n".join(md))
 
     def generate_unassigned_pi_report(self):
         group = self._rd_root_obj
@@ -1207,7 +1248,7 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Unassigned PI Report", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Unassigned PI", "\n".join(md))
 
     # ------------------------------------------------------------------
     # Hierarchy traversal helpers (shared by team/ART/VS reports)
@@ -1254,7 +1295,7 @@ class ReportsMixin:
                 "",
                 "_No risk labels found. Apply `risk::high`, `risk::medium`, or `risk::low` to epics and re-run._",
             ]
-            self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
+            self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
             return
 
         # Build relative path from root for each epic's owning group
@@ -1371,7 +1412,147 @@ class ReportsMixin:
             "",
         ])
 
-        self.upload_to_wiki(group, f"{group.name} - Risk Register", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
+
+    # ------------------------------------------------------------------
+    # PI Predictability Scorecard
+    # ------------------------------------------------------------------
+
+    def generate_pi_predictability_scorecard(self):
+        """PI Predictability Scorecard — % of committed Features/Capabilities delivered per PI."""
+        group = self._rd_root_obj
+        today = date.today()
+        print(f"  Generating PI Predictability Scorecard for {group.name}...")
+
+        # ART → set of group_ids it contains (ART + its teams)
+        art_group_ids: dict = {}
+        for vs_group, art_group in self._iter_art_groups():
+            ids = {art_group["id"]}
+            for team in self._rd_groups_by_parent.get(art_group["id"], []):
+                ids.add(team["id"])
+            art_group_ids[art_group["id"]] = ids
+
+        # Bucket: art_id → piid → [epic, ...]  (Features + Capabilities as commitment units)
+        commitment_epics = (
+            self._rd_metrics.get("Feature", []) +
+            self._rd_metrics.get("Capability", [])
+        )
+        art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
+        for epic in commitment_epics:
+            gid  = epic.get("group_id")
+            piid = epic.get("piid")
+            if not piid:
+                continue
+            for art_id, gids in art_group_ids.items():
+                if gid in gids:
+                    art_pi_data[art_id][piid].append(epic)
+                    break
+
+        all_pis = sorted(
+            {piid for pi_map in art_pi_data.values() for piid in pi_map},
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+        )
+
+        if not all_pis:
+            md = [
+                f"# PI Predictability Scorecard — {group.name}",
+                f"**Report Date:** {today.strftime('%Y-%m-%d')}",
+                "",
+                "_No PI-committed Features or Capabilities found. Ensure epics carry `PIID::` labels._",
+            ]
+            self.upload_to_wiki(group, f"{self._wiki_t2}/PI Predictability Scorecard", "\n".join(md))
+            return
+
+        def _pred(epics):
+            total  = len(epics)
+            closed = sum(1 for e in epics if e["state"].lower() == "closed")
+            pct    = round(closed / total * 100) if total else None
+            return closed, total, pct
+
+        def _cell(closed, total, pct, piid):
+            if total == 0:
+                return " — "
+            pct_pi = self._pct_through_pi(piid)
+            if pct_pi is None or pct_pi == 0:
+                return f" 🔵 {total} planned "
+            if pct_pi < 100:
+                # Current PI — in-flight, no final score yet
+                icon = "✅" if pct >= 80 else ("⚠️" if pct and pct >= 60 else "🟡")
+                return f" {icon} {closed}/{total} in progress "
+            # Past PI — final predictability
+            icon = "✅" if pct >= 80 else ("⚠️" if pct >= 60 else "❌")
+            return f" {icon} {pct}% ({closed}/{total}) "
+
+        md = []
+        md.append(f"# PI Predictability Scorecard — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "Percentage of committed Features and Capabilities that were delivered in each PI.  "
+            "Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a systemic problem."
+        )
+        md.append("")
+
+        header = "| ART |" + "".join(f" {p} |" for p in all_pis)
+        sep    = "|---|" + "".join("---|" for _ in all_pis)
+        md.append(header)
+        md.append(sep)
+
+        portfolio_by_pi: defaultdict = defaultdict(list)
+        any_rows = False
+
+        for vs_group, art_group in self._iter_art_groups():
+            art_id  = art_group["id"]
+            pi_data = art_pi_data.get(art_id)
+            if not pi_data:
+                continue
+            any_rows = True
+            art_link = f"[{art_group['name']}]({art_group['web_url']})"
+            cells = []
+            for piid in all_pis:
+                epics = pi_data.get(piid, [])
+                closed, total, pct = _pred(epics)
+                portfolio_by_pi[piid].extend(epics)
+                cells.append(_cell(closed, total, pct, piid))
+            md.append("| **" + art_link + "** |" + "|".join(cells) + "|")
+
+        if not any_rows:
+            md.append("_No ART-level commitment data found._")
+            md.append("")
+        else:
+            # Portfolio aggregate row
+            cells = []
+            for piid in all_pis:
+                epics = portfolio_by_pi.get(piid, [])
+                closed, total, pct = _pred(epics)
+                cells.append(_cell(closed, total, pct, piid))
+            md.append("| **Portfolio Total** |" + "|".join(cells) + "|")
+
+        md.extend([
+            "",
+            "---",
+            "## Legend",
+            "",
+            "**Predictability %** = closed Features + Capabilities ÷ total committed to PI × 100",
+            "",
+            "| Icon | Range | Meaning |",
+            "|------|-------|---------|",
+            "| ✅ | ≥ 80% | On target — team reliably delivers commitments |",
+            "| ⚠️ | 60–79% | Watch — delivery shortfall, investigate root cause |",
+            "| ❌ | < 60%  | At risk — systemic delivery problem, escalate |",
+            "| 🟡 | Current PI | In progress — final score not yet determined |",
+            "| 🔵 | Future PI  | Not yet started — shows planned commitment count |",
+            "",
+            "> **Sandbagging signal:** an ART consistently at 100% across multiple past PIs "
+            "may be under-committing. Healthy predictability is typically 80–90%.",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{self._wiki_t2}/PI Predictability Scorecard", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/PI Predictability Scorecard")
 
     # ------------------------------------------------------------------
     # Team-level reports
@@ -1410,7 +1591,7 @@ class ReportsMixin:
             md.append(f"- [**{team_name} — Team Backlog**]({wiki_url})  {summary}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - Team Backlog Index", "\n".join(md))
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/Team Backlogs", "\n".join(md))
         print(f"  → Root wiki: {root_group.name} - Team Backlog Index")
 
     def _generate_team_backlog_page(self, vs_group, art_group, team_group):
@@ -1575,19 +1756,16 @@ class ReportsMixin:
             md.append(f"- [**{art_name} — Feature Status**]({wiki_url})  · {total_f} features{risk_str}{blocked_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - ART Feature Status Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - ART Feature Status Index")
+        # (flat index page removed — navigation is via the nested wiki tree)
 
-        # Intermediate pages — GitLab creates these as blank when nested titles use /
-        # Group entries by VS
+        # Group entries by VS for the tier-nested pages
         vs_arts: defaultdict = defaultdict(list)
         for vs_name, art_name, wiki_url, total_f, at_risk, blocked in index_entries:
             vs_arts[vs_name].append((art_name, wiki_url, total_f, at_risk, blocked))
 
         # VS-level pages
         for vs_name, arts in vs_arts.items():
-            vs_slug     = vs_name.replace(" ", "-")
-            wiki_title  = f"ART Feature Status/{vs_name}"
+            wiki_title  = f"{self._wiki_t3}/ART Feature Status/{vs_name}"
             md_vs = []
             md_vs.append(f"# ART Feature Status — {vs_name}")
             md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1605,7 +1783,7 @@ class ReportsMixin:
             print(f"    → Wiki: {wiki_title}")
 
         # Top-level landing page
-        top_url  = f"{root_group.web_url}/-/wikis/ART-Feature-Status"
+        top_url  = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/ART Feature Status')}"
         md_top   = []
         md_top.append("# ART Feature Status")
         md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1614,20 +1792,16 @@ class ReportsMixin:
         md_top.append("Select a Value Stream to browse its ARTs:")
         md_top.append("")
         for vs_name, arts in vs_arts.items():
-            vs_slug   = vs_name.replace(" ", "-")
-            vs_url    = f"{root_group.web_url}/-/wikis/ART-Feature-Status/{vs_slug}"
+            vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/ART Feature Status/{vs_name}')}"
             art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
             md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "ART Feature Status", "\n".join(md_top))
-        print(f"    → Wiki: ART Feature Status")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/ART Feature Status", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/ART Feature Status")
 
     def _generate_art_feature_status_page(self, root_group, vs_group, art_group, team_buckets, team_hierarchy):
-        wiki_title = f"ART Feature Status/{vs_group['name']}/{art_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/ART-Feature-Status"
-            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t3}/ART Feature Status/{vs_group['name']}/{art_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         md = []
         md.append(f"# ART Feature Status — {art_group['name']}")
@@ -1753,8 +1927,7 @@ class ReportsMixin:
             md.append(f"- [**{art_name} — Capacity Balance**]({wiki_url}){flag_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - ART Capacity Balance Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - ART Capacity Balance Index")
+        # (flat legacy index removed — top-level landing page is the T2 page below)
 
         # Intermediate pages — GitLab creates these as blank when nested titles use /
         vs_arts: defaultdict = defaultdict(list)
@@ -1763,7 +1936,7 @@ class ReportsMixin:
 
         # VS-level pages
         for vs_name, arts in vs_arts.items():
-            wiki_title = f"ART Capacity Balance/{vs_name}"
+            wiki_title = f"{self._wiki_t2}/ART Capacity Balance/{vs_name}"
             md_vs = []
             md_vs.append(f"# ART Capacity Balance — {vs_name}")
             md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1780,7 +1953,7 @@ class ReportsMixin:
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
 
-        # Top-level landing page
+        # Top-level landing page (Tier 2)
         md_top = []
         md_top.append("# ART Capacity Balance")
         md_top.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
@@ -1789,20 +1962,16 @@ class ReportsMixin:
         md_top.append("Select a Value Stream to browse its ARTs:")
         md_top.append("")
         for vs_name, arts in vs_arts.items():
-            vs_slug   = vs_name.replace(" ", "-")
-            vs_url    = f"{root_group.web_url}/-/wikis/ART-Capacity-Balance/{vs_slug}"
+            vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/ART Capacity Balance/{vs_name}')}"
             art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
             md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "ART Capacity Balance", "\n".join(md_top))
-        print(f"    → Wiki: ART Capacity Balance")
+        self.upload_to_wiki(root_group, f"{self._wiki_t2}/ART Capacity Balance", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t2}/ART Capacity Balance")
 
     def _generate_art_capacity_balance_page(self, root_group, vs_group, art_group, pi_buckets, team_hierarchy):
-        wiki_title = f"ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/ART-Capacity-Balance"
-            f"/{vs_group['name'].replace(' ', '-')}/{art_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t2}/ART Capacity Balance/{vs_group['name']}/{art_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         sorted_pis = sorted(
             pi_buckets.keys(),
@@ -1977,8 +2146,7 @@ class ReportsMixin:
             md.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - VS Capability Dashboard Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - VS Capability Dashboard Index")
+        # (flat legacy index removed — top-level landing page is the T3 page below)
 
         # Top-level landing page for the nested wiki section
         md_top = []
@@ -2003,15 +2171,12 @@ class ReportsMixin:
             blocked_str = f"  ·  🔒 {blocked} blocked" if blocked else ""
             md_top.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "VS Capability Dashboard", "\n".join(md_top))
-        print(f"    → Wiki: VS Capability Dashboard")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Capability Dashboard", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/VS Capability Dashboard")
 
     def _generate_vs_capability_dashboard_page(self, root_group, vs_group, cap_pi_buckets, direct_pi_buckets, art_hierarchy, team_hierarchy):
-        wiki_title = f"VS Capability Dashboard/{vs_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/VS-Capability-Dashboard"
-            f"/{vs_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t3}/VS Capability Dashboard/{vs_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         all_pis = sorted(
             set(cap_pi_buckets) | set(direct_pi_buckets),
@@ -2260,8 +2425,7 @@ class ReportsMixin:
             md.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
 
         md.append("")
-        self.upload_to_wiki(root_group, f"{root_group.name} - VS Cross-ART Risk Index", "\n".join(md))
-        print(f"  → Root wiki: {root_group.name} - VS Cross-ART Risk Index")
+        # (flat legacy index removed — top-level landing page is the T3 page below)
 
         # Top-level landing page for the nested wiki section
         md_top = []
@@ -2278,15 +2442,12 @@ class ReportsMixin:
             clear_str = "  ·  ✅ No cross-ART blocks" if total_deps == 0 else f"  ·  {total_deps} cross-ART dependencies"
             md_top.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
         md_top.append("")
-        self.upload_to_wiki(root_group, "VS Cross-ART Risk", "\n".join(md_top))
-        print(f"    → Wiki: VS Cross-ART Risk")
+        self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Cross-ART Risk", "\n".join(md_top))
+        print(f"    → Wiki: {self._wiki_t3}/VS Cross-ART Risk")
 
     def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
-        wiki_title = f"VS Cross-ART Risk/{vs_group['name']}"
-        wiki_url   = (
-            f"{root_group.web_url}/-/wikis/VS-Cross-ART-Risk"
-            f"/{vs_group['name'].replace(' ', '-')}"
-        )
+        wiki_title = f"{self._wiki_t3}/VS Cross-ART Risk/{vs_group['name']}"
+        wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         today = date.today()
 
@@ -2748,9 +2909,145 @@ class ReportsMixin:
             "",
         ])
 
-        page_title = "Portfolio Health Dashboard"
+        page_title = f"{self._wiki_t1}/Portfolio Health Dashboard"
         self.upload_to_wiki(root_group, page_title, "\n".join(md))
         print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
+    # WSJF Priority Board
+    # ------------------------------------------------------------------
+
+    def generate_wsjf_priority_board(self):
+        """WSJF Priority Board — portfolio backlog epics ranked by Weighted Shortest Job First score."""
+        group = self._rd_root_obj
+        today = date.today()
+        print(f"  Generating WSJF Priority Board for {group.name}...")
+
+        def _label_val(labels, prefix):
+            for lbl in labels:
+                if lbl.startswith(prefix):
+                    try:
+                        return int(lbl.split("::")[-1])
+                    except ValueError:
+                        pass
+            return None
+
+        # Scan all typed epics — only these have computed planned_weight
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+
+        candidates = []
+        for epic in all_typed:
+            if epic.get("state", "").lower() != "opened":
+                continue
+            labels  = epic.get("labels", [])
+            value   = _label_val(labels, "wsjf-value::")
+            urgency = _label_val(labels, "wsjf-urgency::")
+            risk    = _label_val(labels, "wsjf-risk::")
+            if value is None and urgency is None and risk is None:
+                continue
+            size  = epic.get("planned_weight") or None  # None → partial score
+            v, u, r = (value or 0), (urgency or 0), (risk or 0)
+            score = round((v + u + r) / size, 2) if size else None
+            candidates.append({
+                "epic":    epic,
+                "type":    epic.get("type", "Unknown"),
+                "value":   value,
+                "urgency": urgency,
+                "risk":    risk,
+                "size":    size,
+                "score":   score,
+                "piid":    epic.get("piid"),
+            })
+
+        # Fully scored first (highest → lowest), then partial, then no-size
+        candidates.sort(key=lambda x: (x["score"] is None, -(x["score"] or 0)))
+
+        md = []
+        md.append(f"# WSJF Priority Board — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "Weighted Shortest Job First (WSJF) ranks portfolio backlog items by the ratio of "
+            "Cost of Delay to Job Size. Higher score = should be sequenced first."
+        )
+        md.append("")
+
+        if not candidates:
+            md.append(
+                "_No WSJF-scored epics found. Apply `wsjf-value::N`, `wsjf-urgency::N`, and "
+                "`wsjf-risk::N` labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
+            )
+        else:
+            scored    = [c for c in candidates if c["score"] is not None]
+            partial   = [c for c in candidates if c["score"] is None]
+            backlog   = [c for c in candidates if not c["piid"]]
+            in_flight = [c for c in candidates if c["piid"]]
+
+            md.append("## Summary")
+            md.append("")
+            md.append("| | Count |")
+            md.append("|---|---|")
+            md.append(f"| Fully scored | {len(scored)} |")
+            md.append(f"| Partially scored (missing component or job size) | {len(partial)} |")
+            md.append(f"| Portfolio Backlog (no PI) | {len(backlog)} |")
+            md.append(f"| In-flight (PI assigned) | {len(in_flight)} |")
+            md.append("")
+
+            md.append("## Ranked Board")
+            md.append("")
+            md.append("| Rank | Epic | Type | PI | Value | Urgency | Risk | Size | WSJF |")
+            md.append("|------|------|------|----|-------|---------|------|------|------|")
+
+            for rank, c in enumerate(candidates, 1):
+                epic   = c["epic"]
+                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "🏆")
+                link   = f"[{epic['title']}]({epic['web_url']})"
+                piid   = c["piid"] or "_backlog_"
+                v_str  = str(c["value"])   if c["value"]   is not None else "—"
+                u_str  = str(c["urgency"]) if c["urgency"] is not None else "—"
+                r_str  = str(c["risk"])    if c["risk"]    is not None else "—"
+                s_str  = str(c["size"])    if c["size"]    is not None else "—"
+                sc_str = f"**{c['score']}**" if c["score"] is not None else "_partial_"
+                md.append(
+                    f"| {rank} | {link} | {icon} {c['type']} | {piid} "
+                    f"| {v_str} | {u_str} | {r_str} | {s_str} | {sc_str} |"
+                )
+
+            md.append("")
+
+        md.extend([
+            "---",
+            "## How WSJF Works",
+            "",
+            "**WSJF = (User/Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
+            "",
+            "| Component | Label | What it measures |",
+            "|-----------|-------|-----------------|",
+            "| User/Business Value | `wsjf-value::N` | Economic benefit of delivering this work |",
+            "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how fast does value decay? |",
+            "| Risk Reduction | `wsjf-risk::N` | Risk reduced or opportunity enabled by this work |",
+            "| Job Size | Epic planned weight | Relative effort (set the epic's weight field) |",
+            "",
+            "**Fibonacci scale:** 1 · 2 · 3 · 5 · 8 · 13  _(higher = more)_",
+            "",
+            "A score of 8.0 means the item delivers 8× more value per unit of effort than a score-1 item.",
+            "",
+            "> **Calibration signal:** Scores should spread across the range. If most items cluster "
+            "at 13/13/13 the scale has lost meaning — challenge the team to differentiate.",
+            "",
+            "### Scoring Status",
+            "| Status | Condition |",
+            "|--------|-----------|",
+            "| **N.NN** (bold score) | All three label components present and job size > 0 |",
+            "| _partial_ | One or more label components missing, or job size not set |",
+            "",
+        ])
+
+        self.upload_to_wiki(group, f"{self._wiki_t2}/WSJF Priority Board", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/WSJF Priority Board")
 
     # ------------------------------------------------------------------
     # Wiki Index
@@ -2763,13 +3060,7 @@ class ReportsMixin:
         base  = f"{self.url}/groups/{group.full_path}/-/wikis"
 
         def _wl(page_title, display=None):
-            """Return a markdown link to a wiki page using GitLab's slug rules:
-            non-ASCII dropped, multiple spaces collapsed, spaces → '-', case preserved."""
-            import re as _re
-            slug = _re.sub(r'[^\x00-\x7F]', '', page_title)  # drop non-ASCII (e.g. ×)
-            slug = _re.sub(r' +', ' ', slug).strip()          # collapse double-spaces left by removal
-            slug = slug.replace(" ", "-")                     # spaces → dashes; ' - ' → '---'
-            return f"[{display or page_title}]({base}/{slug})"
+            return f"[{display or page_title}]({base}/{_wiki_slug(page_title)})"
 
         md = []
         md.append(f"# {gn} — Portfolio Home")
@@ -2789,7 +3080,7 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl('Portfolio Health Dashboard')} "
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |"
         )
         md.append("")
@@ -2802,27 +3093,33 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl(f'{gn} - Program × PI Report', 'Program × PI Matrix')} "
+            f"| {_wl(f'{self._wiki_t2}/Program × PI Matrix', 'Program × PI Matrix')} "
             f"| Project label vs PI quarter cross-tab with status and weights |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Program PI Detail Report', 'Program PI Detail')} "
+            f"| {_wl(f'{self._wiki_t2}/Program PI Detail', 'Program PI Detail')} "
             f"| Per-PI section view of program workload and status |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Risk Register', 'Risk Register')} "
+            f"| {_wl(f'{self._wiki_t2}/PI Predictability Scorecard', 'PI Predictability Scorecard')} "
+            f"| % of committed Features and Capabilities delivered per PI, trended by ART |"
+        )
+        md.append(
+            f"| {_wl(f'{self._wiki_t2}/Risk Register', 'Risk Register')} "
             f"| All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |"
         )
         md.append(
-            f"| {_wl('ART Capacity Balance')} "
+            f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
             f"| Per-team planned vs actual weight per PI *(index → VS → ART)* |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Blocking Relationships Report', 'Blocking Relationships')} "
+            f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
             f"| Blocked epics, blockers, and ancestor risk propagation |"
         )
-        md.append("| ~~PI Predictability Scorecard~~ | _Planned_ |")
-        md.append("| ~~WSJF Priority Board~~ | _Planned_ |")
+        md.append(
+            f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
+            f"| Portfolio backlog epics ranked by (Value + Urgency + Risk) ÷ Job Size |"
+        )
         md.append("")
 
         # ── Tier 3 ──────────────────────────────────────────────────────── #
@@ -2833,27 +3130,27 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl('ART Feature Status')} "
+            f"| {_wl(f'{self._wiki_t3}/ART Feature Status', 'ART Feature Status')} "
             f"| Features per ART grouped by Team with completion and risk *(index → VS → ART)* |"
         )
         md.append(
-            f"| {_wl('VS Capability Dashboard')} "
+            f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
             f"| Capabilities by PI with per-ART breakdown *(index → VS)* |"
         )
         md.append(
-            f"| {_wl('VS Cross-ART Risk')} "
+            f"| {_wl(f'{self._wiki_t3}/VS Cross-ART Risk', 'VS Cross-ART Risk')} "
             f"| Blocking relationships that cross ART boundaries *(index → VS)* |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Team Backlog Index', 'Team Backlog')} "
+            f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
             f"| Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |"
         )
         md.append(
-            f"| {_wl(f'{gn} - SAFe Portfolio Report', 'SAFe Portfolio Hierarchy')} "
+            f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
             f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |"
         )
         md.append(
-            f"| {_wl(f'{gn} - ART-Team Workload Report', 'ART-Team Workload')} "
+            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
             f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |"
         )
         md.append("| ~~Flow Metrics~~ | _Planned_ |")
@@ -2869,21 +3166,137 @@ class ReportsMixin:
         md.append("| Report | Description |")
         md.append("|--------|-------------|")
         md.append(
-            f"| {_wl(f'{gn} - Unassigned PI Report', 'Unassigned PI')} "
+            f"| {_wl(f'{self._wiki_t4}/Unassigned PI', 'Unassigned PI')} "
             f"| Epics with no `PIID::` label, broken down by type |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Orphaned Epics Report', 'Orphaned Epics')} "
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Epics', 'Orphaned Epics')} "
             f"| Epics with no parent and no children (disconnected from hierarchy) |"
         )
         md.append(
-            f"| {_wl(f'{gn} - Orphaned Issues Report', 'Orphaned Issues')} "
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
             f"| Issues not linked to any epic, grouped by project |"
         )
         md.append("")
 
         self.upload_to_wiki(group, "home", "\n".join(md))
         print(f"  ↳ Wiki home page updated for {gn}")
+
+        home_url  = f"{self.url}/groups/{group.full_path}/-/wikis/home"
+        _back     = f"[← Portfolio Home]({home_url})"
+        root_name = f"{gn} — Portfolio Home"
+
+        # ── Root folder page (in case GitLab surfaces it as blank) ────────── #
+        root_folder_md = [
+            f"# {root_name}",
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** [{gn}]({group.web_url})",
+            "",
+            f"This is the SAFe portfolio wiki for **{gn}**. Navigate using the tier sections below "
+            f"or return to the [Portfolio Home]({home_url}) index.",
+            "",
+            f"| Tier | Audience | Cadence |",
+            f"|------|----------|---------|",
+            f"| [📊 00 Executive Pulse]({base}/{_wiki_slug(self._wiki_t1)}) "
+            f"| Executives, Portfolio Managers | Daily |",
+            f"| [🗂️ 01 Program Management]({base}/{_wiki_slug(self._wiki_t2)}) "
+            f"| Release Train Engineers, PMs | Weekly |",
+            f"| [🔍 02 Operational Detail]({base}/{_wiki_slug(self._wiki_t3)}) "
+            f"| ART and Team leads | On demand |",
+            f"| [🔧 03 Data Quality]({base}/{_wiki_slug(self._wiki_t4)}) "
+            f"| All — fix labeling gaps | As needed |",
+            "",
+        ]
+        self.upload_to_wiki(group, root_name, "\n".join(root_folder_md))
+
+        # ── Tier landing pages (so folder pages are never blank) ─────────── #
+
+        t1_md = [
+            f"# 📊 Executive Pulse — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_One page. Viewed daily. Read in 90 seconds._",
+            "",
+            "| Report | Description |",
+            "|--------|-------------|",
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
+            f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t1, "\n".join(t1_md))
+
+        t2_md = [
+            f"# 🗂️ Program Management — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Reviewed in weekly ART syncs and PM stand-ups._",
+            "",
+            "| Report | Description |",
+            "|--------|-------------|",
+            f"| {_wl(f'{self._wiki_t2}/Program × PI Matrix', 'Program × PI Matrix')} "
+            f"| Project label vs PI quarter cross-tab with status and weights |",
+            f"| {_wl(f'{self._wiki_t2}/Program PI Detail', 'Program PI Detail')} "
+            f"| Per-PI section view of program workload and status |",
+            f"| {_wl(f'{self._wiki_t2}/PI Predictability Scorecard', 'PI Predictability Scorecard')} "
+            f"| % of committed Features and Capabilities delivered per PI, trended by ART |",
+            f"| {_wl(f'{self._wiki_t2}/Risk Register', 'Risk Register')} "
+            f"| All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |",
+            f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
+            f"| Per-team planned vs actual weight per PI *(index → VS → ART)* |",
+            f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
+            f"| Blocked epics, blockers, and ancestor risk propagation |",
+            f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
+            f"| Portfolio backlog epics ranked by (Value + Urgency + Risk) ÷ Job Size |",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t2, "\n".join(t2_md))
+
+        t3_md = [
+            f"# 🔍 Operational Detail — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Drill-down from Tier 2. Available on demand._",
+            "",
+            "| Report | Description |",
+            "|--------|-------------|",
+            f"| {_wl(f'{self._wiki_t3}/ART Feature Status', 'ART Feature Status')} "
+            f"| Features per ART grouped by Team with completion and risk *(index → VS → ART)* |",
+            f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
+            f"| Capabilities by PI with per-ART breakdown *(index → VS)* |",
+            f"| {_wl(f'{self._wiki_t3}/VS Cross-ART Risk', 'VS Cross-ART Risk')} "
+            f"| Blocking relationships that cross ART boundaries *(index → VS)* |",
+            f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
+            f"| Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |",
+            f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
+            f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |",
+            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
+            f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |",
+            "| ~~Flow Metrics~~ | _Planned_ |",
+            "| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |",
+            "| ~~PI Planning Program Board~~ | _Planned_ |",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t3, "\n".join(t3_md))
+
+        t4_md = [
+            f"# 🔧 Data Quality — {gn}",
+            f"**{_back}**  |  **Updated:** {today.strftime('%Y-%m-%d')}",
+            "",
+            "_Maintenance views — labeling and setup problems, not delivery status._",
+            "",
+            "> These reports identify data hygiene issues to fix — missing labels, disconnected epics, "
+            "issues not linked to the portfolio hierarchy. They are not delivery status indicators.",
+            "",
+            "| Report | Description |",
+            "|--------|-------------|",
+            f"| {_wl(f'{self._wiki_t4}/Unassigned PI', 'Unassigned PI')} "
+            f"| Epics with no `PIID::` label, broken down by type |",
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Epics', 'Orphaned Epics')} "
+            f"| Epics with no parent and no children (disconnected from hierarchy) |",
+            f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
+            f"| Issues not linked to any epic, grouped by project |",
+            "",
+        ]
+        self.upload_to_wiki(group, self._wiki_t4, "\n".join(t4_md))
 
     def generate_all_reports(self):
         self._run_reports(REPORTS)
@@ -3231,6 +3644,11 @@ class ReportsMixin:
         """Execute a list of report entries from the REPORTS registry."""
         group = self.get_group_by_name(self.parent_group)
         self._rd_root_obj = group
+        gn = group.name
+        self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
+        self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
+        self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
+        self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
         print(f"\nGenerating reports for group: {group.full_path}\n")
 
         now      = datetime.now()
