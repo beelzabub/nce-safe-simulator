@@ -41,6 +41,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "epic-lifecycle",
+        "description": "Epic Lifecycle / Portfolio Kanban — epics by SAFe lifecycle state with bottleneck and age analysis",
+        "method":      "generate_epic_lifecycle_report",
+        "needs_group": False,
+    },
+    {
         "key":         "flow-metrics",
         "description": "Flow Metrics Report — velocity, load, distribution, and cycle time across the portfolio",
         "method":      "generate_flow_metrics_report",
@@ -2920,6 +2926,250 @@ class ReportsMixin:
         print(f"  → Wiki: {page_title}")
 
     # ------------------------------------------------------------------
+    # Epic Lifecycle / Portfolio Kanban
+    # ------------------------------------------------------------------
+
+    def generate_epic_lifecycle_report(self):
+        """Epic Lifecycle / Portfolio Kanban — epics by SAFe lifecycle state."""
+        group = self._rd_root_obj
+        today = date.today()
+        gn    = group.name
+        print(f"  Generating Epic Lifecycle / Portfolio Kanban for {gn}...")
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+
+        STATES = [
+            ("lifecycle::funnel",       "💡 Funnel",             "Ideas submitted, not yet analyzed"),
+            ("lifecycle::analyzing",    "🔍 Analyzing",          "Lean Business Case in development"),
+            ("lifecycle::backlog",      "📋 Portfolio Backlog",  "Approved, awaiting capacity"),
+            ("lifecycle::implementing", "⚙️ Implementing",       "Active in a Program Increment"),
+            ("lifecycle::done",         "✅ Done",               "Delivered"),
+        ]
+        STATE_KEYS = {s[0] for s in STATES}
+
+        STUCK_THRESHOLDS = {
+            "lifecycle::funnel":    90,   # days before flagged
+            "lifecycle::analyzing": 30,
+            "lifecycle::backlog":   60,
+        }
+
+        def _age_days(epic):
+            raw = epic.get("created_at")
+            if not raw:
+                return None
+            try:
+                c = date.fromisoformat(str(raw)[:10])
+                return (today - c).days
+            except ValueError:
+                return None
+
+        def _group_name(epic):
+            gid = epic.get("group_id")
+            if gid and hasattr(self, '_rd_groups_by_id'):
+                g = self._rd_groups_by_id.get(gid)
+                return g["name"] if g else "—"
+            return "—"
+
+        def _pi(epic):
+            return epic.get("piid") or "—"
+
+        # Partition epics by lifecycle state
+        buckets = {key: [] for key, _, _ in STATES}
+        buckets["_unlabelled"] = []
+        for epic in all_typed:
+            labels  = set(epic.get("labels", []))
+            matched = labels & STATE_KEYS
+            if not matched:
+                buckets["_unlabelled"].append(epic)
+            else:
+                # If multiple lifecycle labels, pick the first in state order
+                for key, _, _ in STATES:
+                    if key in matched:
+                        buckets[key].append(epic)
+                        break
+
+        # ── build page ───────────────────────────────────────────────── #
+        md = []
+        md.append(f"# Epic Lifecycle / Portfolio Kanban — {gn}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{gn}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "> The SAFe Portfolio Kanban tracks where epics are in their approval-to-delivery "
+            "lifecycle. Use this report to identify bottlenecks in the funding and approval "
+            "pipeline — not just delivery progress. Epics stuck in **Analyzing** or "
+            "**Portfolio Backlog** signal decision-making delays that block downstream delivery."
+        )
+        md.append("")
+        md.append("---")
+
+        # ── Summary table ─────────────────────────────────────────────── #
+        md.append("## Portfolio Kanban — Current State")
+        md.append("")
+
+        def _avg_age(epics):
+            ages = [_age_days(e) for e in epics]
+            ages = [a for a in ages if a is not None]
+            return round(sum(ages) / len(ages)) if ages else None
+
+        def _max_age(epics):
+            ages = [_age_days(e) for e in epics]
+            ages = [a for a in ages if a is not None]
+            return max(ages) if ages else None
+
+        md.append("| State | Count | Avg Age | Oldest | Threshold |")
+        md.append("|-------|-------|---------|--------|-----------|")
+        for key, label, _ in STATES:
+            epics   = buckets[key]
+            avg     = _avg_age(epics)
+            oldest  = _max_age(epics)
+            thresh  = STUCK_THRESHOLDS.get(key)
+            t_str   = f"{thresh}d" if thresh else "—"
+            avg_str = f"{avg}d" if avg is not None else "—"
+            old_str = f"{oldest}d" if oldest is not None else "—"
+            warn    = " ⚠️" if (thresh and oldest and oldest > thresh) else ""
+            md.append(
+                f"| {label} | {len(epics)} | {avg_str} | {old_str}{warn} | {t_str} |"
+            )
+        unlab = buckets["_unlabelled"]
+        avg_u = _avg_age(unlab)
+        md.append(
+            f"| _(unlabelled)_ | {len(unlab)} | "
+            f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
+        )
+        md.append("")
+
+        no_labels = not self._rd_lifecycle_labels
+        if no_labels:
+            md.append(
+                "> ℹ️ No `lifecycle::` labels found. Apply `lifecycle::funnel`, "
+                "`lifecycle::analyzing`, `lifecycle::backlog`, `lifecycle::implementing`, "
+                "or `lifecycle::done` labels to epics to enable this view. "
+                "Use the `set-lifecycle-labels` utility to assign labels in bulk."
+            )
+            md.append("")
+
+        md.append("---")
+
+        # ── Stuck items ───────────────────────────────────────────────── #
+        stuck_sections = [
+            ("lifecycle::analyzing", "🔍 Stuck in Analyzing",
+             "Lean Business Case is overdue for a decision. Review and either approve to backlog or cancel."),
+            ("lifecycle::backlog",   "📋 Stuck in Portfolio Backlog",
+             "Approved work waiting too long for capacity. Consider re-sequencing or rescoping."),
+            ("lifecycle::funnel",    "💡 Stale in Funnel",
+             "Ideas not yet analyzed beyond the threshold. Either analyze or close."),
+        ]
+
+        has_stuck = False
+        for key, heading, guidance in stuck_sections:
+            thresh = STUCK_THRESHOLDS[key]
+            stuck  = [e for e in buckets[key] if (_age_days(e) or 0) > thresh]
+            if not stuck:
+                continue
+            has_stuck = True
+            md.append(f"## ⚠️ {heading} (> {thresh} days)")
+            md.append("")
+            md.append(f"_{guidance}_")
+            md.append("")
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(stuck, key=lambda x: _age_days(x) or 0, reverse=True):
+                age = _age_days(e) or 0
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | **{age}d** "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+            md.append("---")
+
+        if not has_stuck:
+            md.append("## ✅ No Stuck Items")
+            md.append("")
+            md.append("No epics have exceeded their state thresholds. Kanban is flowing.")
+            md.append("")
+            md.append("---")
+
+        # ── Detail by state ───────────────────────────────────────────── #
+        md.append("## Kanban Detail — By State")
+        md.append("")
+
+        STATE_ICONS = {
+            "lifecycle::funnel":       "💡",
+            "lifecycle::analyzing":    "🔍",
+            "lifecycle::backlog":      "📋",
+            "lifecycle::implementing": "⚙️",
+            "lifecycle::done":         "✅",
+        }
+
+        for key, label, description in STATES:
+            epics = buckets[key]
+            md.append(f"### {label}")
+            md.append("")
+            md.append(f"_{description}_")
+            md.append("")
+            if not epics:
+                md.append("_No epics in this state._")
+                md.append("")
+                continue
+            thresh = STUCK_THRESHOLDS.get(key)
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(epics, key=lambda x: _age_days(x) or 0, reverse=True):
+                age     = _age_days(e)
+                age_str = f"**{age}d** ⚠️" if (thresh and age and age > thresh) else (f"{age}d" if age else "—")
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | {age_str} "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+
+        if unlab:
+            md.append("### _(Unlabelled)_")
+            md.append("")
+            md.append(
+                "_Epics without a `lifecycle::` label. These cannot be placed in the Kanban view. "
+                "Apply a lifecycle label or use `set-lifecycle-labels` to assign in bulk._"
+            )
+            md.append("")
+            md.append("| Epic | Type | Age | PI | Group | Link |")
+            md.append("|------|------|-----|----|-------|------|")
+            for e in sorted(unlab, key=lambda x: _age_days(x) or 0, reverse=True):
+                age = _age_days(e)
+                md.append(
+                    f"| {e['title'][:50]} | {e.get('type','?')} | {age or '—'} "
+                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                )
+            md.append("")
+
+        md.append("---")
+
+        # ── About section ─────────────────────────────────────────────── #
+        md.append("## ℹ️ SAFe Portfolio Kanban States")
+        md.append("")
+        md.append("| State | Label | Meaning | Flag if > |")
+        md.append("|-------|-------|---------|-----------|")
+        for key, label, desc in STATES:
+            thresh = STUCK_THRESHOLDS.get(key)
+            t_str  = f"{thresh} days" if thresh else "—"
+            md.append(f"| {label} | `{key}` | {desc} | {t_str} |")
+        md.append("")
+        md.append(
+            "**Why it matters for DoD programs:** Portfolio Kanban visibility is required "
+            "by SAFe 6.0 to manage the flow of Epics from idea to implementation. "
+            "For DoD acquisition programs, delays in the Analyzing and Backlog states "
+            "often map to contract modification cycles, funding decisions, or requirements "
+            "reviews — identifying them early enables proactive stakeholder engagement."
+        )
+        md.append("")
+
+        page_title = f"{self._wiki_t3}/Epic Lifecycle"
+        self.upload_to_wiki(group, page_title, "\n".join(md))
+        print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
     # Flow Metrics Report
     # ------------------------------------------------------------------
 
@@ -3469,7 +3719,10 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
             f"| Velocity, WIP load, work type distribution, and cycle time across the portfolio |"
         )
-        md.append("| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |")
+        md.append(
+            f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
+            f"| Epics by SAFe lifecycle state with bottleneck detection and age analysis |"
+        )
         md.append("| ~~PI Planning Program Board~~ | _Planned_ |")
         md.append("")
 
@@ -3506,19 +3759,26 @@ class ReportsMixin:
             f"# {root_name}",
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** [{gn}]({group.web_url})",
             "",
-            f"This is the SAFe portfolio wiki for **{gn}**. Navigate using the tier sections below "
-            f"or return to the [Portfolio Home]({home_url}) index.",
+            f"This is the SAFe portfolio wiki for **{gn}**. Reports are organized into four tiers "
+            f"by audience and cadence — start with the tier that matches your role, then drill down "
+            f"as needed. Return to the [Portfolio Home]({home_url}) index at any time.",
             "",
-            f"| Tier | Audience | Cadence |",
-            f"|------|----------|---------|",
+            "## How to navigate",
+            "",
+            "Each tier is a folder in this wiki. Click a tier link to see the landing page with "
+            "a full description of that tier's purpose, audience, and questions answered — "
+            "then follow the links to individual reports.",
+            "",
+            f"| Tier | Audience | Cadence | Purpose |",
+            f"|------|----------|---------|---------|",
             f"| [📊 00 Executive Pulse]({base}/{_wiki_slug(self._wiki_t1)}) "
-            f"| Executives, Portfolio Managers | Daily |",
+            f"| Executives, Portfolio Managers | Daily | At-a-glance portfolio health |",
             f"| [🗂️ 01 Program Management]({base}/{_wiki_slug(self._wiki_t2)}) "
-            f"| Release Train Engineers, PMs | Weekly |",
+            f"| Release Train Engineers, PMs | Weekly | Predictability, risk, and prioritisation |",
             f"| [🔍 02 Operational Detail]({base}/{_wiki_slug(self._wiki_t3)}) "
-            f"| ART and Team leads | On demand |",
+            f"| ART and Team leads | On demand | Root-cause drill-down and hierarchy view |",
             f"| [🔧 03 Data Quality]({base}/{_wiki_slug(self._wiki_t4)}) "
-            f"| All — fix labeling gaps | As needed |",
+            f"| All — fix labeling gaps | As needed | Find and fix missing labels and broken links |",
             "",
         ]
         self.upload_to_wiki(group, root_name, "\n".join(root_folder_md))
@@ -3531,8 +3791,26 @@ class ReportsMixin:
             "",
             "_One page. Viewed daily. Read in 90 seconds._",
             "",
-            "| Report | Description |",
-            "|--------|-------------|",
+            "## Purpose",
+            "",
+            "Executive Pulse gives portfolio leadership an at-a-glance health check across all "
+            "Value Streams. The single report in this tier is designed to be consumed in under "
+            "two minutes — it surfaces traffic-light status rather than detail, so decision-makers "
+            "can quickly spot which Value Streams need attention before drilling into Tier 2.",
+            "",
+            "## Audience",
+            "",
+            "Portfolio Managers, Product Management leadership, and programme sponsors who need "
+            "a daily situational-awareness view without wading through operational detail.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Are any Value Streams behind schedule this PI?",
+            "- Which ARTs are at capacity risk or blocked?",
+            "- Has any high risk been raised since yesterday's briefing?",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
             "",
@@ -3545,22 +3823,45 @@ class ReportsMixin:
             "",
             "_Reviewed in weekly ART syncs and PM stand-ups._",
             "",
-            "| Report | Description |",
-            "|--------|-------------|",
+            "## Purpose",
+            "",
+            "Program Management reports give Release Train Engineers, Product Managers, and "
+            "Delivery leads the information they need to manage commitments across Program "
+            "Increments. Each report answers a distinct programme-level question: are we "
+            "predictable, where is risk concentrated, what should we work on next, and do "
+            "our ARTs have the capacity to deliver what we have committed?",
+            "",
+            "## Audience",
+            "",
+            "Release Train Engineers (RTEs), Product Management, Portfolio Managers, and "
+            "ART leadership. Reviewed weekly in ART sync cadences and pre-PI planning.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which programmes are over-committed or under-weight this PI?",
+            "- How predictable has each ART been across recent PIs?",
+            "- Which epics carry the highest WSJF score and should be prioritised next?",
+            "- Where are our blockers and are any crossing ART boundaries?",
+            "- Do we have balanced capacity across teams and ARTs?",
+            "",
+            "## Reports in this tier",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t2}/Program × PI Matrix', 'Program × PI Matrix')} "
-            f"| Project label vs PI quarter cross-tab with status and weights |",
+            f"| Project label vs PI quarter cross-tab — see workload and status at a glance |",
             f"| {_wl(f'{self._wiki_t2}/Program PI Detail', 'Program PI Detail')} "
-            f"| Per-PI section view of program workload and status |",
+            f"| Per-PI section view — drill into workload and completion for a single PI |",
             f"| {_wl(f'{self._wiki_t2}/PI Predictability Scorecard', 'PI Predictability Scorecard')} "
-            f"| % of committed Features and Capabilities delivered per PI, trended by ART |",
+            f"| % of committed Features/Capabilities delivered — ART predictability trend |",
             f"| {_wl(f'{self._wiki_t2}/Risk Register', 'Risk Register')} "
-            f"| All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |",
+            f"| All risk-flagged epics grouped by severity with PI and owning ART |",
             f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
-            f"| Per-team planned vs actual weight per PI *(index → VS → ART)* |",
+            f"| Per-team planned vs actual weight per PI — spot over/under-capacity early |",
             f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
-            f"| Blocked epics, blockers, and ancestor risk propagation |",
+            f"| Blocked epics and cross-ART dependency risk with ancestor propagation |",
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
-            f"| Portfolio backlog epics ranked by (Value + Urgency + Risk) ÷ Job Size |",
+            f"| Portfolio backlog ranked by (Value + Urgency + Risk) ÷ Job Size |",
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t2, "\n".join(t2_md))
@@ -3571,23 +3872,47 @@ class ReportsMixin:
             "",
             "_Drill-down from Tier 2. Available on demand._",
             "",
-            "| Report | Description |",
-            "|--------|-------------|",
+            "## Purpose",
+            "",
+            "Operational Detail reports provide the granular view that team leads and RTEs "
+            "need when a Tier 2 metric raises a question. These pages are not meant for daily "
+            "monitoring — they exist to answer 'why' and 'where exactly' once a problem has "
+            "been spotted in the programme-level view.",
+            "",
+            "## Audience",
+            "",
+            "ART leads, Team leads, Value Stream Engineers, and anyone conducting a root-cause "
+            "investigation. Also useful before PI planning when teams are sizing and scheduling.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which specific Features are behind, and which team owns them?",
+            "- How is work distributed across type (feature vs. enabler vs. infrastructure)?",
+            "- How long have epics been sitting in each lifecycle stage — are any stuck?",
+            "- What does the full Epic → Capability → Feature hierarchy look like right now?",
+            "- Which Capabilities are at risk within a Value Stream this PI?",
+            "- Are our flow metrics showing a WIP bottleneck or a velocity drop?",
+            "",
+            "## Reports in this tier",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t3}/ART Feature Status', 'ART Feature Status')} "
-            f"| Features per ART grouped by Team with completion and risk *(index → VS → ART)* |",
+            f"| Features per ART grouped by Team — completion, weight, and risk flags |",
             f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
-            f"| Capabilities by PI with per-ART breakdown *(index → VS)* |",
+            f"| Capabilities by PI with per-ART breakdown for each Value Stream |",
             f"| {_wl(f'{self._wiki_t3}/VS Cross-ART Risk', 'VS Cross-ART Risk')} "
-            f"| Blocking relationships that cross ART boundaries *(index → VS)* |",
+            f"| Blocking relationships that cross ART boundaries within a Value Stream |",
             f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
-            f"| Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |",
+            f"| Issues grouped by Feature per Team — story-point progress and open/closed count |",
             f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
-            f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |",
+            f"| Full Epic → Capability → Feature hierarchy with % complete and PI labels |",
             f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
-            f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |",
+            f"| Planned vs actual weight per group per PI — on-track / at-risk flags |",
             f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
-            f"| Velocity, WIP load, work type distribution, and cycle time |",
-            "| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |",
+            f"| SAFe flow metrics: velocity, WIP load, work type distribution, and cycle time |",
+            f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
+            f"| Epics by SAFe Portfolio Kanban state — bottleneck detection and age analysis |",
             "| ~~PI Planning Program Board~~ | _Planned_ |",
             "",
         ]
@@ -3599,17 +3924,37 @@ class ReportsMixin:
             "",
             "_Maintenance views — labeling and setup problems, not delivery status._",
             "",
-            "> These reports identify data hygiene issues to fix — missing labels, disconnected epics, "
-            "issues not linked to the portfolio hierarchy. They are not delivery status indicators.",
+            "## Purpose",
             "",
-            "| Report | Description |",
-            "|--------|-------------|",
+            "Data Quality reports surface the configuration and labeling gaps that would "
+            "cause incorrect or misleading results in Tier 1–3 reports. The SAFe portfolio "
+            "reporting model depends on every epic having the right type, PI, project, and "
+            "lifecycle labels — and on issues being linked to the hierarchy. These reports "
+            "make those gaps visible so they can be fixed.",
+            "",
+            "## Audience",
+            "",
+            "Anyone responsible for GitLab data stewardship: RTEs, Portfolio Managers, or "
+            "Scrum Masters who own the backlog hygiene process. These reports are most useful "
+            "after a bootstrap, after a PI boundary, or before generating executive-facing reports.",
+            "",
+            "## Key questions answered",
+            "",
+            "- Which epics have never been assigned to a PI — are they sitting in limbo?",
+            "- Are there epics with no parent and no children that are invisible to the hierarchy?",
+            "- Are there issues sitting in projects with no link to the epic portfolio?",
+            "",
+            "> **Note:** These reports identify data hygiene issues to fix. They are not delivery "
+            "status indicators — a long list here means labeling work to do, not programme problems.",
+            "",
+            "| Report | What it conveys |",
+            "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t4}/Unassigned PI', 'Unassigned PI')} "
-            f"| Epics with no `PIID::` label, broken down by type |",
+            f"| Epics missing a `PIID::` label — not yet scheduled to any PI |",
             f"| {_wl(f'{self._wiki_t4}/Orphaned Epics', 'Orphaned Epics')} "
-            f"| Epics with no parent and no children (disconnected from hierarchy) |",
+            f"| Epics with no parent and no children — disconnected from the hierarchy |",
             f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
-            f"| Issues not linked to any epic, grouped by project |",
+            f"| Issues in team projects not linked to any epic — invisible to portfolio reporting |",
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t4, "\n".join(t4_md))
@@ -3956,6 +4301,7 @@ class ReportsMixin:
         self._rd_project_labels    = sorted({l for l in label_set if l.startswith("project::")})
         self._rd_risk_labels       = sorted({l for l in label_set if l.startswith("risk::")})
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
+        self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""

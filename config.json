@@ -9,6 +9,7 @@
   "epic_type_labels": ["Epic", "Capability", "Feature"],
   "risk_labels": ["risk::high", "risk::medium", "risk::low"],
   "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
+  "lifecycle_labels": ["lifecycle::funnel", "lifecycle::analyzing", "lifecycle::backlog", "lifecycle::implementing", "lifecycle::done"],
   "wsjf_labels": {
     "value":   ["wsjf-value::1", "wsjf-value::2", "wsjf-value::3", "wsjf-value::5", "wsjf-value::8", "wsjf-value::13"],
     "urgency": ["wsjf-urgency::1", "wsjf-urgency::2", "wsjf-urgency::3", "wsjf-urgency::5", "wsjf-urgency::8", "wsjf-urgency::13"],

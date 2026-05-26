@@ -119,6 +119,9 @@ class NceGitLab(
         work_type_env = parse_label_env("WORK_TYPE_LABELS")
         self.WORK_TYPE_LABELS = work_type_env if work_type_env else config.get("work_type_labels", [])
 
+        lifecycle_env = parse_label_env("LIFECYCLE_LABELS")
+        self.LIFECYCLE_LABELS = lifecycle_env if lifecycle_env else config.get("lifecycle_labels", [])
+
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],
             "Capability": [21, 34, 55, 89],
