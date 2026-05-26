@@ -310,7 +310,6 @@ home  (Portfolio Home index)
 ├── 02 Operational Detail      — on demand, team leads
 │   ├── ART Feature Status
 │   ├── VS Capability Dashboard
-│   ├── VS Cross-ART Risk
 │   ├── Team Backlogs
 │   ├── SAFe Portfolio Hierarchy
 │   ├── ART-Team Workload
@@ -375,11 +374,10 @@ The `generate-reports` job in `.gitlab-ci.yml` runs `--report all` and publishes
 | `pi-predictability` | T2 | `01 Program Management/PI Predictability Scorecard` | % of committed Features/Capabilities delivered per PI, trended by ART |
 | `risk-register` | T2 | `01 Program Management/Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |
 | `art-capacity-balance` | T2 | `01 Program Management/ART Capacity Balance` | Per-team planned vs actual weight per PI — spot over/under-capacity *(index → VS → ART)* |
-| `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, blockers, and ancestor risk propagation |
+| `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown *(index → VS)* |
 | `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next |
 | `art-feature-status` | T3 | `02 Operational Detail/ART Feature Status` | Features per ART grouped by Team with completion and risk *(index → VS → ART)* |
 | `vs-capability-dashboard` | T3 | `02 Operational Detail/VS Capability Dashboard` | Capabilities by PI with per-ART breakdown per VS *(index → VS)* |
-| `vs-cross-art-risk` | T3 | `02 Operational Detail/VS Cross-ART Risk` | Blocking relationships that cross ART boundaries within a VS *(index → VS)* |
 | `team-backlog` | T3 | `02 Operational Detail/Team Backlogs` | Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |
 | `portfolio` | T3 | `02 Operational Detail/SAFe Portfolio Hierarchy` | Collapsible Epic → Capability/Feature hierarchy with % complete, PI progress, and risk flags |
 | `workload` | T3 | `02 Operational Detail/ART-Team Workload` | Per-PI planned vs actual weight per group with on-track / at-risk flags |
