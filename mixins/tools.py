@@ -170,6 +170,24 @@ TOOLS = [
         ],
     },
     {
+        "key":         "set-lifecycle-labels",
+        "description": "Randomly assign lifecycle::funnel/analyzing/backlog/implementing/done labels to open epics (or all when reassign=True)",
+        "method":      "_tool_set_lifecycle_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing lifecycle:: labels too?",     "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-lifecycle-labels",
+        "description": "Remove all lifecycle::* labels from every epic (clean slate for testing)",
+        "method":      "_tool_strip_lifecycle_labels",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-piid-labels",
         "description": "Bulk-assign a PIID label to epics that are missing one",
         "method":      "_tool_set_piid_labels",
@@ -1892,5 +1910,122 @@ class ToolsMixin:
         print("\nWalking epics...")
         _walk(group)
         print(f"\nDone.  Stripped: {stripped}  Skipped (no type::): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_lifecycle_labels(self, percent=None, reassign=False, dry_run=False):
+        """Randomly assign lifecycle::* labels to open epics using SAFe Kanban state distribution."""
+        if percent is None:
+            percent = 20.0
+
+        group          = self.get_group_by_name(self.parent_group)
+        lifecycle_lbls = self._discover_labels(group, "lifecycle::")
+        if not lifecycle_lbls:
+            print("No lifecycle::* labels found on group. Create them via bootstrap first.")
+            return
+
+        all_lc = set(lifecycle_lbls)
+
+        # Weighted pool: funnel/analyzing/backlog heavier than implementing/done (realistic portfolio)
+        funnel_l  = [l for l in lifecycle_lbls if "funnel"       in l]
+        anlyz_l   = [l for l in lifecycle_lbls if "analyzing"    in l]
+        backlog_l = [l for l in lifecycle_lbls if "backlog"      in l]
+        impl_l    = [l for l in lifecycle_lbls if "implementing" in l]
+        done_l    = [l for l in lifecycle_lbls if "done"         in l]
+        pool      = funnel_l * 3 + anlyz_l * 2 + backlog_l * 3 + impl_l * 3 + done_l * 1
+
+        if not pool:
+            pool = lifecycle_lbls  # fallback: uniform
+
+        print(f"Group   : {group.full_path}")
+        print(f"Labels  : {lifecycle_lbls}")
+        mode = "ALL open epics (reassign mode)" if reassign else "open epics without lifecycle:: label"
+        print(f"Target  : {percent}% of {mode}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if reassign or not (set(epic.labels) & all_lc):
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        label_state = "total" if reassign else "without lifecycle:: label"
+        print(f"  {len(candidates)} open epics {label_state}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            new_labels = [l for l in epic.labels if l not in all_lc]
+            label      = random.choice(pool)
+            new_labels.append(label)
+            if dry_run:
+                print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_lifecycle_labels(self, dry_run=False):
+        """Remove all lifecycle::* labels from every open epic."""
+        group          = self.get_group_by_name(self.parent_group)
+        lifecycle_lbls = self._discover_labels(group, "lifecycle::")
+        all_lc         = set(lifecycle_lbls)
+
+        if not all_lc:
+            print("No lifecycle::* labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(all_lc)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal stripped, skipped, errors
+            for epic in grp.epics.list(all=True, state="opened"):
+                existing = set(epic.labels) & all_lc
+                if not existing:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l not in all_lc]
+                if dry_run:
+                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    stripped += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                        stripped += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nWalking epics...")
+        _walk(group)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no lifecycle::): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
