@@ -8,6 +8,7 @@
   "piid_labels": ["PIID::2026Q1", "PIID::2026Q2", "PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
   "epic_type_labels": ["Epic", "Capability", "Feature"],
   "risk_labels": ["risk::high", "risk::medium", "risk::low"],
+  "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
   "wsjf_labels": {
     "value":   ["wsjf-value::1", "wsjf-value::2", "wsjf-value::3", "wsjf-value::5", "wsjf-value::8", "wsjf-value::13"],
     "urgency": ["wsjf-urgency::1", "wsjf-urgency::2", "wsjf-urgency::3", "wsjf-urgency::5", "wsjf-urgency::8", "wsjf-urgency::13"],
