@@ -108,6 +108,14 @@ class NceGitLab(
             "risk_labels", ["risk::high", "risk::medium", "risk::low"]
         )
 
+        _wsjf = config.get("wsjf_labels", {})
+        self.WSJF_LABELS = (
+            _wsjf.get("value", []) + _wsjf.get("urgency", []) + _wsjf.get("risk", [])
+        )
+        self.WSJF_VALUE_LABELS   = _wsjf.get("value",   [])
+        self.WSJF_URGENCY_LABELS = _wsjf.get("urgency", [])
+        self.WSJF_RISK_LABELS    = _wsjf.get("risk",    [])
+
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],
             "Capability": [21, 34, 55, 89],
@@ -131,6 +139,7 @@ class NceGitLab(
         self.default_generate_issues_count     = _td.get("generate_issues_count",        5)
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
         self.default_set_risk_percent          = _td.get("set_risk_labels_percent",       15.0)
+        self.default_set_wsjf_percent          = _td.get("set_wsjf_labels_percent",       20.0)
 
         missing_fields = [
             field for field, val in [

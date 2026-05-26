@@ -15,14 +15,20 @@ class WikiMixin:
             (wiki_dir / f"{safe}.md").write_text(content, encoding="utf-8")
 
         try:
-            page_slug = page_title.replace(" ", "-").lower()
+            import re as _re
+            _s = _re.sub(r'[^\x00-\x7F]', '', page_title)   # drop non-ASCII
+            _s = _re.sub(r'[^a-zA-Z0-9/\- ]', ' ', _s)       # special ASCII → space
+            _s = _re.sub(r' +', ' ', _s).strip()              # collapse spaces
+            _s = _s.replace(' ', '-')                          # spaces → dashes
+            _s = _re.sub(r'-+', '-', _s)                       # collapse dashes
+            page_slug = _s.strip('-')
             try:
                 group.wikis.get(page_slug).delete()
             except gitlab.exceptions.GitlabGetError as e:
                 if e.response_code != 404:
                     print(f"Error fetching wiki page '{page_title}': {e}")
                     return
-            group.wikis.create({'title': page_title, 'content': content})
+            group.wikis.create({'title': page_title, 'content': content, 'slug': page_slug})
             print(f"  → Wiki: {page_title}")
         except Exception as e:
             print(f"Failed to upload wiki page '{page_title}': {e}")
