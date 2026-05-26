@@ -59,9 +59,9 @@ _Drill-down from Tier 2. Available on demand._
 | Team Backlog | ✅ Keep | |
 | ART-Team Workload | ⚠️ Review | Largely redundant with Capacity Balance + PI matrix. Consider merging or removing. |
 | SAFe Portfolio Hierarchy | ✅ Keep, demote | It is a reference view, not a management tool. Move to Tier 3. |
-| Flow Metrics Report | 🆕 New | See details below. |
-| Epic Lifecycle / Portfolio Kanban | 🆕 New | See details below. |
-| PI Planning Program Board | 🆕 New | See details below. |
+| Flow Metrics Report | ✅ Done | |
+| Epic Lifecycle / Portfolio Kanban | ✅ Done | |
+| PI Planning Program Board | ⏸️ Deferred | Requires iteration/milestone-level data; out of scope for current build. |
 
 ### Tier 4 — Data Quality
 _Maintenance reports. These indicate labeling/setup problems to fix, not delivery status. Should be grouped under a single "Data Quality" wiki index page with that framing._
@@ -211,18 +211,6 @@ LIFECYCLE_LABELS:
 
 ---
 
-### 7. PI Planning Program Board *(Tier 3)*
-After PI planning, generate a read-only program board artifact. DoD PMs reference this throughout the PI to track drift from plan.
-
-**Content:**
-- Rows = Teams; Columns = Iterations (sprints) within the PI
-- Cells = Features committed by that team in that iteration
-- Dependency indicators between cells (uses existing blocking data)
-- Key milestones (system demos, IP sprint, PI end) shown as column headers
-- Status overlay: Planned / In Progress / Complete / At Risk / Blocked
-
-**Implementation note:** This requires knowing which iteration (milestone) each feature is targeted to. Consider a label convention `sprint::N` or milestone assignment on issues.
-
 ---
 
 ## Wiki Index Restructuring
@@ -275,15 +263,15 @@ Several new reports depend on richer label data. Add these to `config.yaml` and 
 
 ## Suggested Build Sequence
 
-1. **Portfolio Health Dashboard** — Closes the biggest gap. All data already exists in `_rd_*` structures; no new API calls needed. Build from existing metrics + blocking snapshot.
-2. **Restructure wiki index** — Reorganize existing report pages under the four-tier hierarchy. Mostly a reporting/template change.
-3. **PI Predictability Scorecard** — High-value, computable from existing data.
-4. **Risk Register** — Add `risk::*` label convention + report. Low implementation effort, high governance value for DoD.
-5. **Flow Metrics Report** — Add `type::*` label convention; derive velocity, distribution, and load from existing timestamps and weights.
-6. **WSJF Priority Board** — Add `wsjf-*` label convention + scoring report.
-7. **Epic Lifecycle / Portfolio Kanban** — Add `lifecycle::*` label convention + report.
-8. **Consolidate blocking reports** — Merge Blocking Relationships + VS Cross-ART Risk into one Tier 2 report.
-9. **PI Planning Program Board** — Requires iteration-level data; most complex. Build last.
+1. ✅ **Portfolio Health Dashboard** — Tier 1 executive traffic-light view.
+2. ✅ **Restructure wiki index** — Four-tier navigation hierarchy with tier landing pages.
+3. ✅ **PI Predictability Scorecard** — ART predictability trend by PI.
+4. ✅ **Risk Register** — `risk::*` label convention + grouped report.
+5. ✅ **Flow Metrics Report** — `type::*` label convention; velocity, WIP, distribution, cycle time, predictability.
+6. ✅ **WSJF Priority Board** — `wsjf-*` label convention; ranked portfolio backlog.
+7. ✅ **Epic Lifecycle / Portfolio Kanban** — `lifecycle::*` label convention; stuck-item detection.
+8. ✅ **Consolidate blocking reports** — Blocking + VS Cross-ART Risk merged into single T2 report.
+9. ⏸️ **PI Planning Program Board** — Deferred. Requires iteration/milestone-level data; no label convention exists yet for sprint assignment.
 
 ---
 
