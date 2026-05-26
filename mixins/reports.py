@@ -36,7 +36,7 @@ REPORTS = [
     },
     {
         "key":         "blocking",
-        "description": "Blocking Relationships Report — blocked epics and ancestor risk propagation",
+        "description": "Blocking & Cross-ART Risk — blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown",
         "method":      "generate_blocking_report",
         "needs_group": False,
     },
@@ -116,12 +116,6 @@ REPORTS = [
         "key":         "vs-capability-dashboard",
         "description": "VS Capability Dashboard — Capabilities by PI with per-ART breakdown for each Value Stream",
         "method":      "generate_vs_capability_dashboard_report",
-        "needs_group": False,
-    },
-    {
-        "key":         "vs-cross-art-risk",
-        "description": "VS Cross-ART Risk Report — blocking relationships that cross ART boundaries within a Value Stream",
-        "method":      "generate_vs_cross_art_risk_report",
         "needs_group": False,
     },
     {
@@ -1009,6 +1003,7 @@ class ReportsMixin:
 
     def generate_blocking_report(self):
         group = self._rd_root_obj
+        today = date.today()
 
         rels  = self._rd_blocking.get("relationships", [])
         summ  = self._rd_blocking.get("summary", {})
@@ -1023,21 +1018,92 @@ class ReportsMixin:
                 id_to_ancestor[anc["id"]] = anc
                 epic_to_blocked_descendants[anc["id"]].append(rel["blocked_epic"])
 
+        # ── Cross-ART dep computation (same logic as generate_vs_cross_art_risk_report) ── #
+        epic_int_to_group = {
+            e["id"]: e.get("group_id")
+            for tier in self._rd_metrics.values()
+            for e in tier
+        }
+        epic_int_to_piid = {
+            e["id"]: e.get("piid")
+            for tier in self._rd_metrics.values()
+            for e in tier
+        }
+        art_of_group: dict = {}
+        vs_of_group: dict  = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_of_group[art_group["id"]] = art_group
+            vs_of_group[art_group["id"]]  = vs_group
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            art_of_group[team_group["id"]] = art_group
+            vs_of_group[team_group["id"]]  = vs_group
+
+        vs_deps: defaultdict = defaultdict(list)
+        for rel in rels:
+            blocked = rel["blocked_epic"]
+            b_int   = blocked.get("id_int") or _gid_to_int(blocked["id"])
+            b_gid   = epic_int_to_group.get(b_int)
+            b_art   = art_of_group.get(b_gid)
+            b_vs    = vs_of_group.get(b_gid)
+            b_piid  = epic_int_to_piid.get(b_int)
+            if not b_vs or not b_art:
+                continue
+            for blocker in rel.get("blocked_by", []):
+                bl_int = blocker.get("id_int") or _gid_to_int(blocker["id"])
+                bl_gid = epic_int_to_group.get(bl_int)
+                bl_art = art_of_group.get(bl_gid)
+                bl_vs  = vs_of_group.get(bl_gid)
+                if not bl_vs or not bl_art:
+                    continue
+                if b_vs["id"] != bl_vs["id"]:
+                    continue
+                if b_art["id"] == bl_art["id"]:
+                    continue
+                vs_deps[b_vs["id"]].append({
+                    "blocked":      blocked,
+                    "blocked_art":  b_art,
+                    "blocked_piid": b_piid,
+                    "blocker":      blocker,
+                    "blocker_art":  bl_art,
+                })
+
+        cross_art_base = f"{self._wiki_t2}/Blocking & Cross-ART Risk"
+
+        # Generate per-VS detail pages (nested under T2) and collect index entries
+        vs_index_entries = []
+        for vs_group in self._iter_vs_groups():
+            deps  = vs_deps.get(vs_group["id"], [])
+            entry = self._generate_vs_cross_art_risk_page(group, vs_group, deps, parent_path=cross_art_base)
+            vs_index_entries.append(entry)
+
+        total_cross_art = sum(len(vs_deps.get(vs["id"], [])) for vs in self._iter_vs_groups())
+
         def link(title, url):
             return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
 
+        # ── Build T2 consolidated page ──────────────────────────────────────── #
         md = []
-        md.append(f"# Blocking Relationships Report (Group: {group.name})")
-        md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
-        md.append("")
-        md.append("## Summary")
-        md.append(f"- **Directly blocked items:** {len(rels)}")
-        md.append(f"- **Total blocking relationships:** {total_relationships}")
-        md.append(f"- **Top-level Epics with blocked descendants:** {len(epic_to_blocked_descendants)}")
+        md.append(f"# Blocking & Cross-ART Risk — {group.name}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
         md.append("")
 
+        # ── Summary bar ────────────────────────────────────────────────────── #
+        md.append("## Summary")
+        md.append("")
+        md.append("| Metric | Count |")
+        md.append("|--------|-------|")
+        md.append(f"| Directly blocked epics | **{len(rels)}** |")
+        md.append(f"| Total blocking relationships | **{total_relationships}** |")
+        md.append(f"| Portfolio Epics with blocked descendants | **{len(epic_to_blocked_descendants)}** |")
+        md.append(f"| Cross-ART dependencies (within VS) | **{total_cross_art}** |")
+        md.append("")
+
+        # ── Portfolio-level risk table ──────────────────────────────────────── #
         if epic_to_blocked_descendants:
-            md.append("## Portfolio-Level Risk Summary")
+            md.append("## Portfolio-Level Risk")
             md.append("")
             md.append("Top-level Epics that contain one or more blocked descendants:")
             md.append("")
@@ -1062,8 +1128,29 @@ class ReportsMixin:
                 )
             md.append("")
 
+        # ── Cross-ART Risk section ──────────────────────────────────────────── #
+        md.append("## Cross-ART Risk by Value Stream")
+        md.append("")
+        md.append(
+            "Blocking relationships where an epic in one ART is blocked by an epic from a "
+            "different ART within the same Value Stream. These require active ART-to-ART "
+            "coordination. Click a Value Stream link for the full dependency breakdown."
+        )
+        md.append("")
+        md.append("| Value Stream | Cross-ART Deps | Critical |")
+        md.append("|--------------|---------------|----------|")
+        for vs_name, vs_wiki_url, total_deps, critical in vs_index_entries:
+            crit_str  = f"🔴 {critical}" if critical else "—"
+            deps_str  = f"{total_deps}" if total_deps else "✅ None"
+            md.append(f"| [🔷 {vs_name}]({vs_wiki_url}) | {deps_str} | {crit_str} |")
+        md.append("")
+
+        # ── Blocked items detail ────────────────────────────────────────────── #
         if not rels:
+            md.append("## Blocked Items")
+            md.append("")
             md.append("_No blocked epics found._")
+            md.append("")
         else:
             md.append("## Blocked Items (Detail)")
             md.append("")
@@ -1113,16 +1200,24 @@ class ReportsMixin:
             "| ⬆️ | **Risk propagation** — a blocked descendant causes risk to bubble up to this ancestor |",
             "| ⚠️ | **Portfolio risk flag** — a top-level Epic contains one or more blocked descendants |",
             "",
+            "### Cross-ART Severity",
+            "| Icon | Meaning |",
+            "|------|---------|",
+            "| 🔴 Critical | Blocked item is in the **current PI** — requires immediate cross-ART coordination |",
+            "| 🟡 Watch    | Blocked item is in a **future PI** — dependency to monitor and plan around |",
+            "| ⚫ Past     | Blocked item was in a **past PI** — dependency may be stale or resolved |",
+            "",
             "### SAFe Hierarchy",
             "| Icon | Type | Description |",
             "|------|------|-------------|",
             "| 🏆 | **Epic** | Portfolio-level initiative; may span multiple PIs and ARTs |",
-            "| 🧩 | **Capability** | Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs |",
-            "| 🛠️ | **Feature** | Service or function delivered by a single ART within one PI; directly enables business or technical outcomes |",
+            "| 🧩 | **Capability** | Large Solution-level deliverable decomposed from an Epic |",
+            "| 🛠️ | **Feature** | Service or function delivered by a single ART within one PI |",
             "",
         ])
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/Blocking & Cross-ART Risk", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/Blocking & Cross-ART Risk")
 
     def generate_orphan_epics_report(self):
         group = self._rd_root_obj
@@ -2457,8 +2552,10 @@ class ReportsMixin:
         self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Cross-ART Risk", "\n".join(md_top))
         print(f"    → Wiki: {self._wiki_t3}/VS Cross-ART Risk")
 
-    def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps):
-        wiki_title = f"{self._wiki_t3}/VS Cross-ART Risk/{vs_group['name']}"
+    def _generate_vs_cross_art_risk_page(self, root_group, vs_group, deps, parent_path=None):
+        if parent_path is None:
+            parent_path = self._wiki_t3
+        wiki_title = f"{parent_path}/VS Cross-ART Risk/{vs_group['name']}"
         wiki_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(wiki_title)}"
 
         today = date.today()
@@ -3676,7 +3773,7 @@ class ReportsMixin:
         )
         md.append(
             f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
-            f"| Blocked epics, blockers, and ancestor risk propagation |"
+            f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |"
         )
         md.append(
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
@@ -3698,10 +3795,6 @@ class ReportsMixin:
         md.append(
             f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
             f"| Capabilities by PI with per-ART breakdown *(index → VS)* |"
-        )
-        md.append(
-            f"| {_wl(f'{self._wiki_t3}/VS Cross-ART Risk', 'VS Cross-ART Risk')} "
-            f"| Blocking relationships that cross ART boundaries *(index → VS)* |"
         )
         md.append(
             f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
@@ -3859,7 +3952,7 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t2}/ART Capacity Balance', 'ART Capacity Balance')} "
             f"| Per-team planned vs actual weight per PI — spot over/under-capacity early |",
             f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
-            f"| Blocked epics and cross-ART dependency risk with ancestor propagation |",
+            f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |",
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
             f"| Portfolio backlog ranked by (Value + Urgency + Risk) ÷ Job Size |",
             "",
@@ -3901,8 +3994,6 @@ class ReportsMixin:
             f"| Features per ART grouped by Team — completion, weight, and risk flags |",
             f"| {_wl(f'{self._wiki_t3}/VS Capability Dashboard', 'VS Capability Dashboard')} "
             f"| Capabilities by PI with per-ART breakdown for each Value Stream |",
-            f"| {_wl(f'{self._wiki_t3}/VS Cross-ART Risk', 'VS Cross-ART Risk')} "
-            f"| Blocking relationships that cross ART boundaries within a Value Stream |",
             f"| {_wl(f'{self._wiki_t3}/Team Backlogs', 'Team Backlogs')} "
             f"| Issues grouped by Feature per Team — story-point progress and open/closed count |",
             f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
