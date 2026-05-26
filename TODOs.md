@@ -4,6 +4,14 @@ _Perspective: DoD program manager overseeing multiple programs modeled as SAFe P
 
 ---
 
+## 🐛 Open Bugs
+
+| # | Description | Area | Notes |
+|---|-------------|------|-------|
+| 1 | Folder wiki links still do not drill down to child pages | `wiki.py` / `reports.py` | Attempted fix: explicit slug passed in `wikis.create()` and `_wiki_slug()` sanitization updated. Links confirmed bad in testing. Root cause not yet isolated — GitLab may compute a different slug than we pass, or the `/` path-separator in slugs may not be supported by the groups wiki API. Needs further investigation with live API response inspection. |
+
+---
+
 ## The Core Problem with Current Reports
 
 The 13 existing reports are organized around **what data we have**, not **what questions a PM needs to answer**. A DoD program manager opens their laptop Monday morning asking four things in order:
