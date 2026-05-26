@@ -3816,7 +3816,6 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
             f"| Epics by SAFe lifecycle state with bottleneck detection and age analysis |"
         )
-        md.append("| ~~PI Planning Program Board~~ | _Planned_ |")
         md.append("")
 
         # ── Tier 4 ──────────────────────────────────────────────────────── #
@@ -3907,6 +3906,20 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
             "",
+            "## Metric Reference",
+            "",
+            "The Portfolio Health Dashboard uses four traffic-light columns per Value Stream:",
+            "",
+            "| Column | 🟢 Green | 🟡 Yellow | 🔴 Red |",
+            "|--------|----------|-----------|--------|",
+            "| **Schedule** | % done ≥ % elapsed − 10 pp | 10–20 pp behind PI elapsed | > 20 pp behind PI elapsed |",
+            "| **Capacity** | Team load 80–110% of planned weight | Load 70–80% or 110–120% | Load < 70% or > 120% |",
+            "| **Risk** | No high-risk epics | 1–2 high-risk epics | 3+ high-risk epics |",
+            "| **Blocking** | No blocked epics | 1–2 blocked | 3+ blocked |",
+            "",
+            "> **% elapsed through PI** is computed from the `PIID::YYYYQn` label mapped to its calendar quarter. "
+            "A PI labelled `2026Q3` runs 1 Jul – 30 Sep; on 1 Aug the PI is ~48% elapsed.",
+            "",
         ]
         self.upload_to_wiki(group, self._wiki_t1, "\n".join(t1_md))
 
@@ -3956,6 +3969,41 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
             f"| Portfolio backlog ranked by (Value + Urgency + Risk) ÷ Job Size |",
             "",
+            "## Metric Reference",
+            "",
+            "### PI Predictability",
+            "Measures ART reliability — the % of committed Features and Capabilities that were "
+            "actually delivered by the end of the PI they were assigned to.",
+            "",
+            "| Range | Interpretation |",
+            "|-------|----------------|",
+            "| ≥ 80% | Healthy — ART is delivering to its commitments |",
+            "| 60–79% | Caution — consistent over-commitment or scope changes mid-PI |",
+            "| < 60% | At risk — underlying capacity or planning problem |",
+            "| 100% every PI | Investigate — team may be sandbagging (under-committing to guarantee 100%) |",
+            "",
+            "### WSJF (Weighted Shortest Job First)",
+            "Ranks backlog epics by economic priority. Formula: `WSJF = (Value + Urgency + Risk) ÷ Job Size`",
+            "",
+            "| Component | Label family | Meaning |",
+            "|-----------|-------------|---------|",
+            "| Business Value | `wsjf-value::N` | Revenue, mission impact, or customer satisfaction |",
+            "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how quickly does value decay if deferred? |",
+            "| Risk Reduction | `wsjf-risk::N` | Risk or opportunity enabled by doing this item |",
+            "| Job Size | `planned_weight` | Relative effort (from epic planned weight) |",
+            "",
+            "Fibonacci scores 1–13 apply to each label. Higher WSJF = do this first.",
+            "",
+            "### ART Capacity Balance",
+            "Compares **planned weight** (story points assigned to epics) against **actual weight** "
+            "(story points on closed issues). A team at 80–110% load is on track; below 70% may "
+            "indicate under-commitment or blocked work; above 120% is over-loaded.",
+            "",
+            "### Risk Register thresholds",
+            "Epics carrying `risk::high`, `risk::medium`, or `risk::low` labels are included. "
+            "Risk labels are applied manually or via the `set-risk-labels` utility. "
+            "High-risk epics in the current PI should be reviewed every ART sync.",
+            "",
         ]
         self.upload_to_wiki(group, self._wiki_t2, "\n".join(t2_md))
 
@@ -4004,7 +4052,30 @@ class ReportsMixin:
             f"| SAFe flow metrics: velocity, WIP load, work type distribution, and cycle time |",
             f"| {_wl(f'{self._wiki_t3}/Epic Lifecycle', 'Epic Lifecycle / Portfolio Kanban')} "
             f"| Epics by SAFe Portfolio Kanban state — bottleneck detection and age analysis |",
-            "| ~~PI Planning Program Board~~ | _Planned_ |",
+            "",
+            "## Metric Reference",
+            "",
+            "### Flow Metrics (SAFe 6.0)",
+            "",
+            "| Metric | Unit | What to watch |",
+            "|--------|------|---------------|",
+            "| **Flow Velocity** | Story points / PI | Is throughput stable or growing? A declining trend signals a delivery problem. |",
+            "| **Flow Load (WIP)** | Open Features in `implementing` | Rising WIP with flat velocity = bottleneck. SAFe guidance: limit WIP to sustain flow. |",
+            "| **Flow Distribution** | % by work type | Target ~50% feature, ~30% enabler, ~20% infra. > 80% feature = technical debt accumulating. |",
+            "| **Flow Time** | Days open-to-close | Average days a Feature spends from first `implementing` label to close. Shorter = faster delivery cycle. |",
+            "| **Flow Predictability** | Planned vs actual weight % | Ratio of delivered weight to planned weight for closed Features. < 80% = systematic over-commitment. |",
+            "",
+            "### Epic Lifecycle — Stuck Thresholds",
+            "",
+            "Epics are flagged ⚠️ when they have remained in a pre-implementing state beyond these thresholds:",
+            "",
+            "| State | Label | Stuck after |",
+            "|-------|-------|-------------|",
+            "| 💡 Funnel | `lifecycle::funnel` | 90 days — idea submitted but not yet analyzed |",
+            "| 🔍 Analyzing | `lifecycle::analyzing` | 30 days — Lean Business Case taking too long |",
+            "| 📋 Portfolio Backlog | `lifecycle::backlog` | 60 days — approved but no PI capacity assigned |",
+            "",
+            "Use `set-lifecycle-labels` to bulk-seed lifecycle labels and `strip-lifecycle-labels` to reset.",
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t3, "\n".join(t3_md))
