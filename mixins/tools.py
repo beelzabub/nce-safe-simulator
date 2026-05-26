@@ -199,6 +199,24 @@ TOOLS = [
         ],
     },
     {
+        "key":         "set-work-type-labels",
+        "description": "Randomly assign type::feature/enabler/infrastructure/defect labels to open epics that have none (or all when reassign=True)",
+        "method":      "_tool_set_work_type_labels",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing type:: labels too?",          "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-work-type-labels",
+        "description": "Remove all type::* labels from every epic (clean slate for testing)",
+        "method":      "_tool_strip_work_type_labels",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-wsjf-labels",
         "description": "Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
         "method":      "_tool_set_wsjf_labels",
@@ -1758,5 +1776,121 @@ class ToolsMixin:
         print("\nWalking epics...")
         _walk(group)
         print(f"\nDone.  Stripped: {stripped}  Skipped (no wsjf): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_work_type_labels(self, percent=None, reassign=False, dry_run=False):
+        """Randomly assign type::feature/enabler/infrastructure/defect labels to open epics."""
+        if percent is None:
+            percent = 20.0
+
+        group       = self.get_group_by_name(self.parent_group)
+        work_labels = self._discover_labels(group, "type::")
+        if not work_labels:
+            print("No type::* labels found on group. Create them via bootstrap first.")
+            return
+
+        all_work = set(work_labels)
+
+        # Weighted pool matching SAFe targets: ~50% feature, ~30% enabler, ~20% infra, defect rare
+        feat_l  = [l for l in work_labels if "feature"        in l]
+        en_l    = [l for l in work_labels if "enabler"        in l]
+        infra_l = [l for l in work_labels if "infrastructure" in l]
+        def_l   = [l for l in work_labels if "defect"         in l]
+        pool    = feat_l * 5 + en_l * 3 + infra_l * 2 + def_l * 1
+
+        if not pool:
+            pool = work_labels  # fallback: uniform
+
+        print(f"Group   : {group.full_path}")
+        print(f"Labels  : {work_labels}")
+        mode = "ALL open epics (reassign mode)" if reassign else "open epics without type:: label"
+        print(f"Target  : {percent}% of {mode}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if reassign or not (set(epic.labels) & all_work):
+                    candidates.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        label_state = "total" if reassign else "without type:: label"
+        print(f"  {len(candidates)} open epics {label_state}")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Labelling {len(sample)} ({percent}%)\n")
+
+        updated = errors = 0
+        for grp, epic in sample:
+            new_labels = [l for l in epic.labels if l not in all_work]
+            label      = random.choice(pool)
+            new_labels.append(label)
+            if dry_run:
+                print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                updated += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_work_type_labels(self, dry_run=False):
+        """Remove all type::* labels from every open epic."""
+        group       = self.get_group_by_name(self.parent_group)
+        work_labels = self._discover_labels(group, "type::")
+        all_work    = set(work_labels)
+
+        if not all_work:
+            print("No type::* labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(all_work)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        def _walk(grp):
+            nonlocal stripped, skipped, errors
+            for epic in grp.epics.list(all=True, state="opened"):
+                existing = set(epic.labels) & all_work
+                if not existing:
+                    skipped += 1
+                    continue
+                new_labels = [l for l in epic.labels if l not in all_work]
+                if dry_run:
+                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    stripped += 1
+                else:
+                    try:
+                        epic.labels = new_labels
+                        epic.save()
+                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                        stripped += 1
+                    except Exception as e:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nWalking epics...")
+        _walk(group)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no type::): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")

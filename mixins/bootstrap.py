@@ -282,7 +282,7 @@ class BootstrapMixin:
         if root_group is None:
             return
 
-        for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.WSJF_LABELS]:
+        for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS]:
             self.create_and_apply_labels(root_group, label_array)
 
         all_portfolio_epics = self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])

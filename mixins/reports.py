@@ -41,6 +41,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "flow-metrics",
+        "description": "Flow Metrics Report — velocity, load, distribution, and cycle time across the portfolio",
+        "method":      "generate_flow_metrics_report",
+        "needs_group": False,
+    },
+    {
         "key":         "health-dashboard",
         "description": "Portfolio Health Dashboard — Tier 1 executive traffic-light view per Value Stream",
         "method":      "generate_portfolio_health_dashboard",
@@ -2914,6 +2920,312 @@ class ReportsMixin:
         print(f"  → Wiki: {page_title}")
 
     # ------------------------------------------------------------------
+    # Flow Metrics Report
+    # ------------------------------------------------------------------
+
+    def generate_flow_metrics_report(self):
+        """Flow Metrics Report — velocity, load, distribution, and cycle time."""
+        group = self._rd_root_obj
+        today = date.today()
+        gn    = group.name
+        base  = f"{self.url}/groups/{group.full_path}/-/wikis"
+        print(f"  Generating Flow Metrics Report for {gn}...")
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+        piids     = self._rd_piid_labels  # chronologically sorted
+
+        # ── helpers ──────────────────────────────────────────────────── #
+        def _parse_dt(s):
+            if not s:
+                return None
+            try:
+                return date.fromisoformat(str(s)[:10])
+            except ValueError:
+                return None
+
+        def _age(epic):
+            """Days since created_at (open) or approx cycle time (closed)."""
+            c = _parse_dt(epic.get("created_at"))
+            if not c:
+                return None
+            if epic.get("state", "").lower() == "closed":
+                u = _parse_dt(epic.get("updated_at"))
+                return (u - c).days if u else None
+            return (today - c).days
+
+        def _avg(vals):
+            v = [x for x in vals if x is not None]
+            return round(sum(v) / len(v)) if v else None
+
+        def _pct(n, total):
+            return f"{round(n / total * 100)}%" if total else "—"
+
+        # ── partition by state ────────────────────────────────────────── #
+        open_epics   = [e for e in all_typed if e.get("state", "").lower() != "closed"]
+        closed_epics = [e for e in all_typed if e.get("state", "").lower() == "closed"]
+
+        # ── build page ───────────────────────────────────────────────── #
+        md = []
+        md.append(f"# Flow Metrics — {gn}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{gn}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "> SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
+            "not just whether it is on schedule. Five of the six metrics are reported here; "
+            "Flow Efficiency requires time-tracking data not yet available."
+        )
+        md.append("")
+        md.append("---")
+
+        # ── Section 1: Flow Velocity ──────────────────────────────────── #
+        md.append("## 📈 Flow Velocity — Delivered per PI")
+        md.append("")
+        md.append(
+            "Features and Capabilities closed per PI. "
+            "Consistent delivery of committed items is the primary ART health signal."
+        )
+        md.append("")
+
+        feat_types = {"Feature", "Capability"}
+        vel_rows = []
+        for pi in piids:
+            pi_closed = [
+                e for e in closed_epics
+                if e.get("piid") == pi and e.get("type") in feat_types
+            ]
+            feat_c = sum(1 for e in pi_closed if e["type"] == "Feature")
+            cap_c  = sum(1 for e in pi_closed if e["type"] == "Capability")
+            vel_rows.append((pi, feat_c, cap_c, feat_c + cap_c))
+
+        md.append("| PI | Features | Capabilities | Total Delivered |")
+        md.append("|----|----------|--------------|-----------------|")
+        for pi, f, c, t in vel_rows:
+            md.append(f"| `{pi}` | {f} | {c} | **{t}** |")
+
+        total_delivered = sum(r[3] for r in vel_rows)
+        if total_delivered == 0:
+            md.append("")
+            md.append(
+                "> ℹ️ No closed epics found — velocity will populate as PIs complete. "
+                "Use `simulate-pi-progress` and `close-percent` tools to generate demo data."
+            )
+        md.append("")
+        md.append("---")
+
+        # ── Section 2: Flow Load (WIP) ────────────────────────────────── #
+        md.append("## 📦 Flow Load — Work in Progress")
+        md.append("")
+        md.append(
+            "Open epics by PI. High WIP signals overloaded PIs and increases "
+            "the risk of context-switching and delayed delivery."
+        )
+        md.append("")
+
+        md.append("| PI | Features | Capabilities | Epics | Total | Planned Weight |")
+        md.append("|----|----------|--------------|-------|-------|----------------|")
+        no_pi_open = [e for e in open_epics if not e.get("piid")]
+        for pi in piids:
+            pi_open = [e for e in open_epics if e.get("piid") == pi]
+            f   = sum(1 for e in pi_open if e["type"] == "Feature")
+            c   = sum(1 for e in pi_open if e["type"] == "Capability")
+            ep  = sum(1 for e in pi_open if e["type"] == "Epic")
+            pw  = sum(e.get("planned_weight") or 0 for e in pi_open)
+            md.append(f"| `{pi}` | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+        if no_pi_open:
+            f   = sum(1 for e in no_pi_open if e["type"] == "Feature")
+            c   = sum(1 for e in no_pi_open if e["type"] == "Capability")
+            ep  = sum(1 for e in no_pi_open if e["type"] == "Epic")
+            pw  = sum(e.get("planned_weight") or 0 for e in no_pi_open)
+            md.append(f"| _(no PI)_ | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+        md.append("")
+        md.append("---")
+
+        # ── Section 3: Flow Distribution ──────────────────────────────── #
+        md.append("## 🔀 Flow Distribution — Work Type Mix")
+        md.append("")
+
+        # 3a: by SAFe hierarchy level (always available)
+        md.append("### By SAFe Hierarchy Level")
+        md.append("")
+        total_epics = len(all_typed)
+        total_pw    = sum(e.get("planned_weight") or 0 for e in all_typed)
+        md.append("| Type | Count | % Items | Planned Weight | % Weight |")
+        md.append("|------|-------|---------|----------------|----------|")
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = self._rd_metrics.get(t, [])
+            pw     = sum(e.get("planned_weight") or 0 for e in bucket)
+            md.append(
+                f"| {t} | {len(bucket)} | {_pct(len(bucket), total_epics)} "
+                f"| {pw:,} | {_pct(pw, total_pw)} |"
+            )
+        md.append(f"| **Total** | **{total_epics}** | | **{total_pw:,}** | |")
+        md.append("")
+
+        # 3b: by work type label (type::*)
+        md.append("### By Work Type Label")
+        md.append("")
+        work_type_set = set(self._rd_work_type_labels)
+        if work_type_set:
+            wt_counts = {}
+            for lbl in sorted(work_type_set):
+                wt_counts[lbl] = [e for e in all_typed if lbl in e.get("labels", [])]
+
+            labeled   = [e for e in all_typed if set(e.get("labels", [])) & work_type_set]
+            unlabeled = len(all_typed) - len(labeled)
+
+            md.append("| Work Type | Count | % of Labelled | SAFe Target |")
+            md.append("|-----------|-------|---------------|-------------|")
+            targets = {
+                "type::feature":        "~50%",
+                "type::enabler":        "~30%",
+                "type::infrastructure": "~20%",
+                "type::defect":         "minimize",
+            }
+            n_lab = len(labeled) or 1
+            for lbl, epics in sorted(wt_counts.items()):
+                tgt = targets.get(lbl, "—")
+                md.append(f"| `{lbl}` | {len(epics)} | {_pct(len(epics), n_lab)} | {tgt} |")
+            if unlabeled:
+                md.append(f"| _(unlabelled)_ | {unlabeled} | — | — |")
+        else:
+            md.append(
+                "> ℹ️ No `type::` labels found. Apply `type::feature`, `type::enabler`, "
+                "`type::infrastructure`, or `type::defect` labels to epics to enable this view. "
+                "Use the `set-work-type-labels` utility to assign labels in bulk."
+            )
+            md.append("")
+            md.append("**SAFe 6.0 target distribution:**")
+            md.append("")
+            md.append("| Work Type | Target | Risk if Skewed |")
+            md.append("|-----------|--------|----------------|")
+            md.append("| Features (business value) | ~50% | Under-delivery of outcomes |")
+            md.append("| Enablers (tech / architecture) | ~30% | Accumulating technical debt |")
+            md.append("| Infrastructure / DevSecOps | ~20% | Platform stability erosion |")
+            md.append("| Defects | minimize | Quality signal; high % = systemic issues |")
+        md.append("")
+        md.append("---")
+
+        # ── Section 4: Flow Time (Cycle Time) ────────────────────────── #
+        md.append("## ⏱ Flow Time — Cycle Time Analysis")
+        md.append("")
+        md.append(
+            "How long epics spend in-flight. Shorter, more consistent cycle times "
+            "indicate a healthy flow system."
+        )
+        md.append("")
+
+        md.append("### Age of Open Epics (days since created)")
+        md.append("")
+        md.append("| Type | Count | Avg Age | Min | Max |")
+        md.append("|------|-------|---------|-----|-----|")
+        has_open_data = False
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = [e for e in open_epics if e.get("type") == t]
+            ages   = [_age(e) for e in bucket]
+            ages   = [a for a in ages if a is not None]
+            if ages:
+                has_open_data = True
+                md.append(
+                    f"| {t} | {len(bucket)} | {_avg(ages)} days "
+                    f"| {min(ages)} | {max(ages)} |"
+                )
+            elif bucket:
+                md.append(f"| {t} | {len(bucket)} | — | — | — |")
+        if not has_open_data:
+            md.append("| — | — | — | — | — |")
+        md.append("")
+
+        if closed_epics:
+            md.append(
+                "### Cycle Time — Closed Epics "
+                "_(updated\\_at used as close\\_date proxy)_"
+            )
+            md.append("")
+            md.append("| Type | Count | Avg Cycle Time | Min | Max |")
+            md.append("|------|-------|----------------|-----|-----|")
+            for t in ("Feature", "Capability", "Epic"):
+                bucket = [e for e in closed_epics if e.get("type") == t]
+                times  = [_age(e) for e in bucket]
+                times  = [a for a in times if a is not None]
+                if times:
+                    md.append(
+                        f"| {t} | {len(bucket)} | {_avg(times)} days "
+                        f"| {min(times)} | {max(times)} |"
+                    )
+                elif bucket:
+                    md.append(f"| {t} | {len(bucket)} | — | — | — |")
+            md.append("")
+        else:
+            md.append(
+                "> ℹ️ No closed epics — cycle time will populate as work completes."
+            )
+            md.append("")
+
+        md.append("---")
+
+        # ── Section 5: Flow Predictability ───────────────────────────── #
+        md.append("## 🎯 Flow Predictability")
+        md.append("")
+        md.append(
+            "Percentage of PI objectives met as committed. "
+            "SAFe guidance: 80–100% is the healthy range. "
+            "Consistently at 100% may indicate sandbagging."
+        )
+        md.append("")
+        scorecard_slug = _wiki_slug(f"{self._wiki_t2}/PI Predictability Scorecard")
+        md.append(
+            f"Full predictability trend by ART → "
+            f"[PI Predictability Scorecard]({base}/{scorecard_slug})"
+        )
+        md.append("")
+
+        # Summary row from snapshot data
+        pi_pred_rows = []
+        for pi in piids:
+            pi_epics = [
+                e for e in all_typed
+                if e.get("piid") == pi and e.get("type") in feat_types
+            ]
+            if not pi_epics:
+                continue
+            committed = len(pi_epics)
+            delivered = sum(1 for e in pi_epics if e.get("state", "").lower() == "closed")
+            pct       = round(delivered / committed * 100) if committed else 0
+            pi_pred_rows.append((pi, committed, delivered, pct))
+
+        if pi_pred_rows:
+            md.append("| PI | Committed | Delivered | Predictability |")
+            md.append("|----|-----------|-----------|----------------|")
+            for pi, com, dlv, pct in pi_pred_rows:
+                icon = "🟢" if pct >= 80 else ("🟡" if pct >= 60 else "🔴")
+                md.append(f"| `{pi}` | {com} | {dlv} | {icon} {pct}% |")
+            md.append("")
+
+        md.append("---")
+
+        # ── About section ─────────────────────────────────────────────── #
+        md.append("## ℹ️ About Flow Metrics")
+        md.append("")
+        md.append("SAFe 6.0 defines six flow metrics measured at Team, ART, and Portfolio level:")
+        md.append("")
+        md.append("| Metric | This Report | Status |")
+        md.append("|--------|-------------|--------|")
+        md.append("| Flow Velocity | Delivered epics per PI | ✅ |")
+        md.append("| Flow Load | Open epics per PI (WIP) | ✅ |")
+        md.append("| Flow Distribution | Work type mix | ✅ |")
+        md.append("| Flow Time | Cycle time (open age + closed proxy) | ✅ |")
+        md.append("| Flow Predictability | % PI objectives met | ✅ (link to Scorecard) |")
+        md.append("| Flow Efficiency | Value-added vs wait time | ⬜ Requires time tracking |")
+        md.append("")
+
+        page_title = f"{self._wiki_t3}/Flow Metrics"
+        self.upload_to_wiki(group, page_title, "\n".join(md))
+        print(f"  → Wiki: {page_title}")
+
+    # ------------------------------------------------------------------
     # WSJF Priority Board
     # ------------------------------------------------------------------
 
@@ -3153,7 +3465,10 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
             f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |"
         )
-        md.append("| ~~Flow Metrics~~ | _Planned_ |")
+        md.append(
+            f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
+            f"| Velocity, WIP load, work type distribution, and cycle time across the portfolio |"
+        )
         md.append("| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |")
         md.append("| ~~PI Planning Program Board~~ | _Planned_ |")
         md.append("")
@@ -3270,7 +3585,8 @@ class ReportsMixin:
             f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |",
             f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
             f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |",
-            "| ~~Flow Metrics~~ | _Planned_ |",
+            f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
+            f"| Velocity, WIP load, work type distribution, and cycle time |",
             "| ~~Epic Lifecycle / Portfolio Kanban~~ | _Planned_ |",
             "| ~~PI Planning Program Board~~ | _Planned_ |",
             "",
@@ -3637,8 +3953,9 @@ class ReportsMixin:
             {l for l in label_set if l.startswith("PIID::")},
             key=lambda p: (self._pi_dates_from_label(p)[0] or date.min),
         )
-        self._rd_project_labels = sorted({l for l in label_set if l.startswith("project::")})
-        self._rd_risk_labels    = sorted({l for l in label_set if l.startswith("risk::")})
+        self._rd_project_labels    = sorted({l for l in label_set if l.startswith("project::")})
+        self._rd_risk_labels       = sorted({l for l in label_set if l.startswith("risk::")})
+        self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
 
     def _run_reports(self, reports):
         """Execute a list of report entries from the REPORTS registry."""
