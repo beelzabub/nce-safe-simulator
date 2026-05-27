@@ -165,7 +165,7 @@ def _wiki_slug(page_title: str) -> str:
     s = _re.sub(r' +', ' ', s).strip()                  # 3. collapse spaces
     s = s.replace(' ', '-')                              # 4. spaces → dashes
     s = _re.sub(r'-+', '-', s)                           # 5. collapse dashes
-    return s.strip('-')
+    return s.strip('-').lower()
 
 
 class ReportsMixin:
