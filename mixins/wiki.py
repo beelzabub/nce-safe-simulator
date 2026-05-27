@@ -21,7 +21,7 @@ class WikiMixin:
             _s = _re.sub(r' +', ' ', _s).strip()              # collapse spaces
             _s = _s.replace(' ', '-')                          # spaces → dashes
             _s = _re.sub(r'-+', '-', _s)                       # collapse dashes
-            page_slug = _s.strip('-')
+            page_slug = _s.strip('-').lower()
             try:
                 group.wikis.get(page_slug).delete()
             except gitlab.exceptions.GitlabGetError as e:
