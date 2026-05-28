@@ -293,10 +293,14 @@ class BootstrapMixin:
         all_art_caps = []
         all_features = []
 
-        for vs in range(1, num_value_streams + 1):
+        vs_counter   = 0  # global so each VS has a unique name/path
+        art_counter  = 0  # global across all VSs so each ART has a unique name/path
+        team_counter = 0  # global across all ARTs so each Team has a unique name/path
+        for _ in range(num_value_streams):
+            vs_counter += 1
             vs_group = self.gl.groups.create({
-                'name':       f"Value Stream {vs:02d}",
-                'path':       f"vs-{vs:02d}",
+                'name':       f"Value Stream {vs_counter:02d}",
+                'path':       f"vs-{vs_counter:02d}",
                 'parent_id':  root_group.id,
                 'visibility': vis,
             })
@@ -304,10 +308,11 @@ class BootstrapMixin:
             vs_caps = self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
             all_vs_caps.extend(vs_caps)
 
-            for a in range(1, num_arts + 1):
+            for _ in range(num_arts):
+                art_counter += 1
                 art_group = self.gl.groups.create({
-                    'name':       f"ART {a:02d}",
-                    'path':       f"art-{a:02d}",
+                    'name':       f"ART {art_counter:02d}",
+                    'path':       f"art-{art_counter:02d}",
                     'parent_id':  vs_group.id,
                     'visibility': vis,
                 })
@@ -315,10 +320,11 @@ class BootstrapMixin:
                 art_created = self._lorem_epics_in_group(art_group, art_epics, allowed_types=["Capability"])
                 all_art_caps.extend(art_created)
 
-                for t in range(1, num_teams + 1):
+                for _ in range(num_teams):
+                    team_counter += 1
                     team_group = self.gl.groups.create({
-                        'name':       f"Team {t:02d}",
-                        'path':       f"team-{t:02d}",
+                        'name':       f"Team {team_counter:02d}",
+                        'path':       f"team-{team_counter:02d}",
                         'parent_id':  art_group.id,
                         'visibility': vis,
                     })
@@ -416,30 +422,36 @@ class BootstrapMixin:
         print(f"  Team Backlogs  : {total_projects}")
         print()
 
-        vis = target_group.visibility
+        vis          = target_group.visibility
+        vs_counter   = 0  # global so each VS has a unique name/path
+        art_counter  = 0  # global across all VSs so each ART has a unique name/path
+        team_counter = 0  # global across all ARTs so each Team has a unique name/path
 
-        for vs in range(1, num_vs + 1):
+        for _ in range(num_vs):
+            vs_counter += 1
             vs_group = self.gl.groups.create({
-                'name':       f"Value Stream {vs:02d}",
-                'path':       f"vs-{vs:02d}",
+                'name':       f"Value Stream {vs_counter:02d}",
+                'path':       f"vs-{vs_counter:02d}",
                 'parent_id':  target_group.id,
                 'visibility': vis,
             })
             print(f"  [VS]   {vs_group.full_path}")
 
-            for a in range(1, num_arts + 1):
+            for _ in range(num_arts):
+                art_counter += 1
                 art_group = self.gl.groups.create({
-                    'name':       f"ART {a:02d}",
-                    'path':       f"art-{a:02d}",
+                    'name':       f"ART {art_counter:02d}",
+                    'path':       f"art-{art_counter:02d}",
                     'parent_id':  vs_group.id,
                     'visibility': vis,
                 })
                 print(f"    [ART]  {art_group.full_path}")
 
-                for t in range(1, num_teams + 1):
+                for _ in range(num_teams):
+                    team_counter += 1
                     team_group = self.gl.groups.create({
-                        'name':       f"Team {t:02d}",
-                        'path':       f"team-{t:02d}",
+                        'name':       f"Team {team_counter:02d}",
+                        'path':       f"team-{team_counter:02d}",
                         'parent_id':  art_group.id,
                         'visibility': vis,
                     })
