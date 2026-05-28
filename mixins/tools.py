@@ -104,6 +104,14 @@ TOOLS = [
         ],
     },
     {
+        "key":         "list-wikis",
+        "description": "List all wiki pages for: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
+        "method":      "_tool_list_wikis",
+        "params": [
+            {"name": "scope", "prompt": "Scope (portfolio / teams / all / <group-path>)", "type": str, "default": "portfolio"},
+        ],
+    },
+    {
         "key":         "orphan-epics",
         "description": "Remove parent links from N or X% of epics (simulate orphaned data)",
         "method":      "_tool_orphan_epics",
@@ -491,6 +499,81 @@ class ToolsMixin:
             print(f"Dry run complete — {total_pages} page(s) across {total_groups} group(s) would be deleted.")
         else:
             print(f"Done — deleted {total_pages} page(s) across {total_groups} group(s).")
+
+    def _tool_list_wikis(self, scope="portfolio"):
+        """List all wiki pages in target groups.
+
+        scope:
+          'portfolio'  — root group wiki only
+          'teams'      — every team-level group wiki
+          'all'        — root + every group in the hierarchy
+          <group-path> — a specific group by path (relative to root or absolute)
+        """
+        root = self.get_group_by_name(self.parent_group)
+
+        def _all_groups(grp):
+            yield grp
+            for sg in grp.subgroups.list(all=True):
+                yield from _all_groups(self.gl.groups.get(sg.id))
+
+        def _team_groups(grp):
+            sgs = grp.subgroups.list(all=True)
+            if not sgs:
+                yield grp
+            else:
+                for sg in sgs:
+                    yield from _team_groups(self.gl.groups.get(sg.id))
+
+        scope_lc = scope.strip().lower()
+        if scope_lc == "portfolio":
+            targets = [root]
+        elif scope_lc == "teams":
+            targets = list(_team_groups(root))
+        elif scope_lc == "all":
+            targets = list(_all_groups(root))
+        else:
+            candidates = [
+                f"{self.gitlab_namespace}/{self.parent_group}/{scope.strip('/')}",
+                f"{self.gitlab_namespace}/{scope.strip('/')}",
+                scope.strip("/"),
+            ]
+            resolved = None
+            for path in candidates:
+                try:
+                    resolved = self.gl.groups.get(path)
+                    break
+                except Exception:
+                    continue
+            if resolved is None:
+                print(f"Group not found for scope '{scope}'. "
+                      f"Use 'portfolio', 'teams', 'all', or a valid group path.")
+                return
+            targets = [resolved]
+
+        print(f"\nScope : {scope}")
+        print()
+
+        total_groups = total_pages = 0
+        for grp in targets:
+            try:
+                pages = grp.wikis.list(all=True)
+            except Exception as e:
+                print(f"  {grp.full_path}: could not list wiki pages — {e}")
+                continue
+            if not pages:
+                continue
+            total_groups += 1
+            total_pages  += len(pages)
+            print(f"  {grp.full_path}  ({len(pages)} page(s))")
+            slug_w  = max((len(p.slug)  for p in pages), default=4)
+            title_w = max((len(p.title) for p in pages), default=5)
+            print(f"    {'SLUG':<{slug_w}}  {'TITLE':<{title_w}}")
+            print(f"    {'-' * slug_w}  {'-' * title_w}")
+            for page in sorted(pages, key=lambda p: p.slug):
+                print(f"    {page.slug:<{slug_w}}  {page.title}")
+            print()
+
+        print(f"Total: {total_pages} page(s) across {total_groups} group(s).")
 
     def _tool_close_percent(self, percent=None, seed=None, dry_run=False):
         """Randomly close N% of open epics and issues across the group hierarchy."""
