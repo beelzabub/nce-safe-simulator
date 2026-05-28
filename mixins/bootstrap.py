@@ -293,6 +293,7 @@ class BootstrapMixin:
         all_art_caps = []
         all_features = []
 
+        art_counter = 0  # global across all VSs so each ART has a unique name/path
         for vs in range(1, num_value_streams + 1):
             vs_group = self.gl.groups.create({
                 'name':       f"Value Stream {vs:02d}",
@@ -304,10 +305,11 @@ class BootstrapMixin:
             vs_caps = self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
             all_vs_caps.extend(vs_caps)
 
-            for a in range(1, num_arts + 1):
+            for _ in range(num_arts):
+                art_counter += 1
                 art_group = self.gl.groups.create({
-                    'name':       f"ART {a:02d}",
-                    'path':       f"art-{a:02d}",
+                    'name':       f"ART {art_counter:02d}",
+                    'path':       f"art-{art_counter:02d}",
                     'parent_id':  vs_group.id,
                     'visibility': vis,
                 })
@@ -417,6 +419,7 @@ class BootstrapMixin:
         print()
 
         vis = target_group.visibility
+        art_counter = 0  # global across all VSs so each ART has a unique name/path
 
         for vs in range(1, num_vs + 1):
             vs_group = self.gl.groups.create({
@@ -427,10 +430,11 @@ class BootstrapMixin:
             })
             print(f"  [VS]   {vs_group.full_path}")
 
-            for a in range(1, num_arts + 1):
+            for _ in range(num_arts):
+                art_counter += 1
                 art_group = self.gl.groups.create({
-                    'name':       f"ART {a:02d}",
-                    'path':       f"art-{a:02d}",
+                    'name':       f"ART {art_counter:02d}",
+                    'path':       f"art-{art_counter:02d}",
                     'parent_id':  vs_group.id,
                     'visibility': vis,
                 })
