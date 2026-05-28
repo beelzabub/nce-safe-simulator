@@ -180,6 +180,7 @@ class NceGitLab(
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
     # Signal handler — installed before NceGitLab() so it covers init too #
     # ------------------------------------------------------------------ #
@@ -199,15 +200,17 @@ def main():
     signal.signal(signal.SIGINT, _sigint_handler)
 
     parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
-    parser.add_argument("--usage",     action="store_true", help="Show this help message and exit")
-    parser.add_argument("--clean",     action="store_true", help="Delete all group data")
-    parser.add_argument("--create",    action="store_true", help="Bootstrap lorem SAFe data")
-    parser.add_argument("--report",    nargs="?", const="__menu__", metavar="REPORT",
+    parser.add_argument("--usage",                  action="store_true", help="Show this help message and exit")
+    parser.add_argument("-c", "--clean",             action="store_true", help="Delete all group data")
+    parser.add_argument("-C", "--create",            action="store_true", help="Bootstrap lorem SAFe data")
+    parser.add_argument("-r", "--report",            nargs="?", const="__menu__", metavar="REPORT",
                         help="Generate reports interactively (omit REPORT to show menu)")
-    parser.add_argument("--all",       action="store_true", help="Run clean, create, and report in sequence")
-    parser.add_argument("--utilities", nargs="?", const="__menu__", metavar="TOOL",
+    parser.add_argument("--reuse-data",              metavar="DATA_DIR",
+                        help="Skip API fetch; load JSON snapshot from this directory instead")
+    parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
+    parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
-    parser.add_argument("--scaffold", nargs="?", const="__prompt__", metavar="GROUP",
+    parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
     args = parser.parse_args()
 
@@ -258,7 +261,7 @@ def main():
     elif args.report is not None:
         _phase[0] = "reports"
         report_key = None if args.report == "__menu__" else args.report
-        gl.run_reports_menu(report_key)
+        gl.run_reports_menu(report_key, reuse_data=args.reuse_data)
 
     # single-phase timing summary (--clean or --create alone)
     if not args.all and phases:
