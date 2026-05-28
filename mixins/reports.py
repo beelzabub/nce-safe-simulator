@@ -148,23 +148,21 @@ REPORTS = [
 def _wiki_slug(page_title: str) -> str:
     """Convert a page title to a GitLab wiki URL slug.
 
-    Rules (applied in order):
-      1. Drop non-ASCII characters (e.g. em-dash —, multiplication ×).
-      2. Replace any remaining character that isn't alphanumeric, a slash, a
-         dash, or a space with a space (e.g. ampersand &).
-      3. Collapse runs of whitespace to a single space.
-      4. Convert spaces to dashes.
-      5. Collapse runs of dashes (produced by steps 1-4) to a single dash.
-      6. Strip leading/trailing dashes from each segment.
+    Matches GitLab's own slug generation, confirmed from live API error output:
+      - Non-ASCII characters (e.g. em-dash —) are kept as-is; GitLab preserves them.
+      - ASCII characters that are not alphanumeric, slash, dash, or space → space.
+      - Runs of whitespace collapsed to a single space.
+      - Spaces → dashes.
+      - Consecutive dashes collapsed to one.
+      - Leading/trailing dashes stripped.
 
     Forward slashes are preserved as GitLab wiki path separators.
     """
     import re as _re
-    s = _re.sub(r'[^\x00-\x7F]', '', page_title)      # 1. drop non-ASCII
-    s = _re.sub(r'[^a-zA-Z0-9/\- ]', ' ', s)           # 2. special ASCII → space
-    s = _re.sub(r' +', ' ', s).strip()                  # 3. collapse spaces
-    s = s.replace(' ', '-')                              # 4. spaces → dashes
-    s = _re.sub(r'-+', '-', s)                           # 5. collapse dashes
+    s = _re.sub(r'[^-􏿿a-zA-Z0-9/\-& ]', ' ', page_title)
+    s = _re.sub(r' +', ' ', s).strip()                                # collapse spaces
+    s = s.replace(' ', '-')                                            # spaces → dashes
+    s = _re.sub(r'-+', '-', s)                                        # collapse dashes
     return s.strip('-')
 
 
@@ -4124,17 +4122,17 @@ class ReportsMixin:
     def generate_all_reports(self):
         self._run_reports(REPORTS)
 
-    def run_reports_menu(self, report_key=None):
+    def run_reports_menu(self, report_key=None, reuse_data=None):
         """Show the reports selection menu or run a specific report by key."""
         if report_key:
             if report_key == "all":
-                self._run_reports(REPORTS)
+                self._run_reports(REPORTS, reuse_data=reuse_data)
                 return
             report = next((r for r in REPORTS if r["key"] == report_key), None)
             if report is None:
                 print(f"Unknown report '{report_key}'. Available: all, " + ", ".join(r['key'] for r in REPORTS))
                 sys.exit(1)
-            self._run_reports([report])
+            self._run_reports([report], reuse_data=reuse_data)
             return
 
         print()
@@ -4153,7 +4151,7 @@ class ReportsMixin:
             return
 
         if not raw:
-            self._run_reports(REPORTS)
+            self._run_reports(REPORTS, reuse_data=reuse_data)
             return
 
         selected = []
@@ -4173,7 +4171,7 @@ class ReportsMixin:
             print("No valid selection — running all reports.")
             selected = REPORTS
 
-        self._run_reports(selected)
+        self._run_reports(selected, reuse_data=reuse_data)
 
     def _fetch_blocking_graph(self, group):
         """Return the raw blocking relationship graph via the REST related_epics API.
@@ -4465,8 +4463,12 @@ class ReportsMixin:
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
         self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
-    def _run_reports(self, reports):
-        """Execute a list of report entries from the REPORTS registry."""
+    def _run_reports(self, reports, reuse_data=None):
+        """Execute a list of report entries from the REPORTS registry.
+
+        reuse_data: Path to an existing data/ directory whose JSON files
+        should be loaded instead of hitting the API again.
+        """
         group = self.get_group_by_name(self.parent_group)
         self._rd_root_obj = group
         gn = group.name
@@ -4484,8 +4486,25 @@ class ReportsMixin:
         wiki_dir.mkdir(parents=True, exist_ok=True)
         self._report_run_dir = run_dir
         self._wiki_save_dir  = wiki_dir
-        self._write_report_data(data_dir)
-        self._load_report_data(data_dir)
+
+        # Preload existing wiki pages so upload_to_wiki can look them up without
+        # calling wikis.get(slug), which URL-encodes slashes and returns 404 for
+        # nested pages that actually exist.  Keyed by group_id so sub-group wikis
+        # (e.g. each team's own wiki) are handled correctly via lazy loading.
+        try:
+            existing = group.wikis.list(all=True)
+            self._wiki_page_cache = {group.id: {p.slug: p for p in existing}}
+            print(f"  Loaded {len(existing)} existing wiki page(s) into cache.\n")
+        except Exception as e:
+            print(f"  Warning: could not preload wiki page cache: {e}")
+            self._wiki_page_cache = {}
+
+        if reuse_data is not None:
+            print(f"  Reusing data snapshot from: {reuse_data}\n")
+            self._load_report_data(Path(reuse_data))
+        else:
+            self._write_report_data(data_dir)
+            self._load_report_data(data_dir)
 
         total  = len(reports)
         phases = []
