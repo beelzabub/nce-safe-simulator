@@ -24,6 +24,13 @@ Each session opens with:
 - What's currently in progress
 - Any blockers
 
+## Claude Configuration Branch
+All changes to `CLAUDE.md`, `.claude/` settings, skills, and hooks go on the
+persistent `config/claude` branch — never committed directly to main.
+The branch is never deleted; MRs from it to main are opened when a batch of
+config changes is ready, then the branch continues for future work.
+No GitLab issue is required for config-only changes.
+
 ## Labels (dev tracking)
 Issues use: type::feature, type::bug, type::chore
 Status tracked via GitLab issue open/close state + milestone.
