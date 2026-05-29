@@ -2703,14 +2703,20 @@ class ReportsMixin:
             return "🔴", f"{pct_done}% done, {pct_through}% elapsed ({gap}pp behind)"
 
         def _tl_capacity(actual, planned):
-            if not planned:
+            if not planned and not actual:
                 return "⬜", "—"
+            if not actual:
+                # Epic has a planned weight but no child issues yet — show scope, no ratio
+                return "⬜", f"{planned}pt planned (no issues)"
+            if not planned:
+                # Issues exist but epic weight not set — show issue total only
+                return "⬜", f"{actual}pt (no epic weight set)"
             ratio = actual / planned * 100
             if 80 <= ratio <= 110:
-                return "🟢", f"{ratio:.0f}% load"
+                return "🟢", f"{actual}pt/{planned}pt ({ratio:.0f}%)"
             if 70 <= ratio <= 120:
-                return "🟡", f"{ratio:.0f}% load"
-            return "🔴", f"{ratio:.0f}% load"
+                return "🟡", f"{actual}pt/{planned}pt ({ratio:.0f}%)"
+            return "🔴", f"{actual}pt/{planned}pt ({ratio:.0f}%)"
 
         def _tl_risk(risk_labels_present):
             high   = [l for l in risk_labels_present if "high"   in l.lower()]
@@ -2853,6 +2859,8 @@ class ReportsMixin:
         else:
             port_pct_done = 0
         port_tl_sched, _ = _tl_schedule(port_pct_done, pct_pi)
+        port_planned_w = sum(e["planned_weight"] for e in all_pi_epics)
+        port_actual_w  = sum(e["actual_weight"]  for e in all_pi_epics)
 
         # ── Needs Attention ─────────────────────────────────────────────── #
         top_blocked = sorted(
@@ -2920,6 +2928,14 @@ class ReportsMixin:
         md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_pi}) |")
         md.append(f"| Risk-Flagged Epics (any level) | [{portfolio_risk_epics}]({_wi_risk}) |")
         md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
+        if port_planned_w or port_actual_w:
+            if port_actual_w == 0:
+                _wt_str = f"{port_planned_w}pt planned (no issue estimates)"
+            elif port_planned_w == 0:
+                _wt_str = f"{port_actual_w}pt (no epic weight set)"
+            else:
+                _wt_str = f"{port_actual_w}pt actual / {port_planned_w}pt planned"
+            md.append(f"| Story Points (current PI) | {_wt_str} |")
         md.append("")
 
         md.append("## Value Stream Status")
@@ -2979,8 +2995,8 @@ class ReportsMixin:
         md.append("### 🟡 At-Risk Epics (behind schedule)")
         md.append("")
         if at_risk_epics:
-            md.append("| Epic | Type | Done | PI Elapsed | Gap | PI |")
-            md.append("|------|------|------|-----------|-----|-----|")
+            md.append("| Epic | Type | Done | PI Elapsed | Gap | Weight | PI |")
+            md.append("|------|------|------|-----------|-----|--------|-----|")
             for e in at_risk_epics:
                 etype = e.get("type", "—")
                 icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
@@ -2989,9 +3005,19 @@ class ReportsMixin:
                     if e.get("web_url") else f'{icon} {e["title"]}'
                 )
                 gap = pct_pi - e.get("pct_complete", 0)
+                pw = e.get("planned_weight", 0)
+                aw = e.get("actual_weight",  0)
+                if pw and aw:
+                    wt_str = f"{aw}pt/{pw}pt"
+                elif pw:
+                    wt_str = f"{pw}pt (epic)"
+                elif aw:
+                    wt_str = f"{aw}pt (issues)"
+                else:
+                    wt_str = "—"
                 md.append(
                     f"| {link} | {etype} | {e.get('pct_complete', 0)}% "
-                    f"| {pct_pi}% | {gap}pp | {e.get('piid', '—')} |"
+                    f"| {pct_pi}% | {gap}pp | {wt_str} | {e.get('piid', '—')} |"
                 )
         else:
             md.append("✅ No epics significantly behind schedule.")
@@ -3010,7 +3036,8 @@ class ReportsMixin:
             "| ⛔ | Blocked epic |",
             "",
             "**Schedule** — % complete vs % of PI calendar elapsed  ",
-            "**Capacity** — actual story-point load vs planned load for current PI  ",
+            "**Capacity** — issue story-point total vs epic planned weight for current PI; "
+            "⬜ with text = scope set but ratio not applicable (no issues, or no epic weight)  ",
             "**Risk** — presence of `risk::high` / `risk::medium` / `risk::low` labels  ",
             "**Blocking** — count of epics with at least one blocker in current PI  ",
             "",
