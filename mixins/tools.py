@@ -368,7 +368,7 @@ def _prompt_param(param):
 
 class ToolsMixin:
 
-    def run_tools_menu(self, tool_key=None):
+    def run_tools_menu(self, tool_key=None, prefills=None):
         """Show the utilities menu or run a specific tool by key."""
         if tool_key:
             tool = next((t for t in TOOLS if t["key"] == tool_key), None)
@@ -377,7 +377,7 @@ class ToolsMixin:
                 for t in TOOLS:
                     print(f"  {t['key']}")
                 sys.exit(1)
-            self._run_tool(tool)
+            self._run_tool(tool, prefills=prefills)
             return
 
         print()
@@ -401,14 +401,30 @@ class ToolsMixin:
                 pass
             print(f"  Please enter a number between 1 and {len(TOOLS)}.")
 
-    def _run_tool(self, tool):
+    def _run_tool(self, tool, prefills=None):
         print()
         print(f"  {tool['key']} — {tool['description']}")
         print()
 
+        prefills = prefills or {}
         kwargs = {}
         for param in tool["params"]:
-            kwargs[param["name"]] = _prompt_param(param)
+            name = param["name"]
+            if name in prefills:
+                raw = prefills[name]
+                ptype = param["type"]
+                if ptype is bool:
+                    val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
+                elif ptype is int:
+                    val = int(raw)
+                elif ptype is float:
+                    val = float(raw)
+                else:
+                    val = raw
+                print(f"  {param['prompt']}: {val}  (from CLI)")
+                kwargs[name] = val
+            else:
+                kwargs[name] = _prompt_param(param)
 
         print()
         getattr(self, tool["method"])(**kwargs)
