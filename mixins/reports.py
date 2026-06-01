@@ -166,14 +166,17 @@ def _wiki_slug(page_title: str) -> str:
     return s.strip('-')
 
 
-def _item_risk_reasons(item, today=None):
+def _item_risk_reasons(item, today=None, children_by_parent=None):
     """Return a compact at-risk reason string for an epic/feature dict.
 
-    Checks four distinct causes (Refs #8):
-      ⏱️ Behind Schedule — active PI, % done < % PI elapsed
-      📅 Past Due        — due_date in the past, not Closed
-      🏷️ Risk Label      — carries a risk::high/medium/low label
-      🔒 Blocked         — has one or more active blocking relationships
+    Checks five distinct causes (Refs #8):
+      ⏱️ Behind Schedule   — active PI, % done < % PI elapsed
+      📅 Past Due          — due_date in the past, not Closed
+      🏷️ Risk Label        — carries a risk::high/medium/low label
+      🔒 Blocked           — has one or more active blocking relationships
+      🔓 Closed/Open Work  — state is Closed but a descendant epic is still open
+
+    The last check requires children_by_parent ({parent_id: [child_dicts]}).
     Returns "—" when no risk applies.
     """
     if today is None:
@@ -202,6 +205,21 @@ def _item_risk_reasons(item, today=None):
         if lbl in _RISK_LABEL_ICONS:
             reasons.append(_RISK_LABEL_ICONS[lbl])
             break
+    if children_by_parent is not None and state == "closed":
+        def _has_open_descendant(epic_id, seen=None):
+            if seen is None:
+                seen = set()
+            for child in children_by_parent.get(epic_id, []):
+                if child["id"] in seen:
+                    continue
+                seen.add(child["id"])
+                if (child.get("state") or "").lower() != "closed":
+                    return True
+                if _has_open_descendant(child["id"], seen):
+                    return True
+            return False
+        if _has_open_descendant(item.get("id")):
+            reasons.append("🔓 Closed/Open Work")
     return " · ".join(reasons) if reasons else "—"
 
 
@@ -1565,7 +1583,7 @@ class ReportsMixin:
                 path       = _group_path(epic.get("group_id"))
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 state      = epic["state"].capitalize()
-                reasons    = _item_risk_reasons(epic, today)
+                reasons    = _item_risk_reasons(epic, today, children_by_parent=children_by_parent)
                 if _has_overdue_child_feature(epic["id"]):
                     reasons = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
                 md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
