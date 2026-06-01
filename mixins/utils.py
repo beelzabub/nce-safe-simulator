@@ -57,6 +57,132 @@ class UtilitiesMixin:
             if errors:
                 print(f"  Weight error for epic {epic.iid}: {errors}")
 
+    def _fetch_wi_supplement(self, group, epics):
+        """Use the work-items REST endpoints to correct two gaps in the classic API:
+
+        1. Direct issue weights — groups/:id/epics/:iid/issues captures issues linked
+           via the work-items UI that never populate issue.epic on the issue object.
+        2. Cross-group child epics — groups/:id/epics/:iid/epics returns children that
+           live outside the portfolio group hierarchy; these are invisible to
+           group.epics.list(all=True) and are therefore missing from the hierarchy and
+           rollup.
+
+        Returns:
+            direct_weights  {epic_id: (total_w, closed_w)}
+            extra_epics     list of associated_data dicts for cross-group children
+            wi_children     {parent_epic_id: [child_epic_id, ...]}
+        """
+        import requests as _req
+        sess = _req.Session()
+        sess.headers["PRIVATE-TOKEN"] = self.private_token
+
+        known_ids      = {e.id for e in epics}
+        direct_weights = {}
+        wi_children    = {}
+        extra_raw      = {}   # id → REST dict for cross-group children
+
+        total = len(epics)
+        print(f"  Fetching direct issue weights (epics/issues) for {total} epics...")
+        for epic in epics:
+            url    = f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}/issues"
+            issues = []
+            while url:
+                try:
+                    resp = sess.get(url, params={"per_page": 100})
+                    if not resp.ok:
+                        break
+                    issues.extend(resp.json())
+                    url = resp.links.get("next", {}).get("url")
+                except Exception:
+                    break
+            total_w  = sum(i.get("weight") or 0 for i in issues)
+            closed_w = sum(i.get("weight") or 0 for i in issues
+                          if i.get("state") == "closed")
+            direct_weights[epic.id] = (total_w, closed_w)
+
+        print(f"  Checking for cross-group child epics (epics/epics)...")
+        for epic in epics:
+            if "Feature" in set(epic.labels):
+                continue   # Features are leaves; no child epics
+            url      = f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}/epics"
+            children = []
+            while url:
+                try:
+                    resp = sess.get(url, params={"per_page": 100})
+                    if not resp.ok:
+                        break
+                    children.extend(resp.json())
+                    url = resp.links.get("next", {}).get("url")
+                except Exception:
+                    break
+            if children:
+                wi_children[epic.id] = [c["id"] for c in children]
+                for child in children:
+                    cid = child["id"]
+                    if cid not in known_ids and cid not in extra_raw:
+                        extra_raw[cid] = child
+
+        extra_epics = []
+        if extra_raw:
+            print(f"  Fetching data for {len(extra_raw)} cross-group child epic(s)...")
+        for child_dict in extra_raw.values():
+            cid  = child_dict["id"]
+            giid = child_dict["iid"]
+            grp  = child_dict.get("group_id")
+            labels = child_dict.get("labels", [])
+            etype  = next((t for t in ["Epic", "Capability", "Feature"] if t in labels), None)
+            if not etype:
+                continue
+
+            # Issues for this cross-group child
+            url    = f"{self.url}/api/v4/groups/{grp}/epics/{giid}/issues"
+            issues = []
+            while url:
+                try:
+                    resp = sess.get(url, params={"per_page": 100})
+                    if not resp.ok:
+                        break
+                    issues.extend(resp.json())
+                    url = resp.links.get("next", {}).get("url")
+                except Exception:
+                    break
+            total_w  = sum(i.get("weight") or 0 for i in issues)
+            closed_w = sum(i.get("weight") or 0 for i in issues
+                          if i.get("state") == "closed")
+            direct_weights[cid] = (total_w, closed_w)
+
+            piid     = next((l for l in labels if l.startswith("PIID::")), None)
+            pct_pi   = self._pct_through_pi(piid)
+            pct_done = (round(closed_w / total_w * 100) if total_w > 0
+                        else (100 if child_dict.get("state", "").lower() == "closed" else 0))
+
+            extra_epics.append({
+                "id":               cid,
+                "iid":              giid,
+                "title":            child_dict.get("title", ""),
+                "description":      child_dict.get("description"),
+                "state":            child_dict.get("state", "opened").capitalize(),
+                "blocked_by_count": 0,
+                "blocks_count":     0,
+                "web_url":          child_dict.get("web_url", ""),
+                "labels":           labels,
+                "parent_id":        child_dict.get("parent_id"),
+                "group_id":         grp,
+                "planned_weight":   child_dict.get("weight") or 0,
+                "actual_weight":    total_w,
+                "pct_complete":     pct_done,
+                "pct_through_pi":   pct_pi,
+                "piid":             piid,
+                "start_date":       child_dict.get("start_date"),
+                "due_date":         child_dict.get("due_date"),
+                "created_at":       child_dict.get("created_at"),
+                "updated_at":       child_dict.get("updated_at"),
+                "type":             etype,
+                "is_cross_group":   True,
+            })
+
+        return direct_weights, extra_epics, wi_children
+
     def _fetch_epic_weights(self, epics):
         """Return {web_url: weight} for a list of REST epic objects via GraphQL WorkItem queries."""
         query = """
@@ -206,12 +332,46 @@ class UtilitiesMixin:
             metrics[epic_type].append(associated_data)
             all_epics_raw.append(associated_data)
 
-        # Roll % complete up through the hierarchy
+        # Supplement with work-items hierarchy data (Refs #14)
+        direct_weights, extra_epics, wi_children = self._fetch_wi_supplement(group, all_epics)
+
+        # Replace actual_weight / pct_complete with the authoritative epics/issues values
+        for etype_list in metrics.values():
+            for e in etype_list:
+                tw, cw = direct_weights.get(e["id"], (None, None))
+                if tw is None:
+                    continue
+                e["actual_weight"] = tw
+                if tw > 0:
+                    e["pct_complete"] = round(cw / tw * 100)
+                elif e["state"] == "Closed":
+                    e["pct_complete"] = 100
+                else:
+                    e["pct_complete"] = 0
+
+        # Inject cross-group child epics into metrics so the rollup can reach them
+        for extra in extra_epics:
+            metrics[extra["type"]].append(extra)
+            all_epics_raw.append(extra)
+
+        # Build hierarchy — prefer wi_children (correct for WI-linked relationships),
+        # fall back to parent_id for epics not covered by the epics/epics endpoint
+        id_to_meta      = {e["id"]: e for etype in metrics.values() for e in etype}
+        covered_as_child = set()
+
         hierarchy = defaultdict(list)
+        for parent_id, child_ids in wi_children.items():
+            for cid in child_ids:
+                child_meta = id_to_meta.get(cid)
+                if child_meta:
+                    hierarchy[parent_id].append(child_meta)
+                    covered_as_child.add(cid)
+
         for etype in metrics.values():
             for e in etype:
-                if e["parent_id"] is not None:
-                    hierarchy[e["parent_id"]].append(e)
+                if e["id"] not in covered_as_child and e.get("parent_id") is not None:
+                    if e["parent_id"] in id_to_meta:
+                        hierarchy[e["parent_id"]].append(e)
 
         def rollup_pct(e):
             children = hierarchy.get(e["id"], [])
@@ -221,9 +381,7 @@ class UtilitiesMixin:
 
         def rollup_actual(e):
             children = hierarchy.get(e["id"], [])
-            if not children:
-                return e["actual_weight"]
-            return sum(rollup_actual(c) for c in children)
+            return e["actual_weight"] + sum(rollup_actual(c) for c in children)
 
         for cap in metrics["Capability"]:
             cap["pct_complete"]  = rollup_pct(cap)
