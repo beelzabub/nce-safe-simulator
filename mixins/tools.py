@@ -595,7 +595,8 @@ class ToolsMixin:
 
         def _walk_epics(grp):
             for epic in grp.epics.list(all=True, state="opened"):
-                open_epics.append((grp, epic))
+                if getattr(epic, "group_id", grp.id) == grp.id:
+                    open_epics.append((grp, epic))
             for sg in grp.subgroups.list(all=True):
                 _walk_epics(self.gl.groups.get(sg.id))
 
