@@ -178,6 +178,7 @@ class UtilitiesMixin:
                 "created_at":       child_dict.get("created_at"),
                 "updated_at":       child_dict.get("updated_at"),
                 "type":             etype,
+                "is_cross_group":   True,
             })
 
         return direct_weights, extra_epics, wi_children
