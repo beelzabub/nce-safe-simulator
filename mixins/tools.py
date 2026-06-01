@@ -1698,43 +1698,63 @@ class ToolsMixin:
             except Exception as e:
                 print(f"  WARNING: could not fetch issues for '{proj.path}': {e}")
 
-        # --- Reopen closed epics that have open children ---
+        # --- Reopen closed epics that have open children (multi-pass) ---
+        # Each pass propagates "open" one level up the SAFe hierarchy:
+        # Features open in pass 1, Capabilities in pass 2, Epics in pass 3.
         print(f"\n--- Checking {len(closed_epics)} closed epics for open children ---")
         reopened_epics = 0
-        for grp, epic in closed_epics:
-            label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
-            has_open_child = False
+        pending = list(closed_epics)
+        pass_num = 0
 
-            try:
-                child_issues = epic.issues.list(get_all=True)
-                if any(i.state == "opened" for i in child_issues):
-                    has_open_child = True
-            except Exception:
-                pass
+        while pending:
+            pass_num += 1
+            still_closed = []
+            pass_count = 0
 
-            if not has_open_child:
+            for grp, epic in pending:
+                label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
+                has_open_child = False
+
                 try:
-                    child_epics = epic.epics.list(get_all=True)
-                    if any(e.state == "opened" for e in child_epics):
+                    child_issues = epic.issues.list(get_all=True)
+                    if any(i.state == "opened" for i in child_issues):
                         has_open_child = True
                 except Exception:
                     pass
 
-            if not has_open_child:
-                continue
+                if not has_open_child:
+                    try:
+                        child_epics = epic.epics.list(get_all=True)
+                        if any(e.state == "opened" for e in child_epics):
+                            has_open_child = True
+                    except Exception:
+                        pass
 
-            if dry_run:
-                print(f"  DRY   {label}")
+                if not has_open_child:
+                    still_closed.append((grp, epic))
+                    continue
+
+                if dry_run:
+                    print(f"  DRY   {label}")
+                else:
+                    try:
+                        epic.state_event = "reopen"
+                        epic.save()
+                        print(f"  REOPENED {label}")
+                    except Exception as e:
+                        print(f"  ERROR  {label}: {e}")
+                        errors += 1
+                        still_closed.append((grp, epic))
+                        continue
+
                 reopened_epics += 1
-            else:
-                try:
-                    epic.state_event = "reopen"
-                    epic.save()
-                    print(f"  REOPENED {label}")
-                    reopened_epics += 1
-                except Exception as e:
-                    print(f"  ERROR  {label}: {e}")
-                    errors += 1
+                pass_count += 1
+
+            pending = still_closed
+            if pass_count == 0:
+                break
+            if pass_num > 1:
+                print(f"  (pass {pass_num}: {pass_count} more epics reopened)")
 
         print(f"\nDone.  Issues reopened: {reopened_issues}  "
               f"Epics reopened: {reopened_epics}  Errors: {errors}")
