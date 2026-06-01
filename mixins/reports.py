@@ -2852,9 +2852,11 @@ class ReportsMixin:
 
         # ── Portfolio-level totals (all epics, all groups including root) ──── #
         # VS loop only traverses VS subgroup descendants — root-level epics are excluded.
-        portfolio_epics_total = len(self._rd_epics_all)
+        # Exclude cross-group children (injected for rollup only; they live outside the portfolio).
+        portfolio_epics_total = sum(1 for e in self._rd_epics_all if not e.get("is_cross_group"))
         portfolio_risk_epics = len({
             e["id"] for e in self._rd_epics_all
+            if not e.get("is_cross_group")
             for lbl in e.get("labels", []) if lbl in risk_label_set
         })
 
