@@ -1707,6 +1707,7 @@ class ToolsMixin:
         pending = list(closed_epics)
         pass_num = 0
 
+        import requests as _requests
         epic_session = _requests.Session()
         epic_session.headers.update({"PRIVATE-TOKEN": self.private_token})
 
