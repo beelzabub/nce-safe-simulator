@@ -1711,21 +1711,29 @@ class ToolsMixin:
         epic_session = _requests.Session()
         epic_session.headers.update({"PRIVATE-TOKEN": self.private_token})
 
-        def _has_open_child(grp, epic):
+        def _should_reopen(grp, epic):
+            """Return True if the epic has open children OR has no children at all."""
+            issues = []
             try:
-                if any(i.state == "opened" for i in epic.issues.list(get_all=True)):
+                issues = epic.issues.list(get_all=True)
+                if any(i.state == "opened" for i in issues):
                     return True
             except Exception:
                 pass
+
+            child_epics = []
             url = (f"{self.url}/api/v4/groups/{grp.id}/epics/{epic.iid}/epics"
-                   f"?per_page=100&state=opened")
+                   f"?per_page=100")
             try:
                 resp = epic_session.get(url)
-                if resp.ok and resp.json():
-                    return True
+                if resp.ok:
+                    child_epics = resp.json()
+                    if any(e.get("state") == "opened" for e in child_epics):
+                        return True
             except Exception:
                 pass
-            return False
+
+            return len(issues) == 0 and len(child_epics) == 0
 
         while pending:
             pass_num += 1
@@ -1735,7 +1743,7 @@ class ToolsMixin:
             for grp, epic in pending:
                 label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
 
-                if not _has_open_child(grp, epic):
+                if not _should_reopen(grp, epic):
                     still_closed.append((grp, epic))
                     continue
 
