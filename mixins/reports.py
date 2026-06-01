@@ -2850,7 +2850,9 @@ class ReportsMixin:
             portfolio_risk_epics    += risk_epic_count
             portfolio_unassigned    += unassigned_vs
 
-        # ── Portfolio-level risk count (all epics, all groups including root) ── #
+        # ── Portfolio-level totals (all epics, all groups including root) ──── #
+        # VS loop only traverses VS subgroup descendants — root-level epics are excluded.
+        portfolio_epics_total = len(self._rd_epics_all)
         portfolio_risk_epics = len({
             e["id"] for e in self._rd_epics_all
             for lbl in e.get("labels", []) if lbl in risk_label_set
