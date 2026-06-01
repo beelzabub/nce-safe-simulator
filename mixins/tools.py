@@ -94,13 +94,15 @@ TOOLS = [
     },
     {
         "key":         "generate-roam-risks",
-        "description": "Create ROAM risk issues and link them to Feature epics",
+        "description": "Create ROAM risk issues linked to a random subset of Feature epics",
         "method":      "_tool_generate_roam_risks",
         "params": [
-            {"name": "piid",        "prompt": "Limit to PIID label (blank = all)",                              "type": str,  "optional": True},
-            {"name": "per_feature", "prompt": "Risk issues to create per Feature",                              "type": int,  "default": 1},
-            {"name": "replace",     "prompt": "Create risks even for Features that already have some?",         "type": bool, "default": False},
-            {"name": "dry_run",     "prompt": "Dry run?",                                                       "type": bool, "default": False},
+            {"name": "percent",     "prompt": "Percent of Features to assign risks to",                         "type": float, "default": 30.0},
+            {"name": "piid",        "prompt": "Limit to PIID label (blank = all)",                              "type": str,   "optional": True},
+            {"name": "per_feature", "prompt": "Risk issues to create per selected Feature (1–3)",               "type": int,   "default": 1},
+            {"name": "seed",        "prompt": "Random seed (blank = none)",                                     "type": int,   "optional": True},
+            {"name": "replace",     "prompt": "Include Features that already have risks?",                      "type": bool,  "default": False},
+            {"name": "dry_run",     "prompt": "Dry run?",                                                       "type": bool,  "default": False},
         ],
     },
     {
@@ -2212,8 +2214,9 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_generate_roam_risks(self, piid=None, per_feature=1, replace=False, dry_run=False):
-        """Create ROAM risk issues and link them to Feature epics."""
+    def _tool_generate_roam_risks(self, percent=30.0, piid=None, per_feature=1,
+                                   seed=None, replace=False, dry_run=False):
+        """Create ROAM risk issues linked to a random subset of Feature epics."""
         import lorem
 
         group       = self.get_group_by_name(self.parent_group)
@@ -2224,8 +2227,10 @@ class ToolsMixin:
             print("ERROR: ROAM_LABELS not configured.")
             return
 
-        print(f"Group: {group.full_path}  per_feature={per_feature}"
+        rng = random.Random(seed)
+        print(f"Group: {group.full_path}  {percent}% of Features  per_feature={per_feature}"
               + (f"  piid={piid}" if piid else "")
+              + (f"  seed={seed}" if seed is not None else "")
               + ("  (replace)" if replace else ""))
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -2261,10 +2266,17 @@ class ToolsMixin:
                 for _, e in features
             ]
             existing = self._fetch_roam_risks(group, epics_raw)
-            skip_n = sum(1 for _, e in features if e.id in existing)
+            eligible = [(g, e) for g, e in features if e.id not in existing]
+            skip_n   = len(features) - len(eligible)
             if skip_n:
-                print(f"  {skip_n} already have risks and will be skipped"
+                print(f"  {skip_n} already have risks and will be excluded"
                       " (pass replace=True to override)")
+        else:
+            eligible = list(features)
+
+        k      = max(0, round(len(eligible) * percent / 100))
+        sample = rng.sample(eligible, min(k, len(eligible)))
+        print(f"  {len(eligible)} eligible  →  assigning risks to {len(sample)}")
 
         # Project cache: group_id → project object
         proj_cache: dict = {}
@@ -2282,13 +2294,10 @@ class ToolsMixin:
             proj_cache[grp.id] = proj
             return proj
 
-        created = skipped = errors = 0
+        created = errors = 0
 
         print("\n--- Generating risk issues ---")
-        for grp, epic in features:
-            if not replace and epic.id in existing:
-                skipped += 1
-                continue
+        for grp, epic in sample:
 
             flabel = f"Feature #{epic.iid} '{epic.title[:45]}' in {grp.full_path}"
 
@@ -2319,6 +2328,6 @@ class ToolsMixin:
                     print(f"  ERROR  {flabel}: {e}")
                     errors += 1
 
-        print(f"\nDone.  Created: {created}  Skipped: {skipped}  Errors: {errors}")
+        print(f"\nDone.  Created: {created}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
