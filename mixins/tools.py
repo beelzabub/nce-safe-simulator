@@ -1701,10 +1701,30 @@ class ToolsMixin:
         # --- Reopen closed epics that have open children (multi-pass) ---
         # Each pass propagates "open" one level up the SAFe hierarchy:
         # Features open in pass 1, Capabilities in pass 2, Epics in pass 3.
+        # python-gitlab's GroupEpic has no .epics manager; use raw HTTP for child epics.
         print(f"\n--- Checking {len(closed_epics)} closed epics for open children ---")
         reopened_epics = 0
         pending = list(closed_epics)
         pass_num = 0
+
+        epic_session = _requests.Session()
+        epic_session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        def _has_open_child(grp, epic):
+            try:
+                if any(i.state == "opened" for i in epic.issues.list(get_all=True)):
+                    return True
+            except Exception:
+                pass
+            url = (f"{self.url}/api/v4/groups/{grp.id}/epics/{epic.iid}/epics"
+                   f"?per_page=100&state=opened")
+            try:
+                resp = epic_session.get(url)
+                if resp.ok and resp.json():
+                    return True
+            except Exception:
+                pass
+            return False
 
         while pending:
             pass_num += 1
@@ -1713,24 +1733,8 @@ class ToolsMixin:
 
             for grp, epic in pending:
                 label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
-                has_open_child = False
 
-                try:
-                    child_issues = epic.issues.list(get_all=True)
-                    if any(i.state == "opened" for i in child_issues):
-                        has_open_child = True
-                except Exception:
-                    pass
-
-                if not has_open_child:
-                    try:
-                        child_epics = epic.epics.list(get_all=True)
-                        if any(e.state == "opened" for e in child_epics):
-                            has_open_child = True
-                    except Exception:
-                        pass
-
-                if not has_open_child:
+                if not _has_open_child(grp, epic):
                     still_closed.append((grp, epic))
                     continue
 
