@@ -166,6 +166,45 @@ def _wiki_slug(page_title: str) -> str:
     return s.strip('-')
 
 
+def _item_risk_reasons(item, today=None):
+    """Return a compact at-risk reason string for an epic/feature dict.
+
+    Checks four distinct causes (Refs #8):
+      ⏱️ Behind Schedule — active PI, % done < % PI elapsed
+      📅 Past Due        — due_date in the past, not Closed
+      🏷️ Risk Label      — carries a risk::high/medium/low label
+      🔒 Blocked         — has one or more active blocking relationships
+    Returns "—" when no risk applies.
+    """
+    if today is None:
+        today = date.today()
+    reasons = []
+    state    = (item.get("state") or "").lower()
+    pct_done = item.get("pct_complete", 0)
+    pct_pi   = item.get("pct_through_pi")
+    due_date = item.get("due_date")
+    labels   = item.get("labels") or []
+    blocked  = (item.get("blocked_by_count") or 0) > 0
+
+    if blocked:
+        reasons.append("🔒 Blocked")
+    if pct_pi is not None and 0 < pct_pi < 100 and state != "closed" and pct_done < pct_pi:
+        reasons.append("⏱️ Behind Schedule")
+    if due_date and state != "closed":
+        try:
+            dd = date.fromisoformat(str(due_date)[:10])
+            if dd < today:
+                reasons.append("📅 Past Due")
+        except (ValueError, TypeError):
+            pass
+    _RISK_LABEL_ICONS = {"risk::high": "🔴 High Risk", "risk::medium": "🟡 Med Risk", "risk::low": "🟢 Low Risk"}
+    for lbl in labels:
+        if lbl in _RISK_LABEL_ICONS:
+            reasons.append(_RISK_LABEL_ICONS[lbl])
+            break
+    return " · ".join(reasons) if reasons else "—"
+
+
 class ReportsMixin:
 
     def generate_summary_report(self, group):
@@ -1427,6 +1466,39 @@ class ReportsMixin:
 
         total_risk = len(seen_ids)
 
+        # Build parent → [child] map for child-overdue detection (Refs #8)
+        children_by_parent: defaultdict = defaultdict(list)
+        for e in self._rd_epics_all:
+            pid = e.get("parent_id")
+            if pid is not None:
+                children_by_parent[pid].append(e)
+
+        def _has_overdue_child_feature(epic_id):
+            """True if any direct child Feature has due_date < today and is not Closed."""
+            for child in children_by_parent.get(epic_id, []):
+                if "Feature" not in child.get("labels", []):
+                    continue
+                if (child.get("state") or "").lower() == "closed":
+                    continue
+                dd = child.get("due_date")
+                if dd:
+                    try:
+                        if date.fromisoformat(str(dd)[:10]) < today:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+            return False
+
+        # Child-overdue bucket: Epics/Capabilities with no risk label but overdue
+        # child Features — these would otherwise be invisible to the Risk Register.
+        child_overdue_bucket = [
+            e for e in self._rd_epics_all
+            if e["id"] not in seen_ids
+            and e.get("type") in ("Epic", "Capability")
+            and _has_overdue_child_feature(e["id"])
+        ]
+        total_risk += len(child_overdue_bucket)
+
         # VS breakdown
         vs_counts = {}
         for vs in self._iter_vs_groups():
@@ -1450,7 +1522,7 @@ class ReportsMixin:
             f"**Group:** [{group.name}]({group.web_url})"
         )
         md.append("")
-        md.append(f"**{total_risk} risk-flagged epic(s).** Each epic is assigned to its highest risk level.")
+        md.append(f"**{total_risk} risk-flagged epic(s)** — includes risk-labelled items and any unlabelled Epics/Capabilities with overdue child Features.")
         md.append("")
 
         md.append("## Summary")
@@ -1463,6 +1535,8 @@ class ReportsMixin:
             icon  = RISK_ICONS.get(lbl, "⚪")
             level = lbl.split("::")[-1].capitalize()
             md.append(f"| {icon} {level} | {len(buckets[lbl])} |")
+        if child_overdue_bucket:
+            md.append(f"| 📅 Child Overdue _(no label)_ | {len(child_overdue_bucket)} |")
         md.append("")
 
         if vs_counts:
@@ -1479,16 +1553,9 @@ class ReportsMixin:
             piid = next((l for l in e.get("labels", []) if l.startswith("PIID::")), "PIID::ZZZZ")
             return (piid, e["title"])
 
-        for lbl in ordered_levels:
-            epics = buckets[lbl]
-            if not epics:
-                continue
-            icon  = RISK_ICONS.get(lbl, "⚪")
-            level = lbl.split("::")[-1].capitalize()
-            md.append(f"## {icon} {level} Risk ({len(epics)})")
-            md.append("")
-            md.append("| Epic | Type | PI | Group / ART | State |")
-            md.append("|------|------|----|-------------|-------|")
+        def _render_risk_table(epics):
+            md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
+            md.append("|------|------|----|-------------|-------|-----------------|")
             for epic in sorted(epics, key=_pi_sort_key):
                 etype      = next((t for t in ("Epic", "Capability", "Feature")
                                    if t in epic.get("labels", [])), "Unknown")
@@ -1498,8 +1565,28 @@ class ReportsMixin:
                 path       = _group_path(epic.get("group_id"))
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 state      = epic["state"].capitalize()
-                md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} |")
+                reasons    = _item_risk_reasons(epic, today)
+                if _has_overdue_child_feature(epic["id"]):
+                    reasons = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
+                md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
+
+        for lbl in ordered_levels:
+            epics = buckets[lbl]
+            if not epics:
+                continue
+            icon  = RISK_ICONS.get(lbl, "⚪")
+            level = lbl.split("::")[-1].capitalize()
+            md.append(f"## {icon} {level} Risk ({len(epics)})")
+            md.append("")
+            _render_risk_table(epics)
+
+        if child_overdue_bucket:
+            md.append(f"## 📅 Child Overdue ({len(child_overdue_bucket)})")
+            md.append("")
+            md.append("_No risk label applied — flagged because a child Feature has passed its due date._")
+            md.append("")
+            _render_risk_table(child_overdue_bucket)
 
         md.extend([
             "---",
@@ -1510,10 +1597,21 @@ class ReportsMixin:
             "| 🔴 | High   | Immediate attention required — risk to delivery or mission outcome |",
             "| 🟡 | Medium | Monitor closely — risk exists but is being managed |",
             "| 🟢 | Low    | Acknowledged risk — low probability or low impact |",
+            "| 📅 | Child Overdue | No risk label, but a child Feature has passed its due date |",
             "",
             "Risk labels (`risk::high`, `risk::medium`, `risk::low`) are applied directly to epics.  ",
             "Each epic is counted once at its highest assigned risk level.  ",
             "**Group / ART** shows the path from the portfolio root to the owning group.",
+            "",
+            "**At Risk Reasons** indicators:",
+            "",
+            "| Indicator | Meaning |",
+            "|-----------|---------|",
+            "| ⏱️ Behind Schedule | Active PI: % Done is less than % of PI elapsed |",
+            "| 📅 Past Due        | Item's due date has passed and it is not Closed |",
+            "| 📅 Child Overdue   | A child Feature has passed its due date and is not Closed |",
+            "| 🏷️ Risk Label      | Item carries a `risk::high`, `risk::medium`, or `risk::low` label |",
+            "| 🔒 Blocked         | Item has one or more active blocking relationships |",
             "",
         ])
 
@@ -1925,8 +2023,8 @@ class ReportsMixin:
             _, _, team_group = team_hierarchy[team_id]
             md.append(f"## {team_group['name']}")
             md.append("")
-            md.append("| Feature | PI | State | % Done | PI Elapsed | Weight | Status |")
-            md.append("|---------|-----|-------|--------|------------|--------|--------|")
+            md.append("| Feature | PI | State | % Done | PI Elapsed | Weight | Status | At Risk Reason |")
+            md.append("|---------|-----|-------|--------|------------|--------|--------|----------------|")
 
             for f in sorted(feature_list, key=lambda x: x.get("title", "")):
                 title      = f["title"]
@@ -1954,9 +2052,10 @@ class ReportsMixin:
 
                 pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
                 weight_str = f"{planned}pt → {actual}pt"
+                reason     = _item_risk_reasons(f)
                 md.append(
                     f"| [{title}]({url}) | {piid} | {state} "
-                    f"| {pct_done}% | {pi_str} | {weight_str} | {status} |"
+                    f"| {pct_done}% | {pi_str} | {weight_str} | {status} | {reason} |"
                 )
                 total_f += 1
 
@@ -1973,6 +2072,7 @@ class ReportsMixin:
             "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
             "- **🔵 Planned** — future PI or PI not yet started",
             "- **🔒 Blocked** — Feature has one or more active blocking relationships",
+            "- **At Risk Reason** — one or more of: ⏱️ Behind Schedule · 📅 Past Due · 🏷️ Risk Label (🔴/🟡/🟢) · 🔒 Blocked",
             "",
         ])
 
@@ -2328,9 +2428,10 @@ class ReportsMixin:
                 status     = _row_status(item["pct_complete"], pct_pi, item.get("blocked_by_count", 0))
                 pi_str     = f"{pct_pi}%" if pct_pi is not None else "—"
                 weight_str = f"{item.get('planned_weight', 0)}pt → {item.get('actual_weight', 0)}pt"
+                reason     = _item_risk_reasons(item)
                 rows.append(
                     f"| [{item['title']}]({item['web_url']}) | {item['state'].capitalize()} "
-                    f"| {item['pct_complete']}% | {pi_str} | {weight_str} | {status} |"
+                    f"| {item['pct_complete']}% | {pi_str} | {weight_str} | {status} | {reason} |"
                 )
             return rows
 
@@ -2380,8 +2481,8 @@ class ReportsMixin:
                 for art_name, art_url, caps in art_rows:
                     md.append(f"<details><summary><strong>{art_name} — Capability Detail</strong></summary>")
                     md.append("")
-                    md.append("| Capability | State | % Done | PI Elapsed | Weight | Status |")
-                    md.append("|------------|-------|--------|------------|--------|--------|")
+                    md.append("| Capability | State | % Done | PI Elapsed | Weight | Status | At Risk Reason |")
+                    md.append("|------------|-------|--------|------------|--------|--------|----------------|")
                     md.extend(_detail_rows(caps, pct_pi))
                     md.append("")
                     md.append("</details>")
@@ -2423,8 +2524,8 @@ class ReportsMixin:
                 for art_name, art_url, feats in art_direct_rows:
                     md.append(f"<details><summary><strong>{art_name} — Direct Feature Detail</strong></summary>")
                     md.append("")
-                    md.append("| Feature | State | % Done | PI Elapsed | Weight | Status |")
-                    md.append("|---------|-------|--------|------------|--------|--------|")
+                    md.append("| Feature | State | % Done | PI Elapsed | Weight | Status | At Risk Reason |")
+                    md.append("|---------|-------|--------|------------|--------|--------|----------------|")
                     md.extend(_detail_rows(feats, pct_pi))
                     md.append("")
                     md.append("</details>")
@@ -2443,6 +2544,7 @@ class ReportsMixin:
             "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
             "- **🔵 Planned** — future PI or not yet started",
             "- **🔒 Blocked** — has one or more active blocking relationships",
+            "- **At Risk Reason** — one or more of: ⏱️ Behind Schedule · 📅 Past Due · 🏷️ Risk Label (🔴/🟡/🟢) · 🔒 Blocked",
             "",
         ])
 
