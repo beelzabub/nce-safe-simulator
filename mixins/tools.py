@@ -79,8 +79,9 @@ TOOLS = [
         "description": "Create issues in team backlog projects linked to Feature epics",
         "method":      "_tool_generate_issues",
         "params": [
-            {"name": "count",   "prompt": "Issues to create per Feature (default 5)", "type": int,  "default": 5},
-            {"name": "dry_run", "prompt": "Dry run?",                                  "type": bool, "default": False},
+            {"name": "count",           "prompt": "Issues to create per Feature (default 5)",              "type": int,   "default": 5},
+            {"name": "feature_percent", "prompt": "Percent of Features to target (100 = all, 50 = half)",  "type": float, "default": 100.0},
+            {"name": "dry_run",         "prompt": "Dry run?",                                               "type": bool,  "default": False},
         ],
     },
     {
@@ -1218,14 +1219,17 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_generate_issues(self, count=None, dry_run=False):
+    def _tool_generate_issues(self, count=None, feature_percent=100.0, dry_run=False):
         """Create issues in team backlog projects linked to Feature epics."""
         if count is None:
             count = self.default_generate_issues_count
+        if feature_percent is None:
+            feature_percent = 100.0
         import lorem as _lorem  # optional dep — fall back to numbered titles if missing
 
         group = self.get_group_by_name(self.parent_group)
-        print(f"Group : {group.full_path}  →  {count} issues per Feature")
+        pct_label = f"{feature_percent:.0f}% of" if feature_percent < 100.0 else "all"
+        print(f"Group : {group.full_path}  →  {count} issues per Feature  ({pct_label} Features)")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
@@ -1258,6 +1262,10 @@ class ToolsMixin:
             if not features:
                 print(f"  SKIP  {proj.path_with_namespace} — no Feature epics found")
                 continue
+
+            if feature_percent < 100.0:
+                k        = max(1, round(len(features) * feature_percent / 100))
+                features = random.sample(features, min(k, len(features)))
 
             for feat in features:
                 for i in range(1, count + 1):
