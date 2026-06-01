@@ -40,6 +40,14 @@ TOOLS = [
         ],
     },
     {
+        "key":         "clean-roam-risks",
+        "description": "Delete all ROAM risk issues (and their epic links) across the group",
+        "method":      "_tool_clean_roam_risks",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "close-percent",
         "description": "Randomly close N% of open epics and issues (simulate PI progress)",
         "method":      "_tool_close_percent",
@@ -82,6 +90,17 @@ TOOLS = [
             {"name": "count",           "prompt": "Issues to create per Feature (default 5)",              "type": int,   "default": 5},
             {"name": "feature_percent", "prompt": "Percent of Features to target (100 = all, 50 = half)",  "type": float, "default": 100.0},
             {"name": "dry_run",         "prompt": "Dry run?",                                               "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "generate-roam-risks",
+        "description": "Create ROAM risk issues and link them to Feature epics",
+        "method":      "_tool_generate_roam_risks",
+        "params": [
+            {"name": "piid",        "prompt": "Limit to PIID label (blank = all)",                              "type": str,  "optional": True},
+            {"name": "per_feature", "prompt": "Risk issues to create per Feature",                              "type": int,  "default": 1},
+            {"name": "replace",     "prompt": "Create risks even for Features that already have some?",         "type": bool, "default": False},
+            {"name": "dry_run",     "prompt": "Dry run?",                                                       "type": bool, "default": False},
         ],
     },
     {
@@ -2118,5 +2137,188 @@ class ToolsMixin:
         print("\nWalking epics...")
         _walk(group)
         print(f"\nDone.  Stripped: {stripped}  Skipped (no lifecycle::): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # ROAM risk issue management
+    # ------------------------------------------------------------------
+
+    def _tool_clean_roam_risks(self, dry_run=False):
+        """Delete all ROAM risk issues (and their epic links) across the group."""
+        import requests as _requests
+
+        group       = self.get_group_by_name(self.parent_group)
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        print(f"Group: {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        label_list = " ".join(f'"{l}"' for l in roam_labels)
+        query = f"""
+        query FindRoamIssues($fullPath: ID!) {{
+          group(fullPath: $fullPath) {{
+            issues(labelName: [{label_list}]) {{
+              nodes {{
+                iid title
+                project {{ id }}
+              }}
+            }}
+          }}
+        }}
+        """
+        print("\nFetching ROAM risk issues...")
+        data   = self.graphql_query(query, variables={"fullPath": group.full_path})
+        issues = (data or {}).get("group", {}).get("issues", {}).get("nodes", [])
+        print(f"  Found {len(issues)} issue(s).")
+
+        if not issues:
+            print("Nothing to clean up.")
+            return
+
+        session = _requests.Session()
+        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        deleted = errors = 0
+        for issue in issues:
+            iid   = issue["iid"]
+            title = issue["title"][:55]
+            gid   = (issue.get("project") or {}).get("id", "")
+            label = f"#{iid} '{title}'"
+            try:
+                project_id = int(gid.split("/")[-1])
+            except (ValueError, AttributeError):
+                print(f"  SKIP  {label} — could not resolve project id")
+                errors += 1
+                continue
+
+            if dry_run:
+                print(f"  DRY   {label}")
+                deleted += 1
+                continue
+
+            url  = f"{self.url}/api/v4/projects/{project_id}/issues/{iid}"
+            resp = session.delete(url)
+            if resp.status_code in (200, 204):
+                print(f"  DELETED {label}")
+                deleted += 1
+            else:
+                print(f"  ERROR   {label}: {resp.status_code} {resp.text[:60]}")
+                errors += 1
+
+        print(f"\nDone.  Deleted: {deleted}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_generate_roam_risks(self, piid=None, per_feature=1, replace=False, dry_run=False):
+        """Create ROAM risk issues and link them to Feature epics."""
+        import lorem
+
+        group       = self.get_group_by_name(self.parent_group)
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        if not roam_labels:
+            print("ERROR: ROAM_LABELS not configured.")
+            return
+
+        print(f"Group: {group.full_path}  per_feature={per_feature}"
+              + (f"  piid={piid}" if piid else "")
+              + ("  (replace)" if replace else ""))
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # Collect Feature epics
+        print("\nCollecting Feature epics...")
+        features = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                if getattr(epic, "group_id", grp.id) != grp.id:
+                    continue
+                if "Feature" not in epic.labels:
+                    continue
+                if piid and piid not in epic.labels:
+                    continue
+                features.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"  Found {len(features)} Feature epic(s)")
+
+        if not features:
+            print("Nothing to do.")
+            return
+
+        # Build existing-risks map so we can skip Features that already have some
+        existing: dict = {}
+        if not replace:
+            epics_raw = [
+                {"id": e.id, "work_item_id": getattr(e, "work_item_id", None)}
+                for _, e in features
+            ]
+            existing = self._fetch_roam_risks(group, epics_raw)
+            skip_n = sum(1 for _, e in features if e.id in existing)
+            if skip_n:
+                print(f"  {skip_n} already have risks and will be skipped"
+                      " (pass replace=True to override)")
+
+        # Project cache: group_id → project object
+        proj_cache: dict = {}
+
+        def _project_for(grp):
+            if grp.id in proj_cache:
+                return proj_cache[grp.id]
+            projects = grp.projects.list(all=True)
+            proj = (
+                next((p for p in projects if "backlog" in p.path.lower()), None)
+                or (projects[0] if projects else None)
+            )
+            if proj:
+                proj = self.gl.projects.get(proj.id)
+            proj_cache[grp.id] = proj
+            return proj
+
+        created = skipped = errors = 0
+
+        print("\n--- Generating risk issues ---")
+        for grp, epic in features:
+            if not replace and epic.id in existing:
+                skipped += 1
+                continue
+
+            flabel = f"Feature #{epic.iid} '{epic.title[:45]}' in {grp.full_path}"
+
+            if dry_run:
+                for _ in range(per_feature):
+                    print(f"  DRY   {flabel}")
+                created += per_feature
+                continue
+
+            project = _project_for(grp)
+            if not project:
+                print(f"  SKIP  {flabel} — no project in group")
+                errors += 1
+                continue
+
+            for _ in range(per_feature):
+                roam_label = random.choice(roam_labels)
+                try:
+                    risk = project.issues.create({
+                        "title":       f"Risk: {lorem.sentence().rstrip('.')}",
+                        "description": lorem.paragraph(),
+                        "labels":      [roam_label],
+                    })
+                    self._link_risk_to_epic(risk, epic, project)
+                    print(f"  CREATED #{risk.iid} [{roam_label}] → {flabel}")
+                    created += 1
+                except Exception as e:
+                    print(f"  ERROR  {flabel}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Created: {created}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
