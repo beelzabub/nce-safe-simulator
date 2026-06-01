@@ -166,14 +166,28 @@ def _wiki_slug(page_title: str) -> str:
     return s.strip('-')
 
 
+_ROAM_ICONS = {
+    "roam::owned":    "⚠️ O",
+    "roam::accepted": "⚠️ A",
+    "roam::mitigated":"⚠️ M",
+    "roam::resolved": "⚠️ R",
+}
+_RISK_LABEL_ICONS = {
+    "risk::high":   "🔴 High Risk",
+    "risk::medium": "🟡 Med Risk",
+    "risk::low":    "🟢 Low Risk",
+}
+
+
 def _item_risk_reasons(item, today=None):
     """Return a compact at-risk reason string for an epic/feature dict.
 
-    Checks four distinct causes (Refs #8):
+    Checks five distinct causes (Refs #8, #10):
+      🔒 Blocked         — has one or more active blocking relationships
       ⏱️ Behind Schedule — active PI, % done < % PI elapsed
       📅 Past Due        — due_date in the past, not Closed
-      🏷️ Risk Label      — carries a risk::high/medium/low label
-      🔒 Blocked         — has one or more active blocking relationships
+      ⚠️ N risk(s)       — has linked ROAM risk issues (Refs #10)
+      🔴/🟡/🟢 Risk Label — legacy risk:: label fallback (transition)
     Returns "—" when no risk applies.
     """
     if today is None:
@@ -197,11 +211,18 @@ def _item_risk_reasons(item, today=None):
                 reasons.append("📅 Past Due")
         except (ValueError, TypeError):
             pass
-    _RISK_LABEL_ICONS = {"risk::high": "🔴 High Risk", "risk::medium": "🟡 Med Risk", "risk::low": "🟢 Low Risk"}
-    for lbl in labels:
-        if lbl in _RISK_LABEL_ICONS:
-            reasons.append(_RISK_LABEL_ICONS[lbl])
-            break
+
+    roam_risks = item.get("roam_risks") or []
+    if roam_risks:
+        n = len(roam_risks)
+        reasons.append(f"⚠️ {n} risk(s)")
+    else:
+        # Transition fallback: honour legacy risk:: label until migrated to ROAM issues
+        for lbl in labels:
+            if lbl in _RISK_LABEL_ICONS:
+                reasons.append(_RISK_LABEL_ICONS[lbl])
+                break
+
     return " · ".join(reasons) if reasons else "—"
 
 
@@ -1424,23 +1445,16 @@ class ReportsMixin:
         today = date.today()
         print(f"  Generating Risk Register for {group.name}...")
 
+        ROAM_ORDER = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
+        ROAM_ICONS = {
+            "roam::owned":    "⚠️ Owned",
+            "roam::accepted": "✋ Accepted",
+            "roam::mitigated":"🛡️ Mitigated",
+            "roam::resolved": "✅ Resolved",
+        }
+
         RISK_ORDER = ["risk::high", "risk::medium", "risk::low"]
         RISK_ICONS = {"risk::high": "🔴", "risk::medium": "🟡", "risk::low": "🟢"}
-
-        # Canonical order; append any discovered labels not in the standard set
-        active_risk_labels = set(self._rd_risk_labels)
-        ordered_levels = [l for l in RISK_ORDER if l in active_risk_labels] + \
-                         [l for l in self._rd_risk_labels if l not in set(RISK_ORDER)]
-
-        if not ordered_levels:
-            md = [
-                f"# Risk Register — {group.name}",
-                f"## Report Date: {today.strftime('%Y-%m-%d')}",
-                "",
-                "_No risk labels found. Apply `risk::high`, `risk::medium`, or `risk::low` to epics and re-run._",
-            ]
-            self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
-            return
 
         # Build relative path from root for each epic's owning group
         root_id = self._rd_root["id"]
@@ -1453,20 +1467,37 @@ class ReportsMixin:
                 cur = self._rd_groups_by_id.get(cur.get("parent_id"))
             return " / ".join(reversed(parts)) if parts else group.name
 
-        # Assign each epic to its highest risk level (high > medium > low)
-        buckets   = {lbl: [] for lbl in ordered_levels}
-        seen_ids  = set()
+        # ── ROAM risk issues (primary) ────────────────────────────────── #
+        # Build a flat list of (risk_dict, epic_dict) pairs from all epics
+        roam_rows = []
+        roam_epics_seen = set()   # epic IDs that have at least one ROAM risk
+        for epic in self._rd_epics_all:
+            for risk in epic.get("roam_risks") or []:
+                roam_rows.append((risk, epic))
+                roam_epics_seen.add(epic["id"])
+
+        # Bucket by ROAM status
+        roam_buckets: dict = {lbl: [] for lbl in ROAM_ORDER}
+        for risk, epic in roam_rows:
+            status = risk.get("roam_status") or "roam::owned"
+            roam_buckets.setdefault(status, []).append((risk, epic))
+
+        # ── Legacy risk:: label buckets (transition fallback) ─────────── #
+        active_risk_labels = set(self._rd_risk_labels)
+        ordered_levels = [l for l in RISK_ORDER if l in active_risk_labels] + \
+                         [l for l in self._rd_risk_labels if l not in set(RISK_ORDER)]
+
+        legacy_buckets  = {lbl: [] for lbl in ordered_levels}
+        legacy_seen_ids = set()
         for lbl in ordered_levels:
             for epic in self._rd_epics_all:
-                if epic["id"] in seen_ids:
+                if epic["id"] in legacy_seen_ids:
                     continue
                 if lbl in epic.get("labels", []):
-                    buckets[lbl].append(epic)
-                    seen_ids.add(epic["id"])
+                    legacy_buckets[lbl].append(epic)
+                    legacy_seen_ids.add(epic["id"])
 
-        total_risk = len(seen_ids)
-
-        # Build parent → [child] map for child-overdue detection (Refs #8)
+        # ── Child-overdue bucket (Refs #8) ────────────────────────────── #
         children_by_parent: defaultdict = defaultdict(list)
         for e in self._rd_epics_all:
             pid = e.get("parent_id")
@@ -1474,7 +1505,6 @@ class ReportsMixin:
                 children_by_parent[pid].append(e)
 
         def _has_overdue_child_feature(epic_id):
-            """True if any direct child Feature has due_date < today and is not Closed."""
             for child in children_by_parent.get(epic_id, []):
                 if "Feature" not in child.get("labels", []):
                     continue
@@ -1489,32 +1519,35 @@ class ReportsMixin:
                         pass
             return False
 
-        # Child-overdue bucket: Epics/Capabilities with no risk label but overdue
-        # child Features — these would otherwise be invisible to the Risk Register.
+        all_flagged = roam_epics_seen | legacy_seen_ids
         child_overdue_bucket = [
             e for e in self._rd_epics_all
-            if e["id"] not in seen_ids
+            if e["id"] not in all_flagged
             and e.get("type") in ("Epic", "Capability")
             and _has_overdue_child_feature(e["id"])
         ]
-        total_risk += len(child_overdue_bucket)
 
-        # VS breakdown
+        total_roam_risks   = len(roam_rows)
+        total_legacy_epics = len(legacy_seen_ids)
+        total_child_over   = len(child_overdue_bucket)
+
+        # ── VS breakdown ─────────────────────────────────────────────── #
         vs_counts = {}
         for vs in self._iter_vs_groups():
-            vs_desc_ids = set()
+            vs_desc_ids: set = set()
             def _collect(gid):
                 vs_desc_ids.add(gid)
                 for child in self._rd_groups_by_parent.get(gid, []):
                     _collect(child["id"])
             _collect(vs["id"])
-            vs_counts[vs["name"]] = sum(
-                1 for e in self._rd_epics_all
-                if e.get("group_id") in vs_desc_ids
-                and any(l in active_risk_labels for l in e.get("labels", []))
-            )
+            roam_cnt   = sum(1 for e in self._rd_epics_all
+                             if e.get("group_id") in vs_desc_ids and e["id"] in roam_epics_seen)
+            legacy_cnt = sum(1 for e in self._rd_epics_all
+                             if e.get("group_id") in vs_desc_ids
+                             and any(l in active_risk_labels for l in e.get("labels", [])))
+            vs_counts[vs["name"]] = (roam_cnt, legacy_cnt)
 
-        # ── Render ──────────────────────────────────────────────────────── #
+        # ── Render ──────────────────────────────────────────────────── #
         md = []
         md.append(f"# Risk Register — {group.name}")
         md.append(
@@ -1522,95 +1555,171 @@ class ReportsMixin:
             f"**Group:** [{group.name}]({group.web_url})"
         )
         md.append("")
-        md.append(f"**{total_risk} risk-flagged epic(s)** — includes risk-labelled items and any unlabelled Epics/Capabilities with overdue child Features.")
-        md.append("")
 
         md.append("## Summary")
         md.append("")
-        md.append("### By Risk Level")
+        md.append("### ROAM Risk Issues")
         md.append("")
-        md.append("| Risk Level | Count |")
-        md.append("|-----------|-------|")
-        for lbl in ordered_levels:
-            icon  = RISK_ICONS.get(lbl, "⚪")
-            level = lbl.split("::")[-1].capitalize()
-            md.append(f"| {icon} {level} | {len(buckets[lbl])} |")
-        if child_overdue_bucket:
-            md.append(f"| 📅 Child Overdue _(no label)_ | {len(child_overdue_bucket)} |")
+        md.append("| ROAM Status | Risk Issues |")
+        md.append("|-------------|-------------|")
+        for lbl in ROAM_ORDER:
+            icon = ROAM_ICONS.get(lbl, lbl)
+            md.append(f"| {icon} | {len(roam_buckets.get(lbl, []))} |")
+        md.append(f"| **Total** | **{total_roam_risks}** |")
         md.append("")
+
+        if total_legacy_epics or total_child_over:
+            md.append("### Legacy / Structural Flags")
+            md.append("")
+            md.append("| Type | Count |")
+            md.append("|------|-------|")
+            if total_legacy_epics:
+                md.append(f"| 🏷️ Legacy `risk::` label | {total_legacy_epics} |")
+            if total_child_over:
+                md.append(f"| 📅 Child Overdue _(no label)_ | {total_child_over} |")
+            md.append("")
 
         if vs_counts:
             md.append("### By Value Stream")
             md.append("")
-            md.append("| Value Stream | Risk-Flagged Epics |")
-            md.append("|-------------|-------------------|")
-            for vs_name, cnt in vs_counts.items():
-                md.append(f"| {vs_name} | {cnt} |")
+            md.append("| Value Stream | ROAM Risks | Legacy Label |")
+            md.append("|-------------|-----------|--------------|")
+            for vs_name, (rc, lc) in vs_counts.items():
+                md.append(f"| {vs_name} | {rc} | {lc} |")
             md.append("")
 
-        # ── Per-level tables ─────────────────────────────────────────────── #
+        # ── Section 1: ROAM risk issues ──────────────────────────────── #
         def _pi_sort_key(e):
             piid = next((l for l in e.get("labels", []) if l.startswith("PIID::")), "PIID::ZZZZ")
             return (piid, e["title"])
 
-        def _render_risk_table(epics):
-            md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
-            md.append("|------|------|----|-------------|-------|-----------------|")
-            for epic in sorted(epics, key=_pi_sort_key):
-                etype      = next((t for t in ("Epic", "Capability", "Feature")
-                                   if t in epic.get("labels", [])), "Unknown")
-                eicon      = self.EPIC_TYPE_ICONS.get(etype, "❓")
-                pi         = next((l for l in epic.get("labels", [])
-                                   if l.startswith("PIID::")), "—")
-                path       = _group_path(epic.get("group_id"))
-                title_link = f"[{epic['title']}]({epic['web_url']})"
-                state      = epic["state"].capitalize()
-                reasons    = _item_risk_reasons(epic, today)
-                if _has_overdue_child_feature(epic["id"]):
-                    reasons = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
-                md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
+        def _epic_meta(epic):
+            etype = next((t for t in ("Epic", "Capability", "Feature")
+                          if t in epic.get("labels", [])), "Unknown")
+            eicon = self.EPIC_TYPE_ICONS.get(etype, "❓")
+            pi    = next((l for l in epic.get("labels", []) if l.startswith("PIID::")), "—")
+            path  = _group_path(epic.get("group_id"))
+            state = epic["state"].capitalize()
+            return etype, eicon, pi, path, state
+
+        if total_roam_risks:
+            md.append("---")
+            md.append("## ⚠️ ROAM Risk Issues")
+            md.append("")
+            md.append(
+                "Each row is a risk issue linked to the epic it threatens via a "
+                "\"relates to\" relationship.  "
+                "Remove the issue (or mark it closed) when the risk is no longer relevant."
+            )
             md.append("")
 
-        for lbl in ordered_levels:
-            epics = buckets[lbl]
-            if not epics:
-                continue
-            icon  = RISK_ICONS.get(lbl, "⚪")
-            level = lbl.split("::")[-1].capitalize()
-            md.append(f"## {icon} {level} Risk ({len(epics)})")
+            for lbl in ROAM_ORDER:
+                rows = roam_buckets.get(lbl, [])
+                if not rows:
+                    continue
+                icon  = ROAM_ICONS.get(lbl, lbl)
+                md.append(f"### {icon} ({len(rows)})")
+                md.append("")
+                md.append("| Risk Issue | Assignee | Epic Threatened | Type | PI | Group / ART | Epic State |")
+                md.append("|------------|----------|-----------------|------|----|-------------|------------|")
+                for risk, epic in sorted(rows, key=lambda x: _pi_sort_key(x[1])):
+                    etype, eicon, pi, path, estate = _epic_meta(epic)
+                    risk_link = f"[{risk['title']}]({risk['web_url']})"
+                    epic_link = f"[{epic['title']}]({epic['web_url']})"
+                    assignee  = risk.get("assignee") or "—"
+                    md.append(
+                        f"| {risk_link} | {assignee} | {epic_link} "
+                        f"| {eicon} {etype} | {pi} | {path} | {estate} |"
+                    )
+                md.append("")
+        else:
+            md.append("---")
+            md.append("## ⚠️ ROAM Risk Issues")
             md.append("")
-            _render_risk_table(epics)
+            md.append(
+                "_No ROAM risk issues found.  "
+                "Create issues with `roam::owned`, `roam::accepted`, `roam::mitigated`, or "
+                "`roam::resolved` labels and link them to the threatened epic via **\"relates to\"**._"
+            )
+            md.append("")
 
+        # ── Section 2: Legacy risk:: label epics (transition) ────────── #
+        if ordered_levels and total_legacy_epics:
+            md.append("---")
+            md.append("## 🏷️ Legacy Risk Labels _(transition — migrate to ROAM issues)_")
+            md.append("")
+            md.append(
+                "_These epics carry a `risk::` label applied directly. "
+                "Migrate them by creating a ROAM risk issue and linking it to the epic, "
+                "then remove the `risk::` label._"
+            )
+            md.append("")
+
+            def _render_legacy_table(epics):
+                md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
+                md.append("|------|------|----|-------------|-------|-----------------|")
+                for epic in sorted(epics, key=_pi_sort_key):
+                    etype, eicon, pi, path, state = _epic_meta(epic)
+                    title_link = f"[{epic['title']}]({epic['web_url']})"
+                    reasons    = _item_risk_reasons(epic, today)
+                    if _has_overdue_child_feature(epic["id"]):
+                        reasons = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
+                    md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
+                md.append("")
+
+            for lbl in ordered_levels:
+                epics = legacy_buckets[lbl]
+                if not epics:
+                    continue
+                icon  = RISK_ICONS.get(lbl, "⚪")
+                level = lbl.split("::")[-1].capitalize()
+                md.append(f"### {icon} {level} ({len(epics)})")
+                md.append("")
+                _render_legacy_table(epics)
+
+        # ── Section 3: Child Overdue (no label) ──────────────────────── #
         if child_overdue_bucket:
-            md.append(f"## 📅 Child Overdue ({len(child_overdue_bucket)})")
+            md.append("---")
+            md.append(f"## 📅 Child Overdue ({total_child_over})")
             md.append("")
-            md.append("_No risk label applied — flagged because a child Feature has passed its due date._")
+            md.append("_No risk label and no ROAM issues — flagged because a child Feature has passed its due date._")
             md.append("")
+
+            def _render_risk_table(epics):
+                md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
+                md.append("|------|------|----|-------------|-------|-----------------|")
+                for epic in sorted(epics, key=_pi_sort_key):
+                    etype, eicon, pi, path, state = _epic_meta(epic)
+                    title_link = f"[{epic['title']}]({epic['web_url']})"
+                    reasons    = _item_risk_reasons(epic, today)
+                    reasons    = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
+                    md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
+                md.append("")
+
             _render_risk_table(child_overdue_bucket)
 
         md.extend([
             "---",
             "## Legend",
             "",
-            "| Icon | Level | Meaning |",
-            "|------|-------|---------|",
-            "| 🔴 | High   | Immediate attention required — risk to delivery or mission outcome |",
-            "| 🟡 | Medium | Monitor closely — risk exists but is being managed |",
-            "| 🟢 | Low    | Acknowledged risk — low probability or low impact |",
-            "| 📅 | Child Overdue | No risk label, but a child Feature has passed its due date |",
+            "### ROAM Dispositions",
             "",
-            "Risk labels (`risk::high`, `risk::medium`, `risk::low`) are applied directly to epics.  ",
-            "Each epic is counted once at its highest assigned risk level.  ",
-            "**Group / ART** shows the path from the portfolio root to the owning group.",
+            "| Status | Meaning |",
+            "|--------|---------|",
+            "| ⚠️ Owned    | Someone owns this risk and is actively managing it |",
+            "| ✋ Accepted | Risk acknowledged; no action planned — team will live with it |",
+            "| 🛡️ Mitigated | Steps taken to reduce probability or impact |",
+            "| ✅ Resolved | Risk has been eliminated — close or remove the issue |",
             "",
-            "**At Risk Reasons** indicators:",
+            "### At Risk Reason Indicators",
             "",
             "| Indicator | Meaning |",
             "|-----------|---------|",
+            "| ⚠️ N risk(s)       | Item has N linked ROAM risk issues |",
             "| ⏱️ Behind Schedule | Active PI: % Done is less than % of PI elapsed |",
             "| 📅 Past Due        | Item's due date has passed and it is not Closed |",
             "| 📅 Child Overdue   | A child Feature has passed its due date and is not Closed |",
-            "| 🏷️ Risk Label      | Item carries a `risk::high`, `risk::medium`, or `risk::low` label |",
+            "| 🔴/🟡/🟢 Risk Label | Legacy `risk::` label (transition) |",
             "| 🔒 Blocked         | Item has one or more active blocking relationships |",
             "",
         ])

@@ -108,6 +108,11 @@ class NceGitLab(
         risk_labels_env = parse_label_env("RISK_LABELS")
         self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
 
+        roam_labels_env = parse_label_env("ROAM_LABELS")
+        self.ROAM_LABELS = roam_labels_env if roam_labels_env else config.get("roam_labels", [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+
         _wsjf = config.get("wsjf_labels", {})
         self.WSJF_LABELS = (
             _wsjf.get("value", []) + _wsjf.get("urgency", []) + _wsjf.get("risk", [])

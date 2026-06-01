@@ -315,6 +315,8 @@ class UtilitiesMixin:
                 "due_date":         getattr(epic, 'due_date', None),
                 "created_at":       getattr(epic, 'created_at', None),
                 "updated_at":       getattr(epic, 'updated_at', None),
+                "work_item_id":     getattr(epic, 'work_item_id', None),
+                "roam_risks":       [],
             }
 
             if "Epic" in epic.labels:
@@ -390,6 +392,11 @@ class UtilitiesMixin:
             ep["pct_complete"]  = rollup_pct(ep)
             ep["actual_weight"] = rollup_actual(ep)
 
+        # Attach ROAM risk issues to each epic (Refs #10)
+        roam_by_epic = self._fetch_roam_risks(group, all_epics_raw)
+        for e in all_epics_raw:
+            e["roam_risks"] = roam_by_epic.get(e["id"], [])
+
         if not hasattr(self, '_metrics_cache'):
             self._metrics_cache = {}
         self._metrics_cache[group_name] = metrics
@@ -403,6 +410,84 @@ class UtilitiesMixin:
         self._all_epics_cache[group_name] = all_epics_raw
 
         return metrics
+
+    def _fetch_roam_risks(self, group, all_epics_raw):
+        """Return {epic_int_id: [risk_dict, ...]} for all ROAM-labelled issues in the group.
+
+        Each risk issue carries a roam:: scoped label and is linked to one or more portfolio
+        epics via a 'relates to' work-item link.  The link is resolved by matching the linked
+        work item's GID integer against epic work_item_id values (Refs #10).
+        """
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        if not roam_labels:
+            return {}
+
+        # Build work_item_id → epic_int_id lookup
+        wi_to_epic = {
+            e["work_item_id"]: e["id"]
+            for e in all_epics_raw
+            if e.get("work_item_id")
+        }
+        if not wi_to_epic:
+            return {}
+
+        label_list = " ".join(f'"{l}"' for l in roam_labels)
+        query = f"""
+        query RoamRisks($fullPath: ID!) {{
+          group(fullPath: $fullPath) {{
+            issues(labelName: [{label_list}]) {{
+              nodes {{
+                iid title webUrl state
+                labels {{ nodes {{ title }} }}
+                assignees {{ nodes {{ name username }} }}
+                linkedWorkItems(filter: RELATED) {{
+                  nodes {{
+                    linkType
+                    workItem {{ id title webUrl }}
+                  }}
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+        print(f"  Fetching ROAM risk issues for {group.full_path}...")
+        data = self.graphql_query(query, variables={"fullPath": group.full_path})
+        if not data:
+            return {}
+
+        issues = data.get("group", {}).get("issues", {}).get("nodes", [])
+        print(f"    Found {len(issues)} ROAM risk issue(s).")
+
+        result = defaultdict(list)
+        for issue in issues:
+            labels      = [l["title"] for l in issue.get("labels", {}).get("nodes", [])]
+            roam_status = next((l for l in labels if l.startswith("roam::")), None)
+            assignees   = issue.get("assignees", {}).get("nodes", [])
+            assignee    = assignees[0]["name"] if assignees else "—"
+
+            risk_dict = {
+                "iid":         issue["iid"],
+                "title":       issue["title"],
+                "web_url":     issue["webUrl"],
+                "state":       issue["state"],
+                "roam_status": roam_status,
+                "assignee":    assignee,
+            }
+
+            for linked in issue.get("linkedWorkItems", {}).get("nodes", []):
+                gid    = linked["workItem"]["id"]          # gid://gitlab/WorkItem/12345
+                try:
+                    wi_int = int(gid.split("/")[-1])
+                except (ValueError, AttributeError):
+                    continue
+                epic_id = wi_to_epic.get(wi_int)
+                if epic_id:
+                    result[epic_id].append(risk_dict)
+
+        return dict(result)
 
     def _pi_dates_from_label(self, piid):
         """Parse a PIID::YYYYQn label into (start_date, end_date). Returns (None, None) on failure."""
