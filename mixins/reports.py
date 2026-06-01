@@ -1489,6 +1489,16 @@ class ReportsMixin:
                         pass
             return False
 
+        # Child-overdue bucket: Epics/Capabilities with no risk label but overdue
+        # child Features — these would otherwise be invisible to the Risk Register.
+        child_overdue_bucket = [
+            e for e in self._rd_epics_all
+            if e["id"] not in seen_ids
+            and e.get("type") in ("Epic", "Capability")
+            and _has_overdue_child_feature(e["id"])
+        ]
+        total_risk += len(child_overdue_bucket)
+
         # VS breakdown
         vs_counts = {}
         for vs in self._iter_vs_groups():
@@ -1512,7 +1522,7 @@ class ReportsMixin:
             f"**Group:** [{group.name}]({group.web_url})"
         )
         md.append("")
-        md.append(f"**{total_risk} risk-flagged epic(s).** Each epic is assigned to its highest risk level.")
+        md.append(f"**{total_risk} risk-flagged epic(s)** — includes risk-labelled items and any unlabelled Epics/Capabilities with overdue child Features.")
         md.append("")
 
         md.append("## Summary")
@@ -1525,6 +1535,8 @@ class ReportsMixin:
             icon  = RISK_ICONS.get(lbl, "⚪")
             level = lbl.split("::")[-1].capitalize()
             md.append(f"| {icon} {level} | {len(buckets[lbl])} |")
+        if child_overdue_bucket:
+            md.append(f"| 📅 Child Overdue _(no label)_ | {len(child_overdue_bucket)} |")
         md.append("")
 
         if vs_counts:
@@ -1541,14 +1553,7 @@ class ReportsMixin:
             piid = next((l for l in e.get("labels", []) if l.startswith("PIID::")), "PIID::ZZZZ")
             return (piid, e["title"])
 
-        for lbl in ordered_levels:
-            epics = buckets[lbl]
-            if not epics:
-                continue
-            icon  = RISK_ICONS.get(lbl, "⚪")
-            level = lbl.split("::")[-1].capitalize()
-            md.append(f"## {icon} {level} Risk ({len(epics)})")
-            md.append("")
+        def _render_risk_table(epics):
             md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
             md.append("|------|------|----|-------------|-------|-----------------|")
             for epic in sorted(epics, key=_pi_sort_key):
@@ -1566,6 +1571,23 @@ class ReportsMixin:
                 md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
 
+        for lbl in ordered_levels:
+            epics = buckets[lbl]
+            if not epics:
+                continue
+            icon  = RISK_ICONS.get(lbl, "⚪")
+            level = lbl.split("::")[-1].capitalize()
+            md.append(f"## {icon} {level} Risk ({len(epics)})")
+            md.append("")
+            _render_risk_table(epics)
+
+        if child_overdue_bucket:
+            md.append(f"## 📅 Child Overdue ({len(child_overdue_bucket)})")
+            md.append("")
+            md.append("_No risk label applied — flagged because a child Feature has passed its due date._")
+            md.append("")
+            _render_risk_table(child_overdue_bucket)
+
         md.extend([
             "---",
             "## Legend",
@@ -1575,6 +1597,7 @@ class ReportsMixin:
             "| 🔴 | High   | Immediate attention required — risk to delivery or mission outcome |",
             "| 🟡 | Medium | Monitor closely — risk exists but is being managed |",
             "| 🟢 | Low    | Acknowledged risk — low probability or low impact |",
+            "| 📅 | Child Overdue | No risk label, but a child Feature has passed its due date |",
             "",
             "Risk labels (`risk::high`, `risk::medium`, `risk::low`) are applied directly to epics.  ",
             "Each epic is counted once at its highest assigned risk level.  ",
