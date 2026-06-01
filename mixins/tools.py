@@ -134,11 +134,12 @@ TOOLS = [
     },
     {
         "key":         "reset-pi-progress",
-        "description": "Reopen all closed issues linked to epics in a specific PI",
+        "description": "Reopen all closed issues linked to epics in a specific PI (or all PIs)",
         "method":      "_tool_reset_pi_progress",
         "params": [
-            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,  "optional": False},
-            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool, "default": False},
+            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3), or blank if using --all", "type": str,  "optional": True},
+            {"name": "all",     "prompt": "Reopen across all PIs?",                                  "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                "type": bool, "default": False},
         ],
     },
     {
@@ -1593,33 +1594,39 @@ class ToolsMixin:
     # Priority 5 — Reset / Cleanup
     # ------------------------------------------------------------------
 
-    def _tool_reset_pi_progress(self, piid=None, dry_run=False):
-        """Reopen all closed issues linked to epics in a specific PI."""
-        if not piid:
-            print("ERROR: a PIID label is required.")
+    def _tool_reset_pi_progress(self, piid=None, all=False, dry_run=False):
+        """Reopen all closed issues linked to epics in a specific PI (or all PIs)."""
+        if not piid and not all:
+            print("ERROR: provide a PIID label or pass --all.")
+            return
+        if piid and all:
+            print("ERROR: --all and a PIID label are mutually exclusive.")
             return
 
-        group = self.get_group_by_name(self.parent_group)
-        print(f"Group : {group.full_path}  →  reopening closed issues for {piid}")
+        group  = self.get_group_by_name(self.parent_group)
+        scope  = "all PIs" if all else piid
+        print(f"Group : {group.full_path}  →  reopening closed issues for {scope}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
-        print("\nCollecting epics for this PI...")
-        pi_epic_ids = set()
+        pi_epic_ids = None  # None means "accept any epic"
+        if not all:
+            print("\nCollecting epics for this PI...")
+            pi_epic_ids = set()
 
-        def _walk_epics(grp):
-            for epic in grp.epics.list(all=True):
-                if piid in epic.labels:
-                    pi_epic_ids.add(epic.id)
-            for sg in grp.subgroups.list(all=True):
-                _walk_epics(self.gl.groups.get(sg.id))
+            def _walk_epics(grp):
+                for epic in grp.epics.list(all=True):
+                    if piid in epic.labels:
+                        pi_epic_ids.add(epic.id)
+                for sg in grp.subgroups.list(all=True):
+                    _walk_epics(self.gl.groups.get(sg.id))
 
-        _walk_epics(group)
-        print(f"  Found {len(pi_epic_ids)} epics in {piid}")
+            _walk_epics(group)
+            print(f"  Found {len(pi_epic_ids)} epics in {piid}")
 
-        if not pi_epic_ids:
-            print(f"No epics found with label '{piid}' — nothing to do.")
-            return
+            if not pi_epic_ids:
+                print(f"No epics found with label '{piid}' — nothing to do.")
+                return
 
         print("\nCollecting closed issues linked to those epics...")
         reopened = errors = 0
@@ -1628,7 +1635,9 @@ class ToolsMixin:
                 full_p = self.gl.projects.get(proj.id)
                 for issue in full_p.issues.list(all=True, state="closed"):
                     epic = getattr(issue, "epic", None)
-                    if not (epic and epic.get("id") in pi_epic_ids):
+                    if not epic:
+                        continue
+                    if pi_epic_ids is not None and epic.get("id") not in pi_epic_ids:
                         continue
                     if dry_run:
                         print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
