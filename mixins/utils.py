@@ -221,9 +221,7 @@ class UtilitiesMixin:
 
         def rollup_actual(e):
             children = hierarchy.get(e["id"], [])
-            if not children:
-                return e["actual_weight"]
-            return sum(rollup_actual(c) for c in children)
+            return e["actual_weight"] + sum(rollup_actual(c) for c in children)
 
         for cap in metrics["Capability"]:
             cap["pct_complete"]  = rollup_pct(cap)
