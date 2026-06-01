@@ -228,7 +228,7 @@ class UtilitiesMixin:
             query EpicBlockCounts($fullPath: ID!) {
               group(fullPath: $fullPath) {
                 epics {
-                  nodes { webUrl blockedByCount blockingCount }
+                  nodes { webUrl blocked blockedByCount blockingCount }
                 }
               }
             }
@@ -300,7 +300,7 @@ class UtilitiesMixin:
                 "title":            epic.title,
                 "description":      getattr(epic, 'description', None),
                 "state":            epic.state.capitalize(),
-                "blocked_by_count": gql.get("blockedByCount", 0),
+                "blocked_by_count": gql.get("blockedByCount") or (1 if gql.get("blocked") else 0),
                 "blocks_count":     gql.get("blockingCount", 0),
                 "web_url":          epic.web_url,
                 "labels":           epic.labels,
