@@ -1,4 +1,5 @@
 import random
+import re
 import sys
 from collections import defaultdict
 
@@ -137,7 +138,7 @@ TOOLS = [
         "description": "Reopen all closed issues linked to epics in a specific PI (or all PIs)",
         "method":      "_tool_reset_pi_progress",
         "params": [
-            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3), or blank if using --all", "type": str,  "optional": True},
+            {"name": "piid",    "prompt": "PIID label(s) — comma or space separated (e.g. PIID::2026Q3 PIID::2027Q1), blank if using --all", "type": str,  "optional": True},
             {"name": "all",     "prompt": "Reopen across all PIs?",                                  "type": bool, "default": False},
             {"name": "dry_run", "prompt": "Dry run?",                                                "type": bool, "default": False},
         ],
@@ -1596,15 +1597,17 @@ class ToolsMixin:
 
     def _tool_reset_pi_progress(self, piid=None, all=False, dry_run=False):
         """Reopen all closed issues linked to epics in a specific PI (or all PIs)."""
-        if not piid and not all:
-            print("ERROR: provide a PIID label or pass --all.")
+        piids = [t for t in re.split(r"[,\s]+", piid or "") if t] if piid else []
+
+        if not piids and not all:
+            print("ERROR: provide one or more PIID labels or pass --all.")
             return
-        if piid and all:
-            print("ERROR: --all and a PIID label are mutually exclusive.")
+        if piids and all:
+            print("ERROR: --all and PIID labels are mutually exclusive.")
             return
 
         group  = self.get_group_by_name(self.parent_group)
-        scope  = "all PIs" if all else piid
+        scope  = "all PIs" if all else ", ".join(piids)
         print(f"Group : {group.full_path}  →  reopening closed issues for {scope}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -1616,16 +1619,16 @@ class ToolsMixin:
 
             def _walk_epics(grp):
                 for epic in grp.epics.list(all=True):
-                    if piid in epic.labels:
+                    if any(p in epic.labels for p in piids):
                         pi_epic_ids.add(epic.id)
                 for sg in grp.subgroups.list(all=True):
                     _walk_epics(self.gl.groups.get(sg.id))
 
             _walk_epics(group)
-            print(f"  Found {len(pi_epic_ids)} epics in {piid}")
+            print(f"  Found {len(pi_epic_ids)} epics across {scope}")
 
             if not pi_epic_ids:
-                print(f"No epics found with label '{piid}' — nothing to do.")
+                print(f"No epics found with labels {scope} — nothing to do.")
                 return
 
         print("\nCollecting closed issues linked to those epics...")
