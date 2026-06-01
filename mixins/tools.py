@@ -1612,7 +1612,11 @@ class ToolsMixin:
     # ------------------------------------------------------------------
 
     def _tool_reset_pi_progress(self, piid=None, all=False, dry_run=False):
-        """Reopen all closed issues linked to epics in a specific PI (or all PIs)."""
+        """Reopen closed issues and epics for a PI (or all PIs).
+
+        Epics are reopened only when they have at least one open child issue
+        or child epic after the issue-reopening pass.
+        """
         piids = [t for t in re.split(r"[,\s]+", piid or "") if t] if piid else []
 
         if not piids and not all:
@@ -1624,31 +1628,52 @@ class ToolsMixin:
 
         group  = self.get_group_by_name(self.parent_group)
         scope  = "all PIs" if all else ", ".join(piids)
-        print(f"Group : {group.full_path}  →  reopening closed issues for {scope}")
+        print(f"Group : {group.full_path}  →  resetting progress for {scope}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
-        pi_epic_ids = None  # None means "accept any epic"
+        pi_epic_ids  = None  # None = accept any epic for issue filtering
+        closed_epics = []    # (grp, epic) pairs for closed epics in scope
+
         if not all:
             print("\nCollecting epics for this PI...")
             pi_epic_ids = set()
 
             def _walk_epics(grp):
                 for epic in grp.epics.list(all=True):
-                    if any(p in epic.labels for p in piids):
-                        pi_epic_ids.add(epic.id)
+                    if not any(p in epic.labels for p in piids):
+                        continue
+                    if getattr(epic, "group_id", grp.id) != grp.id:
+                        continue
+                    pi_epic_ids.add(epic.id)
+                    if epic.state == "closed":
+                        closed_epics.append((grp, epic))
                 for sg in grp.subgroups.list(all=True):
                     _walk_epics(self.gl.groups.get(sg.id))
 
             _walk_epics(group)
-            print(f"  Found {len(pi_epic_ids)} epics across {scope}")
+            print(f"  Found {len(pi_epic_ids)} epics across {scope} "
+                  f"({len(closed_epics)} closed)")
 
             if not pi_epic_ids:
                 print(f"No epics found with labels {scope} — nothing to do.")
                 return
+        else:
+            print("\nCollecting closed epics...")
 
-        print("\nCollecting closed issues linked to those epics...")
-        reopened = errors = 0
+            def _walk_closed(grp):
+                for epic in grp.epics.list(all=True, state="closed"):
+                    if getattr(epic, "group_id", grp.id) == grp.id:
+                        closed_epics.append((grp, epic))
+                for sg in grp.subgroups.list(all=True):
+                    _walk_closed(self.gl.groups.get(sg.id))
+
+            _walk_closed(group)
+            print(f"  Found {len(closed_epics)} closed epics")
+
+        # --- Reopen issues ---
+        print("\n--- Reopening closed issues ---")
+        reopened_issues = errors = 0
         for proj in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_p = self.gl.projects.get(proj.id)
@@ -1659,21 +1684,60 @@ class ToolsMixin:
                     if pi_epic_ids is not None and epic.get("id") not in pi_epic_ids:
                         continue
                     if dry_run:
-                        print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
-                        reopened += 1
+                        print(f"  DRY   Issue #{issue.iid} '{issue.title[:55]}'")
+                        reopened_issues += 1
                     else:
                         try:
                             issue.state_event = "reopen"
                             issue.save()
-                            print(f"  REOPENED #{issue.iid} '{issue.title[:55]}'")
-                            reopened += 1
+                            print(f"  REOPENED Issue #{issue.iid} '{issue.title[:55]}'")
+                            reopened_issues += 1
                         except Exception as e:
-                            print(f"  ERROR  #{issue.iid}: {e}")
+                            print(f"  ERROR  Issue #{issue.iid}: {e}")
                             errors += 1
             except Exception as e:
                 print(f"  WARNING: could not fetch issues for '{proj.path}': {e}")
 
-        print(f"\nDone.  Reopened: {reopened}  Errors: {errors}")
+        # --- Reopen closed epics that have open children ---
+        print(f"\n--- Checking {len(closed_epics)} closed epics for open children ---")
+        reopened_epics = 0
+        for grp, epic in closed_epics:
+            label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
+            has_open_child = False
+
+            try:
+                child_issues = epic.issues.list(get_all=True)
+                if any(i.state == "opened" for i in child_issues):
+                    has_open_child = True
+            except Exception:
+                pass
+
+            if not has_open_child:
+                try:
+                    child_epics = epic.epics.list(get_all=True)
+                    if any(e.state == "opened" for e in child_epics):
+                        has_open_child = True
+                except Exception:
+                    pass
+
+            if not has_open_child:
+                continue
+
+            if dry_run:
+                print(f"  DRY   {label}")
+                reopened_epics += 1
+            else:
+                try:
+                    epic.state_event = "reopen"
+                    epic.save()
+                    print(f"  REOPENED {label}")
+                    reopened_epics += 1
+                except Exception as e:
+                    print(f"  ERROR  {label}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Issues reopened: {reopened_issues}  "
+              f"Epics reopened: {reopened_epics}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
