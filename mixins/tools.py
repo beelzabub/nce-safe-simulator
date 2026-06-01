@@ -1,4 +1,5 @@
 import random
+import re
 import sys
 from collections import defaultdict
 
@@ -134,11 +135,12 @@ TOOLS = [
     },
     {
         "key":         "reset-pi-progress",
-        "description": "Reopen all closed issues linked to epics in a specific PI",
+        "description": "Reopen all closed issues linked to epics in a specific PI (or all PIs)",
         "method":      "_tool_reset_pi_progress",
         "params": [
-            {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,  "optional": False},
-            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool, "default": False},
+            {"name": "piid",    "prompt": "PIID label(s) — comma or space separated (e.g. PIID::2026Q3 PIID::2027Q1), blank if using --all", "type": str,  "optional": True},
+            {"name": "all",     "prompt": "Reopen across all PIs?",                                  "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                "type": bool, "default": False},
         ],
     },
     {
@@ -366,7 +368,7 @@ def _prompt_param(param):
 
 class ToolsMixin:
 
-    def run_tools_menu(self, tool_key=None):
+    def run_tools_menu(self, tool_key=None, prefills=None):
         """Show the utilities menu or run a specific tool by key."""
         if tool_key:
             tool = next((t for t in TOOLS if t["key"] == tool_key), None)
@@ -375,7 +377,7 @@ class ToolsMixin:
                 for t in TOOLS:
                     print(f"  {t['key']}")
                 sys.exit(1)
-            self._run_tool(tool)
+            self._run_tool(tool, prefills=prefills)
             return
 
         print()
@@ -399,14 +401,30 @@ class ToolsMixin:
                 pass
             print(f"  Please enter a number between 1 and {len(TOOLS)}.")
 
-    def _run_tool(self, tool):
+    def _run_tool(self, tool, prefills=None):
         print()
         print(f"  {tool['key']} — {tool['description']}")
         print()
 
+        prefills = prefills or {}
         kwargs = {}
         for param in tool["params"]:
-            kwargs[param["name"]] = _prompt_param(param)
+            name = param["name"]
+            if name in prefills:
+                raw = prefills[name]
+                ptype = param["type"]
+                if ptype is bool:
+                    val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
+                elif ptype is int:
+                    val = int(raw)
+                elif ptype is float:
+                    val = float(raw)
+                else:
+                    val = raw
+                print(f"  {param['prompt']}: {val}  (from CLI)")
+                kwargs[name] = val
+            else:
+                kwargs[name] = _prompt_param(param)
 
         print()
         getattr(self, tool["method"])(**kwargs)
@@ -595,7 +613,8 @@ class ToolsMixin:
 
         def _walk_epics(grp):
             for epic in grp.epics.list(all=True, state="opened"):
-                open_epics.append((grp, epic))
+                if getattr(epic, "group_id", grp.id) == grp.id:
+                    open_epics.append((grp, epic))
             for sg in grp.subgroups.list(all=True):
                 _walk_epics(self.gl.groups.get(sg.id))
 
@@ -1592,59 +1611,166 @@ class ToolsMixin:
     # Priority 5 — Reset / Cleanup
     # ------------------------------------------------------------------
 
-    def _tool_reset_pi_progress(self, piid=None, dry_run=False):
-        """Reopen all closed issues linked to epics in a specific PI."""
-        if not piid:
-            print("ERROR: a PIID label is required.")
+    def _tool_reset_pi_progress(self, piid=None, all=False, dry_run=False):
+        """Reopen closed issues and epics for a PI (or all PIs).
+
+        Epics are reopened only when they have at least one open child issue
+        or child epic after the issue-reopening pass.
+        """
+        piids = [t for t in re.split(r"[,\s]+", piid or "") if t] if piid else []
+
+        if not piids and not all:
+            print("ERROR: provide one or more PIID labels or pass --all.")
+            return
+        if piids and all:
+            print("ERROR: --all and PIID labels are mutually exclusive.")
             return
 
-        group = self.get_group_by_name(self.parent_group)
-        print(f"Group : {group.full_path}  →  reopening closed issues for {piid}")
+        group  = self.get_group_by_name(self.parent_group)
+        scope  = "all PIs" if all else ", ".join(piids)
+        print(f"Group : {group.full_path}  →  resetting progress for {scope}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
-        print("\nCollecting epics for this PI...")
-        pi_epic_ids = set()
+        pi_epic_ids  = None  # None = accept any epic for issue filtering
+        closed_epics = []    # (grp, epic) pairs for closed epics in scope
 
-        def _walk_epics(grp):
-            for epic in grp.epics.list(all=True):
-                if piid in epic.labels:
+        if not all:
+            print("\nCollecting epics for this PI...")
+            pi_epic_ids = set()
+
+            def _walk_epics(grp):
+                for epic in grp.epics.list(all=True):
+                    if not any(p in epic.labels for p in piids):
+                        continue
+                    if getattr(epic, "group_id", grp.id) != grp.id:
+                        continue
                     pi_epic_ids.add(epic.id)
-            for sg in grp.subgroups.list(all=True):
-                _walk_epics(self.gl.groups.get(sg.id))
+                    if epic.state == "closed":
+                        closed_epics.append((grp, epic))
+                for sg in grp.subgroups.list(all=True):
+                    _walk_epics(self.gl.groups.get(sg.id))
 
-        _walk_epics(group)
-        print(f"  Found {len(pi_epic_ids)} epics in {piid}")
+            _walk_epics(group)
+            print(f"  Found {len(pi_epic_ids)} epics across {scope} "
+                  f"({len(closed_epics)} closed)")
 
-        if not pi_epic_ids:
-            print(f"No epics found with label '{piid}' — nothing to do.")
-            return
+            if not pi_epic_ids:
+                print(f"No epics found with labels {scope} — nothing to do.")
+                return
+        else:
+            print("\nCollecting closed epics...")
 
-        print("\nCollecting closed issues linked to those epics...")
-        reopened = errors = 0
+            def _walk_closed(grp):
+                for epic in grp.epics.list(all=True, state="closed"):
+                    if getattr(epic, "group_id", grp.id) == grp.id:
+                        closed_epics.append((grp, epic))
+                for sg in grp.subgroups.list(all=True):
+                    _walk_closed(self.gl.groups.get(sg.id))
+
+            _walk_closed(group)
+            print(f"  Found {len(closed_epics)} closed epics")
+
+        # --- Reopen issues ---
+        print("\n--- Reopening closed issues ---")
+        reopened_issues = errors = 0
         for proj in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_p = self.gl.projects.get(proj.id)
                 for issue in full_p.issues.list(all=True, state="closed"):
                     epic = getattr(issue, "epic", None)
-                    if not (epic and epic.get("id") in pi_epic_ids):
+                    if not epic:
+                        continue
+                    if pi_epic_ids is not None and epic.get("id") not in pi_epic_ids:
                         continue
                     if dry_run:
-                        print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
-                        reopened += 1
+                        print(f"  DRY   Issue #{issue.iid} '{issue.title[:55]}'")
+                        reopened_issues += 1
                     else:
                         try:
                             issue.state_event = "reopen"
                             issue.save()
-                            print(f"  REOPENED #{issue.iid} '{issue.title[:55]}'")
-                            reopened += 1
+                            print(f"  REOPENED Issue #{issue.iid} '{issue.title[:55]}'")
+                            reopened_issues += 1
                         except Exception as e:
-                            print(f"  ERROR  #{issue.iid}: {e}")
+                            print(f"  ERROR  Issue #{issue.iid}: {e}")
                             errors += 1
             except Exception as e:
                 print(f"  WARNING: could not fetch issues for '{proj.path}': {e}")
 
-        print(f"\nDone.  Reopened: {reopened}  Errors: {errors}")
+        # --- Reopen closed epics that have open children (multi-pass) ---
+        # Each pass propagates "open" one level up the SAFe hierarchy:
+        # Features open in pass 1, Capabilities in pass 2, Epics in pass 3.
+        # python-gitlab's GroupEpic has no .epics manager; use raw HTTP for child epics.
+        print(f"\n--- Checking {len(closed_epics)} closed epics for open children ---")
+        reopened_epics = 0
+        pending = list(closed_epics)
+        pass_num = 0
+
+        import requests as _requests
+        epic_session = _requests.Session()
+        epic_session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+        def _should_reopen(grp, epic):
+            """Return True if the epic has open children OR has no children at all."""
+            issues = []
+            try:
+                issues = epic.issues.list(get_all=True)
+                if any(i.state == "opened" for i in issues):
+                    return True
+            except Exception:
+                pass
+
+            child_epics = []
+            url = (f"{self.url}/api/v4/groups/{grp.id}/epics/{epic.iid}/epics"
+                   f"?per_page=100")
+            try:
+                resp = epic_session.get(url)
+                if resp.ok:
+                    child_epics = resp.json()
+                    if any(e.get("state") == "opened" for e in child_epics):
+                        return True
+            except Exception:
+                pass
+
+            return len(issues) == 0 and len(child_epics) == 0
+
+        while pending:
+            pass_num += 1
+            still_closed = []
+            pass_count = 0
+
+            for grp, epic in pending:
+                label = f"Epic #{epic.iid} '{epic.title[:50]}' in {grp.full_path}"
+
+                if not _should_reopen(grp, epic):
+                    still_closed.append((grp, epic))
+                    continue
+
+                if dry_run:
+                    print(f"  DRY   {label}")
+                else:
+                    try:
+                        epic.state_event = "reopen"
+                        epic.save()
+                        print(f"  REOPENED {label}")
+                    except Exception as e:
+                        print(f"  ERROR  {label}: {e}")
+                        errors += 1
+                        still_closed.append((grp, epic))
+                        continue
+
+                reopened_epics += 1
+                pass_count += 1
+
+            pending = still_closed
+            if pass_count == 0:
+                break
+            if pass_num > 1:
+                print(f"  (pass {pass_num}: {pass_count} more epics reopened)")
+
+        print(f"\nDone.  Issues reopened: {reopened_issues}  "
+              f"Epics reopened: {reopened_epics}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
