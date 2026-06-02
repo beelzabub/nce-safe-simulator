@@ -315,6 +315,8 @@ class UtilitiesMixin:
                 "due_date":         getattr(epic, 'due_date', None),
                 "created_at":       getattr(epic, 'created_at', None),
                 "updated_at":       getattr(epic, 'updated_at', None),
+                "work_item_id":     getattr(epic, 'work_item_id', None),
+                "roam_risks":       [],
             }
 
             if "Epic" in epic.labels:
@@ -390,6 +392,11 @@ class UtilitiesMixin:
             ep["pct_complete"]  = rollup_pct(ep)
             ep["actual_weight"] = rollup_actual(ep)
 
+        # Attach ROAM risk issues to each epic (Refs #10)
+        roam_by_epic = self._fetch_roam_risks(group, all_epics_raw)
+        for e in all_epics_raw:
+            e["roam_risks"] = roam_by_epic.get(e["id"], [])
+
         if not hasattr(self, '_metrics_cache'):
             self._metrics_cache = {}
         self._metrics_cache[group_name] = metrics
@@ -403,6 +410,86 @@ class UtilitiesMixin:
         self._all_epics_cache[group_name] = all_epics_raw
 
         return metrics
+
+    def _fetch_roam_risks(self, group, all_epics_raw):
+        """Return {epic_int_id: [risk_dict, ...]} for all ROAM-labelled issues in the group.
+
+        Queries each project in the group hierarchy individually via project.issues GraphQL,
+        since group.issues does not aggregate sub-group project issues in this environment.
+        Risk→epic associations are resolved via linkedWorkItems RELATED links.
+        """
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        if not roam_labels or not all_epics_raw:
+            return {}
+
+        wi_to_epic = {
+            e["work_item_id"]: e["id"]
+            for e in all_epics_raw
+            if e.get("work_item_id")
+        }
+
+        # Collect all project full_paths under the group
+        project_paths = []
+        def _collect(grp):
+            for p in grp.projects.list(all=True):
+                project_paths.append(p.path_with_namespace)
+            for sg in grp.subgroups.list(all=True):
+                _collect(self.gl.groups.get(sg.id))
+        _collect(group)
+
+        label_list = " ".join(f'"{l}"' for l in roam_labels)
+        query = f"""
+        query RoamRisks($projectPath: ID!) {{
+          project(fullPath: $projectPath) {{
+            issues(or: {{ labelNames: [{label_list}] }}) {{
+              nodes {{
+                iid title webUrl state
+                labels {{ nodes {{ title }} }}
+                assignees {{ nodes {{ name }} }}
+                linkedWorkItems(filter: RELATED) {{
+                  nodes {{ workItem {{ id }} }}
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+
+        print(f"  Fetching ROAM risk issues for {group.full_path}...")
+        result = defaultdict(list)
+        total  = 0
+
+        for path in project_paths:
+            data   = self.graphql_query(query, variables={"projectPath": path})
+            issues = (data or {}).get("project", {}).get("issues", {}).get("nodes", [])
+            for issue in issues:
+                labels      = [l["title"] for l in issue.get("labels", {}).get("nodes", [])]
+                roam_status = next((l for l in labels if l.startswith("roam::")), None)
+                if not roam_status:
+                    continue
+                total += 1
+                assignees = issue.get("assignees", {}).get("nodes", [])
+                risk_dict = {
+                    "iid":         issue["iid"],
+                    "title":       issue["title"],
+                    "web_url":     issue["webUrl"],
+                    "state":       issue["state"],
+                    "roam_status": roam_status,
+                    "assignee":    assignees[0]["name"] if assignees else "—",
+                }
+                for linked in issue.get("linkedWorkItems", {}).get("nodes", []):
+                    try:
+                        wi_int = int(linked["workItem"]["id"].split("/")[-1])
+                    except (ValueError, AttributeError):
+                        continue
+                    epic_id = wi_to_epic.get(wi_int)
+                    if epic_id:
+                        result[epic_id].append(risk_dict)
+
+        print(f"    Found {total} ROAM risk issue(s).")
+        return dict(result)
 
     def _pi_dates_from_label(self, piid):
         """Parse a PIID::YYYYQn label into (start_date, end_date). Returns (None, None) on failure."""

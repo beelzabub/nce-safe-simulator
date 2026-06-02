@@ -8,6 +8,7 @@
   "piid_labels": ["PIID::2026Q1", "PIID::2026Q2", "PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
   "epic_type_labels": ["Epic", "Capability", "Feature"],
   "risk_labels": ["risk::high", "risk::medium", "risk::low"],
+  "roam_labels": ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"],
   "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
   "lifecycle_labels": ["lifecycle::funnel", "lifecycle::analyzing", "lifecycle::backlog", "lifecycle::implementing", "lifecycle::done"],
   "wsjf_labels": {
@@ -36,7 +37,8 @@
       "generate_epic_blocks_count":   10,
       "simulate_pi_progress_percent": 50.0,
       "generate_issues_count":        5,
-      "weight_drift_threshold":       20.0
+      "weight_drift_threshold":       20.0,
+      "roam_risk_relations":          {"min": 1, "max": 3}
     }
   }
 }
