@@ -71,6 +71,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "premature-closures",
+        "description": "Premature Closures — closed Epics/Capabilities with open child epics or open linked issues",
+        "method":      "generate_premature_closures_report",
+        "needs_group": False,
+    },
+    {
         "key":         "piid-project",
         "description": "Program × PI Report — project label vs PI quarter cross-tab with status and weights",
         "method":      "generate_piid_project_report",
@@ -172,22 +178,42 @@ _ROAM_ICONS = {
     "roam::mitigated":"⚠️ M",
     "roam::resolved": "⚠️ R",
 }
-_RISK_LABEL_ICONS = {
-    "risk::high":   "🔴 High Risk",
-    "risk::medium": "🟡 Med Risk",
-    "risk::low":    "🟢 Low Risk",
-}
+
+_TYPE_ICON_LEGEND = [
+    "",
+    "### Epic Type Icons",
+    "",
+    "| Icon | Type |",
+    "|------|------|",
+    "| 🏆 | Epic |",
+    "| 🧩 | Capability |",
+    "| 🛠️ | Feature |",
+    "",
+]
+
+_LEGEND_OPEN  = ["---", "<details>", "<summary>Legend</summary>", ""]
+_LEGEND_CLOSE = ["", "</details>"]
 
 
+def _side_by_side(*panels):
+    """Return one HTML string placing (title, [(left, right), ...]) panels side by side."""
+    def _panel(title, rows):
+        trs = "".join(f"<tr><td>{l}</td><td>{r}</td></tr>" for l, r in rows)
+        return (
+            f"<td valign='top'><strong>{title}</strong>"
+            f"<table><tr><th align='left'>Icon</th><th align='left'>Meaning</th></tr>"
+            f"{trs}</table></td>"
+        )
+    spacer = '<td width="40"></td>'
+    return f"<table><tr valign='top'>{spacer.join(_panel(t, r) for t, r in panels)}</tr></table>"
 def _item_risk_reasons(item, today=None):
     """Return a compact at-risk reason string for an epic/feature dict.
 
-    Checks five distinct causes (Refs #8, #10):
+    Checks four distinct causes (Refs #8, #10):
       🔒 Blocked         — has one or more active blocking relationships
       ⏱️ Behind Schedule — active PI, % done < % PI elapsed
       📅 Past Due        — due_date in the past, not Closed
       ⚠️ N risk(s)       — has linked ROAM risk issues (Refs #10)
-      🔴/🟡/🟢 Risk Label — legacy risk:: label fallback (transition)
     Returns "—" when no risk applies.
     """
     if today is None:
@@ -214,14 +240,7 @@ def _item_risk_reasons(item, today=None):
 
     roam_risks = item.get("roam_risks") or []
     if roam_risks:
-        n = len(roam_risks)
-        reasons.append(f"⚠️ {n} risk(s)")
-    else:
-        # Transition fallback: honour legacy risk:: label until migrated to ROAM issues
-        for lbl in labels:
-            if lbl in _RISK_LABEL_ICONS:
-                reasons.append(_RISK_LABEL_ICONS[lbl])
-                break
+        reasons.append(f"⚠️ {len(roam_risks)} risk(s)")
 
     return " · ".join(reasons) if reasons else "—"
 
@@ -562,7 +581,8 @@ class ReportsMixin:
         md.extend([
             "",
             "---",
-            "## Legend",
+            "<details>",
+            "<summary>Legend</summary>",
             "",
             "### Status",
             "| Icon | Meaning |",
@@ -580,6 +600,8 @@ class ReportsMixin:
             "- **Planned pt** — sum of planned weights set on those epics (via GraphQL)",
             "- **Actual pt** — sum of story-point weights on all linked issues",
             "- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched",
+            "",
+            "</details>",
             "",
             "## Quick Links",
             "",
@@ -691,10 +713,7 @@ class ReportsMixin:
 
             md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
-            "",
+        md.extend(_LEGEND_OPEN + [
             "| Icon | Status | Condition |",
             "|------|--------|-----------|",
             "| ✅ On Track   | Current PI | % Done ≥ % of PI quarter elapsed |",
@@ -708,8 +727,7 @@ class ReportsMixin:
             "- **Actual** — sum of story-point weights on linked issues",
             "- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched",
             "- **Blocked** — number of epics with at least one active blocker",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/Program PI Detail", "\n".join(md))
 
@@ -779,15 +797,11 @@ class ReportsMixin:
             for epic in metrics["Epic"]:
                 render_epic_details(epic)
 
-            markdown_report.extend([
-                "", "", "",
-                "---",
-                "## Legend",
+            markdown_report.extend(["", "", ""] + _LEGEND_OPEN + [
                 "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
                 "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
                 "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
-                "",
-            ])
+            ] + _LEGEND_CLOSE)
 
             md = "\n".join(markdown_report)
             self.upload_to_wiki(group, f"{self._wiki_t3}/SAFe Portfolio Hierarchy", md)
@@ -958,10 +972,7 @@ class ReportsMixin:
 
             md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
-            "",
+        md.extend(_LEGEND_OPEN + [
             "### SAFe Hierarchy",
             "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
             "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
@@ -985,8 +996,7 @@ class ReportsMixin:
             "### PI Elapsed %",
             "- Calculated as: `(today − PI start date) ÷ (PI end date − PI start date) × 100`",
             "- PIID labels follow the pattern `PIID::YYYYQn` and map to calendar quarters: Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t3}/ART-Team Workload", "\n".join(md))
 
@@ -1222,7 +1232,7 @@ class ReportsMixin:
                 md.append("<details>")
                 md.append(
                     f"<summary>⛔ {icon} **{link(epic['title'], epic['web_url'])}**"
-                    f" ({etype}) — State: {state}"
+                    f" — State: {state}"
                     f" — Blocked by: {blocked_by_cnt}</summary>"
                 )
                 md.append("")
@@ -1230,7 +1240,7 @@ class ReportsMixin:
                 for blocker in rel.get("blocked_by", []):
                     btype = blocker.get("type", "Epic")
                     bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
-                    md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}** ({btype})")
+                    md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}**")
                     md.append("")
 
                 ancestors = rel.get("at_risk_portfolio_epics", [])
@@ -1240,39 +1250,24 @@ class ReportsMixin:
                     for ancestor in ancestors:
                         atype = ancestor.get("type", "Epic")
                         aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
-                        md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}** ({atype})")
+                        md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}**")
                         md.append("")
 
                 md.append("</details>")
                 md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
-            "",
-            "### Blocking Status",
-            "| Icon | Meaning |",
-            "|------|---------|",
-            "| ⛔ | **Blocked** — this epic has at least one active blocker preventing progress |",
-            "| 🔒 | **Blocker** — this epic is directly blocking one or more other epics |",
-            "| ⬆️ | **Risk propagation** — a blocked descendant causes risk to bubble up to this ancestor |",
-            "| ⚠️ | **Portfolio risk flag** — a top-level Epic contains one or more blocked descendants |",
-            "",
-            "### Cross-ART Severity",
-            "| Icon | Meaning |",
-            "|------|---------|",
-            "| 🔴 Critical | Blocked item is in the **current PI** — requires immediate cross-ART coordination |",
-            "| 🟡 Watch    | Blocked item is in a **future PI** — dependency to monitor and plan around |",
-            "| ⚫ Past     | Blocked item was in a **past PI** — dependency may be stale or resolved |",
-            "",
-            "### SAFe Hierarchy",
-            "| Icon | Type | Description |",
-            "|------|------|-------------|",
-            "| 🏆 | **Epic** | Portfolio-level initiative; may span multiple PIs and ARTs |",
-            "| 🧩 | **Capability** | Large Solution-level deliverable decomposed from an Epic |",
-            "| 🛠️ | **Feature** | Service or function delivered by a single ART within one PI |",
-            "",
-        ])
+        md.extend(_LEGEND_OPEN + [
+            _side_by_side(
+                ("Epic Type Icons",  [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("Blocking Status",  [("⛔", "Blocked — has at least one active blocker"),
+                                      ("🔒", "Blocker — directly blocking one or more epics"),
+                                      ("⬆️", "Risk propagation — blocked descendant risk bubbles up"),
+                                      ("⚠️", "Portfolio risk flag — top-level Epic has blocked descendants")]),
+                ("Cross-ART Severity", [("🔴 Critical", "Blocked item is in the current PI"),
+                                        ("🟡 Watch",    "Blocked item is in a future PI"),
+                                        ("⚫ Past",     "Blocked item was in a past PI")]),
+            ),
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/Blocking & Cross-ART Risk", "\n".join(md))
         print(f"  → Wiki: {self._wiki_t2}/Blocking & Cross-ART Risk")
@@ -1308,14 +1303,15 @@ class ReportsMixin:
         else:
             md.append(f"**{len(orphans)} orphaned epic(s) found.**")
             md.append("")
-            md.append("| Type | Title | State |")
-            md.append("|------|-------|-------|")
+            md.append("| Title | State |")
+            md.append("|-------|-------|")
             for epic in orphans:
                 etype      = next((t for t in ("Epic", "Capability", "Feature") if t in epic["labels"]), "Unknown")
                 icon       = self.EPIC_TYPE_ICONS.get(etype, "❓")
                 title_link = f"[{epic['title']}]({epic['web_url']})"
-                md.append(f"| {icon} {etype} | {title_link} | {epic['state']} |")
+                md.append(f"| {icon} {title_link} | {epic['state']} |")
 
+        md.extend(_LEGEND_OPEN + _TYPE_ICON_LEGEND + _LEGEND_CLOSE)
         self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Epics", "\n".join(md))
 
     def generate_orphan_issues_report(self):
@@ -1362,6 +1358,124 @@ class ReportsMixin:
 
         self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Issues", "\n".join(md))
 
+    def generate_premature_closures_report(self):
+        group = self._rd_root_obj
+        today = date.today()
+        print("  Generating Premature Closures report...")
+
+        # Build parent → direct children map
+        children_by_parent: defaultdict = defaultdict(list)
+        for e in self._rd_epics_all:
+            pid = e.get("parent_id")
+            if pid is not None:
+                children_by_parent[pid].append(e)
+
+        # Find closed Epics and Capabilities with open direct children or open linked issues
+        findings = []   # list of dicts
+        for etype in ("Epic", "Capability"):
+            for epic in self._rd_epics_all:
+                if epic.get("type") != etype:
+                    continue
+                if (epic.get("state") or "").lower() != "closed":
+                    continue
+
+                open_children = [
+                    c for c in children_by_parent.get(epic["id"], [])
+                    if (c.get("state") or "").lower() != "closed"
+                ]
+                open_issues = [
+                    i for i in self._rd_issues_by_epic.get(epic["id"], [])
+                    if i.get("state", "").lower() != "closed"
+                ]
+
+                if open_children or open_issues:
+                    findings.append({
+                        "epic":          epic,
+                        "etype":         etype,
+                        "open_children": open_children,
+                        "open_issues":   open_issues,
+                    })
+
+        by_type = {
+            "Epic":       [f for f in findings if f["etype"] == "Epic"],
+            "Capability": [f for f in findings if f["etype"] == "Capability"],
+        }
+        total = len(findings)
+
+        md = []
+        md.append(f"# Premature Closures — {group.name}")
+        md.append(
+            f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** [{group.name}]({group.web_url})"
+        )
+        md.append("")
+        md.append(
+            "A **premature closure** is a closed Epic or Capability that still has open "
+            "child epics or open linked issues. Either reopen the parent to reflect "
+            "in-flight work, or close and reassign the remaining items."
+        )
+        md.append("")
+
+        if not findings:
+            md.append("✅ _No premature closures found — all closed epics have fully closed descendants._")
+            self.upload_to_wiki(group, f"{self._wiki_t4}/Premature Closures", "\n".join(md))
+            return
+
+        md.append(f"**{total} closed epic(s) with open work remaining.**")
+        md.append("")
+
+        for etype, icon in (("Epic", "🏆"), ("Capability", "🧩")):
+            rows = by_type[etype]
+            if not rows:
+                continue
+            md.append("---")
+            plural = "Epics" if etype == "Epic" else "Capabilities"
+            md.append(f"## {icon} Closed {plural} with Open Work ({len(rows)})")
+            md.append("")
+
+            for f in sorted(rows, key=lambda x: x["epic"]["title"]):
+                epic         = f["epic"]
+                open_children = f["open_children"]
+                open_issues   = f["open_issues"]
+                title_link   = f"[{epic['title']}]({epic['web_url']})"
+                child_note   = f"⚠️ {len(open_children)} open child epic(s)" if open_children else ""
+                issue_note   = f"⚠️ {len(open_issues)} open issue(s)" if open_issues else ""
+                notes        = " · ".join(x for x in (child_note, issue_note) if x)
+
+                md.append(f"### {title_link}  — {notes}")
+                md.append("")
+
+                if open_children:
+                    md.append("**Open child epics:**")
+                    md.append("")
+                    md.append("| Title | PI |")
+                    md.append("|-------|----|")
+                    for child in sorted(open_children, key=lambda c: c["title"]):
+                        ctype = next(
+                            (t for t in ("Capability", "Feature") if t in child.get("labels", [])),
+                            "Unknown"
+                        )
+                        cicon     = self.EPIC_TYPE_ICONS.get(ctype, "❓")
+                        clink     = f"[{child['title']}]({child['web_url']})"
+                        piid      = next((l for l in child.get("labels", []) if l.startswith("PIID::")), "—")
+                        md.append(f"| {cicon} {clink} | {piid} |")
+                    md.append("")
+
+                if open_issues:
+                    md.append("**Open linked issues:**")
+                    md.append("")
+                    md.append("| # | Issue | Assignee | Milestone |")
+                    md.append("|---|-------|----------|-----------|")
+                    for issue in sorted(open_issues, key=lambda i: i.get("iid", 0)):
+                        ilink     = f"[{issue['title']}]({issue['web_url']})"
+                        assignees = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
+                        milestone = issue.get("milestone") or "—"
+                        md.append(f"| #{issue['iid']} | {ilink} | {assignees} | {milestone} |")
+                    md.append("")
+
+        md.extend(_LEGEND_OPEN + _TYPE_ICON_LEGEND + _LEGEND_CLOSE)
+        self.upload_to_wiki(group, f"{self._wiki_t4}/Premature Closures", "\n".join(md))
+
     def generate_unassigned_pi_report(self):
         group = self._rd_root_obj
         print("  Generating Unassigned PI Report...")
@@ -1402,16 +1516,13 @@ class ReportsMixin:
                 md.append(f"| {title_link} | {state} | {parent} |")
             md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
+        md.extend(_LEGEND_OPEN + [
             "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
             "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
             "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             "- **Parent**: the direct parent epic in the hierarchy, if one exists",
             "- Items with no parent and no children are also captured by the Orphaned Epics report",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t4}/Unassigned PI", "\n".join(md))
 
@@ -1453,9 +1564,6 @@ class ReportsMixin:
             "roam::resolved": "✅ Resolved",
         }
 
-        RISK_ORDER = ["risk::high", "risk::medium", "risk::low"]
-        RISK_ICONS = {"risk::high": "🔴", "risk::medium": "🟡", "risk::low": "🟢"}
-
         # Build relative path from root for each epic's owning group
         root_id = self._rd_root["id"]
 
@@ -1468,34 +1576,23 @@ class ReportsMixin:
             return " / ".join(reversed(parts)) if parts else group.name
 
         # ── ROAM risk issues (primary) ────────────────────────────────── #
-        # Build a flat list of (risk_dict, epic_dict) pairs from all epics
-        roam_rows = []
-        roam_epics_seen = set()   # epic IDs that have at least one ROAM risk
+        # Build {risk_iid: (risk_dict, [epic_dict, ...])} — one entry per unique risk issue.
+        # A risk may relate to multiple epics; we collect all of them.
+        risk_map: dict = {}        # iid → (risk_dict, [epic_dicts])
+        roam_epics_seen: set = set()
         for epic in self._rd_epics_all:
             for risk in epic.get("roam_risks") or []:
-                roam_rows.append((risk, epic))
+                iid = risk["iid"]
+                if iid not in risk_map:
+                    risk_map[iid] = (risk, [])
+                risk_map[iid][1].append(epic)
                 roam_epics_seen.add(epic["id"])
 
-        # Bucket by ROAM status
+        # Bucket by ROAM status — one entry per unique risk issue
         roam_buckets: dict = {lbl: [] for lbl in ROAM_ORDER}
-        for risk, epic in roam_rows:
+        for iid, (risk, epics) in risk_map.items():
             status = risk.get("roam_status") or "roam::owned"
-            roam_buckets.setdefault(status, []).append((risk, epic))
-
-        # ── Legacy risk:: label buckets (transition fallback) ─────────── #
-        active_risk_labels = set(self._rd_risk_labels)
-        ordered_levels = [l for l in RISK_ORDER if l in active_risk_labels] + \
-                         [l for l in self._rd_risk_labels if l not in set(RISK_ORDER)]
-
-        legacy_buckets  = {lbl: [] for lbl in ordered_levels}
-        legacy_seen_ids = set()
-        for lbl in ordered_levels:
-            for epic in self._rd_epics_all:
-                if epic["id"] in legacy_seen_ids:
-                    continue
-                if lbl in epic.get("labels", []):
-                    legacy_buckets[lbl].append(epic)
-                    legacy_seen_ids.add(epic["id"])
+            roam_buckets.setdefault(status, []).append((risk, epics))
 
         # ── Child-overdue bucket (Refs #8) ────────────────────────────── #
         children_by_parent: defaultdict = defaultdict(list)
@@ -1519,7 +1616,13 @@ class ReportsMixin:
                         pass
             return False
 
-        all_flagged = roam_epics_seen | legacy_seen_ids
+        def _is_past_due(dd_str):
+            try:
+                return date.fromisoformat(str(dd_str)[:10]) < today
+            except (ValueError, TypeError):
+                return False
+
+        all_flagged = roam_epics_seen
         child_overdue_bucket = [
             e for e in self._rd_epics_all
             if e["id"] not in all_flagged
@@ -1527,9 +1630,30 @@ class ReportsMixin:
             and _has_overdue_child_feature(e["id"])
         ]
 
-        total_roam_risks   = len(roam_rows)
-        total_legacy_epics = len(legacy_seen_ids)
+        all_flagged = all_flagged | {e["id"] for e in child_overdue_bucket}
+        past_due_bucket = [
+            e for e in self._rd_epics_all
+            if e["id"] not in all_flagged
+            and e.get("type") in ("Epic", "Capability")
+            and (e.get("state") or "").lower() != "closed"
+            and _is_past_due(e.get("due_date"))
+        ]
+
+        all_flagged = all_flagged | {e["id"] for e in past_due_bucket}
+        behind_schedule_bucket = [
+            e for e in self._rd_epics_all
+            if e["id"] not in all_flagged
+            and e.get("type") in ("Epic", "Capability")
+            and (e.get("state") or "").lower() != "closed"
+            and e.get("pct_through_pi") is not None
+            and 0 < e["pct_through_pi"] < 100
+            and e.get("pct_complete", 0) < e["pct_through_pi"]
+        ]
+
+        total_roam_risks   = len(risk_map)
         total_child_over   = len(child_overdue_bucket)
+        total_past_due     = len(past_due_bucket)
+        total_behind_sched = len(behind_schedule_bucket)
 
         # ── VS breakdown ─────────────────────────────────────────────── #
         vs_counts = {}
@@ -1540,12 +1664,9 @@ class ReportsMixin:
                 for child in self._rd_groups_by_parent.get(gid, []):
                     _collect(child["id"])
             _collect(vs["id"])
-            roam_cnt   = sum(1 for e in self._rd_epics_all
-                             if e.get("group_id") in vs_desc_ids and e["id"] in roam_epics_seen)
-            legacy_cnt = sum(1 for e in self._rd_epics_all
-                             if e.get("group_id") in vs_desc_ids
-                             and any(l in active_risk_labels for l in e.get("labels", [])))
-            vs_counts[vs["name"]] = (roam_cnt, legacy_cnt)
+            roam_cnt = sum(1 for e in self._rd_epics_all
+                           if e.get("group_id") in vs_desc_ids and e["id"] in roam_epics_seen)
+            vs_counts[vs["name"]] = roam_cnt
 
         # ── Render ──────────────────────────────────────────────────── #
         md = []
@@ -1556,37 +1677,41 @@ class ReportsMixin:
         )
         md.append("")
 
-        md.append("## Summary")
-        md.append("")
-        md.append("### ROAM Risk Issues")
-        md.append("")
-        md.append("| ROAM Status | Risk Issues |")
-        md.append("|-------------|-------------|")
-        for lbl in ROAM_ORDER:
-            icon = ROAM_ICONS.get(lbl, lbl)
-            md.append(f"| {icon} | {len(roam_buckets.get(lbl, []))} |")
-        md.append(f"| **Total** | **{total_roam_risks}** |")
-        md.append("")
+        # ── Summary: side-by-side panels ─────────────────────────────── #
+        def _panel(title, col1, col2, rows):
+            thead = f"<tr><th align='left'>{col1}</th><th align='left'>{col2}</th></tr>"
+            tbody = "".join(f"<tr><td>{r[0]}</td><td>{r[1]}</td></tr>" for r in rows)
+            return (
+                f"<td valign='top'><strong>{title}</strong>"
+                f"<table>{thead}{tbody}</table></td>"
+            )
 
-        if total_legacy_epics or total_child_over:
-            md.append("### Legacy / Structural Flags")
-            md.append("")
-            md.append("| Type | Count |")
-            md.append("|------|-------|")
-            if total_legacy_epics:
-                md.append(f"| 🏷️ Legacy `risk::` label | {total_legacy_epics} |")
+        panels = []
+
+        roam_rows = [(ROAM_ICONS.get(lbl, lbl), len(roam_buckets.get(lbl, [])))
+                     for lbl in ROAM_ORDER]
+        roam_rows.append(("<strong>Total</strong>", f"<strong>{total_roam_risks}</strong>"))
+        panels.append(_panel("ROAM Risk Issues", "Status", "Count", roam_rows))
+
+        if total_child_over or total_past_due or total_behind_sched:
+            flag_rows = []
+            if total_past_due:
+                flag_rows.append(("📅 Past Due", total_past_due))
             if total_child_over:
-                md.append(f"| 📅 Child Overdue _(no label)_ | {total_child_over} |")
-            md.append("")
+                flag_rows.append(("📅 Child Overdue", total_child_over))
+            if total_behind_sched:
+                flag_rows.append(("⏱️ Behind Schedule", total_behind_sched))
+            panels.append(_panel("Schedule Alerts", "Type", "Count", flag_rows))
 
         if vs_counts:
-            md.append("### By Value Stream")
-            md.append("")
-            md.append("| Value Stream | ROAM Risks | Legacy Label |")
-            md.append("|-------------|-----------|--------------|")
-            for vs_name, (rc, lc) in vs_counts.items():
-                md.append(f"| {vs_name} | {rc} | {lc} |")
-            md.append("")
+            panels.append(_panel("By Value Stream", "Value Stream", "ROAM Risks",
+                                 list(vs_counts.items())))
+
+        spacer = '<td width="40"></td>'
+        md.append("## Summary")
+        md.append("")
+        md.append(f"<table><tr valign='top'>{spacer.join(panels)}</tr></table>")
+        md.append("")
 
         # ── Section 1: ROAM risk issues ──────────────────────────────── #
         def _pi_sort_key(e):
@@ -1607,8 +1732,8 @@ class ReportsMixin:
             md.append("## ⚠️ ROAM Risk Issues")
             md.append("")
             md.append(
-                "Each row is a risk issue linked to the epic it threatens via a "
-                "\"relates to\" relationship.  "
+                "Each row is one risk issue.  "
+                "A risk may threaten more than one epic — all are listed in the last column.  "
                 "Remove the issue (or mark it closed) when the risk is no longer relevant."
             )
             md.append("")
@@ -1617,20 +1742,18 @@ class ReportsMixin:
                 rows = roam_buckets.get(lbl, [])
                 if not rows:
                     continue
-                icon  = ROAM_ICONS.get(lbl, lbl)
+                icon = ROAM_ICONS.get(lbl, lbl)
                 md.append(f"### {icon} ({len(rows)})")
                 md.append("")
-                md.append("| Risk Issue | Assignee | Epic Threatened | Type | PI | Group / ART | Epic State |")
-                md.append("|------------|----------|-----------------|------|----|-------------|------------|")
-                for risk, epic in sorted(rows, key=lambda x: _pi_sort_key(x[1])):
-                    etype, eicon, pi, path, estate = _epic_meta(epic)
-                    risk_link = f"[{risk['title']}]({risk['web_url']})"
-                    epic_link = f"[{epic['title']}]({epic['web_url']})"
-                    assignee  = risk.get("assignee") or "—"
-                    md.append(
-                        f"| {risk_link} | {assignee} | {epic_link} "
-                        f"| {eicon} {etype} | {pi} | {path} | {estate} |"
+                md.append("| Risk Issue | Assignee | Epics Threatened |")
+                md.append("|------------|----------|-----------------|")
+                for risk, epics in sorted(rows, key=lambda x: x[0].get("title", "")):
+                    risk_link  = f"[{risk['title']}]({risk['web_url']})"
+                    assignee   = risk.get("assignee") or "—"
+                    epic_links = ", ".join(
+                        f"[{e['title']}]({e['web_url']})" for e in epics
                     )
+                    md.append(f"| {risk_link} | {assignee} | {epic_links} |")
                 md.append("")
         else:
             md.append("---")
@@ -1643,73 +1766,53 @@ class ReportsMixin:
             )
             md.append("")
 
-        # ── Section 2: Legacy risk:: label epics (transition) ────────── #
-        if ordered_levels and total_legacy_epics:
-            md.append("---")
-            md.append("## 🏷️ Legacy Risk Labels _(transition — migrate to ROAM issues)_")
+        def _render_epic_table(epics, prepend=None):
+            md.append("| Epic | PI | Group / ART | State | At Risk Reasons |")
+            md.append("|------|----|-------------|-------|-----------------|")
+            for epic in sorted(epics, key=_pi_sort_key):
+                etype, eicon, pi, path, state = _epic_meta(epic)
+                title_link = f"[{epic['title']}]({epic['web_url']})"
+                reasons    = _item_risk_reasons(epic, today)
+                if prepend:
+                    reasons = (f"{prepend} · " + reasons) if reasons != "—" else prepend
+                md.append(f"| {eicon} {title_link} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
-            md.append(
-                "_These epics carry a `risk::` label applied directly. "
-                "Migrate them by creating a ROAM risk issue and linking it to the epic, "
-                "then remove the `risk::` label._"
-            )
-            md.append("")
 
-            def _render_legacy_table(epics):
-                md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
-                md.append("|------|------|----|-------------|-------|-----------------|")
-                for epic in sorted(epics, key=_pi_sort_key):
-                    etype, eicon, pi, path, state = _epic_meta(epic)
-                    title_link = f"[{epic['title']}]({epic['web_url']})"
-                    reasons    = _item_risk_reasons(epic, today)
-                    if _has_overdue_child_feature(epic["id"]):
-                        reasons = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
-                    md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
-                md.append("")
-
-            for lbl in ordered_levels:
-                epics = legacy_buckets[lbl]
-                if not epics:
-                    continue
-                icon  = RISK_ICONS.get(lbl, "⚪")
-                level = lbl.split("::")[-1].capitalize()
-                md.append(f"### {icon} {level} ({len(epics)})")
-                md.append("")
-                _render_legacy_table(epics)
-
-        # ── Section 3: Child Overdue (no label) ──────────────────────── #
+        # ── Section 2: Child Overdue ──────────────────────────────────── #
         if child_overdue_bucket:
             md.append("---")
             md.append(f"## 📅 Child Overdue ({total_child_over})")
             md.append("")
-            md.append("_No risk label and no ROAM issues — flagged because a child Feature has passed its due date._")
+            md.append("_No ROAM issues — flagged because a child Feature has passed its due date._")
             md.append("")
+            _render_epic_table(child_overdue_bucket, prepend="📅 Child Overdue")
 
-            def _render_risk_table(epics):
-                md.append("| Epic | Type | PI | Group / ART | State | At Risk Reasons |")
-                md.append("|------|------|----|-------------|-------|-----------------|")
-                for epic in sorted(epics, key=_pi_sort_key):
-                    etype, eicon, pi, path, state = _epic_meta(epic)
-                    title_link = f"[{epic['title']}]({epic['web_url']})"
-                    reasons    = _item_risk_reasons(epic, today)
-                    reasons    = ("📅 Child Overdue · " + reasons) if reasons != "—" else "📅 Child Overdue"
-                    md.append(f"| {title_link} | {eicon} {etype} | {pi} | {path} | {state} | {reasons} |")
-                md.append("")
+        # ── Section 3: Past Due ───────────────────────────────────────── #
+        if past_due_bucket:
+            md.append("---")
+            md.append(f"## 📅 Past Due ({total_past_due})")
+            md.append("")
+            md.append("_No ROAM issues and no overdue children — flagged because the epic's own due date has passed._")
+            md.append("")
+            _render_epic_table(past_due_bucket, prepend="📅 Past Due")
 
-            _render_risk_table(child_overdue_bucket)
+        # ── Section 4: Behind Schedule ────────────────────────────────── #
+        if behind_schedule_bucket:
+            md.append("---")
+            md.append(f"## ⏱️ Behind Schedule ({total_behind_sched})")
+            md.append("")
+            md.append("_Open in an active PI with % complete below % of PI elapsed._")
+            md.append("")
+            _render_epic_table(behind_schedule_bucket, prepend="⏱️ Behind Schedule")
 
-        md.extend([
-            "---",
-            "## Legend",
-            "",
-            "### ROAM Dispositions",
-            "",
-            "| Status | Meaning |",
-            "|--------|---------|",
-            "| ⚠️ Owned    | Someone owns this risk and is actively managing it |",
-            "| ✋ Accepted | Risk acknowledged; no action planned — team will live with it |",
-            "| 🛡️ Mitigated | Steps taken to reduce probability or impact |",
-            "| ✅ Resolved | Risk has been eliminated — close or remove the issue |",
+        md.extend(_LEGEND_OPEN + [
+            _side_by_side(
+                ("Epic Type Icons",   [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("ROAM Dispositions", [("⚠️ Owned",    "Someone owns this risk and is actively managing it"),
+                                       ("✋ Accepted",  "Risk acknowledged; no action planned"),
+                                       ("🛡️ Mitigated", "Steps taken to reduce probability or impact"),
+                                       ("✅ Resolved",  "Risk eliminated — close or remove the issue")]),
+            ),
             "",
             "### At Risk Reason Indicators",
             "",
@@ -1719,10 +1822,8 @@ class ReportsMixin:
             "| ⏱️ Behind Schedule | Active PI: % Done is less than % of PI elapsed |",
             "| 📅 Past Due        | Item's due date has passed and it is not Closed |",
             "| 📅 Child Overdue   | A child Feature has passed its due date and is not Closed |",
-            "| 🔴/🟡/🟢 Risk Label | Legacy `risk::` label (transition) |",
             "| 🔒 Blocked         | Item has one or more active blocking relationships |",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/Risk Register", "\n".join(md))
 
@@ -1843,11 +1944,7 @@ class ReportsMixin:
                 cells.append(_cell(closed, total, pct, piid))
             md.append("| **Portfolio Total** |" + "|".join(cells) + "|")
 
-        md.extend([
-            "",
-            "---",
-            "## Legend",
-            "",
+        md.extend([""] + _LEGEND_OPEN + [
             "**Predictability %** = closed Features + Capabilities ÷ total committed to PI × 100",
             "",
             "| Icon | Range | Meaning |",
@@ -1860,8 +1957,7 @@ class ReportsMixin:
             "",
             "> **Sandbagging signal:** an ART consistently at 100% across multiple past PIs "
             "may be under-committing. Healthy predictability is typically 80–90%.",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/PI Predictability Scorecard", "\n".join(md))
         print(f"  → Wiki: {self._wiki_t2}/PI Predictability Scorecard")
@@ -2170,9 +2266,7 @@ class ReportsMixin:
 
             md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
+        md.extend(_LEGEND_OPEN + [
             "- **% Done** — closed issue weight ÷ total issue weight for all issues linked to this Feature",
             "- **PI Elapsed** — how far through the PI quarter today falls: `(today − PI start) ÷ (PI end − PI start) × 100`",
             "- **Weight** — Planned pt → Actual pt (planned set via GraphQL; actual = sum of linked issue weights)",
@@ -2181,9 +2275,7 @@ class ReportsMixin:
             "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
             "- **🔵 Planned** — future PI or PI not yet started",
             "- **🔒 Blocked** — Feature has one or more active blocking relationships",
-            "- **At Risk Reason** — one or more of: ⏱️ Behind Schedule · 📅 Past Due · 🏷️ Risk Label (🔴/🟡/🟢) · 🔒 Blocked",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
@@ -2350,10 +2442,7 @@ class ReportsMixin:
 
             md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
-            "",
+        md.extend(_LEGEND_OPEN + [
             "### Load%",
             "- **Load%** — `Actual ÷ Planned × 100`: how much work is estimated relative to the team's planned capacity",
             "",
@@ -2369,8 +2458,7 @@ class ReportsMixin:
             "- **Planned** — sum of planned weights on Features assigned to this team for the PI (set via GraphQL)",
             "- **Actual** — sum of story-point weights on all issues linked to those Features",
             "- **Δ** — Actual minus Planned: ▲ more than planned · ▼ less than planned · = matched",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
@@ -2640,9 +2728,7 @@ class ReportsMixin:
                     md.append("</details>")
                     md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
+        md.extend(_LEGEND_OPEN + [
             "- **🧩 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
             "- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
             "- **% Done** — closed issue weight ÷ total issue weight",
@@ -2653,9 +2739,7 @@ class ReportsMixin:
             "- **✅ Complete** / **❌ Incomplete** — outcome for a past PI",
             "- **🔵 Planned** — future PI or not yet started",
             "- **🔒 Blocked** — has one or more active blocking relationships",
-            "- **At Risk Reason** — one or more of: ⏱️ Behind Schedule · 📅 Past Due · 🏷️ Risk Label (🔴/🟡/🟢) · 🔒 Blocked",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
@@ -2860,9 +2944,7 @@ class ReportsMixin:
                     md.append(f"| {b_art_name} | ⛔←🔒 | {bl_art_name} | {len(pair_list)} |")
                 md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
+        md.extend(_LEGEND_OPEN + [
             "| Icon | Meaning |",
             "|------|---------|",
             "| 🔴 Critical | Blocked item is in the **current PI** — active risk requiring immediate coordination |",
@@ -2870,8 +2952,7 @@ class ReportsMixin:
             "| ⚫ Past     | Blocked item was in a **past PI** — dependency may be stale or already resolved |",
             "| ⛔ | The blocked epic (the one that cannot proceed) |",
             "| 🔒 | The blocker epic (the one causing the block) |",
-            "",
-        ])
+        ] + _LEGEND_CLOSE)
 
         self.upload_to_wiki(root_group, wiki_title, "\n".join(md))
         print(f"    → Wiki: {wiki_title}")
@@ -2945,16 +3026,12 @@ class ReportsMixin:
                 return "🟡", f"{issue_pts}pt/{total_plan}pt ({ratio:.0f}%)"
             return "🔴", f"{issue_pts}pt/{total_plan}pt ({ratio:.0f}%)"
 
-        def _tl_risk(risk_labels_present):
-            high   = [l for l in risk_labels_present if "high"   in l.lower()]
-            medium = [l for l in risk_labels_present if "medium" in l.lower()]
-            if high:
-                return "🔴", f"{len(high)} high-risk epic(s)"
-            if medium:
-                return "🟡", f"{len(medium)} medium-risk epic(s)"
-            if risk_labels_present:
-                return "🟢", f"{len(risk_labels_present)} low-risk"
-            return "🟢", "No risk labels"
+        def _tl_risk(active_roam_count):
+            if active_roam_count >= 3:
+                return "🔴", f"{active_roam_count} active risk(s)"
+            if active_roam_count > 0:
+                return "🟡", f"{active_roam_count} active risk(s)"
+            return "🟢", "No active risks"
 
         def _tl_blocking(blocked_count):
             if blocked_count == 0:
@@ -2980,7 +3057,7 @@ class ReportsMixin:
             if eid:
                 blocked_counts[eid] = len(rel.get("blocked_by", []))
 
-        risk_label_set = set(self._rd_risk_labels)
+        _active_roam = {"roam::owned", "roam::accepted", "roam::mitigated"}
 
         # ── Per-VS stats ─────────────────────────────────────────────────── #
         vs_rows = []
@@ -3025,11 +3102,12 @@ class ReportsMixin:
 
             tl_cap, cap_detail = _tl_capacity(pi_epics)
 
-            risk_labels_found = [
-                lbl for e in all_vs_epics_raw for lbl in e.get("labels", [])
-                if lbl in risk_label_set
-            ]
-            tl_risk, risk_detail = _tl_risk(risk_labels_found)
+            vs_roam_count = sum(
+                1 for e in all_vs_epics_raw
+                if any(r.get("roam_status") in _active_roam
+                       for r in (e.get("roam_risks") or []))
+            )
+            tl_risk, risk_detail = _tl_risk(vs_roam_count)
 
             vs_epic_ids = {e["id"] for e in (pi_epics if pi_epics else all_vs_epics_raw)}
             vs_blocked  = sum(1 for eid in vs_epic_ids if blocked_counts.get(eid, 0) > 0)
@@ -3040,8 +3118,7 @@ class ReportsMixin:
                 1 for e in all_vs_epics_raw
                 if not any(l.startswith("PIID::") for l in e.get("labels", []))
             )
-            risk_epic_count = len({e["id"] for e in all_vs_epics_raw
-                                   for lbl in e.get("labels", []) if lbl in risk_label_set})
+            risk_epic_count = vs_roam_count
 
             vs_rows.append({
                 "vs":          vs_group,
@@ -3065,11 +3142,12 @@ class ReportsMixin:
         # VS loop only traverses VS subgroup descendants — root-level epics are excluded.
         # Exclude cross-group children (injected for rollup only; they live outside the portfolio).
         portfolio_epics_total = sum(1 for e in self._rd_epics_all if not e.get("is_cross_group"))
-        portfolio_risk_epics = len({
-            e["id"] for e in self._rd_epics_all
+        portfolio_risk_epics = sum(
+            1 for e in self._rd_epics_all
             if not e.get("is_cross_group")
-            for lbl in e.get("labels", []) if lbl in risk_label_set
-        })
+            and any(r.get("roam_status") in _active_roam
+                    for r in (e.get("roam_risks") or []))
+        )
 
         # ── Portfolio-level current PI progress ─────────────────────────── #
         all_pi_epics = [
@@ -3137,10 +3215,7 @@ class ReportsMixin:
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
-        _risk_p  = [("state", "opened"), ("type[]", "epic")] + [
-            ("or[label_name][]", lbl) for lbl in self._rd_risk_labels
-        ]
-        _wi_risk  = _wi(_risk_p) if self._rd_risk_labels else _wi_all
+        _wi_risk = _wi_all
         _wi_unasn = _wi([("state", "opened"), ("type[]", "epic")])
 
         md.append("## Portfolio Summary")
@@ -3154,21 +3229,13 @@ class ReportsMixin:
             f"({pct_pi}% elapsed) {port_tl_sched} |"
         )
         md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_pi}) |")
-        md.append(f"| Risk-Flagged Epics (any level) | [{portfolio_risk_epics}]({_wi_risk}) |")
+        md.append(f"| Epics with Active ROAM Risks | [{portfolio_risk_epics}]({_wi_risk}) |")
         md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
         if port_wt_str != "—":
             md.append(f"| Story Points (current PI) | {port_wt_str} |")
         md.append("")
 
         md.append("## Value Stream Status")
-        md.append("")
-        md.append(
-            "> **Traffic light thresholds:**  "
-            "Schedule — 🟢 ≤10pp behind · 🟡 ≤20pp · 🔴 >20pp  |  "
-            "Capacity — 🟢 80–110% loaded · 🟡 70–120% · 🔴 outside  |  "
-            "Risk — 🟢 none · 🟡 medium/low only · 🔴 any high  |  "
-            "Blocking — 🟢 0 · 🟡 1–2 · 🔴 3+"
-        )
         md.append("")
         md.append("| Value Stream | Status | Schedule | Capacity | Risk | Blocking | Epics | Unassigned |")
         md.append("|---|---|---|---|---|---|---|---|")
@@ -3194,8 +3261,8 @@ class ReportsMixin:
         md.append("### ⛔ Blocked Epics")
         md.append("")
         if top_blocked:
-            md.append("| Epic | Type | Blockers | PI |")
-            md.append("|------|------|---------|-----|")
+            md.append("| Epic | Blockers | PI |")
+            md.append("|------|---------|-----|")
             for rel in top_blocked:
                 epic   = rel["blocked_epic"]
                 etype  = epic.get("type", "—")
@@ -3209,7 +3276,7 @@ class ReportsMixin:
                     epic.get("id_int") or epic.get("id"), {}
                 )
                 piid   = e_meta.get("piid") or "—"
-                md.append(f"| {link} | {etype} | {n_blk} | {piid} |")
+                md.append(f"| {link} | {n_blk} | {piid} |")
         else:
             md.append("✅ No blocked epics found.")
         md.append("")
@@ -3217,8 +3284,8 @@ class ReportsMixin:
         md.append("### 🟡 At-Risk Epics (behind schedule)")
         md.append("")
         if at_risk_epics:
-            md.append("| Epic | Type | Done | PI Elapsed | Gap | Weight | PI |")
-            md.append("|------|------|------|-----------|-----|--------|-----|")
+            md.append("| Epic | Done | PI Elapsed | Gap | Weight | PI |")
+            md.append("|------|------|-----------|-----|--------|-----|")
             for e in at_risk_epics:
                 etype = e.get("type", "—")
                 icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
@@ -3238,33 +3305,41 @@ class ReportsMixin:
                 else:
                     wt_str = "—"
                 md.append(
-                    f"| {link} | {etype} | {e.get('pct_complete', 0)}% "
+                    f"| {link} | {e.get('pct_complete', 0)}% "
                     f"| {pct_pi}% | {gap}pp | {wt_str} | {e.get('piid', '—')} |"
                 )
         else:
             md.append("✅ No epics significantly behind schedule.")
         md.append("")
 
-        md.extend([
-            "---",
-            "## Legend",
+        md.extend(_LEGEND_OPEN + [
+            _side_by_side(
+                ("Epic Type Icons", [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("Status Icons",    [("🟢", "On track — within threshold"),
+                                     ("🟡", "Watch — approaching threshold"),
+                                     ("🔴", "At risk — threshold exceeded"),
+                                     ("⬜", "No data"),
+                                     ("⛔", "Blocked epic")]),
+            ),
             "",
-            "| Icon | Meaning |",
-            "|------|---------|",
-            "| 🟢 | On track — within threshold |",
-            "| 🟡 | Watch — approaching threshold |",
-            "| 🔴 | At risk — threshold exceeded |",
-            "| ⬜ | No data |",
-            "| ⛔ | Blocked epic |",
+            "### Column Definitions",
             "",
             "**Schedule** — % complete vs % of PI calendar elapsed  ",
             "**Capacity** — issue story-point total vs epic planned weight for current PI; "
             "⬜ = ratio not applicable (no issues yet, no epic weight, or mixed — "
             "some epics estimated via issues, others scoped at epic level only)  ",
-            "**Risk** — presence of `risk::high` / `risk::medium` / `risk::low` labels  ",
+            "**Risk** — presence of ROAM risk issues linked to epics in this Value Stream  ",
             "**Blocking** — count of epics with at least one blocker in current PI  ",
             "",
-        ])
+            "### Traffic Light Thresholds",
+            "",
+            "| Column | 🟢 On Track | 🟡 Watch | 🔴 At Risk |",
+            "|--------|------------|---------|-----------|",
+            "| Schedule | ≤ 10pp behind PI elapsed | ≤ 20pp behind | > 20pp behind |",
+            "| Capacity | 80–110% loaded | 70–120% | Outside 70–120% |",
+            "| Risk | No active ROAM risks | 1–2 active risks | 3+ active risks |",
+            "| Blocking | 0 blockers | 1–2 blockers | 3+ blockers |",
+        ] + _LEGEND_CLOSE)
 
         page_title = f"{self._wiki_t1}/Portfolio Health Dashboard"
         self.upload_to_wiki(root_group, page_title, "\n".join(md))
@@ -4085,6 +4160,10 @@ class ReportsMixin:
             f"| {_wl(f'{self._wiki_t4}/Orphaned Issues', 'Orphaned Issues')} "
             f"| Issues not linked to any epic, grouped by project |"
         )
+        md.append(
+            f"| {_wl(f'{self._wiki_t4}/Premature Closures', 'Premature Closures')} "
+            f"| Closed Epics or Capabilities that still have open child epics or open linked issues |"
+        )
         md.append("")
 
         self.upload_to_wiki(group, "home", "\n".join(md))
@@ -4247,10 +4326,11 @@ class ReportsMixin:
             "(story points on closed issues). A team at 80–110% load is on track; below 70% may "
             "indicate under-commitment or blocked work; above 120% is over-loaded.",
             "",
-            "### Risk Register thresholds",
-            "Epics carrying `risk::high`, `risk::medium`, or `risk::low` labels are included. "
-            "Risk labels are applied manually or via the `set-risk-labels` utility. "
-            "High-risk epics in the current PI should be reviewed every ART sync.",
+            "### Risk Register",
+            "Epics with linked ROAM risk issues appear in the Risk Register, grouped by disposition "
+            "(`roam::owned`, `roam::accepted`, `roam::mitigated`, `roam::resolved`). "
+            "Create a ROAM risk issue in the relevant project, then link it to the threatened epic "
+            "via **\"relates to\"**. Epics with no ROAM issues but overdue child Features are also flagged.",
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t2, "\n".join(t2_md))
@@ -4709,7 +4789,6 @@ class ReportsMixin:
             key=lambda p: (self._pi_dates_from_label(p)[0] or date.min),
         )
         self._rd_project_labels    = sorted({l for l in label_set if l.startswith("project::")})
-        self._rd_risk_labels       = sorted({l for l in label_set if l.startswith("risk::")})
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
         self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 

@@ -198,12 +198,26 @@ class BootstrapMixin:
         """Create a 'relates to' work-item link between a risk issue and the epic it threatens."""
         wi_id = getattr(epic, 'work_item_id', None)
         if not wi_id:
+            try:
+                import requests as _req
+                resp = _req.get(
+                    f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}",
+                    headers={"PRIVATE-TOKEN": self.private_token},
+                )
+                if resp.ok:
+                    wi_id = resp.json().get("work_item_id")
+            except Exception:
+                pass
+        if not wi_id:
             return
+        # Traditional issues expose their global id via .id; use it as the work item GID
+        risk_gid = f"gid://gitlab/WorkItem/{risk_issue.id}"
+        epic_gid = f"gid://gitlab/WorkItem/{wi_id}"
         mutation = """
         mutation LinkRisk($epicGid: WorkItemID!, $riskGid: WorkItemID!) {
           workItemAddLinkedItems(input: {
-            id: $epicGid
-            workItemsIds: [$riskGid]
+            id: $riskGid
+            workItemsIds: [$epicGid]
             linkType: RELATED
           }) {
             workItem { id }
@@ -211,23 +225,6 @@ class BootstrapMixin:
           }
         }
         """
-        risk_wi_id = getattr(risk_issue, 'work_item_id', None)
-        if not risk_wi_id:
-            # Fallback: fetch work_item_id via REST
-            try:
-                import requests as _req
-                resp = _req.get(
-                    f"{self.url}/api/v4/projects/{project.id}/issues/{risk_issue.iid}",
-                    headers={"PRIVATE-TOKEN": self.private_token},
-                )
-                if resp.ok:
-                    risk_wi_id = resp.json().get("work_item_id")
-            except Exception:
-                pass
-        if not risk_wi_id:
-            return
-        epic_gid = f"gid://gitlab/WorkItem/{wi_id}"
-        risk_gid = f"gid://gitlab/WorkItem/{risk_wi_id}"
         result   = self.graphql_query(mutation, variables={"epicGid": epic_gid, "riskGid": risk_gid})
         if result:
             errors = result.get("workItemAddLinkedItems", {}).get("errors", [])

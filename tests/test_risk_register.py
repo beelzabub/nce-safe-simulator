@@ -11,12 +11,9 @@ TODAY     = date(2026, 6, 1)
 YESTERDAY = "2026-05-31"
 
 
-def _render(epics_all=None, risk_labels=None):
+def _render(epics_all=None):
     """Build a ReportsHarness, call generate_risk_register, return captured markdown."""
-    rpt = ReportsHarness(
-        epics_all=epics_all or [],
-        risk_labels=risk_labels if risk_labels is not None else ["risk::high", "risk::medium", "risk::low"],
-    )
+    rpt = ReportsHarness(epics_all=epics_all or [])
     rpt.generate_risk_register()
     return rpt._uploaded.get("Portfolio/01 Program Management/Risk Register", "")
 
@@ -82,48 +79,13 @@ class TestRoamSection:
             make_risk(iid=3, roam_status="roam::accepted"),
         ])]
         md = _render(epics)
-        assert "| ⚠️ Owned | 2 |" in md
-        assert "| ✋ Accepted | 1 |" in md
+        assert "<td>⚠️ Owned</td><td>2</td>" in md
+        assert "<td>✋ Accepted</td><td>1</td>" in md
 
     def test_total_risk_count_in_summary(self):
         epics = [make_epic(id=1, roam_risks=[make_risk(iid=1), make_risk(iid=2)])]
         md = _render(epics)
-        assert "| **Total** | **2** |" in md
-
-
-# ---------------------------------------------------------------------------
-# Legacy risk:: label section (transition)
-# ---------------------------------------------------------------------------
-
-class TestLegacySection:
-    def test_legacy_section_shown_when_risk_labels_present(self):
-        epics = [make_epic(id=1, labels=["Feature", "risk::high"])]
-        md = _render(epics)
-        assert "Legacy Risk Labels" in md
-
-    def test_legacy_section_hidden_when_all_migrated(self):
-        # Epic has ROAM risks and no risk:: label
-        epics = [make_epic(id=1, roam_risks=[make_risk()], labels=["Feature"])]
-        md = _render(epics)
-        assert "Legacy Risk Labels" not in md
-
-    def test_legacy_high_subsection(self):
-        epics = [make_epic(id=1, labels=["Feature", "risk::high"])]
-        md = _render(epics)
-        assert "### 🔴 High" in md
-
-    def test_legacy_migration_note_shown(self):
-        epics = [make_epic(id=1, labels=["Feature", "risk::medium"])]
-        md = _render(epics)
-        assert "migrate" in md.lower()
-
-    def test_epic_not_double_counted(self):
-        # Epic has both ROAM risk AND legacy risk:: label — should appear in ROAM section
-        # and ALSO in legacy section (legacy checks labels independently)
-        epic = make_epic(id=1, labels=["Feature", "risk::high"], roam_risks=[make_risk()])
-        md   = _render([epic])
-        # Should appear in ROAM section
-        assert "## ⚠️ ROAM Risk Issues" in md
+        assert "<strong>Total</strong></td><td><strong>2</strong>" in md
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +130,7 @@ class TestChildOverdueSection:
 class TestLegend:
     def test_legend_section_present(self):
         md = _render()
-        assert "## Legend" in md
+        assert "<summary>Legend</summary>" in md
 
     def test_roam_dispositions_in_legend(self):
         md = _render()
@@ -181,3 +143,113 @@ class TestLegend:
         assert "Past Due"        in md
         assert "Child Overdue"   in md
         assert "Blocked"         in md
+
+
+# ---------------------------------------------------------------------------
+# Past Due section
+# ---------------------------------------------------------------------------
+
+class TestPastDueSection:
+    def test_past_due_section_shown_for_overdue_epic(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
+        md = _render([epic])
+        assert "## 📅 Past Due" in md
+
+    def test_past_due_section_hidden_when_no_overdue_epics(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"], due_date="2099-12-31")
+        md = _render([epic])
+        assert "## 📅 Past Due" not in md
+
+    def test_past_due_count_in_summary(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
+        md = _render([epic])
+        assert "<td>📅 Past Due</td><td>1</td>" in md
+
+    def test_past_due_epic_not_shown_when_has_roam_risk(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         due_date=YESTERDAY, roam_risks=[make_risk()])
+        md = _render([epic])
+        assert "## 📅 Past Due" not in md
+        assert "## ⚠️ ROAM Risk Issues" in md
+
+    def test_past_due_epic_not_double_counted_with_child_overdue(self):
+        # Parent has past due_date AND overdue child — child_overdue wins
+        parent = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
+        child  = make_epic(id=2, etype="Feature", labels=["Feature"],
+                           due_date=YESTERDAY, parent_id=1)
+        md = _render([parent, child])
+        assert "## 📅 Child Overdue" in md
+        assert "## 📅 Past Due" not in md
+
+    def test_prepend_reason_in_row(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
+        md = _render([epic])
+        assert "📅 Past Due" in md
+
+    def test_feature_type_excluded_from_past_due(self):
+        epic = make_epic(id=1, etype="Feature", labels=["Feature"], due_date=YESTERDAY)
+        md = _render([epic])
+        assert "## 📅 Past Due" not in md
+
+
+# ---------------------------------------------------------------------------
+# Behind Schedule section
+# ---------------------------------------------------------------------------
+
+class TestBehindScheduleSection:
+    def test_behind_schedule_section_shown(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=30, pct_through_pi=70)
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" in md
+
+    def test_behind_schedule_hidden_when_on_track(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=80, pct_through_pi=70)
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" not in md
+
+    def test_behind_schedule_hidden_when_no_pi(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=0, pct_through_pi=None)
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" not in md
+
+    def test_behind_schedule_count_in_summary(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=10, pct_through_pi=60)
+        md = _render([epic])
+        assert "<td>⏱️ Behind Schedule</td><td>1</td>" in md
+
+    def test_behind_schedule_not_shown_when_has_roam_risk(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=10, pct_through_pi=60,
+                         roam_risks=[make_risk()])
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" not in md
+
+    def test_behind_schedule_not_double_counted_with_past_due(self):
+        # Epic is both past due and behind schedule — past_due bucket wins
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         due_date=YESTERDAY, pct_complete=10, pct_through_pi=60)
+        md = _render([epic])
+        assert "## 📅 Past Due" in md
+        assert "## ⏱️ Behind Schedule" not in md
+
+    def test_prepend_reason_in_row(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=10, pct_through_pi=60)
+        md = _render([epic])
+        assert "⏱️ Behind Schedule" in md
+
+    def test_pi_at_zero_not_flagged(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=0, pct_through_pi=0)
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" not in md
+
+    def test_pi_at_100_not_flagged(self):
+        epic = make_epic(id=1, etype="Epic", labels=["Epic"],
+                         pct_complete=0, pct_through_pi=100)
+        md = _render([epic])
+        assert "## ⏱️ Behind Schedule" not in md

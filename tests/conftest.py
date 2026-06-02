@@ -107,7 +107,6 @@ class ReportsHarness(ReportsMixin):
         self,
         epics_all=None,
         metrics=None,
-        risk_labels=None,
         groups_by_id=None,
         groups_by_parent=None,
         vs_groups=None,
@@ -117,9 +116,6 @@ class ReportsHarness(ReportsMixin):
         self._rd_root         = {"id": root_id, "name": "Test Portfolio"}
         self._rd_metrics      = metrics or {"Epic": [], "Capability": [], "Feature": []}
         self._rd_epics_all    = epics_all or []
-        self._rd_risk_labels  = risk_labels if risk_labels is not None else [
-            "risk::high", "risk::medium", "risk::low"
-        ]
         self._rd_groups_by_id     = groups_by_id or {}
         self._rd_groups_by_parent = groups_by_parent or {}
         self._vs_groups           = vs_groups or []

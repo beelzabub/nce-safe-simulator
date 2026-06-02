@@ -28,10 +28,10 @@ def _epic(work_item_id=100, iid=1):
     return obj
 
 
-def _risk(work_item_id=200, iid=7):
+def _risk(id=191000200, iid=7):
     obj = MagicMock()
-    obj.work_item_id = work_item_id
-    obj.iid          = iid
+    obj.id  = id
+    obj.iid = iid
     return obj
 
 
@@ -48,11 +48,11 @@ def _ok_gql():
 class TestLinkRiskToEpic:
     def test_calls_mutation_with_correct_gids(self):
         bs = ConcreteBootstrap(graphql_result=_ok_gql())
-        bs._link_risk_to_epic(_risk(work_item_id=200), _epic(work_item_id=100), _project())
+        bs._link_risk_to_epic(_risk(id=191000200), _epic(work_item_id=100), _project())
         assert len(bs._gql_calls) == 1
         assert bs._gql_calls[0] == {
             "epicGid": "gid://gitlab/WorkItem/100",
-            "riskGid": "gid://gitlab/WorkItem/200",
+            "riskGid": "gid://gitlab/WorkItem/191000200",
         }
 
     def test_skips_when_epic_has_no_work_item_id(self):
@@ -60,39 +60,16 @@ class TestLinkRiskToEpic:
         bs._link_risk_to_epic(_risk(), _epic(work_item_id=None), _project())
         assert bs._gql_calls == []
 
-    def test_falls_back_to_rest_when_risk_has_no_work_item_id(self):
+    def test_risk_global_id_used_directly_as_work_item_gid(self):
         bs = ConcreteBootstrap(graphql_result=_ok_gql())
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.json.return_value = {"work_item_id": 300}
+        bs._link_risk_to_epic(_risk(id=999888777), _epic(work_item_id=100), _project())
+        assert bs._gql_calls[0]["riskGid"] == "gid://gitlab/WorkItem/999888777"
 
-        with patch("requests.get", return_value=mock_resp) as mock_get:
-            bs._link_risk_to_epic(_risk(work_item_id=None, iid=7), _epic(work_item_id=100), _project(id=42))
-
-        mock_get.assert_called_once()
-        assert "/projects/42/issues/7" in mock_get.call_args[0][0]
-        assert bs._gql_calls[0]["riskGid"] == "gid://gitlab/WorkItem/300"
-
-    def test_skips_mutation_when_rest_fallback_returns_no_id(self):
+    def test_no_rest_call_needed_for_risk_gid(self):
         bs = ConcreteBootstrap(graphql_result=_ok_gql())
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.json.return_value = {}
-
-        with patch("requests.get", return_value=mock_resp):
-            bs._link_risk_to_epic(_risk(work_item_id=None), _epic(work_item_id=100), _project())
-
-        assert bs._gql_calls == []
-
-    def test_skips_mutation_when_rest_request_fails(self):
-        bs = ConcreteBootstrap(graphql_result=_ok_gql())
-        mock_resp = MagicMock()
-        mock_resp.ok = False
-
-        with patch("requests.get", return_value=mock_resp):
-            bs._link_risk_to_epic(_risk(work_item_id=None), _epic(work_item_id=100), _project())
-
-        assert bs._gql_calls == []
+        with patch("requests.get") as mock_get:
+            bs._link_risk_to_epic(_risk(id=12345), _epic(work_item_id=100), _project())
+        mock_get.assert_not_called()
 
     def test_prints_warning_on_graphql_errors(self, capsys):
         result = {"workItemAddLinkedItems": {"workItem": {"id": "..."}, "errors": ["link failed"]}}

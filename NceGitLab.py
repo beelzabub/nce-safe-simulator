@@ -151,6 +151,9 @@ class NceGitLab(
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
         self.default_set_risk_percent          = _td.get("set_risk_labels_percent",       15.0)
         self.default_set_wsjf_percent          = _td.get("set_wsjf_labels_percent",       20.0)
+        _rr = _td.get("roam_risk_relations", {})
+        self.default_roam_risk_relations_min   = _rr.get("min", 1)
+        self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         missing_fields = [
             field for field, val in [
@@ -184,6 +187,17 @@ class NceGitLab(
             exit(1)
 
 
+def _last_data_dir():
+    """Return the most recent reports/.../data directory that contains a valid snapshot."""
+    root = Path("reports")
+    if not root.exists():
+        return None
+    for d in sorted(root.glob("*/*/data"), reverse=True):
+        if (d / "epics.json").exists():
+            return d
+    return None
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
@@ -212,6 +226,8 @@ def main():
                         help="Generate reports interactively (omit REPORT to show menu)")
     parser.add_argument("--reuse-data",              metavar="DATA_DIR",
                         help="Skip API fetch; load JSON snapshot from this directory instead")
+    parser.add_argument("--last",                    action="store_true",
+                        help="Reuse the most recently pulled data snapshot (no API fetch)")
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
@@ -266,7 +282,15 @@ def main():
     elif args.report is not None:
         _phase[0] = "reports"
         report_key = None if args.report == "__menu__" else args.report
-        gl.run_reports_menu(report_key, reuse_data=args.reuse_data)
+        reuse = args.reuse_data
+        if args.last:
+            last = _last_data_dir()
+            if last:
+                print(f"  --last: reusing snapshot from {last}\n")
+                reuse = str(last)
+            else:
+                print("  --last: no previous snapshot found — fetching live data.\n")
+        gl.run_reports_menu(report_key, reuse_data=reuse)
 
     # single-phase timing summary (--clean or --create alone)
     if not args.all and phases:

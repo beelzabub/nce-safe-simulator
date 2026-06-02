@@ -100,49 +100,18 @@ class TestRoamRisks:
         reason = _item_risk_reasons(epic, TODAY)
         assert "⚠️ 3 risk(s)" in reason
 
-    def test_roam_risks_supersede_legacy_label(self):
-        epic = make_epic(
-            roam_risks=[make_risk()],
-            labels=["Feature", "risk::high"],
-        )
-        reason = _item_risk_reasons(epic, TODAY)
-        assert "⚠️ 1 risk(s)" in reason
-        assert "🔴 High Risk" not in reason
+    def test_roam_risks_shown_regardless_of_labels(self):
+        epic = make_epic(roam_risks=[make_risk()], labels=["Feature", "risk::high"])
+        assert "⚠️ 1 risk(s)" in _item_risk_reasons(epic, TODAY)
 
-    def test_empty_roam_risks_falls_back_to_label(self):
+    def test_no_roam_risks_no_risk_indicator(self):
         epic = make_epic(roam_risks=[], labels=["Feature", "risk::high"])
-        reason = _item_risk_reasons(epic, TODAY)
-        assert "🔴 High Risk" in reason
+        assert "risk(s)" not in _item_risk_reasons(epic, TODAY)
 
     def test_all_roam_statuses_trigger_flag(self):
         for status in ("roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"):
             epic = make_epic(roam_risks=[make_risk(roam_status=status)])
             assert "⚠️ 1 risk(s)" in _item_risk_reasons(epic, TODAY), f"Failed for {status}"
-
-
-# ---------------------------------------------------------------------------
-# 🏷️ Legacy risk:: label fallback (transition — Refs #10)
-# ---------------------------------------------------------------------------
-
-class TestLegacyRiskLabel:
-    def test_high_risk_label(self):
-        epic = make_epic(labels=["Feature", "risk::high"])
-        assert "🔴 High Risk" in _item_risk_reasons(epic, TODAY)
-
-    def test_medium_risk_label(self):
-        epic = make_epic(labels=["Feature", "risk::medium"])
-        assert "🟡 Med Risk" in _item_risk_reasons(epic, TODAY)
-
-    def test_low_risk_label(self):
-        epic = make_epic(labels=["Feature", "risk::low"])
-        assert "🟢 Low Risk" in _item_risk_reasons(epic, TODAY)
-
-    def test_unknown_label_not_flagged(self):
-        epic = make_epic(labels=["Feature", "status::active"])
-        reason = _item_risk_reasons(epic, TODAY)
-        assert "High Risk" not in reason
-        assert "Med Risk" not in reason
-        assert "Low Risk" not in reason
 
 
 # ---------------------------------------------------------------------------
