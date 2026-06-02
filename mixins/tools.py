@@ -2,6 +2,7 @@ import random
 import re
 import sys
 from collections import defaultdict
+from datetime import date, timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,14 @@ TOOLS = [
         "params": [
             {"name": "scope",   "prompt": "Scope — portfolio / teams / all / <group-path>", "type": str,  "default": "portfolio"},
             {"name": "dry_run", "prompt": "Dry run?",                                        "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "clean-roam-risks",
+        "description": "Delete all ROAM risk issues (and their epic links) across the group",
+        "method":      "_tool_clean_roam_risks",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
         ],
     },
     {
@@ -83,6 +92,31 @@ TOOLS = [
             {"name": "count",           "prompt": "Issues to create per Feature (default 5)",              "type": int,   "default": 5},
             {"name": "feature_percent", "prompt": "Percent of Features to target (100 = all, 50 = half)",  "type": float, "default": 100.0},
             {"name": "dry_run",         "prompt": "Dry run?",                                               "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "generate-risk-reasons",
+        "description": "Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics",
+        "method":      "_tool_generate_risk_reasons",
+        "params": [
+            {"name": "conditions",   "prompt": "Conditions to create (behind_schedule / past_due / child_overdue / blocked / all)", "type": str,   "default": "all"},
+            {"name": "percent",      "prompt": "Percent of eligible epics to target (default 20)",                         "type": float, "default": 20.0},
+            {"name": "days_overdue", "prompt": "Days past due to set on due dates (default 7)",                            "type": int,   "default": 7},
+            {"name": "piid",         "prompt": "PI label for behind_schedule (blank = auto-detect active PI)",             "type": str,   "optional": True},
+            {"name": "dry_run",      "prompt": "Dry run?",                                                                  "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "generate-roam-risks",
+        "description": "Create ROAM risk issues, each related to a random number of epics",
+        "method":      "_tool_generate_roam_risks",
+        "params": [
+            {"name": "count",         "prompt": "Number of ROAM risk issues to create",                       "type": int,  "default": 10},
+            {"name": "relations_min", "prompt": "Min epics related per risk (blank = config default)",        "type": int,  "optional": True},
+            {"name": "relations_max", "prompt": "Max epics related per risk (blank = config default)",        "type": int,  "optional": True},
+            {"name": "piid",          "prompt": "Limit to PIID label (blank = all)",                          "type": str,  "optional": True},
+            {"name": "seed",          "prompt": "Random seed (blank = none)",                                  "type": int,  "optional": True},
+            {"name": "dry_run",       "prompt": "Dry run?",                                                    "type": bool, "default": False},
         ],
     },
     {
@@ -468,10 +502,9 @@ class ToolsMixin:
         elif scope_lc == "all":
             targets = list(_all_groups(root))
         else:
-            # Treat as an explicit group path: try relative to namespace, then absolute
+            # Treat as an explicit group path: try relative to parent_group, then absolute
             candidates = [
-                f"{self.gitlab_namespace}/{self.parent_group}/{scope.strip('/')}",
-                f"{self.gitlab_namespace}/{scope.strip('/')}",
+                f"{root.full_path}/{scope.strip('/')}",
                 scope.strip("/"),
             ]
             resolved = None
@@ -552,8 +585,7 @@ class ToolsMixin:
             targets = list(_all_groups(root))
         else:
             candidates = [
-                f"{self.gitlab_namespace}/{self.parent_group}/{scope.strip('/')}",
-                f"{self.gitlab_namespace}/{scope.strip('/')}",
+                f"{root.full_path}/{scope.strip('/')}",
                 scope.strip("/"),
             ]
             resolved = None
@@ -2244,5 +2276,412 @@ class ToolsMixin:
         print("\nWalking epics...")
         _walk(group)
         print(f"\nDone.  Stripped: {stripped}  Skipped (no lifecycle::): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    # ------------------------------------------------------------------
+    # ROAM risk issue management
+    # ------------------------------------------------------------------
+
+    def _tool_clean_roam_risks(self, dry_run=False):
+        """Delete all ROAM risk issues across the group."""
+        group       = self.get_group_by_name(self.parent_group)
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        print(f"Group: {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # Collect issues per label (REST group.issues aggregates sub-group projects)
+        print("\nFetching ROAM risk issues...")
+        seen    = {}
+        for label in roam_labels:
+            for issue in group.issues.list(labels=[label], get_all=True):
+                if issue.id not in seen:
+                    seen[issue.id] = issue
+        issues = list(seen.values())
+        print(f"  Found {len(issues)} issue(s).")
+
+        if not issues:
+            print("Nothing to clean up.")
+            return
+
+        deleted = errors = 0
+        for issue in issues:
+            label = f"#{issue.iid} '{issue.title[:55]}'"
+            if dry_run:
+                print(f"  DRY   {label}")
+                deleted += 1
+                continue
+            try:
+                self.gl.projects.get(issue.project_id).issues.delete(issue.iid)
+                print(f"  DELETED {label}")
+                deleted += 1
+            except Exception as e:
+                print(f"  ERROR   {label}: {e}")
+                errors += 1
+
+        print(f"\nDone.  Deleted: {deleted}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_generate_roam_risks(self, count=10, relations_min=None, relations_max=None,
+                                   piid=None, seed=None, dry_run=False):
+        """Create ROAM risk issues and relate each to a random number of epics."""
+        import lorem
+
+        group       = self.get_group_by_name(self.parent_group)
+        roam_labels = getattr(self, 'ROAM_LABELS', [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+        if not roam_labels:
+            print("ERROR: ROAM_LABELS not configured.")
+            return
+
+        rel_min = relations_min if relations_min is not None \
+            else getattr(self, 'default_roam_risk_relations_min', 1)
+        rel_max = relations_max if relations_max is not None \
+            else getattr(self, 'default_roam_risk_relations_max', 3)
+        rel_min = max(1, rel_min)
+        rel_max = max(rel_min, rel_max)
+
+        rng = random.Random(seed)
+        print(f"Group: {group.full_path}  count={count}  relations={rel_min}-{rel_max}"
+              + (f"  piid={piid}" if piid else "")
+              + (f"  seed={seed}" if seed is not None else ""))
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # Collect all epics (any type: Epic, Capability, Feature)
+        print("\nCollecting epics...")
+        epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                if getattr(epic, "group_id", grp.id) != grp.id:
+                    continue
+                if not any(t in epic.labels for t in ["Epic", "Capability", "Feature"]):
+                    continue
+                if piid and piid not in epic.labels:
+                    continue
+                epics.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"  Found {len(epics)} epic(s)")
+
+        if not epics:
+            print("Nothing to do.")
+            return
+
+        # Project cache: group_id → project object
+        proj_cache: dict = {}
+
+        def _project_for(grp):
+            if grp.id in proj_cache:
+                return proj_cache[grp.id]
+            projects = grp.projects.list(all=True)
+            proj = (
+                next((p for p in projects if "backlog" in p.path.lower()), None)
+                or (projects[0] if projects else None)
+            )
+            if proj:
+                proj = self.gl.projects.get(proj.id)
+            else:
+                for sg in grp.subgroups.list(all=True):
+                    proj = _project_for(self.gl.groups.get(sg.id))
+                    if proj:
+                        break
+            proj_cache[grp.id] = proj
+            return proj
+
+        _LINK = """
+        mutation($riskGid: WorkItemID!, $epicGids: [WorkItemID!]!) {
+          workItemAddLinkedItems(input: {
+            id: $riskGid  workItemsIds: $epicGids  linkType: RELATED
+          }) {
+            workItem { id }
+            errors
+          }
+        }
+        """
+
+        created = errors = 0
+
+        print(f"\n--- Generating {count} risk issue(s) ---")
+        for _ in range(count):
+            k         = rng.randint(rel_min, min(rel_max, len(epics)))
+            selection = rng.sample(epics, k)
+            labels_str = ", ".join(
+                f"{next((t for t in ['Epic','Capability','Feature'] if t in e.labels), 'epic')} "
+                f"#{e.iid}" for _, e in selection
+            )
+
+            if dry_run:
+                roam_label = rng.choice(roam_labels)
+                print(f"  DRY   [{roam_label}] → [{labels_str}]")
+                created += 1
+                continue
+
+            grp, _ = selection[0]
+            project = _project_for(grp)
+            if not project:
+                print(f"  SKIP  no project found for group {grp.full_path}")
+                errors += 1
+                continue
+
+            roam_label = rng.choice(roam_labels)
+            try:
+                risk = project.issues.create({
+                    "title":       f"Risk: {lorem.sentence().rstrip('.')}",
+                    "description": lorem.paragraph(),
+                    "labels":      [roam_label],
+                })
+                risk_gid  = f"gid://gitlab/WorkItem/{risk.id}"
+                epic_gids = [
+                    f"gid://gitlab/WorkItem/{epic.work_item_id}"
+                    for _, epic in selection
+                    if epic.work_item_id
+                ]
+                if epic_gids:
+                    link_result = self.graphql_query(_LINK, variables={
+                        "riskGid": risk_gid, "epicGids": epic_gids,
+                    })
+                    link_errors = (link_result or {}).get("workItemAddLinkedItems", {}).get("errors", [])
+                    if link_errors:
+                        print(f"  WARN  #{risk.iid} link errors: {link_errors}")
+
+                print(f"  CREATED #{risk.iid} [{roam_label}] → [{labels_str}]")
+                created += 1
+            except Exception as e:
+                print(f"  ERROR  [{labels_str}]: {e}")
+                errors += 1
+
+        print(f"\nDone.  Created: {created}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_generate_risk_reasons(self, conditions="all", percent=20.0,
+                                     days_overdue=7, piid=None, dry_run=False):
+        """Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics."""
+        conds_all = {"behind_schedule", "past_due", "child_overdue", "blocked"}
+        if conditions.strip().lower() == "all":
+            conds = conds_all
+        else:
+            conds = {c.strip().lower() for c in conditions.replace(",", " ").split() if c.strip()}
+            unknown = conds - conds_all
+            if unknown:
+                print(f"ERROR: unknown condition(s): {', '.join(sorted(unknown))}")
+                print(f"Valid: {', '.join(sorted(conds_all))} or 'all'")
+                return
+
+        today     = date.today()
+        past_date = (today - timedelta(days=days_overdue)).isoformat()
+        group     = self.get_group_by_name(self.parent_group)
+
+        print(f"Group     : {group.full_path}")
+        print(f"Conditions: {', '.join(sorted(conds))}")
+        print(f"Target    : {percent}% of eligible epics")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        # ── Collect all open epics (deduplicated by global epic id) ──── #
+        print("\nCollecting open epics...")
+        all_open: list = []
+        _seen_ids: set = set()
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                if epic.id not in _seen_ids:
+                    _seen_ids.add(epic.id)
+                    all_open.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"  Found {len(all_open)} open epics")
+
+        # ── Past Due ─────────────────────────────────────────────────── #
+        if "past_due" in conds:
+            print("\n── Past Due ──")
+            eligible = [
+                (g, e) for g, e in all_open
+                if "Feature" not in e.labels
+                and (not e.due_date or e.due_date >= today.isoformat())
+            ]
+            k      = max(0, round(len(eligible) * percent / 100))
+            sample = random.sample(eligible, min(k, len(eligible)))
+            print(f"  Eligible (non-Feature, no existing past due_date): {len(eligible)}")
+            print(f"  Targeting {len(sample)}\n")
+            updated = errors = 0
+            for g, epic in sample:
+                if dry_run:
+                    print(f"  DRY  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
+                    updated += 1
+                else:
+                    try:
+                        epic.due_date = past_date
+                        epic.save()
+                        print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
+                        updated += 1
+                    except Exception as exc:
+                        print(f"  ERROR #{epic.iid}: {exc}")
+                        errors += 1
+            print(f"\n  Updated: {updated}  Errors: {errors}")
+
+        # ── Child Overdue ─────────────────────────────────────────────── #
+        if "child_overdue" in conds:
+            print("\n── Child Overdue ──")
+            eligible = [
+                (g, e) for g, e in all_open
+                if "Feature" in e.labels
+                and getattr(e, "parent_id", None) is not None
+                and (not e.due_date or e.due_date >= today.isoformat())
+            ]
+            k      = max(0, round(len(eligible) * percent / 100))
+            sample = random.sample(eligible, min(k, len(eligible)))
+            print(f"  Eligible (Feature with parent, no existing past due_date): {len(eligible)}")
+            print(f"  Targeting {len(sample)}\n")
+            updated = errors = 0
+            for g, epic in sample:
+                if dry_run:
+                    print(f"  DRY  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
+                    updated += 1
+                else:
+                    try:
+                        epic.due_date = past_date
+                        epic.save()
+                        print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
+                        updated += 1
+                    except Exception as exc:
+                        print(f"  ERROR #{epic.iid}: {exc}")
+                        errors += 1
+            print(f"\n  Updated: {updated}  Errors: {errors}")
+
+        # ── Behind Schedule ───────────────────────────────────────────── #
+        if "behind_schedule" in conds:
+            print("\n── Behind Schedule ──")
+
+            # Resolve the target PI (auto-detect current active PI if not supplied)
+            target_piid = None
+            if piid:
+                target_piid = piid if piid.startswith("PIID::") else f"PIID::{piid}"
+            else:
+                for _, epic in all_open:
+                    for lbl in epic.labels:
+                        if lbl.startswith("PIID::") and 0 < (self._pct_through_pi(lbl) or 0) < 100:
+                            target_piid = lbl
+                            break
+                    if target_piid:
+                        break
+
+            if not target_piid:
+                print("  No active PI found (0 < elapsed < 100%). Pass piid= to specify one.")
+            else:
+                pct_pi = self._pct_through_pi(target_piid)
+                print(f"  Active PI : {target_piid}  ({pct_pi}% elapsed)")
+
+                # Collect closed weighted issues whose epic is in this PI
+                print("\n  Collecting closed weighted issues on PI epics...")
+                pi_epic_ids = {e.id for _, e in all_open if target_piid in e.labels}
+                print(f"  Open epics in {target_piid}: {len(pi_epic_ids)}")
+
+                candidates: list = []
+                for proj in group.projects.list(all=True, include_subgroups=True):
+                    try:
+                        full_p = self.gl.projects.get(proj.id)
+                        for issue in full_p.issues.list(all=True, state="closed"):
+                            epic_ref = getattr(issue, "epic", None)
+                            if epic_ref and epic_ref.get("id") in pi_epic_ids:
+                                if (issue.weight or 0) > 0:
+                                    candidates.append((full_p, issue))
+                    except Exception as exc:
+                        print(f"  WARNING: {proj.path}: {exc}")
+
+                k      = max(0, round(len(candidates) * percent / 100))
+                sample = random.sample(candidates, min(k, len(candidates)))
+                print(f"  Closed weighted issues in PI: {len(candidates)}")
+                print(f"  Reopening {len(sample)} ({percent}%)\n")
+
+                updated = errors = 0
+                for full_p, issue in sample:
+                    if dry_run:
+                        print(f"  DRY  reopen #{issue.iid} '{issue.title[:55]}'")
+                        updated += 1
+                    else:
+                        try:
+                            issue.state_event = "reopen"
+                            issue.save()
+                            print(f"  REOPEN #{issue.iid} '{issue.title[:55]}'")
+                            updated += 1
+                        except Exception as exc:
+                            print(f"  ERROR #{issue.iid}: {exc}")
+                            errors += 1
+                print(f"\n  Reopened: {updated}  Errors: {errors}")
+
+        # ── Blocked ───────────────────────────────────────────────────── #
+        # Target Feature epics with a parent so the block propagates up to the
+        # Capability ancestor (⬆️ Risk propagation) and the portfolio Epic (⚠️ Portfolio risk flag).
+        if "blocked" in conds:
+            print("\n── Blocked ──")
+            import requests as _requests
+
+            session = _requests.Session()
+            session.headers.update({"PRIVATE-TOKEN": self.private_token})
+
+            # Blocked targets: Features that have a parent (guarantees ancestor propagation)
+            targets = [
+                (g, e) for g, e in all_open
+                if "Feature" in e.labels
+                and getattr(e, "parent_id", None) is not None
+            ]
+            # Blocker pool: non-Feature epics (Capabilities/Epics act as blockers)
+            blocker_pool = [(g, e) for g, e in all_open if "Feature" not in e.labels]
+            if not blocker_pool:
+                blocker_pool = all_open
+
+            k      = max(0, round(len(targets) * percent / 100))
+            sample = random.sample(targets, min(k, len(targets)))
+            print(f"  Eligible (Feature with parent): {len(targets)}")
+            print(f"  Targeting {len(sample)}\n")
+
+            updated = errors = 0
+            for g, epic in sample:
+                valid_blockers = [(bg, be) for bg, be in blocker_pool if be.id != epic.id]
+                if not valid_blockers:
+                    print(f"  SKIP  #{epic.iid} (no valid blocker available)")
+                    continue
+
+                blocker_grp, blocker_epic = random.choice(valid_blockers)
+                label = (
+                    f"#{epic.iid} '{epic.title[:45]}'"
+                    f"  <--[blocked by]--  "
+                    f"#{blocker_epic.iid} '{blocker_epic.title[:45]}'"
+                )
+
+                if dry_run:
+                    print(f"  DRY  {label}")
+                    updated += 1
+                else:
+                    url  = f"{self.url}/api/v4/groups/{g.id}/epics/{epic.iid}/related_epics"
+                    resp = session.post(url, json={
+                        "target_group_id": blocker_grp.id,
+                        "target_epic_iid": blocker_epic.iid,
+                        "link_type":       "is_blocked_by",
+                    })
+                    if resp.status_code in (200, 201):
+                        print(f"  BLOCKED  {label}")
+                        updated += 1
+                    elif resp.status_code == 409:
+                        print(f"  SKIP (already linked)  #{epic.iid}")
+                    else:
+                        print(f"  ERROR [{resp.status_code}] #{epic.iid}: {resp.text[:120]}")
+                        errors += 1
+
+            print(f"\n  Blocked: {updated}  Errors: {errors}")
+
+        print("\nDone.")
         if dry_run:
             print("(dry-run — no changes saved)")
