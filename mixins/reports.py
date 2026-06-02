@@ -206,6 +206,8 @@ def _side_by_side(*panels):
         )
     spacer = '<td width="40"></td>'
     return f"<table><tr valign='top'>{spacer.join(_panel(t, r) for t, r in panels)}</tr></table>"
+
+
 def _item_risk_reasons(item, today=None):
     """Return a compact at-risk reason string for an epic/feature dict.
 

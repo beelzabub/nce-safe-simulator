@@ -198,6 +198,29 @@ def _last_data_dir():
     return None
 
 
+def _parse_tool_args(extra):
+    """Convert leftover CLI tokens into a tool-param prefills dict.
+
+    Handles --flag (bool True) and --param value (string, coerced later).
+    Normalises --dry-run style hyphens to underscores.
+    """
+    result = {}
+    i = 0
+    while i < len(extra):
+        tok = extra[i]
+        if tok.startswith("--"):
+            name = tok[2:].replace("-", "_")
+            if i + 1 < len(extra) and not extra[i + 1].startswith("-"):
+                result[name] = extra[i + 1]
+                i += 2
+            else:
+                result[name] = True
+                i += 1
+        else:
+            i += 1
+    return result
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
@@ -233,7 +256,7 @@ def main():
                         help="Run a utility tool interactively (omit TOOL to show menu)")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
-    args = parser.parse_args()
+    args, extra = parser.parse_known_args()
 
     if args.usage or not any(vars(args).values()):
         parser.print_help()
@@ -247,7 +270,10 @@ def main():
     if args.utilities is not None:
         _phase[0] = "utilities menu"
         tool_key = None if args.utilities == "__menu__" else args.utilities
-        gl.run_tools_menu(tool_key)
+        prefills = _parse_tool_args(extra)
+        if args.all:
+            prefills.setdefault("all", True)
+        gl.run_tools_menu(tool_key, prefills=prefills)
         return
 
     if args.scaffold is not None:
