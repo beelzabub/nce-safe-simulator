@@ -194,6 +194,43 @@ class BootstrapMixin:
 
         return created
 
+    def _link_risk_to_epic(self, risk_issue, epic, project):
+        """Create a 'relates to' work-item link between a risk issue and the epic it threatens."""
+        wi_id = getattr(epic, 'work_item_id', None)
+        if not wi_id:
+            try:
+                import requests as _req
+                resp = _req.get(
+                    f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}",
+                    headers={"PRIVATE-TOKEN": self.private_token},
+                )
+                if resp.ok:
+                    wi_id = resp.json().get("work_item_id")
+            except Exception:
+                pass
+        if not wi_id:
+            return
+        # Traditional issues expose their global id via .id; use it as the work item GID
+        risk_gid = f"gid://gitlab/WorkItem/{risk_issue.id}"
+        epic_gid = f"gid://gitlab/WorkItem/{wi_id}"
+        mutation = """
+        mutation LinkRisk($epicGid: WorkItemID!, $riskGid: WorkItemID!) {
+          workItemAddLinkedItems(input: {
+            id: $riskGid
+            workItemsIds: [$epicGid]
+            linkType: RELATED
+          }) {
+            workItem { id }
+            errors
+          }
+        }
+        """
+        result   = self.graphql_query(mutation, variables={"epicGid": epic_gid, "riskGid": risk_gid})
+        if result:
+            errors = result.get("workItemAddLinkedItems", {}).get("errors", [])
+            if errors:
+                print(f"      Link warning: {errors}")
+
     def _lorem_issues_in_project(self, project, count):
         issues = []
         for _ in range(count):
@@ -237,6 +274,20 @@ class BootstrapMixin:
                     issue.save()
 
                 print(f"    {total_stories} stories → Feature #{feature_epic.iid}")
+
+                # Create 0–2 ROAM risk issues linked to this Feature (Refs #10)
+                roam_labels = getattr(self, 'ROAM_LABELS', [])
+                if roam_labels:
+                    num_risks = random.choices([0, 1, 2], weights=[50, 35, 15])[0]
+                    for _ in range(num_risks):
+                        roam_label = random.choice(roam_labels)
+                        risk_issue = project.issues.create({
+                            'title':       f"Risk: {lorem.sentence().rstrip('.')}",
+                            'description': lorem.paragraph(),
+                            'labels':      [roam_label],
+                        })
+                        self._link_risk_to_epic(risk_issue, feature_epic, project)
+                        print(f"    Risk issue #{risk_issue.iid} [{roam_label}] → Feature #{feature_epic.iid}")
 
         except Exception as e:
             print(f"  Skipping team backlog for '{group.full_path}': {e}")
@@ -282,7 +333,7 @@ class BootstrapMixin:
         if root_group is None:
             return
 
-        for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS, self.LIFECYCLE_LABELS]:
+        for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.ROAM_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS, self.LIFECYCLE_LABELS]:
             self.create_and_apply_labels(root_group, label_array)
 
         all_portfolio_epics = self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])

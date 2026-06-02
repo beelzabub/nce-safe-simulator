@@ -3,3 +3,6 @@ pandas
 python-dateutil
 requests
 lorem
+
+pytest
+pytest-mock
