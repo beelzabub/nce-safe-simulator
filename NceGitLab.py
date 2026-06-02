@@ -108,6 +108,11 @@ class NceGitLab(
         risk_labels_env = parse_label_env("RISK_LABELS")
         self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
 
+        roam_labels_env = parse_label_env("ROAM_LABELS")
+        self.ROAM_LABELS = roam_labels_env if roam_labels_env else config.get("roam_labels", [
+            "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved",
+        ])
+
         _wsjf = config.get("wsjf_labels", {})
         self.WSJF_LABELS = (
             _wsjf.get("value", []) + _wsjf.get("urgency", []) + _wsjf.get("risk", [])
@@ -146,6 +151,9 @@ class NceGitLab(
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
         self.default_set_risk_percent          = _td.get("set_risk_labels_percent",       15.0)
         self.default_set_wsjf_percent          = _td.get("set_wsjf_labels_percent",       20.0)
+        _rr = _td.get("roam_risk_relations", {})
+        self.default_roam_risk_relations_min   = _rr.get("min", 1)
+        self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         missing_fields = [
             field for field, val in [
@@ -177,6 +185,17 @@ class NceGitLab(
         except gitlab.GitlabGetError as e:
             print(f"Failed to fetch group '{self.parent_group}': {e}")
             exit(1)
+
+
+def _last_data_dir():
+    """Return the most recent reports/.../data directory that contains a valid snapshot."""
+    root = Path("reports")
+    if not root.exists():
+        return None
+    for d in sorted(root.glob("*/*/data"), reverse=True):
+        if (d / "epics.json").exists():
+            return d
+    return None
 
 
 def _parse_tool_args(extra):
@@ -230,6 +249,8 @@ def main():
                         help="Generate reports interactively (omit REPORT to show menu)")
     parser.add_argument("--reuse-data",              metavar="DATA_DIR",
                         help="Skip API fetch; load JSON snapshot from this directory instead")
+    parser.add_argument("--last",                    action="store_true",
+                        help="Reuse the most recently pulled data snapshot (no API fetch)")
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
@@ -287,7 +308,15 @@ def main():
     elif args.report is not None:
         _phase[0] = "reports"
         report_key = None if args.report == "__menu__" else args.report
-        gl.run_reports_menu(report_key, reuse_data=args.reuse_data)
+        reuse = args.reuse_data
+        if args.last:
+            last = _last_data_dir()
+            if last:
+                print(f"  --last: reusing snapshot from {last}\n")
+                reuse = str(last)
+            else:
+                print("  --last: no previous snapshot found — fetching live data.\n")
+        gl.run_reports_menu(report_key, reuse_data=reuse)
 
     # single-phase timing summary (--clean or --create alone)
     if not args.all and phases:
