@@ -3924,7 +3924,7 @@ class ReportsMixin:
             if epic.get("state", "").lower() != "opened":
                 continue
             labels  = epic.get("labels", [])
-            value   = _label_val(labels, "wsjf-value::")
+            value   = epic.get("business_value")
             urgency = _label_val(labels, "wsjf-urgency::")
             risk    = _label_val(labels, "wsjf-risk::")
             if value is None and urgency is None and risk is None:
@@ -3961,8 +3961,9 @@ class ReportsMixin:
 
         if not candidates:
             md.append(
-                "_No WSJF-scored epics found. Apply `wsjf-value::N`, `wsjf-urgency::N`, and "
-                "`wsjf-risk::N` labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
+                "_No WSJF-scored epics found. Set the Business Value custom field via "
+                "`set-business-value`, and apply `wsjf-urgency::N` and `wsjf-risk::N` labels "
+                "(Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
             )
         else:
             scored    = [c for c in candidates if c["score"] is not None]
@@ -3982,8 +3983,8 @@ class ReportsMixin:
 
             md.append("## Ranked Board")
             md.append("")
-            md.append("| Rank | Epic | Type | PI | Value | Urgency | Risk | Size | WSJF |")
-            md.append("|------|------|------|----|-------|---------|------|------|------|")
+            md.append("| Rank | Epic | Type | PI | BV | Urgency | Risk | Size | WSJF |")
+            md.append("|------|------|------|----|----|---------|------|------|------|")
 
             for rank, c in enumerate(candidates, 1):
                 epic   = c["epic"]
@@ -4006,11 +4007,11 @@ class ReportsMixin:
             "---",
             "## How WSJF Works",
             "",
-            "**WSJF = (User/Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
+            "**WSJF = (Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
             "",
-            "| Component | Label | What it measures |",
-            "|-----------|-------|-----------------|",
-            "| User/Business Value | `wsjf-value::N` | Economic benefit of delivering this work |",
+            "| Component | Source | What it measures |",
+            "|-----------|--------|-----------------|",
+            "| Business Value | Custom field (Fibonacci 1–21) | Economic benefit — set via `set-business-value` or the GitLab epic UI |",
             "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how fast does value decay? |",
             "| Risk Reduction | `wsjf-risk::N` | Risk reduced or opportunity enabled by this work |",
             "| Job Size | Epic planned weight | Relative effort (set the epic's weight field) |",

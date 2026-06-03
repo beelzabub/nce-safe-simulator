@@ -291,8 +291,26 @@ TOOLS = [
         ],
     },
     {
+        "key":         "set-business-value",
+        "description": "Randomly assign Business Value custom field (Fibonacci 1–21) to open epics that have none (or all when reassign=True)",
+        "method":      "_tool_set_business_value",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to set (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing Business Value too?",       "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                   "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-business-value",
+        "description": "Clear the Business Value custom field from every epic (clean slate for testing)",
+        "method":      "_tool_strip_business_value",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-wsjf-labels",
-        "description": "Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
+        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
         "method":      "_tool_set_wsjf_labels",
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
@@ -402,6 +420,7 @@ TOOL_CATEGORIES = [
             "set-lifecycle-labels", "strip-lifecycle-labels",
             "set-piid-labels", "set-project-labels", "set-risk-labels",
             "set-work-type-labels", "strip-work-type-labels",
+            "set-business-value", "strip-business-value",
             "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
         ],
     },
@@ -2187,8 +2206,9 @@ class ToolsMixin:
             print("(dry-run — no changes saved)")
 
     def _tool_set_wsjf_labels(self, percent=None, reassign=False, dry_run=False):
-        """Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics.
+        """Randomly assign wsjf-urgency/risk Fibonacci labels to open epics.
 
+        Business Value is now a custom field — use set-business-value for that component.
         By default skips epics that already have any wsjf label.
         Pass reassign=True to replace existing wsjf labels too.
         """
@@ -2197,18 +2217,16 @@ class ToolsMixin:
 
         group = self.get_group_by_name(self.parent_group)
 
-        value_labels   = self._discover_labels(group, "wsjf-value::")
         urgency_labels = self._discover_labels(group, "wsjf-urgency::")
         risk_labels    = self._discover_labels(group, "wsjf-risk::")
 
-        if not value_labels and not urgency_labels and not risk_labels:
-            print("No wsjf-* labels found on group. Create them via bootstrap first.")
+        if not urgency_labels and not risk_labels:
+            print("No wsjf-urgency/risk labels found on group. Create them via bootstrap first.")
             return
 
-        all_wsjf = set(value_labels + urgency_labels + risk_labels)
+        all_wsjf = set(urgency_labels + risk_labels)
 
         print(f"Group          : {group.full_path}")
-        print(f"Value labels   : {value_labels}")
         print(f"Urgency labels : {urgency_labels}")
         print(f"Risk labels    : {risk_labels}")
         mode = "ALL open epics (reassign mode)" if reassign else "open epics with no existing wsjf label"
@@ -2236,13 +2254,8 @@ class ToolsMixin:
 
         updated = errors = 0
         for grp, epic in sample:
-            # Strip any existing wsjf labels before assigning new ones
             new_labels = [l for l in epic.labels if l not in all_wsjf]
             chosen = []
-            if value_labels:
-                v = random.choice(value_labels)
-                new_labels.append(v)
-                chosen.append(v)
             if urgency_labels:
                 u = random.choice(urgency_labels)
                 new_labels.append(u)
@@ -2267,6 +2280,130 @@ class ToolsMixin:
                     errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_business_value(self, percent=None, reassign=False, dry_run=False):
+        """Assign random Fibonacci Business Value to N% of open epics via custom field."""
+        if percent is None:
+            percent = 20.0
+
+        if not self.gitlab_namespace:
+            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            return
+
+        fields   = self._fetch_custom_fields(self.gitlab_namespace)
+        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        if not bv_field:
+            print("Business Value custom field not found. Run 'setup-bv-field' first.")
+            return
+
+        field_gid = bv_field["id"]
+        options   = [(opt["id"], opt["value"]) for opt in (bv_field.get("selectOptions") or [])]
+        if not options:
+            print("Business Value field has no options — check setup-bv-field.")
+            return
+
+        group = self.get_group_by_name(self.parent_group)
+
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                all_epics.append(epic)
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        print(f"  {len(all_epics)} open epics found")
+
+        if reassign:
+            candidates = all_epics
+        else:
+            bv_map     = self._fetch_epic_business_values(all_epics)
+            candidates = [e for e in all_epics if e.id not in bv_map]
+            print(f"  {len(candidates)} without Business Value set")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Setting Business Value on {len(sample)} ({percent}%)\n")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = errors = 0
+        for epic in sample:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                continue
+            opt_gid, opt_val = random.choice(options)
+            if dry_run:
+                print(f"  DRY  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
+                updated += 1
+            else:
+                try:
+                    self._set_work_item_business_value(wid, field_gid, opt_gid)
+                    print(f"  SET  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Set: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_business_value(self, dry_run=False):
+        """Clear the Business Value custom field from all epics."""
+        if not self.gitlab_namespace:
+            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            return
+
+        fields   = self._fetch_custom_fields(self.gitlab_namespace)
+        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        if not bv_field:
+            print("Business Value custom field not found — nothing to strip.")
+            return
+
+        field_gid = bv_field["id"]
+        group     = self.get_group_by_name(self.parent_group)
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                all_epics.append(epic)
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting epics...")
+        _walk(group)
+
+        bv_map    = self._fetch_epic_business_values(all_epics)
+        to_strip  = [e for e in all_epics if e.id in bv_map]
+        skipped   = len(all_epics) - len(to_strip)
+        print(f"  {len(to_strip)} with Business Value set, {skipped} already clear")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = errors = 0
+        for epic in to_strip:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:45]}'")
+                stripped += 1
+            else:
+                try:
+                    self._clear_work_item_business_value(wid, field_gid)
+                    print(f"  CLR  #{epic.iid} '{epic.title[:45]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Cleared: {stripped}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
