@@ -1789,7 +1789,7 @@ class ReportsMixin:
                 etype, eicon, pi, path, state = _epic_meta(epic)
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 reasons    = _item_risk_reasons(epic, today)
-                if prepend:
+                if prepend and prepend not in reasons:
                     reasons = (f"{prepend} · " + reasons) if reasons != "—" else prepend
                 md.append(f"| {eicon} {title_link} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
