@@ -451,6 +451,8 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 |---|---|
 | `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
+| `clean-epic-blocks` | Remove all blocking relationships between epics across the group |
+| `clean-roam-risks` | Remove all ROAM risk labels and conditions from every epic |
 | `clean-wikis` | Delete all wiki pages from a specified scope (portfolio / teams / all / group-path) |
 | `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
 | `export-epics` | Export all epics from the group hierarchy to CSV or JSON |
