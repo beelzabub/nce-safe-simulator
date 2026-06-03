@@ -186,6 +186,7 @@ class BootstrapMixin:
                 'due_date':    due.isoformat(),
                 'labels':      [project_label, piid_label, epic_label],
             })
+            group.epics.update(epic.iid, {'title': f"{epic.iid} - {lorem_title}"})
             self._set_epic_weight(epic, weight)
 
             # Set a random Business Value if the custom field is configured
@@ -247,6 +248,7 @@ class BootstrapMixin:
                 'description': lorem.paragraph(),
                 'weight':      random.choice(self.fibonacci_weights),
             })
+            project.issues.update(issue.iid, {'title': f"{issue.iid} - {lorem_title}"})
             print(f"  Issue #{issue.iid} → {project.path_with_namespace}")
             issues.append(issue)
         return issues
@@ -279,7 +281,10 @@ class BootstrapMixin:
                         'weight':       random.choice(issue_weight_pool),
                         'milestone_id': ms.id if ms else None,
                     })
-                    project.issues.update(issue.iid, {'epic_id': feature_epic.id})
+                    project.issues.update(issue.iid, {
+                        'title':   f"{issue.iid} - {lorem_title}",
+                        'epic_id': feature_epic.id,
+                    })
 
                 print(f"    {total_stories} stories → Feature #{feature_epic.iid}")
 
@@ -295,6 +300,7 @@ class BootstrapMixin:
                             'description': lorem.paragraph(),
                             'labels':      [roam_label],
                         })
+                        project.issues.update(risk_issue.iid, {'title': f"Risk {risk_issue.iid} - {lorem_title}"})
                         self._link_risk_to_epic(risk_issue, feature_epic, project)
                         print(f"    Risk issue #{risk_issue.iid} [{roam_label}] → Feature #{feature_epic.iid}")
 
