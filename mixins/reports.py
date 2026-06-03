@@ -1703,7 +1703,7 @@ class ReportsMixin:
             if n == 0:
                 return 0
             url = f"{group.web_url}/-/issues?label_name[]={lbl}"
-            return f"<a href='{url}'>{n}</a>"
+            return f"<a href='{url}' target='_blank'>{n}</a>"
 
         roam_rows = [(ROAM_ICONS.get(lbl, lbl),
                       _roam_count(lbl, len(roam_buckets.get(lbl, []))))
