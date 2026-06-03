@@ -94,20 +94,17 @@ class BootstrapMixin:
         for sg in subgroups:
             self.delete_all_milestones(sg)
 
-        print("Deleting all issues across group hierarchy...")
-        for project in live_projects:
-            try:
-                full_project = self.gl.projects.get(project.id)
-                issues       = full_project.issues.list(all=True)
-                for issue in issues:
-                    try:
-                        issue.delete()
-                    except Exception as e:
-                        print(f"  Failed to delete issue #{issue.iid} in '{project.path_with_namespace}': {e}")
-                if issues:
-                    print(f"  Deleted {len(issues)} issues from '{project.path_with_namespace}'")
-            except Exception as e:
-                print(f"  Failed to fetch issues for '{project.path_with_namespace}': {e}")
+        print(f"Deleting all issues across group hierarchy ({self.delete_workers} workers)...")
+
+        def _delete_project_issues(project):
+            full_project = self.gl.projects.get(project.id)
+            issues       = full_project.issues.list(all=True)
+            for issue in issues:
+                issue.delete()
+            if issues:
+                print(f"  Deleted {len(issues)} issues from '{project.path_with_namespace}'")
+
+        self._parallel_delete(live_projects, _delete_project_issues)
 
         self.delete_all_labels(group)
         for sg in subgroups:
@@ -189,8 +186,7 @@ class BootstrapMixin:
                 'due_date':    due.isoformat(),
                 'labels':      [project_label, piid_label, epic_label],
             })
-            epic.title = f"{epic.id} - {lorem_title}"
-            epic.save()
+            group.epics.update(epic.iid, {'title': f"{epic.iid} - {lorem_title}"})
             self._set_epic_weight(epic, weight)
 
             # Set a random Business Value if the custom field is configured
@@ -252,8 +248,7 @@ class BootstrapMixin:
                 'description': lorem.paragraph(),
                 'weight':      random.choice(self.fibonacci_weights),
             })
-            issue.title = f"{issue.id} - {lorem_title}"
-            issue.save()
+            project.issues.update(issue.iid, {'title': f"{issue.iid} - {lorem_title}"})
             print(f"  Issue #{issue.iid} → {project.path_with_namespace}")
             issues.append(issue)
         return issues
@@ -286,9 +281,10 @@ class BootstrapMixin:
                         'weight':       random.choice(issue_weight_pool),
                         'milestone_id': ms.id if ms else None,
                     })
-                    issue.title    = f"{issue.id} - {lorem_title}"
-                    issue.epic_id  = feature_epic.id
-                    issue.save()
+                    project.issues.update(issue.iid, {
+                        'title':   f"{issue.iid} - {lorem_title}",
+                        'epic_id': feature_epic.id,
+                    })
 
                 print(f"    {total_stories} stories → Feature #{feature_epic.iid}")
 
@@ -304,8 +300,7 @@ class BootstrapMixin:
                             'description': lorem.paragraph(),
                             'labels':      [roam_label],
                         })
-                        risk_issue.title = f"Risk {risk_issue.id} - {lorem_title}"
-                        risk_issue.save()
+                        project.issues.update(risk_issue.iid, {'title': f"Risk {risk_issue.iid} - {lorem_title}"})
                         self._link_risk_to_epic(risk_issue, feature_epic, project)
                         print(f"    Risk issue #{risk_issue.iid} [{roam_label}] → Feature #{feature_epic.iid}")
 
