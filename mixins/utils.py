@@ -7,14 +7,23 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from pprint import pformat
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 class _TimeoutAdapter(HTTPAdapter):
-    """HTTPAdapter that applies a default timeout to every request."""
+    """HTTPAdapter that applies a default timeout and 429 retry-with-backoff."""
     def __init__(self, timeout, **kwargs):
         self.timeout = timeout
-        super().__init__(**kwargs)
+        retry = Retry(
+            total=5,
+            backoff_factor=1,          # sleeps 1 2 4 8 16 s between retries
+            status_forcelist=[429],
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        super().__init__(max_retries=retry, **kwargs)
 
     def send(self, *args, **kwargs):
         kwargs.setdefault("timeout", self.timeout)
@@ -78,6 +87,25 @@ def _tee_to_log(log_path):
 
 
 class UtilitiesMixin:
+
+    def _parallel_delete(self, items, fn, workers=None):
+        """Run fn(item) for each item in parallel. Returns (done, errors) counts.
+
+        fn should raise on failure. Errors are caught, printed, and counted.
+        Thread count defaults to self.delete_workers (from config) or 5.
+        """
+        w = workers or getattr(self, "delete_workers", 5)
+        done = errors = 0
+        with ThreadPoolExecutor(max_workers=w) as pool:
+            futures = {pool.submit(fn, item): item for item in items}
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                    done += 1
+                except Exception as e:
+                    print(f"  ERROR: {e}")
+                    errors += 1
+        return done, errors
 
     def _make_session(self):
         """Return a requests.Session pre-configured with auth and the configured timeout."""
