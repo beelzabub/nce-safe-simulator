@@ -1707,21 +1707,24 @@ class ReportsMixin:
                     if lbl in all_roam_counts:
                         all_roam_counts[lbl] += 1
 
-        def _roam_count(lbl, n_all, n_linked):
+        def _roam_all_cell(lbl, n):
             url = f"{group.web_url}/-/issues?label_name[]={lbl}&state=all"
-            all_cell    = (f"<a href='{url}' target='_blank'>{n_all}</a>"
-                           if n_all else "0")
-            linked_cell = str(n_linked)
-            return f"{all_cell} · {linked_cell}"
+            return f"<a href='{url}' target='_blank'>{n}</a>" if n else "0"
 
-        roam_rows = [(ROAM_ICONS.get(lbl, lbl),
-                      _roam_count(lbl, all_roam_counts.get(lbl, 0),
-                                  len(roam_buckets.get(lbl, []))))
-                     for lbl in ROAM_ORDER]
         total_all_roam = sum(all_roam_counts.values())
+        roam_rows = [(ROAM_ICONS.get(lbl, lbl),
+                      _roam_all_cell(lbl, all_roam_counts.get(lbl, 0)),
+                      len(roam_buckets.get(lbl, [])))
+                     for lbl in ROAM_ORDER]
         roam_rows.append(("<strong>Total</strong>",
-                          f"<strong>{total_all_roam} · {total_roam_risks}</strong>"))
-        panels.append(_panel("ROAM Risk Issues", "Status", "All · On Epics", roam_rows))
+                          f"<strong>{total_all_roam}</strong>",
+                          f"<strong>{total_roam_risks}</strong>"))
+        _roam_thead = "<tr><th align='left'>Status</th><th align='left'>All</th><th align='left'>Linked</th></tr>"
+        _roam_tbody = "".join(f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td></tr>" for r in roam_rows)
+        panels.append(
+            f"<td valign='top'><strong>ROAM Risk Issues</strong>"
+            f"<table>{_roam_thead}{_roam_tbody}</table></td>"
+        )
 
         alert_rows = []
         if total_blocked:
