@@ -2984,7 +2984,8 @@ class ToolsMixin:
             eligible = [
                 (g, e) for g, e in all_open
                 if "Feature" not in e.labels
-                and (not e.due_date or e.due_date >= today.isoformat())
+                and (not (e.due_date or getattr(e, 'end_date', None))
+                     or (e.due_date or getattr(e, 'end_date', None)) >= today.isoformat())
             ]
             k      = max(0, round(len(eligible) * percent / 100))
             sample = random.sample(eligible, min(k, len(eligible)))
@@ -2997,7 +2998,7 @@ class ToolsMixin:
                     updated += 1
                 else:
                     try:
-                        epic.due_date = past_date
+                        epic.end_date = past_date
                         epic.save()
                         print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
                         updated += 1
@@ -3013,7 +3014,8 @@ class ToolsMixin:
                 (g, e) for g, e in all_open
                 if "Feature" in e.labels
                 and getattr(e, "parent_id", None) is not None
-                and (not e.due_date or e.due_date >= today.isoformat())
+                and (not (e.due_date or getattr(e, 'end_date', None))
+                     or (e.due_date or getattr(e, 'end_date', None)) >= today.isoformat())
             ]
             k      = max(0, round(len(eligible) * percent / 100))
             sample = random.sample(eligible, min(k, len(eligible)))
@@ -3026,7 +3028,7 @@ class ToolsMixin:
                     updated += 1
                 else:
                     try:
-                        epic.due_date = past_date
+                        epic.end_date = past_date
                         epic.save()
                         print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
                         updated += 1

@@ -1606,11 +1606,19 @@ class ReportsMixin:
 
         def _has_overdue_child_feature(epic_id):
             for child in children_by_parent.get(epic_id, []):
-                if "Feature" not in child.get("labels", []):
-                    continue
                 if (child.get("state") or "").lower() == "closed":
                     continue
                 dd = child.get("due_date")
+                if dd:
+                    try:
+                        if date.fromisoformat(str(dd)[:10]) < today:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+            for issue in self._rd_issues_by_epic.get(epic_id, []):
+                if (issue.get("state") or "").lower() == "closed":
+                    continue
+                dd = issue.get("due_date")
                 if dd:
                     try:
                         if date.fromisoformat(str(dd)[:10]) < today:
