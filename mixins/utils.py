@@ -547,6 +547,7 @@ class UtilitiesMixin:
                         "state":        issue.state,
                         "labels":       getattr(issue, 'labels', []),
                         "weight":       getattr(issue, 'weight', None),
+                        "due_date":     getattr(issue, 'due_date', None),
                         "milestone":    issue.milestone['title'] if issue.milestone else None,
                         "assignees":    [a['username'] for a in getattr(issue, 'assignees', [])],
                         "epic_id":      epic_info['id']  if epic_info else None,

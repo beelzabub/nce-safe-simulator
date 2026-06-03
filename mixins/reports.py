@@ -1637,7 +1637,7 @@ class ReportsMixin:
 
         open_epics_caps = [
             e for e in self._rd_epics_all
-            if e.get("type") in ("Epic", "Capability")
+            if e.get("type") in ("Epic", "Capability", "Feature")
             and (e.get("state") or "").lower() != "closed"
         ]
 
@@ -1736,7 +1736,7 @@ class ReportsMixin:
         if total_behind_sched:
             alert_rows.append(("⏱️ Behind Schedule", total_behind_sched))
         if alert_rows:
-            panels.append(_panel("Condition Alerts", "Condition", "Epics", alert_rows))
+            panels.append(_panel("Condition Alerts", "Condition", "Items", alert_rows))
 
         if vs_counts:
             panels.append(_panel("By Value Stream", "Value Stream", "ROAM Risks",
