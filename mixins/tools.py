@@ -369,6 +369,14 @@ TOOLS = [
             {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False},
         ],
     },
+    {
+        "key":         "clean-epic-blocks",
+        "description": "Remove all blocking relationships between epics across the group",
+        "method":      "_tool_clean_epic_blocks",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
 ]
 
 
@@ -408,7 +416,7 @@ TOOL_CATEGORIES = [
     {
         "name":        "Reset / Clean",
         "description": "Remove seeded data and restore a clean state",
-        "tools": ["clean-roam-risks", "clean-wikis", "reset-pi-progress", "clean-reports", "clean-logs"],
+        "tools": ["clean-roam-risks", "clean-epic-blocks", "clean-wikis", "reset-pi-progress", "clean-reports", "clean-logs"],
     },
     {
         "name":        "Audit",
@@ -2547,6 +2555,75 @@ class ToolsMixin:
     # ------------------------------------------------------------------
     # ROAM risk issue management
     # ------------------------------------------------------------------
+
+    def _tool_clean_epic_blocks(self, dry_run=False):
+        """Remove all blocking relationships between epics across the group."""
+        group   = self.get_group_by_name(self.parent_group)
+        session = self._make_session()
+
+        print(f"Group: {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        print("\nCollecting epics...")
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                if getattr(epic, 'group_id', grp.id) == grp.id:
+                    all_epics.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        print(f"  Found {len(all_epics)} epics")
+
+        print("\nCollecting blocking relationships...")
+        seen_link_ids = set()
+        links = []  # (grp_id, epic_iid, link_id, label)
+
+        for grp, epic in all_epics:
+            url  = f"{self.url}/api/v4/groups/{grp.id}/epics/{epic.iid}/related_epics"
+            resp = session.get(url)
+            if not resp.ok:
+                continue
+            for rel in resp.json():
+                link_type = rel.get("link_type", "")
+                if link_type not in ("blocks", "is_blocked_by"):
+                    continue
+                link_id = rel.get("related_epic_link_id")
+                if not link_id or link_id in seen_link_ids:
+                    continue
+                seen_link_ids.add(link_id)
+                label = (
+                    f"Epic #{epic.iid} '{epic.title[:40]}' ({grp.full_path})"
+                    f"  --[{link_type}]-->  "
+                    f"#{rel.get('iid', '?')} '{rel.get('title', '')[:40]}'"
+                )
+                links.append((grp.id, epic.iid, link_id, label))
+
+        print(f"  Found {len(links)} blocking relationship(s)")
+
+        if not links:
+            print("Nothing to remove.")
+            return
+
+        if dry_run:
+            for _, _, _, label in links:
+                print(f"  DRY   REMOVE {label}")
+            print(f"\nDry run — {len(links)} relationship(s) would be removed.")
+            return
+
+        def _delete_link(link):
+            grp_id, epic_iid, link_id, label = link
+            url  = f"{self.url}/api/v4/groups/{grp_id}/epics/{epic_iid}/related_epics/{link_id}"
+            resp = session.delete(url)
+            if resp.status_code not in (200, 204):
+                raise RuntimeError(f"[{resp.status_code}] {resp.text[:120]}")
+            print(f"  REMOVED {label}")
+
+        removed, errors = self._parallel_delete(links, _delete_link)
+        print(f"\nDone.  Removed: {removed}  Errors: {errors}")
 
     def _tool_clean_roam_risks(self, dry_run=False):
         """Delete all ROAM risk issues across the group."""
