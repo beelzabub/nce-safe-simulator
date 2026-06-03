@@ -1615,6 +1615,8 @@ class ReportsMixin:
                             return True
                     except (ValueError, TypeError):
                         pass
+                if _has_overdue_child_feature(child["id"]):
+                    return True
             for issue in self._rd_issues_by_epic.get(epic_id, []):
                 if (issue.get("state") or "").lower() == "closed":
                     continue
@@ -1697,7 +1699,14 @@ class ReportsMixin:
 
         panels = []
 
-        roam_rows = [(ROAM_ICONS.get(lbl, lbl), len(roam_buckets.get(lbl, [])))
+        def _roam_count(lbl, n):
+            if n == 0:
+                return 0
+            url = f"{group.web_url}/-/issues?label_name[]={lbl}"
+            return f"<a href='{url}'>{n}</a>"
+
+        roam_rows = [(ROAM_ICONS.get(lbl, lbl),
+                      _roam_count(lbl, len(roam_buckets.get(lbl, []))))
                      for lbl in ROAM_ORDER]
         roam_rows.append(("<strong>Total</strong>", f"<strong>{total_roam_risks}</strong>"))
         panels.append(_panel("ROAM Risk Issues", "Status", "Count", roam_rows))
