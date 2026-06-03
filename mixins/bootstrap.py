@@ -94,20 +94,17 @@ class BootstrapMixin:
         for sg in subgroups:
             self.delete_all_milestones(sg)
 
-        print("Deleting all issues across group hierarchy...")
-        for project in live_projects:
-            try:
-                full_project = self.gl.projects.get(project.id)
-                issues       = full_project.issues.list(all=True)
-                for issue in issues:
-                    try:
-                        issue.delete()
-                    except Exception as e:
-                        print(f"  Failed to delete issue #{issue.iid} in '{project.path_with_namespace}': {e}")
-                if issues:
-                    print(f"  Deleted {len(issues)} issues from '{project.path_with_namespace}'")
-            except Exception as e:
-                print(f"  Failed to fetch issues for '{project.path_with_namespace}': {e}")
+        print(f"Deleting all issues across group hierarchy ({self.delete_workers} workers)...")
+
+        def _delete_project_issues(project):
+            full_project = self.gl.projects.get(project.id)
+            issues       = full_project.issues.list(all=True)
+            for issue in issues:
+                issue.delete()
+            if issues:
+                print(f"  Deleted {len(issues)} issues from '{project.path_with_namespace}'")
+
+        self._parallel_delete(live_projects, _delete_project_issues)
 
         self.delete_all_labels(group)
         for sg in subgroups:

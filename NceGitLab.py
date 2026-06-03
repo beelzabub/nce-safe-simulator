@@ -94,7 +94,8 @@ class NceGitLab(
         else:
             self.private_token = config.get("private_token", "")
 
-        self.api_timeout = config.get("api_timeout", 300)
+        self.api_timeout     = config.get("api_timeout",    300)
+        self.delete_workers  = config.get("delete_workers",  5)
 
         fibonacci_weights_env = parse_fibonacci_env("FIBONACCI_WEIGHTS")
         self.fibonacci_weights = fibonacci_weights_env if fibonacci_weights_env else config.get("fibonacci_weights")

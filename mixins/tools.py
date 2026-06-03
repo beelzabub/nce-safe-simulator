@@ -793,7 +793,9 @@ class ToolsMixin:
             print("Mode  : DRY RUN — no pages will be deleted")
         print()
 
-        total_groups = total_pages = 0
+        # Collect all pages across target groups first
+        all_pages    = []   # list of (grp, page)
+        total_groups = 0
         for grp in targets:
             try:
                 pages = grp.wikis.list(all=True)
@@ -803,21 +805,22 @@ class ToolsMixin:
             if not pages:
                 continue
             total_groups += 1
-            total_pages  += len(pages)
             print(f"  {grp.full_path}  ({len(pages)} page(s))")
             for page in pages:
                 print(f"    • {page.slug}")
-                if not dry_run:
-                    try:
-                        page.delete()
-                    except Exception as e:
-                        print(f"      ERROR deleting '{page.slug}': {e}")
+                all_pages.append(page)
 
         print()
         if dry_run:
-            print(f"Dry run complete — {total_pages} page(s) across {total_groups} group(s) would be deleted.")
-        else:
-            print(f"Done — deleted {total_pages} page(s) across {total_groups} group(s).")
+            print(f"Dry run complete — {len(all_pages)} page(s) across {total_groups} group(s) would be deleted.")
+            return
+
+        def _delete_page(page):
+            page.delete()
+
+        done, errors = self._parallel_delete(all_pages, _delete_page)
+        print(f"Done — deleted {done} page(s) across {total_groups} group(s)."
+              + (f"  Errors: {errors}" if errors else ""))
 
     def _tool_list_wikis(self, scope="portfolio"):
         """List all wiki pages in target groups.
@@ -2568,24 +2571,18 @@ class ToolsMixin:
             print("Nothing to clean up.")
             return
 
-        deleted = errors = 0
-        for issue in issues:
-            label = f"#{issue.iid} '{issue.title[:55]}'"
-            if dry_run:
-                print(f"  DRY   {label}")
-                deleted += 1
-                continue
-            try:
-                self.gl.projects.get(issue.project_id).issues.delete(issue.iid)
-                print(f"  DELETED {label}")
-                deleted += 1
-            except Exception as e:
-                print(f"  ERROR   {label}: {e}")
-                errors += 1
-
-        print(f"\nDone.  Deleted: {deleted}  Errors: {errors}")
         if dry_run:
-            print("(dry-run — no changes saved)")
+            for issue in issues:
+                print(f"  DRY   #{issue.iid} '{issue.title[:55]}'")
+            print(f"\nDry run — {len(issues)} issue(s) would be deleted.")
+            return
+
+        def _delete_issue(issue):
+            self.gl.projects.get(issue.project_id).issues.delete(issue.iid)
+            print(f"  DELETED #{issue.iid} '{issue.title[:55]}'")
+
+        deleted, errors = self._parallel_delete(issues, _delete_issue)
+        print(f"\nDone.  Deleted: {deleted}  Errors: {errors}")
 
     def _tool_generate_roam_risks(self, count=10, relations_min=None, relations_max=None,
                                    piid=None, seed=None, dry_run=False):
