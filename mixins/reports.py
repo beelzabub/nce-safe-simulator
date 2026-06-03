@@ -1596,7 +1596,8 @@ class ReportsMixin:
             status = risk.get("roam_status") or "roam::owned"
             roam_buckets.setdefault(status, []).append((risk, epics))
 
-        # ── Child-overdue bucket (Refs #8) ────────────────────────────── #
+        # ── Condition buckets — independent, an epic may appear in multiple ─ #
+        # Build parent→children map for child-overdue detection
         children_by_parent: defaultdict = defaultdict(list)
         for e in self._rd_epics_all:
             pid = e.get("parent_id")
@@ -1624,35 +1625,33 @@ class ReportsMixin:
             except (ValueError, TypeError):
                 return False
 
-        all_flagged = roam_epics_seen
+        open_epics_caps = [
+            e for e in self._rd_epics_all
+            if e.get("type") in ("Epic", "Capability")
+            and (e.get("state") or "").lower() != "closed"
+        ]
+
+        blocked_bucket = [
+            e for e in open_epics_caps
+            if (e.get("blocked_by_count") or 0) > 0
+        ]
         child_overdue_bucket = [
-            e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and _has_overdue_child_feature(e["id"])
+            e for e in open_epics_caps
+            if _has_overdue_child_feature(e["id"])
         ]
-
-        all_flagged = all_flagged | {e["id"] for e in child_overdue_bucket}
         past_due_bucket = [
-            e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and (e.get("state") or "").lower() != "closed"
-            and _is_past_due(e.get("due_date"))
+            e for e in open_epics_caps
+            if _is_past_due(e.get("due_date"))
         ]
-
-        all_flagged = all_flagged | {e["id"] for e in past_due_bucket}
         behind_schedule_bucket = [
-            e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and (e.get("state") or "").lower() != "closed"
-            and e.get("pct_through_pi") is not None
+            e for e in open_epics_caps
+            if e.get("pct_through_pi") is not None
             and 0 < e["pct_through_pi"] < 100
             and e.get("pct_complete", 0) < e["pct_through_pi"]
         ]
 
         total_roam_risks   = len(risk_map)
+        total_blocked      = len(blocked_bucket)
         total_child_over   = len(child_overdue_bucket)
         total_past_due     = len(past_due_bucket)
         total_behind_sched = len(behind_schedule_bucket)
@@ -1695,15 +1694,17 @@ class ReportsMixin:
         roam_rows.append(("<strong>Total</strong>", f"<strong>{total_roam_risks}</strong>"))
         panels.append(_panel("ROAM Risk Issues", "Status", "Count", roam_rows))
 
-        if total_child_over or total_past_due or total_behind_sched:
-            flag_rows = []
-            if total_past_due:
-                flag_rows.append(("📅 Past Due", total_past_due))
-            if total_child_over:
-                flag_rows.append(("📅 Child Overdue", total_child_over))
-            if total_behind_sched:
-                flag_rows.append(("⏱️ Behind Schedule", total_behind_sched))
-            panels.append(_panel("Schedule Alerts", "Type", "Count", flag_rows))
+        alert_rows = []
+        if total_blocked:
+            alert_rows.append(("🔒 Blocked", total_blocked))
+        if total_child_over:
+            alert_rows.append(("📅 Child Overdue", total_child_over))
+        if total_past_due:
+            alert_rows.append(("📅 Past Due", total_past_due))
+        if total_behind_sched:
+            alert_rows.append(("⏱️ Behind Schedule", total_behind_sched))
+        if alert_rows:
+            panels.append(_panel("Condition Alerts", "Condition", "Epics", alert_rows))
 
         if vs_counts:
             panels.append(_panel("By Value Stream", "Value Stream", "ROAM Risks",
@@ -1713,6 +1714,11 @@ class ReportsMixin:
         md.append("## Summary")
         md.append("")
         md.append(f"<table><tr valign='top'>{spacer.join(panels)}</tr></table>")
+        md.append("")
+        md.append(
+            "_An epic may appear in more than one condition section below — "
+            "conditions are independent and cumulative._"
+        )
         md.append("")
 
         # ── Section 1: ROAM risk issues ──────────────────────────────── #
@@ -1780,25 +1786,34 @@ class ReportsMixin:
                 md.append(f"| {eicon} {title_link} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
 
-        # ── Section 2: Child Overdue ──────────────────────────────────── #
+        # ── Section 2: Blocked ───────────────────────────────────────────── #
+        if blocked_bucket:
+            md.append("---")
+            md.append(f"## 🔒 Blocked ({total_blocked})")
+            md.append("")
+            md.append("_Has one or more active blocking relationships._")
+            md.append("")
+            _render_epic_table(blocked_bucket, prepend="🔒 Blocked")
+
+        # ── Section 3: Child Overdue ──────────────────────────────────── #
         if child_overdue_bucket:
             md.append("---")
             md.append(f"## 📅 Child Overdue ({total_child_over})")
             md.append("")
-            md.append("_No ROAM issues — flagged because a child Feature has passed its due date._")
+            md.append("_A child Feature has passed its due date and is not Closed._")
             md.append("")
             _render_epic_table(child_overdue_bucket, prepend="📅 Child Overdue")
 
-        # ── Section 3: Past Due ───────────────────────────────────────── #
+        # ── Section 4: Past Due ───────────────────────────────────────── #
         if past_due_bucket:
             md.append("---")
             md.append(f"## 📅 Past Due ({total_past_due})")
             md.append("")
-            md.append("_No ROAM issues and no overdue children — flagged because the epic's own due date has passed._")
+            md.append("_The epic's own due date has passed and it is not Closed._")
             md.append("")
             _render_epic_table(past_due_bucket, prepend="📅 Past Due")
 
-        # ── Section 4: Behind Schedule ────────────────────────────────── #
+        # ── Section 5: Behind Schedule ────────────────────────────────── #
         if behind_schedule_bucket:
             md.append("---")
             md.append(f"## ⏱️ Behind Schedule ({total_behind_sched})")
