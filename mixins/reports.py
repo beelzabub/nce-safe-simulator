@@ -4827,6 +4827,12 @@ class ReportsMixin:
             self._run_reports_inner(reports, run_dir, data_dir, reuse_data)
 
     def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data):
+        # Always start with a clean fetch — stale caches from a prior run in
+        # the same session would silently re-publish old data to the wiki.
+        for _cache_attr in ('_metrics_cache', '_issues_cache', '_all_epics_cache'):
+            if hasattr(self, _cache_attr):
+                delattr(self, _cache_attr)
+
         group = self.get_group_by_name(self.parent_group)
         self._rd_root_obj = group
         gn = group.name
