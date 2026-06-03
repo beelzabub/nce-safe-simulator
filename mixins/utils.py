@@ -293,7 +293,9 @@ class UtilitiesMixin:
               ... on WorkItemWidgetCustomFields {
                 customFieldValues {
                   customField { id }
-                  selectedOption { id value }
+                  ... on WorkItemSelectFieldValue {
+                    selectedOptions { id value }
+                  }
                 }
               }
             }
@@ -318,12 +320,12 @@ class UtilitiesMixin:
                             continue
                         if cfv.get("customField", {}).get("id") != field_gid:
                             continue
-                        opt = cfv.get("selectedOption")
-                        if opt:
+                        opts = cfv.get("selectedOptions") or []
+                        if opts:
                             try:
-                                results[epic.id] = int(opt.get("value", ""))
+                                results[epic.id] = int(opts[0].get("value", ""))
                             except (ValueError, TypeError):
-                                opt_id = opt.get("id")
+                                opt_id = opts[0].get("id")
                                 if opt_id in option_map:
                                     results[epic.id] = option_map[opt_id]
                         break
