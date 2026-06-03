@@ -1699,17 +1699,29 @@ class ReportsMixin:
 
         panels = []
 
-        def _roam_count(lbl, n):
-            if n == 0:
-                return 0
+        # Count all issues per ROAM label from the snapshot (regardless of epic linkage)
+        all_roam_counts: dict = {lbl: 0 for lbl in ROAM_ORDER}
+        for issues in self._rd_issues_by_project.values():
+            for issue in issues:
+                for lbl in (issue.get("labels") or []):
+                    if lbl in all_roam_counts:
+                        all_roam_counts[lbl] += 1
+
+        def _roam_count(lbl, n_all, n_linked):
             url = f"{group.web_url}/-/issues?label_name[]={lbl}&state=all"
-            return f"<a href='{url}' target='_blank' title='All {lbl} issues (includes unlinked)'>{n}</a>"
+            all_cell    = (f"<a href='{url}' target='_blank'>{n_all}</a>"
+                           if n_all else "0")
+            linked_cell = str(n_linked)
+            return f"{all_cell} · {linked_cell}"
 
         roam_rows = [(ROAM_ICONS.get(lbl, lbl),
-                      _roam_count(lbl, len(roam_buckets.get(lbl, []))))
+                      _roam_count(lbl, all_roam_counts.get(lbl, 0),
+                                  len(roam_buckets.get(lbl, []))))
                      for lbl in ROAM_ORDER]
-        roam_rows.append(("<strong>Total</strong>", f"<strong>{total_roam_risks}</strong>"))
-        panels.append(_panel("ROAM Risk Issues", "Status", "Count", roam_rows))
+        total_all_roam = sum(all_roam_counts.values())
+        roam_rows.append(("<strong>Total</strong>",
+                          f"<strong>{total_all_roam} · {total_roam_risks}</strong>"))
+        panels.append(_panel("ROAM Risk Issues", "Status", "All · On Epics", roam_rows))
 
         alert_rows = []
         if total_blocked:
