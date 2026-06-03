@@ -2,6 +2,7 @@
   "url": "https://gitlab.com",
   "parent_group": "PMW-120",
   "api_timeout": 300,
+  "delete_workers": 5,
   "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
   "fibonacci_weights": [1, 2, 3, 5, 8, 13],
   "business_value_field": {
