@@ -291,9 +291,9 @@ class UtilitiesMixin:
           workItem(id: $id) {
             widgets {
               ... on WorkItemWidgetCustomFields {
-                customFields {
-                  definition { id }
+                customFieldValues {
                   ... on WorkItemCustomFieldSingleSelectValue {
+                    customField { id }
                     selectedOption { id value }
                   }
                 }
@@ -315,12 +315,12 @@ class UtilitiesMixin:
                 for widget in (data.get("workItem") or {}).get("widgets", []):
                     if not isinstance(widget, dict):
                         continue
-                    for cf in widget.get("customFields", []):
-                        if not isinstance(cf, dict):
+                    for cfv in widget.get("customFieldValues", []):
+                        if not isinstance(cfv, dict):
                             continue
-                        if cf.get("definition", {}).get("id") != field_gid:
+                        if cfv.get("customField", {}).get("id") != field_gid:
                             continue
-                        opt = cf.get("selectedOption")
+                        opt = cfv.get("selectedOption")
                         if opt:
                             try:
                                 results[epic.id] = int(opt.get("value", ""))
