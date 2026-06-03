@@ -1,8 +1,12 @@
 import random
 import re
+import shutil
 import sys
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from .utils import _clear, _pause, _tee_to_log
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +176,8 @@ TOOLS = [
         "description": "Reopen all closed issues linked to epics in a specific PI (or all PIs)",
         "method":      "_tool_reset_pi_progress",
         "params": [
-            {"name": "piid",    "prompt": "PIID label(s) — comma or space separated (e.g. PIID::2026Q3 PIID::2027Q1), blank if using --all", "type": str,  "optional": True},
-            {"name": "all",     "prompt": "Reopen across all PIs?",                                  "type": bool, "default": False},
-            {"name": "dry_run", "prompt": "Dry run?",                                                "type": bool, "default": False},
+            {"name": "piid",    "prompt": "PIID label(s) (e.g. PIID::2026Q3 PIID::2027Q1), blank = all PIs", "type": str,  "optional": True},
+            {"name": "dry_run", "prompt": "Dry run?",                                                          "type": bool, "default": False},
         ],
     },
     {
@@ -182,6 +185,14 @@ TOOLS = [
         "description": "Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content",
         "method":      "create_safe_hierarchy",
         "params":      [],
+    },
+    {
+        "key":         "setup-bv-field",
+        "description": "Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21, applies to Epic / Capability / Feature)",
+        "method":      "_tool_setup_bv_field",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
     },
     {
         "key":         "set-epic-states",
@@ -340,25 +351,125 @@ TOOLS = [
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
         ],
     },
+    {
+        "key":         "clean-reports",
+        "description": "Delete local report run directories older than N days",
+        "method":      "_tool_clean_reports",
+        "params": [
+            {"name": "keep_days", "prompt": "Keep runs from the last N days (0 = delete all)", "type": int,  "default": 7},
+            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "clean-logs",
+        "description": "Delete local log directories older than N days",
+        "method":      "_tool_clean_logs",
+        "params": [
+            {"name": "keep_days", "prompt": "Keep logs from the last N days (0 = delete all)", "type": int,  "default": 7},
+            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False},
+        ],
+    },
 ]
 
 
+TOOL_CATEGORIES = [
+    {
+        "name":        "Setup",
+        "description": "Initialize structure and custom fields",
+        "tools": ["scaffold", "setup-bv-field"],
+    },
+    {
+        "name":        "Seed Data",
+        "description": "Generate and simulate realistic test conditions",
+        "tools": [
+            "generate-issues", "generate-epic-blocks", "generate-roam-risks",
+            "generate-risk-reasons", "close-percent", "simulate-pi-progress",
+            "set-epic-states", "orphan-epics", "orphan-issues",
+        ],
+    },
+    {
+        "name":        "Labels",
+        "description": "Assign or strip epic label sets",
+        "tools": [
+            "set-lifecycle-labels", "strip-lifecycle-labels",
+            "set-piid-labels", "set-project-labels", "set-risk-labels",
+            "set-work-type-labels", "strip-work-type-labels",
+            "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
+        ],
+    },
+    {
+        "name":        "Weights",
+        "description": "Manage epic and issue story-point weights",
+        "tools": [
+            "set-issue-weights", "strip-issue-weights",
+            "update-weights", "validate-weights", "weight-drift-check",
+        ],
+    },
+    {
+        "name":        "Reset / Clean",
+        "description": "Remove seeded data and restore a clean state",
+        "tools": ["clean-roam-risks", "clean-wikis", "reset-pi-progress", "clean-reports", "clean-logs"],
+    },
+    {
+        "name":        "Audit",
+        "description": "Inspect data quality, labels, and hierarchy",
+        "tools": ["audit-hierarchy", "audit-labels", "list-wikis"],
+    },
+    {
+        "name":        "Import / Export",
+        "description": "Move epics and issues in and out of GitLab",
+        "tools": ["export-epics", "export-issues", "import-epics", "import-issues"],
+    },
+]
+
+_TOOL_BY_KEY = {t["key"]: t for t in TOOLS}
+
+# Map tool key → category slug for descriptive log file names.
+# Category name → kebab slug: "Reset / Clean" → "reset-clean", etc.
+_TOOL_CAT_SLUG: dict[str, str] = {}
+for _cat in TOOL_CATEGORIES:
+    _slug = re.sub(r"[^a-z0-9]+", "-", _cat["name"].lower()).strip("-")
+    for _k in _cat["tools"]:
+        _TOOL_CAT_SLUG[_k] = _slug
+del _cat, _slug, _k
+
+
+def _tool_log_stem(tool_key: str) -> str:
+    """Return a descriptive log filename stem for a tool, e.g. 'seed-data-close-percent'."""
+    cat = _TOOL_CAT_SLUG.get(tool_key, "misc")
+    return f"{cat}-{tool_key}"
+
+
+class _BackSignal(Exception):
+    """Raised when the user types 'b' at a parameter prompt to cancel and go back."""
+
+
+def _check_back(raw):
+    if raw.strip().lower() == "b":
+        raise _BackSignal
+
+
 def _prompt_param(param):
-    """Prompt the user for a single parameter value and return the typed result."""
+    """Prompt the user for a single parameter value and return the typed result.
+
+    Typing 'b' at any prompt raises _BackSignal to cancel the tool.
+    """
     ptype    = param["type"]
     optional = param.get("optional", False)
     default  = param.get("default")
 
     if ptype is bool:
         default_hint = "Y/n" if default else "y/N"
-        raw = input(f"  {param['prompt']} [{default_hint}]: ").strip().lower()
+        raw = input(f"  {param['prompt']} [{default_hint}]: ").strip()
+        _check_back(raw)
         if not raw:
             return default if default is not None else False
-        return raw in ("y", "yes")
+        return raw.lower() in ("y", "yes")
 
     if ptype is int:
         while True:
             raw = input(f"  {param['prompt']}: ").strip()
+            _check_back(raw)
             if not raw:
                 if optional:
                     return None
@@ -375,6 +486,7 @@ def _prompt_param(param):
         while True:
             hint = f" [{default}]" if default is not None else ""
             raw  = input(f"  {param['prompt']}{hint}: ").strip()
+            _check_back(raw)
             if not raw and default is not None:
                 return default
             try:
@@ -390,6 +502,7 @@ def _prompt_param(param):
     while True:
         hint = f" [{default}]" if default is not None else ""
         raw  = input(f"  {param['prompt']}{hint}: ").strip()
+        _check_back(raw)
         if not raw:
             if optional:
                 return None
@@ -403,9 +516,15 @@ def _prompt_param(param):
 class ToolsMixin:
 
     def run_tools_menu(self, tool_key=None, prefills=None):
-        """Show the utilities menu or run a specific tool by key."""
+        """Show a two-level category → tool menu, or run a tool directly by key.
+
+        Navigation:
+          b — go back one level (prompt → tool list → category menu)
+          q — quit the menu entirely
+        After a tool completes the category menu is shown again.
+        """
         if tool_key:
-            tool = next((t for t in TOOLS if t["key"] == tool_key), None)
+            tool = _TOOL_BY_KEY.get(tool_key)
             if tool is None:
                 print(f"Unknown tool '{tool_key}'. Available tools:")
                 for t in TOOLS:
@@ -414,54 +533,202 @@ class ToolsMixin:
             self._run_tool(tool, prefills=prefills)
             return
 
-        print()
-        print("Available Utilities")
-        print("=" * 50)
-        for i, tool in enumerate(TOOLS, 1):
-            print(f"  [{i}] {tool['key']:<22} {tool['description']}")
-        print(f"  [q] quit")
-        print()
-
         while True:
-            raw = input(f"Select [1-{len(TOOLS)}] or q to quit: ").strip().lower()
-            if raw in ("q", "quit", "exit"):
+            # ── Category menu ──────────────────────────────────────────── #
+            _clear()
+            last_key = getattr(self, "_last_tool_key", None)
+            print("Utilities")
+            print("=" * 52)
+            for i, cat in enumerate(TOOL_CATEGORIES, 1):
+                n = len(cat["tools"])
+                print(f"  [{i}] {cat['name']:<18} {cat['description']}  ({n})")
+            print()
+            if last_key:
+                print(f"  [r] re-run: {last_key}")
+            print(f"  [/keyword] search   [b] back   [q] quit")
+            print()
+
+            raw = input(f"Select [1-{len(TOOL_CATEGORIES)}], r, /search, b, or q: ").strip()
+            raw_l = raw.lower()
+
+            if raw_l in ("b", "back"):
                 return
+            if raw_l in ("q", "quit", "exit"):
+                sys.exit(0)
+
+            if raw_l in ("r", "rerun"):
+                self._rerun_last_tool()
+                continue
+
+            if raw_l[:1] in ("/", "?"):
+                self._run_tool_search(raw[1:].strip())
+                continue
+
             try:
-                idx = int(raw) - 1
-                if 0 <= idx < len(TOOLS):
-                    self._run_tool(TOOLS[idx])
-                    return
+                cat_idx = int(raw_l) - 1
+                if not (0 <= cat_idx < len(TOOL_CATEGORIES)):
+                    raise ValueError
             except ValueError:
-                pass
-            print(f"  Please enter a number between 1 and {len(TOOLS)}.")
+                print(f"  Please enter a number between 1 and {len(TOOL_CATEGORIES)}, r, or /keyword.")
+                continue
+
+            # ── Tool menu for chosen category ──────────────────────────── #
+            cat   = TOOL_CATEGORIES[cat_idx]
+            tools = [_TOOL_BY_KEY[k] for k in cat["tools"] if k in _TOOL_BY_KEY]
+
+            while True:
+                _clear()
+                print(f"  {cat['name']}")
+                print("  " + "-" * 48)
+                for j, tool in enumerate(tools, 1):
+                    print(f"  [{j}] {tool['key']:<28} {tool['description'][:50]}")
+                print("  [b] back  [q] quit")
+                print()
+
+                raw2 = input(f"  Select [1-{len(tools)}], b, or q: ").strip().lower()
+                if raw2 in ("q", "quit", "exit"):
+                    sys.exit(0)
+                if raw2 in ("b", "back"):
+                    break   # → category menu
+                try:
+                    tool_idx = int(raw2) - 1
+                    if not (0 <= tool_idx < len(tools)):
+                        raise ValueError
+                except ValueError:
+                    print(f"  Please enter a number between 1 and {len(tools)}.")
+                    continue
+
+                try:
+                    self._run_tool(tools[tool_idx])
+                except _BackSignal:
+                    print("  Cancelled.")
+                    continue  # → tool list
+                _pause()
+                break  # tool completed → back to category menu
+
+    def _rerun_last_tool(self):
+        last_key    = getattr(self, "_last_tool_key",    None)
+        last_kwargs = getattr(self, "_last_tool_kwargs", {})
+        if not last_key:
+            print("  No tool has been run yet this session.")
+            _pause()
+            return
+        tool = _TOOL_BY_KEY.get(last_key)
+        if not tool:
+            print(f"  Last tool '{last_key}' no longer exists.")
+            _pause()
+            return
+        try:
+            self._run_tool_direct(tool, last_kwargs)
+        except _BackSignal:
+            print("  Cancelled.")
+        _pause()
+
+    def _run_tool_search(self, query):
+        """Show filtered tool list matching query, then run selected tool."""
+        _clear()
+        if not query:
+            query = input("  Search tools: ").strip()
+            if not query:
+                return
+
+        q = query.lower()
+        matches = [
+            t for t in TOOLS
+            if q in t["key"] or q in t["description"].lower()
+        ]
+
+        _clear()
+        print(f"  Search: '{query}'  —  {len(matches)} match(es)")
+        print("  " + "-" * 48)
+        if not matches:
+            print("  (no matches)")
+            _pause()
+            return
+        for j, tool in enumerate(matches, 1):
+            print(f"  [{j}] {tool['key']:<28} {tool['description'][:50]}")
+        print()
+        print("  [b] back   [q] quit")
+        print()
+        raw = input(f"  Select [1-{len(matches)}], b, or q: ").strip().lower()
+        if raw in ("q", "quit", "exit"):
+            sys.exit(0)
+        if raw in ("b", "back", ""):
+            return
+        try:
+            idx = int(raw) - 1
+            if not (0 <= idx < len(matches)):
+                raise ValueError
+        except ValueError:
+            print(f"  Please enter a number between 1 and {len(matches)}.")
+            _pause()
+            return
+        try:
+            self._run_tool(matches[idx])
+        except _BackSignal:
+            print("  Cancelled.")
+        _pause()
 
     def _run_tool(self, tool, prefills=None):
-        print()
-        print(f"  {tool['key']} — {tool['description']}")
-        print()
+        now      = datetime.now()
+        log_path = (
+            Path("logs")
+            / now.strftime("%Y-%m-%d")
+            / f"{now.strftime('%H-%M-%S')}_{_tool_log_stem(tool['key'])}.log"
+        )
 
-        prefills = prefills or {}
-        kwargs = {}
-        for param in tool["params"]:
-            name = param["name"]
-            if name in prefills:
-                raw = prefills[name]
-                ptype = param["type"]
-                if ptype is bool:
-                    val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
-                elif ptype is int:
-                    val = int(raw)
-                elif ptype is float:
-                    val = float(raw)
+        with _tee_to_log(log_path):
+            print()
+            print(f"  {tool['key']} — {tool['description']}")
+            print(f"  (enter 'b' at any prompt to cancel and go back)")
+            print(f"  log → {log_path}")
+            print()
+
+            prefills = prefills or {}
+            kwargs = {}
+            for param in tool["params"]:
+                name = param["name"]
+                if name in prefills:
+                    raw = prefills[name]
+                    ptype = param["type"]
+                    if ptype is bool:
+                        val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
+                    elif ptype is int:
+                        val = int(raw)
+                    elif ptype is float:
+                        val = float(raw)
+                    else:
+                        val = raw
+                    print(f"  {param['prompt']}: {val}  (from CLI)")
+                    kwargs[name] = val
                 else:
-                    val = raw
-                print(f"  {param['prompt']}: {val}  (from CLI)")
-                kwargs[name] = val
-            else:
-                kwargs[name] = _prompt_param(param)
+                    kwargs[name] = _prompt_param(param)
 
-        print()
-        getattr(self, tool["method"])(**kwargs)
+            print()
+            getattr(self, tool["method"])(**kwargs)
+            self._last_tool_key    = tool["key"]
+            self._last_tool_kwargs = kwargs.copy()
+
+    def _run_tool_direct(self, tool, kwargs):
+        """Re-run a tool with saved kwargs, no prompting."""
+        now      = datetime.now()
+        log_path = (
+            Path("logs")
+            / now.strftime("%Y-%m-%d")
+            / f"{now.strftime('%H-%M-%S')}_{_tool_log_stem(tool['key'])}.log"
+        )
+        with _tee_to_log(log_path):
+            print()
+            print(f"  {tool['key']} — {tool['description']}  [re-run]")
+            print(f"  log → {log_path}")
+            print()
+            for param in tool["params"]:
+                val = kwargs.get(param["name"])
+                print(f"  {param['prompt']}: {val}")
+            print()
+            getattr(self, tool["method"])(**kwargs)
+            self._last_tool_key    = tool["key"]
+            self._last_tool_kwargs = kwargs.copy()
 
     # ------------------------------------------------------------------
     # Tool implementations
@@ -837,8 +1104,7 @@ class ToolsMixin:
         import requests as _requests
 
         group   = self.get_group_by_name(self.parent_group)
-        session = _requests.Session()
-        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+        session = self._make_session()
 
         print(f"Group: {group.full_path}")
         if dry_run:
@@ -1288,7 +1554,7 @@ class ToolsMixin:
 
         def _title(i):
             try:
-                return _lorem.sentence()[:80]
+                return _lorem.sentence().rstrip('.')[:80]
             except Exception:
                 return f"Generated issue {i}"
 
@@ -1332,7 +1598,9 @@ class ToolsMixin:
                                 "weight":   w,
                                 "epic_id":  feat.id,
                             })
-                            print(f"  CREATED #{issue.iid} '{title[:50]}' → Feature '{feat.title[:40]}' ({w} pt)")
+                            issue.title = f"{issue.id} - {title}"
+                            issue.save()
+                            print(f"  CREATED #{issue.iid} '{issue.title[:50]}' → Feature '{feat.title[:40]}' ({w} pt)")
                             created += 1
                         except Exception as e:
                             print(f"  ERROR  Feature '{feat.title[:40]}' issue {i}: {e}")
@@ -1541,8 +1809,7 @@ class ToolsMixin:
         sample = random.sample(candidates, k)
         print(f"  Orphaning {k}\n")
 
-        session = _requests.Session()
-        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+        session = self._make_session()
 
         updated = errors = 0
         for child_id, child_iid, title, parent_id in sample:
@@ -1583,8 +1850,7 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
-        session = _requests.Session()
-        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+        session = self._make_session()
 
         # Collect via epic issues endpoint — gives us the epic_issue_id needed for DELETE
         candidates = []  # (group_id, epic_iid, epic_issue_id, issue_iid, title)
@@ -1650,13 +1916,7 @@ class ToolsMixin:
         or child epic after the issue-reopening pass.
         """
         piids = [t for t in re.split(r"[,\s]+", piid or "") if t] if piid else []
-
-        if not piids and not all:
-            print("ERROR: provide one or more PIID labels or pass --all.")
-            return
-        if piids and all:
-            print("ERROR: --all and PIID labels are mutually exclusive.")
-            return
+        all   = all or not piids  # blank piid → all PIs
 
         group  = self.get_group_by_name(self.parent_group)
         scope  = "all PIs" if all else ", ".join(piids)
@@ -1704,17 +1964,20 @@ class ToolsMixin:
             print(f"  Found {len(closed_epics)} closed epics")
 
         # --- Reopen issues ---
+        # When scoped to a PI, only reopen issues linked to an epic in that PI.
+        # When --all is used, reopen every closed issue in the group (including
+        # ROAM risk issues that are linked via the work-items API and therefore
+        # have no classic issue.epic attribute).
         print("\n--- Reopening closed issues ---")
         reopened_issues = errors = 0
         for proj in group.projects.list(all=True, include_subgroups=True):
             try:
                 full_p = self.gl.projects.get(proj.id)
                 for issue in full_p.issues.list(all=True, state="closed"):
-                    epic = getattr(issue, "epic", None)
-                    if not epic:
-                        continue
-                    if pi_epic_ids is not None and epic.get("id") not in pi_epic_ids:
-                        continue
+                    if pi_epic_ids is not None:
+                        epic = getattr(issue, "epic", None)
+                        if not epic or epic.get("id") not in pi_epic_ids:
+                            continue
                     if dry_run:
                         print(f"  DRY   Issue #{issue.iid} '{issue.title[:55]}'")
                         reopened_issues += 1
@@ -1739,9 +2002,7 @@ class ToolsMixin:
         pending = list(closed_epics)
         pass_num = 0
 
-        import requests as _requests
-        epic_session = _requests.Session()
-        epic_session.headers.update({"PRIVATE-TOKEN": self.private_token})
+        epic_session = self._make_session()
 
         def _should_reopen(grp, epic):
             """Return True if the epic has open children OR has no children at all."""
@@ -2432,13 +2693,16 @@ class ToolsMixin:
                 errors += 1
                 continue
 
-            roam_label = rng.choice(roam_labels)
+            roam_label  = rng.choice(roam_labels)
+            lorem_title = lorem.sentence().rstrip('.')
             try:
                 risk = project.issues.create({
-                    "title":       f"Risk: {lorem.sentence().rstrip('.')}",
+                    "title":       f"Risk: {lorem_title}",
                     "description": lorem.paragraph(),
                     "labels":      [roam_label],
                 })
+                risk.title = f"Risk {risk.id} - {lorem_title}"
+                risk.save()
                 risk_gid  = f"gid://gitlab/WorkItem/{risk.id}"
                 epic_gids = [
                     f"gid://gitlab/WorkItem/{epic.work_item_id}"
@@ -2626,10 +2890,7 @@ class ToolsMixin:
         # Capability ancestor (⬆️ Risk propagation) and the portfolio Epic (⚠️ Portfolio risk flag).
         if "blocked" in conds:
             print("\n── Blocked ──")
-            import requests as _requests
-
-            session = _requests.Session()
-            session.headers.update({"PRIVATE-TOKEN": self.private_token})
+            session = self._make_session()
 
             # Blocked targets: Features that have a parent (guarantees ancestor propagation)
             targets = [
@@ -2685,3 +2946,122 @@ class ToolsMixin:
         print("\nDone.")
         if dry_run:
             print("(dry-run — no changes saved)")
+
+    def _tool_setup_bv_field(self, dry_run=False):
+        """Create or verify the Business Value custom field at the root namespace."""
+        cfg = self.BUSINESS_VALUE_FIELD
+        print(f"Business Value field definition:")
+        print(f"  Name    : {cfg['name']}")
+        print(f"  Type    : {cfg['field_type']}")
+        print(f"  Options : {cfg['select_options']}")
+        print(f"  Scope   : Epic / Capability / Feature (all GitLab Epic work item type)")
+        print(f"  Namespace: {self.gitlab_namespace}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+        print()
+        self._ensure_business_value_field(interactive=not dry_run, dry_run=dry_run)
+
+    # ------------------------------------------------------------------
+    # Local data management
+    # ------------------------------------------------------------------
+
+    def _tool_clean_reports(self, keep_days=7, dry_run=False):
+        """Delete local report run directories older than keep_days."""
+        self._clean_timestamped_dir(
+            root        = Path("reports"),
+            parse_ts    = self._parse_report_ts,
+            label       = "report run",
+            keep_days   = keep_days,
+            dry_run     = dry_run,
+        )
+
+    def _tool_clean_logs(self, keep_days=7, dry_run=False):
+        """Delete local log date directories older than keep_days."""
+        self._clean_timestamped_dir(
+            root        = Path("logs"),
+            parse_ts    = self._parse_log_ts,
+            label       = "log directory",
+            keep_days   = keep_days,
+            dry_run     = dry_run,
+        )
+
+    @staticmethod
+    def _parse_report_ts(path):
+        """Return datetime for reports/YYYYMMDD/HHMMSS/, or None."""
+        try:
+            return datetime.strptime(
+                f"{path.parent.name}{path.name}", "%Y%m%d%H%M%S"
+            )
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_log_ts(path):
+        """Return datetime for logs/YYYY-MM-DD/, or None."""
+        try:
+            return datetime.strptime(path.name, "%Y-%m-%d")
+        except ValueError:
+            return None
+
+    def _clean_timestamped_dir(self, root, parse_ts, label, keep_days, dry_run):
+        if not root.exists():
+            print(f"  No {root}/ directory found.")
+            return
+
+        cutoff = datetime.now() - timedelta(days=keep_days)
+
+        # Collect leaf directories with their parsed timestamps.
+        # For reports: leaf = HHMMSS subdirs under YYYYMMDD.
+        # For logs:    leaf = YYYY-MM-DD dirs directly under logs/.
+        entries = []
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            ts = parse_ts(child)
+            if ts is not None:
+                entries.append((ts, child))
+            else:
+                # one level deeper (reports/YYYYMMDD/HHMMSS)
+                for grandchild in sorted(child.iterdir()):
+                    if not grandchild.is_dir():
+                        continue
+                    ts2 = parse_ts(grandchild)
+                    if ts2 is not None:
+                        entries.append((ts2, grandchild))
+
+        if not entries:
+            print(f"  No {label}s found in {root}/.")
+            return
+
+        to_delete = [(ts, p) for ts, p in entries if keep_days == 0 or ts < cutoff]
+        to_keep   = [(ts, p) for ts, p in entries if keep_days > 0 and ts >= cutoff]
+
+        print(f"  Found {len(entries)} {label}(s).  "
+              f"Keeping {len(to_keep)}, deleting {len(to_delete)}.")
+        print()
+
+        if not to_delete:
+            print("  Nothing to delete.")
+            return
+
+        freed = 0
+        for ts, path in to_delete:
+            size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+            tag  = "(dry-run) " if dry_run else ""
+            print(f"  {tag}delete  {path}  "
+                  f"{ts.strftime('%Y-%m-%d %H:%M')}  {size // 1024} KB")
+            if not dry_run:
+                shutil.rmtree(path)
+                parent = path.parent
+                try:
+                    next(parent.iterdir())
+                except StopIteration:
+                    parent.rmdir()
+                freed += size
+
+        print()
+        if dry_run:
+            print(f"  Dry run — {len(to_delete)} {label}(s) would be removed.")
+        else:
+            print(f"  Done — removed {len(to_delete)} {label}(s), "
+                  f"freed {freed // 1024} KB.")

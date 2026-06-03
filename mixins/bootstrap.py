@@ -181,14 +181,26 @@ class BootstrapMixin:
 
             weight = random.choice(weight_pool.get(epic_label, self.fibonacci_weights))
 
+            lorem_title = lorem.sentence().rstrip('.')
             epic = group.epics.create({
-                'title':       lorem.sentence().rstrip('.'),
+                'title':       lorem_title,
                 'description': lorem.paragraph(),
                 'start_date':  start.isoformat(),
                 'due_date':    due.isoformat(),
                 'labels':      [project_label, piid_label, epic_label],
             })
+            epic.title = f"{epic.id} - {lorem_title}"
+            epic.save()
             self._set_epic_weight(epic, weight)
+
+            # Set a random Business Value if the custom field is configured
+            bv_field   = getattr(self, "_bv_field_gid",   None)
+            bv_options = getattr(self, "_bv_option_gids",  [])
+            if bv_field and bv_options:
+                wid = getattr(epic, "work_item_id", None)
+                if wid:
+                    self._set_work_item_business_value(wid, bv_field, random.choice(bv_options))
+
             print(f"  Epic {epic.iid} [{epic_label}] w={weight} → {group.full_path}")
             created.append((epic, epic_label))
 
@@ -234,11 +246,14 @@ class BootstrapMixin:
     def _lorem_issues_in_project(self, project, count):
         issues = []
         for _ in range(count):
+            lorem_title = lorem.sentence().rstrip('.')
             issue = project.issues.create({
-                'title':       lorem.sentence().rstrip('.'),
+                'title':       lorem_title,
                 'description': lorem.paragraph(),
                 'weight':      random.choice(self.fibonacci_weights),
             })
+            issue.title = f"{issue.id} - {lorem_title}"
+            issue.save()
             print(f"  Issue #{issue.iid} → {project.path_with_namespace}")
             issues.append(issue)
         return issues
@@ -263,14 +278,16 @@ class BootstrapMixin:
                 total_stories = random.randint(8, 15)
 
                 for i in range(total_stories):
-                    ms    = random.choice(milestones) if milestones else None
+                    ms          = random.choice(milestones) if milestones else None
+                    lorem_title = lorem.sentence().rstrip('.')
                     issue = project.issues.create({
-                        'title':        lorem.sentence().rstrip('.'),
+                        'title':        lorem_title,
                         'description':  lorem.paragraph(),
                         'weight':       random.choice(issue_weight_pool),
                         'milestone_id': ms.id if ms else None,
                     })
-                    issue.epic_id = feature_epic.id
+                    issue.title    = f"{issue.id} - {lorem_title}"
+                    issue.epic_id  = feature_epic.id
                     issue.save()
 
                 print(f"    {total_stories} stories → Feature #{feature_epic.iid}")
@@ -280,12 +297,15 @@ class BootstrapMixin:
                 if roam_labels:
                     num_risks = random.choices([0, 1, 2], weights=[50, 35, 15])[0]
                     for _ in range(num_risks):
-                        roam_label = random.choice(roam_labels)
+                        roam_label  = random.choice(roam_labels)
+                        lorem_title = lorem.sentence().rstrip('.')
                         risk_issue = project.issues.create({
-                            'title':       f"Risk: {lorem.sentence().rstrip('.')}",
+                            'title':       f"Risk: {lorem_title}",
                             'description': lorem.paragraph(),
                             'labels':      [roam_label],
                         })
+                        risk_issue.title = f"Risk {risk_issue.id} - {lorem_title}"
+                        risk_issue.save()
                         self._link_risk_to_epic(risk_issue, feature_epic, project)
                         print(f"    Risk issue #{risk_issue.iid} [{roam_label}] → Feature #{feature_epic.iid}")
 
@@ -332,6 +352,20 @@ class BootstrapMixin:
         root_group = self._get_or_create_root_group()
         if root_group is None:
             return
+
+        # Ensure Business Value custom field exists, then cache its option GIDs for
+        # use during epic creation so each epic gets a random Fibonacci value.
+        print("\nSetting up custom fields...")
+        self._ensure_business_value_field(interactive=False)
+        self._bv_field_gid   = None
+        self._bv_option_gids = []
+        if self.gitlab_namespace:
+            _fields = self._fetch_custom_fields(self.gitlab_namespace)
+            _bv     = next((f for f in _fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+            if _bv:
+                self._bv_field_gid   = _bv["id"]
+                self._bv_option_gids = [o["id"] for o in (_bv.get("selectOptions") or []) if o.get("id")]
+        print()
 
         for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.ROAM_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS, self.LIFECYCLE_LABELS]:
             self.create_and_apply_labels(root_group, label_array)
@@ -519,3 +553,101 @@ class BootstrapMixin:
                         print(f"      Failed to create Team Backlog for '{team_group.full_path}': {e}")
 
         print(f"\nScaffold complete.")
+
+        print("\nSetting up custom fields...")
+        self._ensure_business_value_field(interactive=True)
+
+    # ------------------------------------------------------------------
+    # Custom field setup
+    # ------------------------------------------------------------------
+
+    def _ensure_business_value_field(self, interactive=True, dry_run=False):
+        """Create or verify the Business Value custom field at the root namespace.
+
+        Returns: "created" | "ok" | "skipped" | "overwritten"
+        Raises SystemExit(0) if the user chooses to quit.
+        """
+        if not self.gitlab_namespace:
+            print("  WARNING: gitlab_namespace not set — cannot manage custom fields.")
+            return "skipped"
+
+        cfg            = self.BUSINESS_VALUE_FIELD
+        field_name     = cfg["name"]
+        field_type     = cfg["field_type"]
+        expected_opts  = cfg["select_options"]
+        expected_set   = set(expected_opts)
+
+        # Resolve the Epic work item type GID (needed for create/update)
+        epic_type_id = self._get_epic_work_item_type_id(self.gitlab_namespace)
+        if not epic_type_id:
+            print("  WARNING: Could not resolve Epic work item type ID — skipping custom field setup.")
+            return "skipped"
+
+        existing = self._fetch_custom_fields(self.gitlab_namespace)
+        match    = next((f for f in existing if f["name"] == field_name), None)
+
+        if match is None:
+            # Field does not exist — create it
+            if dry_run:
+                print(f"  DRY  Would create '{field_name}' ({field_type}) with options {expected_opts}")
+                return "created"
+            self._custom_field_create(
+                self.gitlab_namespace, field_name, field_type,
+                expected_opts, [epic_type_id],
+            )
+            print(f"  ✅  Created custom field '{field_name}' ({field_type}): {expected_opts}")
+            return "created"
+
+        # Field exists — check if it matches our definition
+        actual_opts  = [o["value"] for o in (match.get("selectOptions") or [])]
+        actual_set   = set(actual_opts)
+        actual_type  = match.get("fieldType", "")
+        actual_types = {wt["name"] for wt in (match.get("workItemTypes") or [])}
+
+        type_ok    = actual_type.upper() == field_type.upper()
+        options_ok = actual_set == expected_set
+        types_ok   = "Epic" in actual_types
+
+        if type_ok and options_ok and types_ok:
+            print(f"  ✅  '{field_name}' already matches definition — nothing to do.")
+            return "ok"
+
+        # Mismatch — report differences
+        print(f"  ⚠️   Custom field '{field_name}' exists but differs:")
+        if not type_ok:
+            print(f"       field_type : expected={field_type}  found={actual_type}")
+        if not options_ok:
+            missing = sorted(expected_set - actual_set)
+            extra   = sorted(actual_set - expected_set)
+            if missing:
+                print(f"       missing options : {missing}")
+            if extra:
+                print(f"       extra options   : {extra}")
+        if not types_ok:
+            print(f"       work item types: expected Epic, found {sorted(actual_types)}")
+
+        if dry_run:
+            print(f"  DRY  Would update '{field_name}' to match definition.")
+            return "overwritten"
+
+        if not interactive:
+            print("  Skipping (non-interactive mode).")
+            return "skipped"
+
+        print()
+        print("  (o) Overwrite — update to match definition")
+        print("  (s) Skip      — leave as-is and continue")
+        print("  (q) Quit      — abort the current operation")
+        while True:
+            choice = input("  Choice [o/s/q]: ").strip().lower()
+            if choice == "o":
+                self._custom_field_update(match["id"], field_name, expected_opts, [epic_type_id])
+                print(f"  ✅  Updated '{field_name}' to match definition.")
+                return "overwritten"
+            if choice == "s":
+                print("  Skipping.")
+                return "skipped"
+            if choice == "q":
+                print("  Aborting.")
+                raise SystemExit(0)
+            print("  Please enter o, s, or q.")
