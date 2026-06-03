@@ -1601,7 +1601,6 @@ class ToolsMixin:
                                 "weight":   w,
                                 "epic_id":  feat.id,
                             })
-                            proj.issues.update(issue.iid, {"title": f"{issue.id} - {title}"})
                             print(f"  CREATED #{issue.iid} '{issue.title[:50]}' → Feature '{feat.title[:40]}' ({w} pt)")
                             created += 1
                         except Exception as e:
@@ -2697,7 +2696,6 @@ class ToolsMixin:
                     "description": lorem.paragraph(),
                     "labels":      [roam_label],
                 })
-                project.issues.update(risk.iid, {"title": f"Risk {risk.id} - {lorem_title}"})
                 risk_gid  = f"gid://gitlab/WorkItem/{risk.id}"
                 epic_gids = [
                     f"gid://gitlab/WorkItem/{epic.work_item_id}"
