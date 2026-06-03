@@ -8,7 +8,7 @@ python-version-test:
   stage: build
   script:
     - pip install -r requirements.txt
-    - pytest tests/
+    - python -m pytest tests/
 
 generate-reports:
   stage: report
