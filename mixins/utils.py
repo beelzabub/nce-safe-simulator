@@ -292,10 +292,8 @@ class UtilitiesMixin:
             widgets {
               ... on WorkItemWidgetCustomFields {
                 customFieldValues {
-                  ... on WorkItemCustomFieldSingleSelectValue {
-                    customField { id }
-                    selectedOption { id value }
-                  }
+                  customField { id }
+                  selectedOption { id value }
                 }
               }
             }
