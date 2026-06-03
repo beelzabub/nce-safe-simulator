@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from .utils import _fmt_duration
+from .utils import _clear, _fmt_duration, _tee_to_log
 
 
 def _gid_to_int(gid_str):
@@ -4467,43 +4467,50 @@ class ReportsMixin:
             self._run_reports([report], reuse_data=reuse_data)
             return
 
-        print()
-        print("Available Reports")
-        print("=" * 60)
-        for i, report in enumerate(REPORTS, 1):
-            print(f"  [{i}] {report['key']:<22} {report['description']}")
-        print()
-        print("  Enter  — run all reports (default)")
-        print("  q      — quit")
-        print()
+        while True:
+            _clear()
+            print("Available Reports")
+            print("=" * 60)
+            for i, report in enumerate(REPORTS, 1):
+                print(f"  [{i}] {report['key']:<22} {report['description']}")
+            print()
+            print("  Enter  — run all reports (default)")
+            print("  b      — back    q — quit")
+            print()
 
-        raw = input(f"Select [1-{len(REPORTS)}, space-separated, or Enter for all]: ").strip()
+            raw = input(f"Select [1-{len(REPORTS)}, space-separated, or Enter for all]: ").strip()
 
-        if raw.lower() in ("q", "quit"):
-            return
+            if raw.lower() in ("b", "back"):
+                return False
+            if raw.lower() in ("q", "quit", "exit"):
+                sys.exit(0)
 
-        if not raw:
-            self._run_reports(REPORTS, reuse_data=reuse_data)
-            return
+            if not raw:
+                self._run_reports(REPORTS, reuse_data=reuse_data)
+                return True
 
-        selected = []
-        for token in raw.split():
-            try:
-                idx = int(token)
-                if 1 <= idx <= len(REPORTS):
-                    report = REPORTS[idx - 1]
-                    if report not in selected:
-                        selected.append(report)
-                else:
-                    print(f"  Ignoring out-of-range selection: {idx}")
-            except ValueError:
-                print(f"  Ignoring unrecognised input: {token!r}")
+            selected = []
+            bad = []
+            for token in raw.split():
+                try:
+                    idx = int(token)
+                    if 1 <= idx <= len(REPORTS):
+                        report = REPORTS[idx - 1]
+                        if report not in selected:
+                            selected.append(report)
+                    else:
+                        bad.append(token)
+                except ValueError:
+                    bad.append(token)
 
-        if not selected:
-            print("No valid selection — running all reports.")
-            selected = REPORTS
+            if bad:
+                print(f"  Invalid selection(s): {', '.join(bad)}  "
+                      f"(valid range 1–{len(REPORTS)})")
+            if not selected:
+                continue
 
-        self._run_reports(selected, reuse_data=reuse_data)
+            self._run_reports(selected, reuse_data=reuse_data)
+            return True
 
     def _fetch_blocking_graph(self, group):
         """Return the raw blocking relationship graph via the REST related_epics API.
@@ -4512,15 +4519,12 @@ class ReportsMixin:
         an extra hierarchy walk, and queries each epic's /related_epics endpoint
         directly — the same API used to create blocking relationships.
         """
-        import requests as _requests
-
         all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, [])
         if not all_epics_raw:
             print("  WARNING: epic cache empty — cannot collect blocking data.")
             return {"relationships": [], "summary": {}}
 
-        session = _requests.Session()
-        session.headers.update({"PRIVATE-TOKEN": self.private_token})
+        session = self._make_session()
 
         epic_by_id = {e["id"]: e for e in all_epics_raw}
         parent_of  = {e["id"]: e["parent_id"] for e in all_epics_raw if e.get("parent_id")}
@@ -4800,15 +4804,6 @@ class ReportsMixin:
         reuse_data: Path to an existing data/ directory whose JSON files
         should be loaded instead of hitting the API again.
         """
-        group = self.get_group_by_name(self.parent_group)
-        self._rd_root_obj = group
-        gn = group.name
-        self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
-        self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
-        self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
-        self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
-        print(f"\nGenerating reports for group: {group.full_path}\n")
-
         now      = datetime.now()
         run_dir  = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
         data_dir = run_dir / "data"
@@ -4817,6 +4812,28 @@ class ReportsMixin:
         wiki_dir.mkdir(parents=True, exist_ok=True)
         self._report_run_dir = run_dir
         self._wiki_save_dir  = wiki_dir
+
+        if len(reports) == len(REPORTS):
+            log_stem = "reports-all"
+        elif len(reports) == 1:
+            log_stem = f"reports-{reports[0]['key']}"
+        else:
+            log_stem = f"reports-{len(reports)}-selected"
+        log_path = run_dir / f"{log_stem}.log"
+
+        with _tee_to_log(log_path):
+            print(f"  log → {log_path}\n")
+            self._run_reports_inner(reports, run_dir, data_dir, reuse_data)
+
+    def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data):
+        group = self.get_group_by_name(self.parent_group)
+        self._rd_root_obj = group
+        gn = group.name
+        self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
+        self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
+        self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
+        self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
+        print(f"\nGenerating reports for group: {group.full_path}\n")
 
         # Preload existing wiki pages so upload_to_wiki can look them up without
         # calling wikis.get(slug), which URL-encodes slashes and returns 404 for

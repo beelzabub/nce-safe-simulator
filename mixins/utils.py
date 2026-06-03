@@ -1,9 +1,24 @@
 import re
+import sys
 import time
 import requests
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date, datetime
+from pathlib import Path
 from pprint import pformat
+from requests.adapters import HTTPAdapter
+
+
+class _TimeoutAdapter(HTTPAdapter):
+    """HTTPAdapter that applies a default timeout to every request."""
+    def __init__(self, timeout, **kwargs):
+        self.timeout = timeout
+        super().__init__(**kwargs)
+
+    def send(self, *args, **kwargs):
+        kwargs.setdefault("timeout", self.timeout)
+        return super().send(*args, **kwargs)
 
 
 def _fmt_duration(seconds):
@@ -16,7 +31,62 @@ def _fmt_duration(seconds):
     return f"{h}h {m:02d}m {s:02d}s"
 
 
+def _clear():
+    print('\033[2J\033[H', end='', flush=True)
+
+
+def _pause():
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+    input("\n  Press Enter to continue...")
+
+
+class _Tee:
+    """Writes to two streams simultaneously — terminal and a log file."""
+    def __init__(self, stream, logfile):
+        self._stream  = stream
+        self._logfile = logfile
+
+    def write(self, data):
+        self._stream.write(data)
+        self._logfile.write(data)
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        self._logfile.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+@contextmanager
+def _tee_to_log(log_path):
+    """Tee sys.stdout to log_path for the duration of the with-block."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8") as f:
+        old = sys.stdout
+        sys.stdout = _Tee(old, f)
+        try:
+            yield log_path
+        finally:
+            sys.stdout = old
+
+
 class UtilitiesMixin:
+
+    def _make_session(self):
+        """Return a requests.Session pre-configured with auth and the configured timeout."""
+        sess = requests.Session()
+        sess.headers["PRIVATE-TOKEN"] = self.private_token
+        adapter = _TimeoutAdapter(timeout=getattr(self, "api_timeout", 300))
+        sess.mount("https://", adapter)
+        sess.mount("http://",  adapter)
+        return sess
 
     def graphql_query(self, query, variables=None):
         payload = {"query": query}
@@ -57,6 +127,115 @@ class UtilitiesMixin:
             if errors:
                 print(f"  Weight error for epic {epic.iid}: {errors}")
 
+    # ------------------------------------------------------------------
+    # Custom field helpers
+    # ------------------------------------------------------------------
+
+    def _fetch_custom_fields(self, namespace_path):
+        """Return list of custom field dicts for the given root namespace."""
+        query = """
+        query GetCustomFields($path: ID!) {
+          namespace(fullPath: $path) {
+            customFields {
+              nodes {
+                id
+                name
+                fieldType
+                workItemTypes { id name }
+                selectOptions { id value }
+              }
+            }
+          }
+        }
+        """
+        data = self.graphql_query(query, variables={"path": namespace_path})
+        ns = (data or {}).get("namespace") or {}
+        return (ns.get("customFields") or {}).get("nodes") or []
+
+    def _custom_field_create(self, namespace_path, name, field_type, select_options, work_item_type_ids):
+        """Create a custom field at the root namespace. Returns the created field dict."""
+        mutation = """
+        mutation CreateCustomField($input: CustomFieldCreateInput!) {
+          customFieldCreate(input: $input) {
+            customField { id name fieldType selectOptions { value } workItemTypes { id name } }
+            errors
+          }
+        }
+        """
+        variables = {
+            "input": {
+                "groupPath":        namespace_path,
+                "name":             name,
+                "fieldType":        field_type,
+                "workItemTypeIds":  work_item_type_ids,
+                "selectOptions":    [{"value": str(v)} for v in select_options],
+            }
+        }
+        data   = self.graphql_query(mutation, variables=variables)
+        result = (data or {}).get("customFieldCreate") or {}
+        if result.get("errors"):
+            raise RuntimeError(f"customFieldCreate errors: {result['errors']}")
+        return result.get("customField")
+
+    def _custom_field_update(self, field_id, name, select_options, work_item_type_ids):
+        """Update an existing custom field's options and work item types."""
+        mutation = """
+        mutation UpdateCustomField($input: CustomFieldUpdateInput!) {
+          customFieldUpdate(input: $input) {
+            customField { id name fieldType selectOptions { value } workItemTypes { id name } }
+            errors
+          }
+        }
+        """
+        variables = {
+            "input": {
+                "id":              field_id,
+                "name":            name,
+                "selectOptions":   [{"value": str(v)} for v in select_options],
+                "workItemTypeIds": work_item_type_ids,
+            }
+        }
+        data   = self.graphql_query(mutation, variables=variables)
+        result = (data or {}).get("customFieldUpdate") or {}
+        if result.get("errors"):
+            raise RuntimeError(f"customFieldUpdate errors: {result['errors']}")
+        return result.get("customField")
+
+    def _set_work_item_business_value(self, work_item_id, field_gid, option_gid):
+        """Set a SINGLE_SELECT custom field value on a work item."""
+        mutation = """
+        mutation {
+          workItemUpdate(input: {
+            id: "%s"
+            customFieldsWidget: [{
+              customFieldId: "%s"
+              selectedOptionIds: ["%s"]
+            }]
+          }) {
+            workItem { id }
+            errors
+          }
+        }
+        """ % (f"gid://gitlab/WorkItem/{work_item_id}", field_gid, option_gid)
+        data   = self.graphql_query(mutation)
+        errors = (data or {}).get("workItemUpdate", {}).get("errors", [])
+        if errors:
+            print(f"  Business Value set error: {errors}")
+
+    def _get_epic_work_item_type_id(self, namespace_path):
+        """Return the GID for the Epic work item type in the given namespace."""
+        query = """
+        query GetWorkItemTypes($path: ID!) {
+          group(fullPath: $path) {
+            workItemTypes { nodes { id name } }
+          }
+        }
+        """
+        data  = self.graphql_query(query, variables={"path": namespace_path})
+        nodes = ((data or {}).get("group") or {}).get("workItemTypes", {}).get("nodes") or []
+        epic  = next((n for n in nodes if n["name"] == "Epic"), None)
+        return epic["id"] if epic else None
+
     def _fetch_wi_supplement(self, group, epics):
         """Use the work-items REST endpoints to correct two gaps in the classic API:
 
@@ -72,9 +251,7 @@ class UtilitiesMixin:
             extra_epics     list of associated_data dicts for cross-group children
             wi_children     {parent_epic_id: [child_epic_id, ...]}
         """
-        import requests as _req
-        sess = _req.Session()
-        sess.headers["PRIVATE-TOKEN"] = self.private_token
+        sess = self._make_session()
 
         known_ids      = {e.id for e in epics}
         direct_weights = {}

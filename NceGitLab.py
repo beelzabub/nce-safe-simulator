@@ -24,6 +24,7 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
+from mixins.utils import _clear, _pause
 
 
 class NceGitLab(
@@ -93,8 +94,17 @@ class NceGitLab(
         else:
             self.private_token = config.get("private_token", "")
 
+        self.api_timeout = config.get("api_timeout", 300)
+
         fibonacci_weights_env = parse_fibonacci_env("FIBONACCI_WEIGHTS")
         self.fibonacci_weights = fibonacci_weights_env if fibonacci_weights_env else config.get("fibonacci_weights")
+
+        _bvf = config.get("business_value_field", {})
+        self.BUSINESS_VALUE_FIELD = {
+            "name":           _bvf.get("name",        "Business Value"),
+            "field_type":     _bvf.get("field_type",  "SINGLE_SELECT"),
+            "select_options": [str(v) for v in _bvf.get("select_options", ["1","2","3","5","8","13","21"])],
+        }
 
         project_labels_env = parse_label_env("PROJECT_LABELS")
         self.PROJECT_LABELS = project_labels_env if project_labels_env else config.get("project_labels", [])
@@ -187,6 +197,158 @@ class NceGitLab(
             exit(1)
 
 
+def _confirm_create(gl):
+    """Show a summary of what Create will do and ask for confirmation."""
+    cfg = gl
+    ns  = gl.gitlab_namespace
+    grp = gl.parent_group
+    full_path = f"{ns}/{grp}" if ns else grp
+
+    print()
+    print("  Create — Populate with lorem SAFe data")
+    print("  " + "-" * 46)
+    print(f"  Target group : {full_path}")
+    print()
+    print("  This will create inside that group:")
+    print("    • All label sets (PIID, type, lifecycle, risk, WSJF, ROAM)")
+    print("    • Value Stream → ART → Team subgroups + Team Backlog projects")
+    print("    • Portfolio Epics, VS/ART Capabilities, and Team Features")
+    print("      with lorem text, dates, planned weights, and PI labels")
+    print("    • Issues linked to Features (story points via Fibonacci weights)")
+    print("    • Business Value custom field set on every epic")
+    print()
+    print("  The group must exist first (use Scaffold if it does not).")
+    print("  Existing content will not be removed — run Clean first for a fresh start.")
+    print()
+    confirm = input("  Proceed? [y/N]: ").strip().lower()
+    if confirm in ("y", "yes"):
+        gl.create_all_lorem_objects()
+    else:
+        print("  Cancelled.")
+
+
+def _confirm_clean(gl):
+    """Show exactly what Clean will destroy and require the group name as confirmation."""
+    ns        = gl.gitlab_namespace
+    grp       = gl.parent_group
+    full_path = f"{ns}/{grp}" if ns else grp
+
+    print()
+    print("  ⚠️   DESTRUCTIVE — this cannot be undone.")
+    print("  " + "-" * 46)
+    print(f"  Target group : {full_path}")
+    print()
+    print("  Everything inside that group will be permanently deleted:")
+    print("    • All wiki pages")
+    print("    • All epics, capabilities, and features")
+    print("    • All milestones")
+    print("    • All issues")
+    print("    • All labels")
+    print("    • All team backlog projects")
+    print("    • All subgroups (ARTs, Value Streams)")
+    print("    • The root group itself")
+    print()
+    print(f"  To confirm, type the group name exactly: {grp}")
+    print()
+    typed = input("  Group name: ").strip()
+    if typed == grp:
+        gl.cleanup_group()
+    else:
+        print(f"  '{typed}' does not match '{grp}' — cancelled.")
+
+
+def _last_report_stamp():
+    """Return 'YYYY-MM-DD HH:MM' of the most recent report run, or None."""
+    root = Path("reports")
+    if not root.exists():
+        return None
+    for date_dir in sorted(root.iterdir(), reverse=True):
+        if not date_dir.is_dir():
+            continue
+        for time_dir in sorted(date_dir.iterdir(), reverse=True):
+            if not time_dir.is_dir():
+                continue
+            try:
+                t = datetime.strptime(
+                    f"{date_dir.name}{time_dir.name}", "%Y%m%d%H%M%S"
+                )
+                return t.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                continue
+    return None
+
+
+def _last_tool_stamp():
+    """Return (key, 'YYYY-MM-DD HH:MM') of the most recent tool log, or None."""
+    root = Path("logs")
+    if not root.exists():
+        return None
+    for date_dir in sorted(root.iterdir(), reverse=True):
+        if not date_dir.is_dir():
+            continue
+        for log_file in sorted(date_dir.iterdir(), reverse=True):
+            if log_file.suffix != ".log":
+                continue
+            parts = log_file.stem.split("_", 1)
+            if len(parts) != 2:
+                continue
+            time_str, key = parts
+            try:
+                t = datetime.strptime(
+                    f"{date_dir.name}_{time_str}", "%Y-%m-%d_%H-%M-%S"
+                )
+                return key, t.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                continue
+    return None
+
+
+def _run_main_menu(gl):
+    """Top-level interactive menu. Loops until the user quits."""
+    while True:
+        _clear()
+        print("NCE GitLab SAFe Tooling")
+        print("=" * 38)
+        print(f"  Group : {gl.parent_group}")
+        last_report = _last_report_stamp()
+        last_tool   = _last_tool_stamp()
+        if last_report or last_tool:
+            if last_report:
+                print(f"  Last report : {last_report}")
+            if last_tool:
+                key, ts = last_tool
+                print(f"  Last tool   : {key}  ({ts})")
+        print()
+        print("  [1] Reports      Generate wiki reports")
+        print("  [2] Utilities    Data management tools")
+        print("  [3] Scaffold     Create SAFe group/project structure")
+        print("  [4] Create       Populate group with lorem SAFe data")
+        print("  [5] Clean        Delete all group data")
+        print("  [q] quit")
+        print()
+
+        raw = input("Select [1-5] or q: ").strip().lower()
+
+        if raw in ("q", "quit", "exit"):
+            return
+        if raw == "1":
+            if gl.run_reports_menu():
+                _pause()
+        elif raw == "2":
+            gl.run_tools_menu()
+        elif raw == "3":
+            gl.create_safe_hierarchy()
+            _pause()
+        elif raw == "4":
+            _confirm_create(gl)
+            _pause()
+        elif raw == "5":
+            _confirm_clean(gl)
+            _pause()
+        else:
+            print("  Please enter a number between 1 and 5.")
+
+
 def _last_data_dir():
     """Return the most recent reports/.../data directory that contains a valid snapshot."""
     root = Path("reports")
@@ -258,7 +420,7 @@ def main():
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
     args, extra = parser.parse_known_args()
 
-    if args.usage or not any(vars(args).values()):
+    if args.usage:
         parser.print_help()
         print()
         return
@@ -266,6 +428,10 @@ def main():
     _phase[0] = "connecting to GitLab"
     gl = NceGitLab()
     _gl[0] = gl
+
+    if not any(vars(args).values()):
+        _run_main_menu(gl)
+        return
 
     if args.utilities is not None:
         _phase[0] = "utilities menu"
