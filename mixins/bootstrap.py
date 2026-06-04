@@ -27,6 +27,33 @@ def _range_label(cfg_val, resolved):
     return str(resolved)
 
 
+def _link_to_parents(children, parents, scope_by_group=None):
+    """Link each child epic to a random same-program parent epic.
+
+    scope_by_group: optional {child.group_id: [(epic, label), ...]} restricts
+    each child's candidates to its own program. Children with no valid same-program
+    parent are skipped with a warning instead of receiving a cross-program link.
+    """
+    if not parents or not children:
+        return
+    default_parents = [e for e, _ in parents]
+    for child_epic, _ in children:
+        if scope_by_group is not None:
+            valid = [e for e, _ in scope_by_group.get(child_epic.group_id, [])]
+            if not valid:
+                print(f"  Warning: no same-program parent for '{child_epic.title[:40]}' — skipping")
+                continue
+            parent = random.choice(valid)
+        else:
+            parent = random.choice(default_parents)
+        try:
+            child_epic.parent_id = parent.id
+            child_epic.save()
+            print(f"  Linked '{child_epic.title[:40]}' → '{parent.title[:40]}'")
+        except Exception as e:
+            print(f"  Failed to link '{child_epic.title[:40]}': {e}")
+
+
 class BootstrapMixin:
 
     def _get_or_create_root_group(self):
@@ -396,6 +423,8 @@ class BootstrapMixin:
         all_vs_caps  = []
         all_art_caps = []
         all_features = []
+        art_to_vs    = {}   # art_group.id → this ART's VS caps (same-program guard)
+        team_to_art  = {}   # team_group.id → this team's ART caps (same-program guard)
 
         vs_counter    = 0  # global so each VS has a unique name/path
         art_counter   = 0  # global across all VSs so each ART has a unique name/path
@@ -424,6 +453,7 @@ class BootstrapMixin:
                 print(f"\n[ART] {art_group.full_path}")
                 art_created = self._lorem_epics_in_group(art_group, art_epics, allowed_types=["Capability"])
                 all_art_caps.extend(art_created)
+                art_to_vs[art_group.id] = vs_caps
                 art_items_map[art_group.id] = {
                     "art":          art_group,
                     "epics":        list(art_created),
@@ -438,6 +468,7 @@ class BootstrapMixin:
                         'parent_id':  art_group.id,
                         'visibility': vis,
                     })
+                    team_to_art[team_group.id] = art_created
                     print(f"\n[Agile Team] {team_group.full_path}")
                     team_created, team_project = self._lorem_populate_group(team_group, team_features, allowed_types=["Feature"])
                     if team_created:
@@ -446,22 +477,9 @@ class BootstrapMixin:
                     if team_project:
                         art_items_map[art_group.id]["team_projects"].append(team_project)
 
-        def _link_to_parents(children, parents):
-            if not parents or not children:
-                return
-            parent_epics = [e for e, _ in parents]
-            for child_epic, _ in children:
-                parent = random.choice(parent_epics)
-                try:
-                    child_epic.parent_id = parent.id
-                    child_epic.save()
-                    print(f"  Linked '{child_epic.title[:40]}' → '{parent.title[:40]}'")
-                except Exception as e:
-                    print(f"  Failed to link '{child_epic.title[:40]}': {e}")
-
         print("\nLinking cross-group hierarchy...")
         _link_to_parents(all_vs_caps, all_portfolio_epics)
-        _link_to_parents(all_art_caps, all_vs_caps)
+        _link_to_parents(all_art_caps, all_vs_caps, scope_by_group=art_to_vs)
 
         # Split Features: majority direct to Portfolio Epics, minority via Capability chain
         random.shuffle(all_features)
@@ -470,7 +488,7 @@ class BootstrapMixin:
         cap_features    = all_features[split:]
         print(f"\nFeature routing: {len(direct_features)} direct → Epic  |  {len(cap_features)} via Capability chain  ({int(direct_feature_ratio*100)}% direct)")
         _link_to_parents(direct_features, all_portfolio_epics)
-        _link_to_parents(cap_features,    all_art_caps)
+        _link_to_parents(cap_features,    all_art_caps, scope_by_group=team_to_art)
 
         extra = list(all_portfolio_epics) + list(all_vs_caps)
         self._simulate_history(art_items_map, extra_epics=extra)
