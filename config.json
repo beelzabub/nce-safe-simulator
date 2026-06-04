@@ -12,7 +12,13 @@
   },
   "private_token": "glpat-iIZZmGz0wMDv0rjg5rhFxmM6MQpvOjEKdTptaGFueQ8.01.170hn26t9",
   "project_labels": ["project::DO", "project::RTSO", "project::DCGS", "project::TestA", "project::TestB", "project::TestC"],
-  "piid_labels": ["PIID::2026Q1", "PIID::2026Q2", "PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2", "PIID::2027Q3", "PIID::2027Q4"],
+  "piid_labels": [
+    "PIID::2024Q1", "PIID::2024Q2", "PIID::2024Q3", "PIID::2024Q4",
+    "PIID::2025Q1", "PIID::2025Q2", "PIID::2025Q3", "PIID::2025Q4",
+    "PIID::2026Q1",
+    "PIID::2026Q2",
+    "PIID::2026Q3", "PIID::2026Q4", "PIID::2027Q1", "PIID::2027Q2"
+  ],
   "epic_type_labels": ["Epic", "Capability", "Feature"],
   "risk_labels": ["risk::high", "risk::medium", "risk::low"],
   "roam_labels": ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"],
