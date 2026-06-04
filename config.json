@@ -39,10 +39,10 @@
       "num_arts":             {"min": 1, "max": 3, "desired": 2},
       "num_teams":            {"min": 1, "max": 4, "desired": 2},
       "portfolio_epics":      {"min": 3, "max": 8, "desired": 5},
-      "vs_caps_per_vs":       {"min": 2, "max": 5, "desired": 3},
-      "art_caps_per_art":     {"min": 2, "max": 6, "desired": 4},
+      "vs_caps_per_vs":       {"min": 0, "max": 2, "desired": 1},
+      "art_caps_per_art":     {"min": 1, "max": 3, "desired": 2},
       "features_per_team":    {"min": 3, "max": 6, "desired": 4},
-      "direct_feature_ratio": 0.70,
+      "direct_feature_ratio": 0.85,
       "history_close_rate_min": 0.70,
       "history_close_rate_max": 0.95,
       "current_pi_issue_close_pct": 0.50

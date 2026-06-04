@@ -4092,8 +4092,11 @@ class ReportsMixin:
                           for tier in self._rd_metrics.values() for e in tier}
 
         # rows: (pe_id, pe_link, pe_bv, blocked_link, type_str, blocker_str)
-        bv_rows    = []
-        seen_pe_bv = {}  # pe_id → bv — deduped for total
+        bv_rows       = []
+        seen_pe_bv    = {}  # pe_id → bv — deduped for total
+        seen_pe_link  = {}  # pe_id → link — first-seen
+        seen_pe_type  = {}  # pe_id → type string — first-seen
+        pe_blocked_ct = {}  # pe_id → count of blocked items
 
         for rel in self._rd_blocking.get("relationships", []):
             blocked  = rel["blocked_epic"]
@@ -4117,9 +4120,13 @@ class ReportsMixin:
                 pe_bv   = bv_by_id.get(pe_id)
                 pe_url  = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
                 pe_link = f"[{pe['title']}]({pe_url})" if pe_url else pe["title"]
+                pe_type = pe.get("type", "Epic")
                 bv_rows.append((pe_id, pe_link, pe_bv, bl_link, f"{b_icon} {b_type}", blocker_str))
                 if pe_id not in seen_pe_bv:
-                    seen_pe_bv[pe_id] = pe_bv
+                    seen_pe_bv[pe_id]   = pe_bv
+                    seen_pe_link[pe_id] = pe_link
+                    seen_pe_type[pe_id] = pe_type
+                pe_blocked_ct[pe_id] = pe_blocked_ct.get(pe_id, 0) + 1
 
         if bv_rows:
             total_bv    = sum(v for v in seen_pe_bv.values() if v is not None)
@@ -4134,7 +4141,25 @@ class ReportsMixin:
                 f"Total BV at risk: **{total_bv}**_"
             )
             md.append("")
-            md.append("| Portfolio Epic | BV | Blocked Item | Type | Blocker(s) |")
+
+            pe_summary = sorted(
+                [(pid, seen_pe_link[pid], seen_pe_bv[pid], seen_pe_type[pid], pe_blocked_ct[pid])
+                 for pid in seen_pe_bv],
+                key=lambda x: (x[2] is None, -(x[2] or 0)),
+            )
+            md.append("### BV at Risk by Epic")
+            md.append("")
+            md.append("| Epic at Risk | Type | BV | Blocked Items |")
+            md.append("|---|---|---|---|")
+            for _, pe_link, pe_bv, pe_type, n_blocked in pe_summary:
+                bv_str   = str(pe_bv) if pe_bv is not None else "—"
+                type_icon = self.EPIC_TYPE_ICONS.get(pe_type, "🏆")
+                md.append(f"| {pe_link} | {type_icon} {pe_type} | {bv_str} | {n_blocked} |")
+            md.append("")
+
+            md.append("### Blocking Detail")
+            md.append("")
+            md.append("| Epic at Risk | BV | Blocked Item | Type | Blocker(s) |")
             md.append("|---|---|---|---|---|")
             for _, pe_link, pe_bv, bl_link, type_str, blocker_str in bv_rows:
                 bv_str = str(pe_bv) if pe_bv is not None else "—"
