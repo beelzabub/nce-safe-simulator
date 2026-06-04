@@ -133,3 +133,76 @@ class TestWsjfSummaryCounts:
         content = _run(_harness(features=[backlog, inflight]))
         assert "Portfolio Backlog" in content
         assert "In-flight" in content
+
+
+def _blocking_harness(pe, blocked, blocker):
+    """Build a harness with one blocking relationship."""
+    h = _harness(epics=[pe])
+    h._rd_blocking = {
+        "relationships": [{
+            "blocked_epic":             blocked,
+            "blocked_by":               [blocker],
+            "at_risk_portfolio_epics":  [pe],
+        }]
+    }
+    return h
+
+
+class TestBlockedBVSummaryTable:
+    def test_summary_table_heading_present(self):
+        pe      = _epic_with_wsjf(id=10, business_value=8, urgency=5, risk=3, planned_weight=4,
+                                  title="Portfolio Epic A")
+        blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
+        blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
+        content = _run(_blocking_harness(pe, blocked, blocker))
+        assert "### BV at Risk by Epic" in content
+
+    def test_summary_table_shows_pe_bv(self):
+        pe      = _epic_with_wsjf(id=10, business_value=8, title="Portfolio Epic A")
+        blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
+        blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
+        content = _run(_blocking_harness(pe, blocked, blocker))
+        assert "Portfolio Epic A" in content
+        assert "| 8 |" in content
+
+    def test_summary_table_shows_type_column(self):
+        pe      = _epic_with_wsjf(id=10, business_value=8, title="Portfolio Epic A")
+        blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
+        blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
+        content = _run(_blocking_harness(pe, blocked, blocker))
+        idx = content.index("### BV at Risk by Epic")
+        summary_section = content[idx: content.index("### Blocking Detail", idx)]
+        assert "Epic at Risk" in summary_section
+        assert "Type" in summary_section
+
+    def test_summary_table_blocked_items_count(self):
+        pe = _epic_with_wsjf(id=10, business_value=5, title="PE Alpha")
+        h  = _harness(epics=[pe])
+        h._rd_blocking = {
+            "relationships": [
+                {"blocked_epic": {"id": 21, "title": "Feat A", "web_url": "https://gl/f/21", "type": "Feature"},
+                 "blocked_by": [{"id": 31, "title": "Blocker 1", "web_url": "https://gl/i/31"}],
+                 "at_risk_portfolio_epics": [pe]},
+                {"blocked_epic": {"id": 22, "title": "Feat B", "web_url": "https://gl/f/22", "type": "Feature"},
+                 "blocked_by": [{"id": 32, "title": "Blocker 2", "web_url": "https://gl/i/32"}],
+                 "at_risk_portfolio_epics": [pe]},
+            ]
+        }
+        content = _run(h)
+        # PE Alpha appears once in summary table with count 2
+        idx = content.index("### BV at Risk by Epic")
+        summary_section = content[idx: content.index("### Blocking Detail", idx)]
+        assert "PE Alpha" in summary_section
+        assert "| 2 |" in summary_section
+
+    def test_blocking_detail_heading_present(self):
+        pe      = _epic_with_wsjf(id=10, business_value=8, title="PE A")
+        blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
+        blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
+        content = _run(_blocking_harness(pe, blocked, blocker))
+        assert "### Blocking Detail" in content
+
+    def test_no_blocking_section_when_no_relationships(self):
+        content = _run(_harness())
+        assert "## Blocked Business Value" not in content
+        assert "### BV at Risk by Epic" not in content

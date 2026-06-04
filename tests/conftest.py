@@ -13,6 +13,7 @@ from mixins.reports import ReportsMixin, _item_risk_reasons
 from mixins.tools import ToolsMixin
 from mixins.labels import LabelsMixin
 from mixins.wiki import WikiMixin
+from mixins.utils import UtilitiesMixin
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ def _make_issue_mock(id=200, iid=1, title="Test Issue", epic_id=None):
 # Testable ToolsMixin harness
 # ---------------------------------------------------------------------------
 
-class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin):
+class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
     """Concrete subclass of ToolsMixin with all external calls pre-wired for tests."""
 
     EPIC_TYPE_ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}

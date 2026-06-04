@@ -208,7 +208,7 @@ def test_set_lifecycle_labels_applies_label_to_all_epics():
 
     h._tool_set_lifecycle_labels(percent=100, dry_run=False)
 
-    assert all(e.save.called for e in epics)
+    assert h.gl.http_put.call_count == len(epics)
     for epic in epics:
         assert any(l.startswith("lifecycle::") for l in epic.labels)
 
@@ -222,8 +222,7 @@ def test_strip_lifecycle_labels_removes_lifecycle_labels():
 
     h._tool_strip_lifecycle_labels(dry_run=False)
 
-    assert e1.save.called
-    assert e2.save.called
+    assert h.gl.http_put.call_count == 2
     assert not e3.save.called
     assert "lifecycle::funnel" not in e1.labels
     assert "lifecycle::analyzing" not in e2.labels
