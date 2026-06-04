@@ -46,6 +46,9 @@ def make_epic(
     work_item_id=None,
     web_url=None,
     piid=None,
+    created_at=None,
+    planned_weight=10,
+    actual_weight=5,
 ):
     default_labels = [etype]
     if piid:
@@ -67,10 +70,10 @@ def make_epic(
         "work_item_id":     work_item_id,
         "web_url":          web_url or f"https://gitlab.com/groups/test/-/epics/{iid}",
         "piid":             piid,
-        "planned_weight":   10,
-        "actual_weight":    5,
+        "planned_weight":   planned_weight,
+        "actual_weight":    actual_weight,
         "start_date":       None,
-        "created_at":       None,
+        "created_at":       created_at,
         "updated_at":       None,
     }
     return epic
@@ -110,6 +113,9 @@ class ReportsHarness(ReportsMixin):
         groups_by_id=None,
         groups_by_parent=None,
         vs_groups=None,
+        piid_labels=None,
+        lifecycle_labels=None,
+        project_labels=None,
     ):
         root_id = 1
         self._rd_root_obj     = make_mock_group(id=root_id)
@@ -122,6 +128,9 @@ class ReportsHarness(ReportsMixin):
         self._rd_issues_by_epic    = defaultdict(list)
         self._rd_issues_by_project = defaultdict(list)
         self._rd_blocking          = {"relationships": [], "summary": {}}
+        self._rd_piid_labels       = piid_labels       or []
+        self._rd_lifecycle_labels  = lifecycle_labels  or []
+        self._rd_project_labels    = project_labels    or []
         self._wiki_t1 = "Portfolio/00 Executive Pulse"
         self._wiki_t2 = "Portfolio/01 Program Management"
         self._wiki_t3 = "Portfolio/02 Operational Detail"
