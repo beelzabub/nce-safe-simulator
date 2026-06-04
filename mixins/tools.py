@@ -311,12 +311,13 @@ TOOLS = [
     },
     {
         "key":         "set-wsjf-labels",
-        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
+        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to epics that have none (or all when reassign=True)",
         "method":      "_tool_set_wsjf_labels",
         "params": [
-            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
-            {"name": "reassign", "prompt": "Replace existing wsjf labels too?",           "type": bool,  "default": False},
-            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+            {"name": "percent",   "prompt": "Percent of epics to label (default 20)",          "type": float, "default": 20.0},
+            {"name": "reassign",  "prompt": "Replace existing wsjf labels too?",               "type": bool,  "default": False},
+            {"name": "open_only", "prompt": "Restrict to open epics only?",                    "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False},
         ],
     },
     {
@@ -1066,22 +1067,17 @@ class ToolsMixin:
         results = {t: {"ok": 0, "bad": []} for t in safe_types}
         no_type = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                etype = next((t for t in safe_types if t in epic.labels), None)
-                w     = getattr(epic, "weight", None)
-                if etype is None:
-                    no_type.append(epic)
-                    continue
-                pool = weight_pools.get(etype, [])
-                if w in pool:
-                    results[etype]["ok"] += 1
-                else:
-                    results[etype]["bad"].append((epic, w, pool))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            etype = next((t for t in safe_types if t in epic.labels), None)
+            w     = getattr(epic, "weight", None)
+            if etype is None:
+                no_type.append(epic)
+                continue
+            pool = weight_pools.get(etype, [])
+            if w in pool:
+                results[etype]["ok"] += 1
+            else:
+                results[etype]["bad"].append((epic, w, pool))
 
         print(f"\n{'Type':<15} {'Expected pool':<45} {'OK':>5} {'FAIL':>5}")
         print("-" * 74)
@@ -1380,21 +1376,15 @@ class ToolsMixin:
         missing = defaultdict(list)   # "type" | "piid" | "project" → [epic]
         total   = 0
 
-        def _walk(grp):
-            nonlocal total
-            for epic in grp.epics.list(all=True):
-                total += 1
-                labels = set(epic.labels)
-                if not labels & type_set:
-                    missing["type"].append(epic)
-                if not labels & piid_set:
-                    missing["piid"].append(epic)
-                if not labels & proj_set:
-                    missing["project"].append(epic)
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            total += 1
+            labels = set(epic.labels)
+            if not labels & type_set:
+                missing["type"].append(epic)
+            if not labels & piid_set:
+                missing["piid"].append(epic)
+            if not labels & proj_set:
+                missing["project"].append(epic)
 
         print(f"Total epics scanned: {total}\n")
         all_ok = True
@@ -1496,31 +1486,26 @@ class ToolsMixin:
 
         updated = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal updated, skipped, errors
-            for epic in grp.epics.list(all=True):
-                if set(epic.labels) & piid_set:
-                    skipped += 1
-                    continue
-                if epic_type and epic_type not in epic.labels:
-                    skipped += 1
-                    continue
-                if dry_run:
-                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{piid}")
+        for epic in group.epics.list(all=True):
+            if set(epic.labels) & piid_set:
+                skipped += 1
+                continue
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{piid}")
+                updated += 1
+            else:
+                try:
+                    epic.labels = list(epic.labels) + [piid]
+                    epic.save()
+                    print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{piid}")
                     updated += 1
-                else:
-                    try:
-                        epic.labels = list(epic.labels) + [piid]
-                        epic.save()
-                        print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{piid}")
-                        updated += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
-        _walk(group)
         print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -1540,31 +1525,26 @@ class ToolsMixin:
 
         updated = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal updated, skipped, errors
-            for epic in grp.epics.list(all=True):
-                if set(epic.labels) & proj_set:
-                    skipped += 1
-                    continue
-                if epic_type and epic_type not in epic.labels:
-                    skipped += 1
-                    continue
-                if dry_run:
-                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{label}")
+        for epic in group.epics.list(all=True):
+            if set(epic.labels) & proj_set:
+                skipped += 1
+                continue
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → +{label}")
+                updated += 1
+            else:
+                try:
+                    epic.labels = list(epic.labels) + [label]
+                    epic.save()
+                    print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{label}")
                     updated += 1
-                else:
-                    try:
-                        epic.labels = list(epic.labels) + [label]
-                        epic.save()
-                        print(f"  SET  #{epic.iid} '{epic.title[:55]}' → +{label}")
-                        updated += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
-        _walk(group)
         print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -1664,35 +1644,29 @@ class ToolsMixin:
 
         updated = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal updated, skipped, errors
-            for epic in grp.epics.list(all=True):
-                if piid and piid not in epic.labels:
-                    skipped += 1
-                    continue
-                if epic_type and epic_type not in epic.labels:
-                    skipped += 1
-                    continue
-                current = epic.state.lower()
-                if (state == "close" and current == "closed") or (state == "open" and current == "opened"):
-                    skipped += 1
-                    continue
-                if dry_run:
-                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → {state}")
+        for epic in group.epics.list(all=True):
+            if piid and piid not in epic.labels:
+                skipped += 1
+                continue
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            current = epic.state.lower()
+            if (state == "close" and current == "closed") or (state == "open" and current == "opened"):
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → {state}")
+                updated += 1
+            else:
+                try:
+                    epic.state_event = state_event
+                    epic.save()
+                    print(f"  {state.upper()}D  #{epic.iid} '{epic.title[:55]}'")
                     updated += 1
-                else:
-                    try:
-                        epic.state_event = state_event
-                        epic.save()
-                        print(f"  {state.upper()}D  #{epic.iid} '{epic.title[:55]}'")
-                        updated += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
         print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -1709,16 +1683,12 @@ class ToolsMixin:
         all_epics  = {}   # id → epic
         parent_map = {}   # epic_id → parent_id
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                all_epics[epic.id] = epic
-                pid = getattr(epic, "parent_id", None)
-                if pid:
-                    parent_map[epic.id] = pid
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
+        for epic in group.epics.list(all=True):
+            all_epics[epic.id] = epic
+            pid = getattr(epic, "parent_id", None)
+            if pid:
+                parent_map[epic.id] = pid
 
-        _walk(group)
         print(f"Total epics: {len(all_epics)}\n")
 
         violations = []
@@ -1817,16 +1787,11 @@ class ToolsMixin:
         epic_index   = {}  # epic_id → (group_id, iid)
         candidates   = []  # (child_id, child_iid, child_title, parent_id)
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                epic_index[epic.id] = (grp.id, epic.iid)
-                if getattr(epic, 'parent_id', None):
-                    candidates.append((epic.id, epic.iid, epic.title, epic.parent_id))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting epics with parents...")
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            epic_index[epic.id] = (getattr(epic, 'group_id', group.id), epic.iid)
+            if getattr(epic, 'parent_id', None):
+                candidates.append((epic.id, epic.iid, epic.title, epic.parent_id))
         print(f"  {len(candidates)} epics have a parent")
 
         if count is not None:
@@ -2114,32 +2079,27 @@ class ToolsMixin:
 
         updated = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal updated, skipped, errors
-            for epic in grp.epics.list(all=True):
-                if epic_type and epic_type not in epic.labels:
-                    skipped += 1
-                    continue
-                if label not in epic.labels:
-                    skipped += 1
-                    continue
-                new_labels = [l for l in epic.labels if l != label]
-                if dry_run:
-                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' — remove '{label}'")
+        for epic in group.epics.list(all=True):
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            if label not in epic.labels:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l != label]
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:55]}' — remove '{label}'")
+                updated += 1
+            else:
+                try:
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  REMOVED  #{epic.iid} '{epic.title[:55]}' — '{label}' stripped{suffix}")
                     updated += 1
-                else:
-                    try:
-                        epic.labels = new_labels
-                        epic.save()
-                        print(f"  REMOVED  #{epic.iid} '{epic.title[:55]}' — '{label}' stripped")
-                        updated += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
-        _walk(group)
         print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -2171,15 +2131,10 @@ class ToolsMixin:
 
         candidates = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True, state="opened"):
-                if not set(epic.labels) & risk_set:
-                    candidates.append((grp, epic))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting open epics...")
-        _walk(group)
+        for epic in group.epics.list(all=True, state="opened"):
+            if not set(epic.labels) & risk_set:
+                candidates.append(epic)
         print(f"  {len(candidates)} open epics without a risk label")
 
         k      = max(0, round(len(candidates) * percent / 100))
@@ -2187,7 +2142,7 @@ class ToolsMixin:
         print(f"  Labelling {len(sample)} ({percent}%)\n")
 
         updated = errors = 0
-        for grp, epic in sample:
+        for epic in sample:
             label = random.choice(pool)
             if dry_run:
                 print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:55]}'")
@@ -2206,8 +2161,8 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_set_wsjf_labels(self, percent=None, reassign=False, dry_run=False):
-        """Randomly assign wsjf-urgency/risk Fibonacci labels to open epics.
+    def _tool_set_wsjf_labels(self, percent=None, reassign=False, open_only=False, dry_run=False):
+        """Randomly assign wsjf-urgency/risk Fibonacci labels to epics.
 
         Business Value is now a custom field — use set-business-value for that component.
         By default skips epics that already have any wsjf label.
@@ -2227,34 +2182,32 @@ class ToolsMixin:
 
         all_wsjf = set(urgency_labels + risk_labels)
 
+        scope = "open epics" if open_only else "epics (open + closed)"
+
         print(f"Group          : {group.full_path}")
         print(f"Urgency labels : {urgency_labels}")
         print(f"Risk labels    : {risk_labels}")
-        mode = "ALL open epics (reassign mode)" if reassign else "open epics with no existing wsjf label"
+        mode = f"ALL {scope} (reassign mode)" if reassign else f"{scope} without wsjf labels"
         print(f"Target         : {percent}% of {mode}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
         candidates = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True, state="opened"):
-                if reassign or not (set(epic.labels) & all_wsjf):
-                    candidates.append((grp, epic))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        print("\nCollecting open epics...")
-        _walk(group)
+        print(f"\nCollecting {scope}...")
+        list_kwargs = {"all": True, "state": "opened"} if open_only else {"all": True}
+        for epic in group.epics.list(**list_kwargs):
+            if reassign or not (set(epic.labels) & all_wsjf):
+                candidates.append(epic)
         label_state = "total" if reassign else "without wsjf labels"
-        print(f"  {len(candidates)} open epics {label_state}")
+        print(f"  {len(candidates)} {scope} {label_state}")
 
         k      = max(0, round(len(candidates) * percent / 100))
         sample = random.sample(candidates, min(k, len(candidates)))
         print(f"  Labelling {len(sample)} ({percent}%)\n")
 
         updated = errors = 0
-        for grp, epic in sample:
+        for epic in sample:
             new_labels = [l for l in epic.labels if l not in all_wsjf]
             chosen = []
             if urgency_labels:
@@ -2272,9 +2225,9 @@ class ToolsMixin:
                 updated += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'{suffix}")
                     updated += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
@@ -2290,7 +2243,7 @@ class ToolsMixin:
             percent = 20.0
 
         if not self.gitlab_namespace:
-            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            print("Root namespace not configured — cannot manage Business Value custom field.")
             return
 
         fields   = self._fetch_custom_fields(self.gitlab_namespace)
@@ -2307,16 +2260,8 @@ class ToolsMixin:
 
         group = self.get_group_by_name(self.parent_group)
 
-        all_epics = []
-
-        def _walk(grp):
-            for epic in grp.epics.list(all=True, state="opened"):
-                all_epics.append(epic)
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting open epics...")
-        _walk(group)
+        all_epics = group.epics.list(all=True, state="opened")
         print(f"  {len(all_epics)} open epics found")
 
         if reassign:
@@ -2357,7 +2302,7 @@ class ToolsMixin:
     def _tool_strip_business_value(self, dry_run=False):
         """Clear the Business Value custom field from all epics."""
         if not self.gitlab_namespace:
-            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            print("Root namespace not configured — cannot manage Business Value custom field.")
             return
 
         fields   = self._fetch_custom_fields(self.gitlab_namespace)
@@ -2368,16 +2313,8 @@ class ToolsMixin:
 
         field_gid = bv_field["id"]
         group     = self.get_group_by_name(self.parent_group)
-        all_epics = []
-
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                all_epics.append(epic)
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting epics...")
-        _walk(group)
+        all_epics = group.epics.list(all=True)
 
         bv_map    = self._fetch_epic_business_values(all_epics)
         to_strip  = [e for e in all_epics if e.id in bv_map]
@@ -2427,31 +2364,25 @@ class ToolsMixin:
 
         stripped = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal stripped, skipped, errors
-            for epic in grp.epics.list(all=True, state="opened"):
-                existing = set(epic.labels) & all_wsjf
-                if not existing:
-                    skipped += 1
-                    continue
-                new_labels = [l for l in epic.labels if l not in all_wsjf]
-                if dry_run:
-                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
-                    stripped += 1
-                else:
-                    try:
-                        epic.labels = new_labels
-                        epic.save()
-                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
-                        stripped += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nWalking epics...")
-        _walk(group)
+        for epic in group.epics.list(all=True, state="opened"):
+            existing = set(epic.labels) & all_wsjf
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in all_wsjf]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
+                stripped += 1
+            else:
+                try:
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'{suffix}")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
         print(f"\nDone.  Stripped: {stripped}  Skipped (no wsjf): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -2488,15 +2419,10 @@ class ToolsMixin:
 
         candidates = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True, state="opened"):
-                if reassign or not (set(epic.labels) & all_work):
-                    candidates.append((grp, epic))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting open epics...")
-        _walk(group)
+        for epic in group.epics.list(all=True, state="opened"):
+            if reassign or not (set(epic.labels) & all_work):
+                candidates.append(epic)
         label_state = "total" if reassign else "without type:: label"
         print(f"  {len(candidates)} open epics {label_state}")
 
@@ -2505,7 +2431,7 @@ class ToolsMixin:
         print(f"  Labelling {len(sample)} ({percent}%)\n")
 
         updated = errors = 0
-        for grp, epic in sample:
+        for epic in sample:
             new_labels = [l for l in epic.labels if l not in all_work]
             label      = random.choice(pool)
             new_labels.append(label)
@@ -2543,31 +2469,25 @@ class ToolsMixin:
 
         stripped = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal stripped, skipped, errors
-            for epic in grp.epics.list(all=True, state="opened"):
-                existing = set(epic.labels) & all_work
-                if not existing:
-                    skipped += 1
-                    continue
-                new_labels = [l for l in epic.labels if l not in all_work]
-                if dry_run:
-                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
-                    stripped += 1
-                else:
-                    try:
-                        epic.labels = new_labels
-                        epic.save()
-                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
-                        stripped += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nWalking epics...")
-        _walk(group)
+        for epic in group.epics.list(all=True, state="opened"):
+            existing = set(epic.labels) & all_work
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in all_work]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                stripped += 1
+            else:
+                try:
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'{suffix}")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
         print(f"\nDone.  Stripped: {stripped}  Skipped (no type::): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -2596,8 +2516,6 @@ class ToolsMixin:
         if not pool:
             pool = lifecycle_lbls  # fallback: uniform
 
-        state_filter = "opened" if open_only else "all"
-
         print(f"Group   : {group.full_path}")
         print(f"Labels  : {lifecycle_lbls}")
         scope = "open epics" if open_only else "all epics (open + closed)"
@@ -2608,16 +2526,12 @@ class ToolsMixin:
 
         candidates = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True, state=state_filter):
-                if reassign or not (set(epic.labels) & all_lc):
-                    candidates.append((grp, epic))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         scope_label = "open epics" if open_only else "epics (open + closed)"
         print(f"\nCollecting {scope_label}...")
-        _walk(group)
+        list_kwargs = {"all": True, "state": "opened"} if open_only else {"all": True}
+        for epic in group.epics.list(**list_kwargs):
+            if reassign or not (set(epic.labels) & all_lc):
+                candidates.append(epic)
         label_state = "total" if reassign else f"without lifecycle:: label"
         print(f"  {len(candidates)} {scope_label} {label_state}")
 
@@ -2626,38 +2540,23 @@ class ToolsMixin:
         print(f"  Labelling {len(sample)} ({percent}%)\n")
 
         updated = errors = 0
-        for grp, epic in sample:
+        for epic in sample:
             new_labels = [l for l in epic.labels if l not in all_lc]
-            label      = random.choice(pool)
+            # Closed epics are always done; only open epics get a random lifecycle state.
+            label      = 'lifecycle::done' if getattr(epic, 'state', '') == 'closed' else random.choice(pool)
             new_labels.append(label)
             if dry_run:
                 print(f"  DRY  [{label}]  #{epic.iid} '{epic.title[:50]}'")
                 updated += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'{suffix}")
                     updated += 1
                 except Exception as e:
-                    if (getattr(e, "response_code", None) == 403
-                            and getattr(epic, "state", None) == "closed"):
-                        # GitLab rejects label-only saves on closed epics;
-                        # reopen, apply label, then close again.
-                        try:
-                            epic.state_event = "reopen"
-                            epic.labels = new_labels
-                            epic.save()
-                            epic.state_event = "close"
-                            epic.save()
-                            print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}' (via reopen)")
-                            updated += 1
-                        except Exception as e2:
-                            print(f"  ERROR #{epic.iid} (reopen/close failed): {e2}")
-                            errors += 1
-                    else:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
@@ -2680,31 +2579,25 @@ class ToolsMixin:
 
         stripped = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal stripped, skipped, errors
-            for epic in grp.epics.list(all=True, state="opened"):
-                existing = set(epic.labels) & all_lc
-                if not existing:
-                    skipped += 1
-                    continue
-                new_labels = [l for l in epic.labels if l not in all_lc]
-                if dry_run:
-                    print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
-                    stripped += 1
-                else:
-                    try:
-                        epic.labels = new_labels
-                        epic.save()
-                        print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
-                        stripped += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nWalking epics...")
-        _walk(group)
+        for epic in group.epics.list(all=True, state="opened"):
+            existing = set(epic.labels) & all_lc
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in all_lc]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                stripped += 1
+            else:
+                try:
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'{suffix}")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
         print(f"\nDone.  Stripped: {stripped}  Skipped (no lifecycle::): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -3292,7 +3185,7 @@ class ToolsMixin:
         print(f"  Type    : {cfg['field_type']}")
         print(f"  Options : {cfg['select_options']}")
         print(f"  Scope   : Epic / Capability / Feature (all GitLab Epic work item type)")
-        print(f"  Namespace: {self.gitlab_namespace}")
+        print(f"  Namespace: {self.gitlab_namespace or '(not set)'}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
         print()
