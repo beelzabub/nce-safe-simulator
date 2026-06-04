@@ -392,9 +392,9 @@ Data snapshot → reports/20260525/143022/
   projects.json (8 projects)
 ```
 
-**`epics.json` fields:** `id`, `iid`, `type`, `title`, `description`, `state`, `labels`, `parent_id`, `group_id`, `planned_weight`, `actual_weight`, `pct_complete`, `pct_through_pi`, `piid`, `blocked_by_count`, `blocks_count`, `start_date`, `due_date`, `created_at`, `updated_at`, `web_url`
+**`epics.json` fields:** `id`, `iid`, `type`, `title`, `description`, `state`, `labels`, `parent_id`, `group_id`, `planned_weight`, `actual_weight`, `pct_complete`, `pct_through_pi`, `piid`, `business_value`, `blocked_by_count`, `blocks_count`, `start_date`, `due_date`, `created_at`, `updated_at`, `web_url`, `work_item_id`, `roam_risks`
 
-**`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
+**`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
 **`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
 
@@ -402,9 +402,9 @@ Data snapshot → reports/20260525/143022/
 
 **`projects.json` fields:** `id`, `name`, `path`, `path_with_namespace`, `name_with_namespace`, `namespace_id`, `web_url`, `issues_enabled`
 
-#### CI Artifact
+#### CI
 
-The `generate-reports` job in `.gitlab-ci.yml` runs `--report all` and publishes the `reports/` directory as a downloadable artifact (30-day retention). The job is `when: manual` to avoid unintended API calls. Trigger it from the GitLab pipeline UI after setting `ACCESS_TOKEN` and `GROUP_NAME` as CI/CD variables in the project settings.
+`.gitlab-ci.yml` runs `pytest tests/` on every push (`python-version-test` job, `build` stage). A manual `generate-reports` job exists in the `report` stage but is not currently in active use.
 
 ### Report Index
 
@@ -432,48 +432,6 @@ The `generate-reports` job in `.gitlab-ci.yml` runs `--report all` and publishes
 | `orphan-epics` | T4 | `03 Data Quality/Orphaned Epics` | Epics with no parent and no children (disconnected from hierarchy) |
 | `orphan-issues` | T4 | `03 Data Quality/Orphaned Issues` | Issues not linked to any epic, grouped by project |
 
-### Report Detail — New Reports
-
-#### Portfolio Health Dashboard (T1)
-Executive traffic-light view for daily situational awareness. Each Value Stream gets a single row with coloured status indicators (🟢 / 🟡 / 🔴) across four dimensions: Schedule (% done vs % elapsed through PI), Capacity (team weight load), Risk (high-risk epics), and Blocking (blocked work count). A "Needs Attention" section lists specific blocked and at-risk epics below the summary table.
-
-#### Risk Register (T2)
-All epics carrying a `risk::high`, `risk::medium`, or `risk::low` label, sorted severity-first within each level. Columns show PI assignment, owning ART, epic type, state (open/closed), and a direct link to the GitLab epic. Summary counts by level and by Value Stream are at the top.
-
-#### PI Predictability Scorecard (T2)
-Measures ART predictability — the % of Features and Capabilities that were committed at PI planning and actually delivered by PI close. One row per ART per PI. Trend arrows show whether predictability is improving or declining. Useful for identifying systemic over-commitment.
-
-#### WSJF Priority Board (T2)
-Ranks portfolio backlog epics by Weighted Shortest Job First score: `(Business Value + Time Criticality + Risk Reduction) ÷ Job Size`. Business Value comes from the native GitLab **Business Value custom field** (Fibonacci 1–21, set via `set-business-value` or the epic UI). Time Criticality and Risk Reduction come from `wsjf-urgency::N` and `wsjf-risk::N` labels. Job Size is the epic's planned weight. Higher scores should be scheduled first.
-
-#### Flow Metrics (T3)
-Five SAFe 6.0 flow metrics across the portfolio:
-
-| Metric | What it measures |
-|---|---|
-| **Flow Velocity** | Story points delivered per PI (closed Feature weight) — is throughput increasing? |
-| **Flow Load (WIP)** | Open Features in `implementing` state — is WIP growing faster than delivery? |
-| **Flow Distribution** | Proportion of work by type (`type::feature`, `type::enabler`, `type::infrastructure`, `type::defect`) — is the portfolio balanced? |
-| **Flow Time (Cycle Time)** | Days from first `implementing` label to close for completed Features — is lead time shrinking? |
-| **Flow Predictability** | Planned vs actual weight ratio for closed Features — how reliable are estimates? |
-
-Features are the primary unit of analysis (not issues). Labels `type::*` must be applied for Distribution; `lifecycle::implementing` must be applied for Load. Use `set-work-type-labels` and `set-lifecycle-labels` to seed these labels.
-
-#### Epic Lifecycle / Portfolio Kanban (T3)
-Maps every epic to a SAFe Portfolio Kanban state via `lifecycle::*` labels:
-
-| State | Label | Description | Stuck threshold |
-|---|---|---|---|
-| 💡 Funnel | `lifecycle::funnel` | Ideas submitted, not yet analyzed | 90 days |
-| 🔍 Analyzing | `lifecycle::analyzing` | Lean Business Case in development | 30 days |
-| 📋 Portfolio Backlog | `lifecycle::backlog` | Approved, awaiting PI capacity | 60 days |
-| ⚙️ Implementing | `lifecycle::implementing` | Active in a Program Increment | — |
-| ✅ Done | `lifecycle::done` | Delivered | — |
-
-Epics that have remained in a pre-implementing state longer than the threshold are flagged with ⚠️ in a dedicated "Stuck Items" section. The report also shows epics with no lifecycle label and explains how to apply them.
-
-Use `set-lifecycle-labels` to bulk-assign lifecycle labels across existing epics, and `strip-lifecycle-labels` to reset them for testing.
-
 ### PI Progress Calculation
 
 PIID labels follow the pattern `PIID::YYYYQn` (e.g. `PIID::2026Q3`).  
@@ -490,128 +448,110 @@ Reports flag items as **At Risk** (⚠️) when `% done < % elapsed through PI`.
 
 ## Utility Tools
 
-Run interactively with `--utilities` or pass a key directly (e.g. `--utilities audit-labels`).
+Run interactively with `-ut` (category → tool menu) or pass a key directly (e.g. `-ut audit-labels`). Tool params can be passed as flags (e.g. `-ut set-wsjf-labels --open_only`).
+
+### Setup
+
+| Key | Description |
+|---|---|
+| `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
+| `setup-bv-field` | Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21) |
+
+### Seed Data
+
+| Key | Description |
+|---|---|
+| `generate-issues` | Create issues in team backlog projects linked to Feature epics |
+| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
+| `generate-roam-risks` | Create ROAM risk issues, each related to a random number of epics |
+| `generate-risk-reasons` | Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics |
+| `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
+| `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
+| `set-epic-states` | Open or close all epics matching an optional type and/or PI filter |
+| `orphan-epics` | Remove parent links from N or X% of epics (simulate orphaned data) |
+| `orphan-issues` | Remove epic links from N or X% of issues (simulate orphaned data) |
+
+### Labels
+
+| Key | Description |
+|---|---|
+| `set-lifecycle-labels` | Randomly assign `lifecycle::*` labels to epics |
+| `strip-lifecycle-labels` | Remove all `lifecycle::*` labels from every epic |
+| `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one |
+| `set-project-labels` | Bulk-assign a project label to epics that are missing one |
+| `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none |
+| `set-work-type-labels` | Randomly assign `type::*` labels to open epics |
+| `strip-work-type-labels` | Remove all `type::*` labels from every epic |
+| `set-business-value` | Randomly assign Business Value custom field (Fibonacci 1–21) to open epics |
+| `strip-business-value` | Clear the Business Value custom field from every epic |
+| `set-wsjf-labels` | Randomly assign `wsjf-urgency::N` and `wsjf-risk::N` Fibonacci labels to open epics |
+| `strip-wsjf-labels` | Remove all `wsjf-*` labels from every epic |
+| `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
+
+### Weights
+
+| Key | Description |
+|---|---|
+| `set-issue-weights` | Assign Fibonacci story-point weights to issues (skip already-weighted unless `reassign=True`) |
+| `strip-issue-weights` | Zero out all issue weights across every team project |
+| `update-weights` | Assign planned weights to all epics based on SAFe type label |
+| `validate-weights` | Validate epic and issue weights against configured pools |
+| `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
+
+### Reset / Clean
+
+| Key | Description |
+|---|---|
+| `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
+| `clean-roam-risks` | Delete all ROAM risk issues and their epic links across the group |
+| `clean-epic-blocks` | Remove all blocking relationships between epics across the group |
+| `clean-wikis` | Delete all wiki pages from a specified scope (portfolio / teams / all / group-path) |
+| `clean-reports` | Delete local report run directories older than N days |
+| `clean-logs` | Delete local log directories older than N days |
+
+### Audit
 
 | Key | Description |
 |---|---|
 | `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
-| `clean-epic-blocks` | Remove all blocking relationships between epics across the group |
-| `clean-roam-risks` | Remove all ROAM risk labels and conditions from every epic |
-| `clean-wikis` | Delete all wiki pages from a specified scope (portfolio / teams / all / group-path) |
-| `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
-| `export-epics` | Export all epics from the group hierarchy to CSV or JSON |
-| `export-issues` | Export all issues from the group hierarchy to CSV or JSON |
-| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
-| `set-business-value` | Randomly assign Business Value custom field (Fibonacci 1–21) to open epics that have none (or all when `reassign=True`) |
-| `strip-business-value` | Clear the Business Value custom field from every epic (clean slate for testing) |
-| `generate-issues` | Create issues in team backlog projects linked to Feature epics |
-| `import-epics` | Import epics from CSV or JSON with pre-flight validation and dry-run |
-| `import-issues` | Import issues from CSV or JSON with pre-flight validation and dry-run |
-| `orphan-epics` | Remove parent links from N or X% of epics (simulate orphaned data) |
-| `orphan-issues` | Remove epic links from N or X% of issues (simulate orphaned data) |
-| `reset-pi-progress` | Reopen all closed issues linked to epics in a specific PI |
-| `scaffold` | Create SAFe group/project structure (VS → ART → Team → Team Backlog) with no content |
-| `set-epic-states` | Open or close all epics matching an optional type and/or PI filter |
-| `set-issue-weights` | Assign Fibonacci story-point weights to issues (skip already-weighted unless `reassign=True`) |
-| `strip-issue-weights` | Zero out all issue weights across every team project (clean slate for testing) |
-| `set-lifecycle-labels` | Randomly assign `lifecycle::*` labels to open epics (skip already-labelled unless `reassign=True`) |
-| `strip-lifecycle-labels` | Remove all `lifecycle::*` labels from every epic (clean slate for testing) |
-| `set-piid-labels` | Bulk-assign a PIID label to epics that are missing one |
-| `set-project-labels` | Bulk-assign a project label to epics that are missing one |
-| `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none |
-| `set-work-type-labels` | Randomly assign `type::*` labels to open epics (skip already-labelled unless `reassign=True`) |
-| `strip-work-type-labels` | Remove all `type::*` labels from every epic (clean slate for testing) |
-| `set-wsjf-labels` | Randomly assign `wsjf-urgency::N` and `wsjf-risk::N` Fibonacci labels to open epics |
-| `strip-wsjf-labels` | Remove all `wsjf-*` labels from every epic (clean slate for testing) |
-| `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
-| `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
-| `update-weights` | Assign planned weights to all epics based on SAFe type label |
-| `validate-weights` | Validate epic and issue weights against configured pools |
-| `weight-drift-check` | Flag epics where planned weight vs sum of issue weights drifts beyond a threshold |
+| `list-wikis` | List all wiki pages for a specified scope (portfolio / teams / all / group-path) |
+
+### Import / Export
+
+Both CSV and JSON are supported. Format is inferred from the file extension (`.json` → JSON, anything else → CSV). Export filenames are auto-named from the group name when no output path is given. Relative and `~`-prefixed paths are resolved to absolute.
+
+| Key | Scope | Key fields |
+|---|---|---|
+| `export-epics` | All epics across the full group hierarchy | `group_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
+| `export-issues` | All issues across the full group hierarchy | `project_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
+| `import-epics` | Create epics from file with pre-flight validation | Required: `title` — Optional: `group_path`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
+| `import-issues` | Create issues from file with pre-flight validation | Required: `title`, `project_path` — Optional: `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
+
+`planned_weight` on epics is fetched/set via GraphQL (the REST API does not expose it).
+
+Both importers run a full validation pass before creating anything — errors are reported upfront and the import aborts if any are found. Pass `dry_run: yes` to validate and preview without creating. When `parent_id` values from an external system don't match live IDs, the importer asks once how to handle them: `ask` (pick a fallback parent interactively), `label` (create without parent and tag `import::needs-parent`, default), or `skip`.
 
 ### Test Data Seeding Pattern
 
-The `set-*` and `strip-*` utility pairs are designed for rapid test-data cycling. A typical pattern:
+The `set-*` and `strip-*` pairs are designed for rapid test-data cycling:
 
 ```bash
 # Seed WSJF data, run the board, strip and repeat
-python3 NceGitLab.py --utilities set-business-value  # percent=50, reassign=False (Business Value custom field)
-python3 NceGitLab.py --utilities set-wsjf-labels     # percent=50, reassign=False (urgency + risk labels)
-python3 NceGitLab.py --report wsjf
-python3 NceGitLab.py --utilities strip-business-value  # clean slate
-python3 NceGitLab.py --utilities strip-wsjf-labels     # clean slate
-python3 NceGitLab.py --utilities set-business-value  # percent=80, reassign=False
-python3 NceGitLab.py --utilities set-wsjf-labels     # percent=80, reassign=False
+python3 NceGitLab.py -ut set-business-value
+python3 NceGitLab.py -ut set-wsjf-labels
+python3 NceGitLab.py -r wsjf
+python3 NceGitLab.py -ut strip-business-value
+python3 NceGitLab.py -ut strip-wsjf-labels
 
 # Same pattern works for lifecycle, work-type, and risk labels
 ```
 
 ---
 
-## Import / Export
+## Contributing
 
-Epic and issue import/export is available via the `--utilities` menu (`export-epics`, `import-epics`, `export-issues`, `import-issues`).
-
-### File Formats
-
-Both CSV and JSON are supported. Format is inferred from the file extension (`.json` → JSON, anything else → CSV). Export filenames are auto-named from the group name when no output path is given (e.g. `bmw-120-epics-export.csv`). Relative and `~`-prefixed input paths are resolved to absolute.
-
-### Export
-
-| Tool | Scope | Key fields exported |
-|---|---|---|
-| `export-epics` | All epics across the full group hierarchy (recursive by default) | `group_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
-| `export-issues` | All issues across the full group hierarchy | `project_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
-
-`planned_weight` on epics is fetched via GraphQL (the REST API does not expose it).
-
-### Import — Pre-flight Validation
-
-Both importers run a full validation pass before creating anything. All errors are reported upfront; if any are found the import aborts without touching the instance.
-
-Checks performed:
-- Required column(s) present (`title` for both; `project_path` for issues unless a target project is provided at the prompt)
-- Unknown columns noted as warnings and silently ignored
-- Blank required fields flagged per row
-- Date fields validated as `YYYY-MM-DD`
-- Numeric fields (`weight`, `parent_id`, `epic_id`, `planned_weight`) validated as integers
-- `state` values validated (`opened` / `closed`)
-- All `parent_id` values checked against live epic IDs in the target hierarchy (see below)
-
-**Minimum required columns:**
-
-| Import | Required | Commonly useful optional |
-|---|---|---|
-| `import-epics` | `title` | `group_path`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
-| `import-issues` | `title`, `project_path` | `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
-
-**Post-create steps applied automatically:**
-- `planned_weight` set via GraphQL after epic creation
-- `milestone` resolved by title lookup in the target project
-- `assignees` resolved by GitLab username lookup (cached per run; unknown usernames warned and skipped)
-- `epic_id` assigned to issues via a post-create save
-- Epics or issues with `state: closed` are closed after creation
-
-Pass `dry_run: yes` to validate and preview every row without creating anything.
-
-### Unresolvable `parent_id` Values
-
-When importing epics from an external system, `parent_id` values will not match IDs in the target GitLab instance. The pre-flight pass identifies all affected rows, reports them as a table, and asks once how to handle them before any creation starts:
-
-| Mode | Behaviour |
-|---|---|
-| `ask` | Displays the live epic hierarchy grouped by containing group; user picks a single fallback parent for all affected rows. Choosing `0` falls back to the `label` approach. |
-| `label` | Creates the epic without a parent and adds the label `import::needs-parent` *(default)* |
-| `skip` | Skips the affected rows entirely |
-
-An **orphan summary table** is printed at the end of any run that produces epics without their intended parent (row number, original `parent_id`, group, title). Filter by label `import::needs-parent` in GitLab to find and re-parent these epics.
-
----
-
-## Known Issues
-
-- **Direct Features in ART-level reports:** `ART Feature Status` and `ART Capacity Balance` still assume the full three-tier chain (Epic → Capability → Feature) and do not surface Features parented directly to a Portfolio Epic. Both reports need hierarchy traversal updates to handle the two-tier (Epic → Feature) case.
+Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/saic-study-group/beelzabub-project/-/issues](https://gitlab.com/saic-study-group/beelzabub-project/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
 
 ---
 
@@ -621,12 +561,11 @@ An **orphan summary table** is printed at the end of any run that produces epics
 
 1. Wiki pages (root group)
 2. Epics (children before parents, recursively)
-3. Milestones (root group + all subgroups)
-4. Issues (all projects, synchronously)
-5. Labels (root group + subgroups + projects)
-6. Projects
-7. Subgroups (deepest first)
-8. Root group
+3. Issues (all projects, parallel)
+4. Labels (root group + subgroups + projects)
+5. Projects
+6. Subgroups (deepest first)
+7. Root group
 
 ---
 
@@ -640,9 +579,11 @@ An **orphan summary table** is printed at the end of any run that produces epics
 
 **Config-driven defaults** — All numeric defaults for bootstrap counts and tool parameters live in `config.json` under `defaults.bootstrap` and `defaults.tools`. Function signatures use `None` sentinels and resolve from `self.default_*` at runtime, so callers can still override individual values programmatically. Structure count keys (`num_value_streams`, `num_arts`, `num_teams`, etc.) accept a plain integer, `{"desired": N}`, or `{"min": M, "max": N}` range object. `_resolve_range()` in `mixins/bootstrap.py` handles all three forms; `_range_label()` produces a human-readable annotation for the run summary.
 
-**Job timing** — Each phase (`--clean`, `--create`, individual reports, `--all`) prints start/stop times and duration. `--all` aggregates all phases into a single summary table.
+**API session** — All HTTP calls route through a shared `requests.Session` configured by `_make_session()` in `mixins/utils.py`. The session mounts a `_TimeoutAdapter` that enforces `api_timeout` (default 300 s, configurable in `config.json`) on every request and auto-retries 429 responses up to 5 times with exponential backoff (1 → 2 → 4 → 8 → 16 s). This prevents report runs from hanging silently on slow GitLab responses.
 
-**Data snapshots** — Every report run writes `epics.json`, `issues.json`, and `blocking.json` to `reports/YYYYMMDD/HHMMSS/` before any wiki pages are generated. The data comes from `calculate_portfolio_metrics()` (which already fetches and caches all epics and issues) plus a dedicated GraphQL call for the full blocking graph. Multiple runs per day each get their own timestamped subdirectory. The `.gitlab-ci.yml` `generate-reports` job exposes this directory as a downloadable CI artifact.
+**Job timing** — Each phase (clean, create, individual reports, all) logs start/stop times and elapsed duration via `_print_timing_table()` in `mixins/utils.py`. `--all` aggregates all phases into a consolidated summary table.
+
+**Data snapshots** — Every report run writes five files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
 
 ---
 
