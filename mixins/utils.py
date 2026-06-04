@@ -250,6 +250,89 @@ class UtilitiesMixin:
         if errors:
             print(f"  Business Value set error: {errors}")
 
+    def _clear_work_item_business_value(self, work_item_id, field_gid):
+        """Clear a SINGLE_SELECT custom field on a work item (sets selectedOptionIds to [])."""
+        mutation = """
+        mutation {
+          workItemUpdate(input: {
+            id: "%s"
+            customFieldsWidget: [{
+              customFieldId: "%s"
+              selectedOptionIds: []
+            }]
+          }) {
+            workItem { id }
+            errors
+          }
+        }
+        """ % (f"gid://gitlab/WorkItem/{work_item_id}", field_gid)
+        data   = self.graphql_query(mutation)
+        errors = (data or {}).get("workItemUpdate", {}).get("errors", [])
+        if errors:
+            print(f"  Business Value clear error: {errors}")
+
+    def _fetch_epic_business_values(self, epics):
+        """Return {epic_id: int} Business Value custom field for epics that have it set."""
+        if not self.gitlab_namespace:
+            return {}
+        fields   = self._fetch_custom_fields(self.gitlab_namespace)
+        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        if not bv_field:
+            return {}
+        field_gid  = bv_field["id"]
+        option_map = {}
+        for opt in bv_field.get("selectOptions") or []:
+            try:
+                option_map[opt["id"]] = int(opt["value"])
+            except (ValueError, KeyError):
+                pass
+        query = """
+        query GetWorkItemBV($id: WorkItemID!) {
+          workItem(id: $id) {
+            widgets {
+              ... on WorkItemWidgetCustomFields {
+                customFieldValues {
+                  customField { id }
+                  ... on WorkItemSelectFieldValue {
+                    selectedOptions { id value }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        results = {}
+        print(f"  Fetching Business Value for {len(epics)} epics...")
+        for epic in epics:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                continue
+            try:
+                data = self.graphql_query(query, variables={"id": f"gid://gitlab/WorkItem/{wid}"})
+                if not data:
+                    continue
+                for widget in (data.get("workItem") or {}).get("widgets", []):
+                    if not isinstance(widget, dict):
+                        continue
+                    for cfv in widget.get("customFieldValues", []):
+                        if not isinstance(cfv, dict):
+                            continue
+                        if cfv.get("customField", {}).get("id") != field_gid:
+                            continue
+                        opts = cfv.get("selectedOptions") or []
+                        if opts:
+                            try:
+                                results[epic.id] = int(opts[0].get("value", ""))
+                            except (ValueError, TypeError):
+                                opt_id = opts[0].get("id")
+                                if opt_id in option_map:
+                                    results[epic.id] = option_map[opt_id]
+                        break
+            except Exception:
+                pass
+        return results
+
     def _get_epic_work_item_type_id(self, namespace_path):
         """Return the GID for the Epic work item type in the given namespace."""
         query = """
@@ -379,7 +462,7 @@ class UtilitiesMixin:
                 "pct_through_pi":   pct_pi,
                 "piid":             piid,
                 "start_date":       child_dict.get("start_date"),
-                "due_date":         child_dict.get("due_date"),
+                "due_date":         child_dict.get("due_date") or child_dict.get("end_date"),
                 "created_at":       child_dict.get("created_at"),
                 "updated_at":       child_dict.get("updated_at"),
                 "type":             etype,
@@ -464,6 +547,7 @@ class UtilitiesMixin:
                         "state":        issue.state,
                         "labels":       getattr(issue, 'labels', []),
                         "weight":       getattr(issue, 'weight', None),
+                        "due_date":     getattr(issue, 'due_date', None),
                         "milestone":    issue.milestone['title'] if issue.milestone else None,
                         "assignees":    [a['username'] for a in getattr(issue, 'assignees', [])],
                         "epic_id":      epic_info['id']  if epic_info else None,
@@ -477,9 +561,10 @@ class UtilitiesMixin:
             except Exception as e:
                 print(f"  Failed to fetch issues for '{project.name}': {e}")
 
-        all_epics = group.epics.list(all=True)
+        all_epics    = group.epics.list(all=True)
         epic_weights = self._fetch_epic_weights(all_epics)
-        metrics       = {"Epic": [], "Capability": [], "Feature": []}
+        bv_values    = self._fetch_epic_business_values(all_epics)
+        metrics      = {"Epic": [], "Capability": [], "Feature": []}
         all_epics_raw = []
 
         print(f"  Processing {len(all_epics)} epics...")
@@ -512,12 +597,13 @@ class UtilitiesMixin:
                 "parent_id":        getattr(epic, 'parent_id', None),
                 "group_id":         getattr(epic, 'group_id', None),
                 "planned_weight":   epic_weights.get(epic.web_url, 0),
+                "business_value":   bv_values.get(epic.id),
                 "actual_weight":    total_w,
                 "pct_complete":     pct_done,
                 "pct_through_pi":   pct_pi,
                 "piid":             piid,
                 "start_date":       getattr(epic, 'start_date', None),
-                "due_date":         getattr(epic, 'due_date', None),
+                "due_date":         getattr(epic, 'due_date', None) or getattr(epic, 'end_date', None),
                 "created_at":       getattr(epic, 'created_at', None),
                 "updated_at":       getattr(epic, 'updated_at', None),
                 "work_item_id":     getattr(epic, 'work_item_id', None),
