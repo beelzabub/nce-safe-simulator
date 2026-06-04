@@ -77,7 +77,9 @@ def _tee_to_log(log_path):
     """Tee sys.stdout to log_path for the duration of the with-block."""
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as f:
+    # buffering=1 → line-buffered: each newline flushes to disk immediately,
+    # so a mid-run crash leaves a readable partial log rather than an empty file.
+    with open(log_path, "w", encoding="utf-8", buffering=1) as f:
         old = sys.stdout
         sys.stdout = _Tee(old, f)
         try:
