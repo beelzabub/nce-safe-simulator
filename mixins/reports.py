@@ -3537,10 +3537,7 @@ class ReportsMixin:
             f"&not[label_name][]={quote(lc, safe='')}"
             for lc in self._rd_lifecycle_labels
         )
-        unlab_count = (
-            f'<a href="{epics_base}?state=all{_not_lc}" target="_blank">{len(unlab)}</a>'
-            if unlab else "0"
-        )
+        unlab_count = str(len(unlab)) if unlab else "0"
         md.append(
             f"| _(unlabelled)_ | {unlab_count} | "
             f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
