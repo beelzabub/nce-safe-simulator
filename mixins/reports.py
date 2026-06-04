@@ -249,6 +249,21 @@ def _item_risk_reasons(item, today=None):
 
 class ReportsMixin:
 
+    def _relative_project_name(self, project):
+        """Return project name_with_namespace with the top-level gitlab_namespace stripped.
+
+        GitLab's name_with_namespace includes the root namespace
+        (e.g. "gl-demo-ultimate-lmwilliams / PMW-120 / VS 01 / ...").
+        Wiki reports should only show paths starting from parent_group.
+        """
+        name = project.get("name_with_namespace", project.get("path_with_namespace", ""))
+        ns   = getattr(self, "gitlab_namespace", "")
+        if ns:
+            prefix = ns + " / "
+            if name.lower().startswith(prefix.lower()):
+                return name[len(prefix):]
+        return name
+
     def generate_summary_report(self, group):
         try:
             group_name = group.name
@@ -1346,7 +1361,7 @@ class ReportsMixin:
             md.append("")
 
             for _key, (project, issues) in sorted(orphans_by_project.items()):
-                md.append(f"### {project['name_with_namespace']}")
+                md.append(f"### {self._relative_project_name(project)}")
                 md.append("")
                 md.append("| # | Title | State | Milestone | Assignees |")
                 md.append("|---|-------|-------|-----------|-----------|")
