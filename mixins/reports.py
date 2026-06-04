@@ -9,6 +9,12 @@ from urllib.parse import quote
 from .utils import _clear, _fmt_duration, _tee_to_log
 
 
+# GitLab work_items URL numeric type ID for Epics (type[]=8).
+# Inferred from browser URL when filtering by Epic in the work_items UI.
+# May differ on self-managed instances — check /-/work_items if links misbehave.
+_WI_EPIC_TYPE = "8"
+
+
 def _gid_to_int(gid_str):
     """Convert 'gid://gitlab/Epic/123' → 123, or return None."""
     try:
@@ -548,7 +554,8 @@ class ReportsMixin:
         def _board_url(proj, piid):
             return (
                 f"{group.web_url}/-/work_items"
-                f"?label_name[]={quote(piid, safe='')}"
+                f"?type%5B%5D={_WI_EPIC_TYPE}"
+                f"&label_name[]={quote(piid, safe='')}"
                 f"&label_name[]={quote(proj, safe='')}"
                 f"&state=all"
             )
@@ -713,7 +720,8 @@ class ReportsMixin:
                 blocked_str = str(blocked) if blocked else "—"
                 board_url = (
                     f"{group.web_url}/-/work_items"
-                    f"?label_name[]={quote(piid, safe='')}"
+                    f"?type%5B%5D={_WI_EPIC_TYPE}"
+                    f"&label_name[]={quote(piid, safe='')}"
                     f"&label_name[]={quote(proj, safe='')}"
                     f"&state=all"
                 )
@@ -975,6 +983,7 @@ class ReportsMixin:
                     wi_url = (
                         f"{self.url}/groups/{grp['full_path']}/-/work_items"
                         f"?sort=created_date&state=opened"
+                        f"&type%5B%5D={_WI_EPIC_TYPE}"
                         f"&label_name%5B%5D={quote(piid, safe='')}"
                         f"&first_page_size=100"
                     )
@@ -3275,15 +3284,15 @@ class ReportsMixin:
             parts = [f"{_pquote(k, safe='')}={_pquote(v, safe='')}" for k, v in params]
             return f"{root_group.web_url}/-/work_items?{'&'.join(parts)}"
 
-        _wi_all   = _wi([("state", "all"),    ("type[]", "8")])
+        _wi_all   = _wi([("state", "all"),    ("type[]", _WI_EPIC_TYPE)])
         _wi_pi    = (
-            _wi([("state", "opened"), ("type[]", "8"), ("label_name[]", current_pi)])
+            _wi([("state", "opened"), ("type[]", _WI_EPIC_TYPE), ("label_name[]", current_pi)])
             if current_pi else _wi_all
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
         _wi_risk = _wi_all
-        _wi_unasn = _wi([("state", "opened"), ("type[]", "8")])
+        _wi_unasn = _wi([("state", "opened"), ("type[]", _WI_EPIC_TYPE)])
 
         md.append("## Portfolio Summary")
         md.append("")
@@ -3511,7 +3520,7 @@ class ReportsMixin:
         def _wi_lc(lc_key):
             return (
                 f"{wi_base}?state=all"
-                f"&type%5B%5D=8"
+                f"&type%5B%5D={_WI_EPIC_TYPE}"
                 f"&label_name%5B%5D={quote(lc_key, safe='')}"
             )
 
@@ -3537,7 +3546,7 @@ class ReportsMixin:
             for lc in self._rd_lifecycle_labels
         )
         unlab_count = (
-            f'<a href="{wi_base}?state=all&type%5B%5D=8{_not_lc}" target="_blank">{len(unlab)}</a>'
+            f'<a href="{wi_base}?state=all&type%5B%5D={_WI_EPIC_TYPE}{_not_lc}" target="_blank">{len(unlab)}</a>'
             if unlab else "0"
         )
         md.append(
