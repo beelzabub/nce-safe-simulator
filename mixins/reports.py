@@ -3284,7 +3284,9 @@ class ReportsMixin:
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
-        _wi_risk = _wi_all
+        # ROAM risks are linked issues, not labels — no epics-filter URL can show them;
+        # link to the Risk Register wiki page instead.
+        _wi_risk = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/Risk Register')}"
         _wi_unasn = _wi([("state", "opened")])
 
         md.append("## Portfolio Summary")
@@ -3533,11 +3535,16 @@ class ReportsMixin:
             )
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
-        _not_lc = "".join(
-            f"&not[label_name][]={quote(lc, safe='')}"
-            for lc in self._rd_lifecycle_labels
+        # GitLab epics browser has no URL filter for "no lifecycle label" — link to the
+        # dedicated unlabelled section on the Epic Lifecycle wiki page instead.
+        _lc_page = (
+            f"{group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/Epic Lifecycle')}"
+            "#unlabelled"
         )
-        unlab_count = str(len(unlab)) if unlab else "0"
+        unlab_count = (
+            f'<a href="{_lc_page}" target="_blank">{len(unlab)}</a>'
+            if unlab else "0"
+        )
         md.append(
             f"| _(unlabelled)_ | {unlab_count} | "
             f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
