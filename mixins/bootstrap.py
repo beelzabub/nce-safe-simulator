@@ -1,5 +1,5 @@
 import random
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 import lorem
@@ -144,6 +144,29 @@ class BootstrapMixin:
             result.append(full_sg)
         return result
 
+    def _weighted_piid_label(self):
+        """Draw a PIID label weighted 65% past / 20% current / 15% future."""
+        today = date.today()
+        past, current, future = [], [], []
+        for p in self.PIID_LABELS:
+            start, end = self._pi_dates_from_label(p)
+            if start is None:
+                future.append(p)
+            elif end < today:
+                past.append(p)
+            elif start <= today <= end:
+                current.append(p)
+            else:
+                future.append(p)
+        buckets = [(past, 0.65), (current, 0.20), (future, 0.15)]
+        buckets = [(b, w) for b, w in buckets if b]
+        if not buckets:
+            return random.choice(self.PIID_LABELS)
+        total = sum(w for _, w in buckets)
+        populations, weights = zip(*buckets)
+        chosen = random.choices(populations, weights=[w / total for w in weights])[0]
+        return random.choice(chosen)
+
     def _lorem_epics_in_group(self, group, count, allowed_types=None):
         def next_monday_on_or_after(d):
             while d.weekday() != 0:
@@ -155,7 +178,7 @@ class BootstrapMixin:
 
         created = []
         for _ in range(count):
-            piid_label    = random.choice(self.PIID_LABELS)
+            piid_label    = self._weighted_piid_label()
             epic_label    = random.choice(type_pool)
             project_label = random.choice(self.PROJECT_LABELS)
 
@@ -257,8 +280,9 @@ class BootstrapMixin:
         epics         = self._lorem_epics_in_group(group, epic_count, allowed_types=allowed_types)
         feature_epics = [(e, lbl) for e, lbl in epics if lbl == "Feature"]
         if not feature_epics:
-            return epics
+            return epics, None
 
+        project = None
         try:
             project = self.gl.projects.create({
                 'name':         f"{group.name} — Team Backlog",
@@ -307,7 +331,7 @@ class BootstrapMixin:
         except Exception as e:
             print(f"  Skipping team backlog for '{group.full_path}': {e}")
 
-        return epics
+        return epics, project
 
     def create_all_lorem_objects(self,
                                   num_value_streams=None, num_arts=None, num_teams=None,
@@ -373,9 +397,10 @@ class BootstrapMixin:
         all_art_caps = []
         all_features = []
 
-        vs_counter   = 0  # global so each VS has a unique name/path
-        art_counter  = 0  # global across all VSs so each ART has a unique name/path
-        team_counter = 0  # global across all ARTs so each Team has a unique name/path
+        vs_counter    = 0  # global so each VS has a unique name/path
+        art_counter   = 0  # global across all VSs so each ART has a unique name/path
+        team_counter  = 0  # global across all ARTs so each Team has a unique name/path
+        art_items_map = {}  # art_group.id → {art, epics, team_projects} for history simulation
         for _ in range(num_value_streams):
             vs_counter += 1
             vs_group = self.gl.groups.create({
@@ -399,6 +424,11 @@ class BootstrapMixin:
                 print(f"\n[ART] {art_group.full_path}")
                 art_created = self._lorem_epics_in_group(art_group, art_epics, allowed_types=["Capability"])
                 all_art_caps.extend(art_created)
+                art_items_map[art_group.id] = {
+                    "art":          art_group,
+                    "epics":        list(art_created),
+                    "team_projects": [],
+                }
 
                 for _ in range(num_teams):
                     team_counter += 1
@@ -409,9 +439,12 @@ class BootstrapMixin:
                         'visibility': vis,
                     })
                     print(f"\n[Agile Team] {team_group.full_path}")
-                    team_created = self._lorem_populate_group(team_group, team_features, allowed_types=["Feature"])
+                    team_created, team_project = self._lorem_populate_group(team_group, team_features, allowed_types=["Feature"])
                     if team_created:
                         all_features.extend(team_created)
+                        art_items_map[art_group.id]["epics"].extend(team_created)
+                    if team_project:
+                        art_items_map[art_group.id]["team_projects"].append(team_project)
 
         def _link_to_parents(children, parents):
             if not parents or not children:
@@ -438,6 +471,85 @@ class BootstrapMixin:
         print(f"\nFeature routing: {len(direct_features)} direct → Epic  |  {len(cap_features)} via Capability chain  ({int(direct_feature_ratio*100)}% direct)")
         _link_to_parents(direct_features, all_portfolio_epics)
         _link_to_parents(cap_features,    all_art_caps)
+
+        self._simulate_history(art_items_map)
+
+    def _simulate_history(self, art_items_map):
+        """Close past-PI epics per ART at a realistic reliability rate; partially close current-PI issues."""
+        today = date.today()
+
+        past_piids    = [p for p in self.PIID_LABELS
+                         if (lambda s, e: e is not None and e < today)(*self._pi_dates_from_label(p))]
+        current_piids = [p for p in self.PIID_LABELS
+                         if (lambda s, e: s is not None and s <= today <= e)(*self._pi_dates_from_label(p))]
+
+        if not past_piids and not current_piids:
+            print("\nNo past or current PIIDs configured — skipping history simulation.")
+            return
+
+        rate_min = self.default_history_close_rate_min
+        rate_max = self.default_history_close_rate_max
+        curr_pct = self.default_current_pi_issue_close_pct
+
+        # Each ART gets a stable base reliability for the entire run
+        reliabilities = {aid: random.uniform(rate_min, rate_max) for aid in art_items_map}
+
+        print("\n--- Historical PI close simulation ---")
+        for aid, data in art_items_map.items():
+            print(f"  {data['art'].name}: base reliability {reliabilities[aid]:.0%}")
+
+        # Past PIs: close epics per ART at base ± 10%, then close child issues of closed epics
+        if past_piids:
+            print()
+            for aid, data in art_items_map.items():
+                reliability = reliabilities[aid]
+                projects    = data["team_projects"]
+
+                for piid in past_piids:
+                    pi_epics = [e for e, _ in data["epics"] if piid in getattr(e, 'labels', [])]
+                    if not pi_epics:
+                        continue
+
+                    rate      = min(1.0, max(0.5, reliability + random.uniform(-0.10, 0.10)))
+                    n_close   = round(len(pi_epics) * rate)
+                    to_close  = random.sample(pi_epics, n_close)
+                    closed_ids = set()
+
+                    for epic in to_close:
+                        try:
+                            epic.state_event = 'close'
+                            epic.save()
+                            closed_ids.add(epic.id)
+                        except Exception as exc:
+                            print(f"    Warning: could not close epic {getattr(epic, 'iid', '?')}: {exc}")
+
+                    # Close issues whose parent feature epic was closed
+                    for project in projects:
+                        try:
+                            for issue in project.issues.list(state='opened', all=True):
+                                epic_info = getattr(issue, 'epic', None)
+                                if isinstance(epic_info, dict) and epic_info.get('id') in closed_ids:
+                                    issue.state_event = 'close'
+                                    issue.save()
+                        except Exception as exc:
+                            print(f"    Warning: issue close error in {project.name}: {exc}")
+
+                    print(f"  {data['art'].name} / {piid}: closed {len(to_close)}/{len(pi_epics)} epics ({rate:.0%})")
+
+        # Current PI: partially close issues only — epics stay open to drive health dashboard flags
+        if current_piids and curr_pct > 0:
+            print(f"\n--- Current PI: closing {curr_pct:.0%} of issues (epics stay open) ---")
+            for data in art_items_map.values():
+                for project in data["team_projects"]:
+                    try:
+                        open_issues = project.issues.list(state='opened', all=True)
+                        n_close     = round(len(open_issues) * curr_pct)
+                        for issue in random.sample(open_issues, min(n_close, len(open_issues))):
+                            issue.state_event = 'close'
+                            issue.save()
+                        print(f"  {project.name}: closed {n_close}/{len(open_issues)} issues")
+                    except Exception as exc:
+                        print(f"  Warning: issue close error in {project.name}: {exc}")
 
     def create_safe_hierarchy(self, target_path=None):
         if target_path is None:
