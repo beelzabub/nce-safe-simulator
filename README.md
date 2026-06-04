@@ -209,20 +209,43 @@ Any config value can be overridden at runtime without editing the file:
 
 ### Main CLI
 
+Running with no arguments launches the **interactive main menu** — a numbered prompt covering Reports, Utilities, Scaffold, Create, and Clean. All options are also available as flags for non-interactive / scripted use.
+
 ```bash
-python3 NceGitLab.py --clean              # Delete all data in the root group
-python3 NceGitLab.py --create             # Bootstrap a full SAFe lorem data set
-python3 NceGitLab.py --scaffold           # Create SAFe group structure only (prompted)
-python3 NceGitLab.py --scaffold my/group  # Create SAFe group structure under a specific group
-python3 NceGitLab.py --report             # Show the report menu
-python3 NceGitLab.py --report all        # Run all reports non-interactively
-python3 NceGitLab.py --report portfolio   # Run a single report by key
-python3 NceGitLab.py --utilities          # Show the utility tool menu
-python3 NceGitLab.py --utilities audit-labels  # Run a single tool by key
-python3 NceGitLab.py --all                # clean → create → report in sequence
+python3 NceGitLab.py                      # Interactive main menu (default)
+
+# Core operations
+python3 NceGitLab.py -c  / --clean        # Delete all group data
+python3 NceGitLab.py -C  / --create       # Bootstrap a full SAFe lorem data set
+python3 NceGitLab.py -a  / --all          # clean → create → report in sequence
+
+# Reports
+python3 NceGitLab.py -r                   # Interactive report menu
+python3 NceGitLab.py -r all               # Run all reports
+python3 NceGitLab.py -r portfolio         # Run a single report by key
+python3 NceGitLab.py -r --last            # Reuse most recent data snapshot (no API fetch)
+python3 NceGitLab.py -r --reuse-data DIR  # Load snapshot from a specific directory
+
+# Utility tools
+python3 NceGitLab.py -ut                  # Interactive utility tool menu
+python3 NceGitLab.py -ut audit-labels     # Run a single tool by key
+python3 NceGitLab.py -ut set-wsjf-labels --open_only  # Pass tool params as flags
+
+# Scaffold
+python3 NceGitLab.py -s                   # Create SAFe group/project structure (prompted)
+python3 NceGitLab.py -s my/group          # Create structure under a specific group
 ```
 
-Each phase prints start/stop times and duration. `--all` prints a full run summary table on completion.
+Each phase logs start/stop times and elapsed duration. `--all` prints a consolidated timing table on completion. Ctrl-C prints a clean interrupt message showing which phase was running.
+
+#### Data snapshots
+
+`-r` fetches live data from GitLab on every run and saves a timestamped JSON snapshot under `reports/YYYY-MM-DD/HH-MM-SS/data/`. Two flags let you skip the fetch and reuse a previous snapshot:
+
+| Flag | Behaviour |
+|------|-----------|
+| `--last` | Automatically finds and loads the most recent saved snapshot |
+| `--reuse-data DIR` | Loads the snapshot from the directory you specify |
 
 A typical demo cycle:
 
@@ -243,7 +266,7 @@ python3 NceGitLab.py --all
 - *N* Team subgroups per ART, each with:
   - **Features** (🛠️)
   - A `Team Backlog` GitLab project
-  - 8–15 Issues per Feature, linked to milestones, with Fibonacci weights
+  - 8–15 Issues per Feature, with Fibonacci weights
 
 After all objects are created the hierarchy is linked cross-group:  
 `VS Capabilities → Portfolio Epics` → `ART Capabilities → VS Capabilities`
