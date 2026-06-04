@@ -24,7 +24,7 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
-from mixins.utils import _clear, _pause
+from mixins.utils import _clear, _pause, _tee_to_log
 
 
 class NceGitLab(
@@ -454,19 +454,30 @@ def main():
 
     phases = []
 
-    def _run_phase(label, fn):
+    def _run_phase(label, fn, log_stem=None):
         _phase[0] = label
-        start = datetime.now()
+        now      = datetime.now()
+        log_path = (
+            Path("logs")
+            / now.strftime("%Y-%m-%d")
+            / f"{now.strftime('%H-%M-%S')}_{log_stem or label}.log"
+        ) if log_stem is not None else None
+        start = now
         t0    = time.monotonic()
-        fn()
+        if log_path:
+            with _tee_to_log(log_path):
+                print(f"  log → {log_path}\n")
+                fn()
+        else:
+            fn()
         elapsed = time.monotonic() - t0
         end     = datetime.now()
         phases.append((label, start, end, elapsed))
 
     if args.all or args.clean:
-        _run_phase("cleanup", gl.cleanup_group)
+        _run_phase("cleanup", gl.cleanup_group, log_stem="clean")
     if args.all or args.create:
-        _run_phase("create",  gl.create_all_lorem_objects)
+        _run_phase("create",  gl.create_all_lorem_objects, log_stem="create")
 
     if args.all:
         _phase[0] = "reports"
