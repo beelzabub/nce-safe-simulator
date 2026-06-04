@@ -118,6 +118,32 @@ class UtilitiesMixin:
         sess.mount("http://",  adapter)
         return sess
 
+    def _epic_save_with_reopen(self, epic, new_labels):
+        """Apply new_labels to epic and save.
+
+        GitLab rejects label-only saves on closed epics via the REST API with
+        403 Forbidden — even when the epics list was filtered by state=opened,
+        a small number of closed epics can leak through.  On a 403 this method
+        reopens the epic, applies the labels, saves, then closes again.
+
+        Returns 'ok' on a direct save or 'ok_reopen' when the workaround was
+        needed.  Raises the original exception for any non-403 error, or if the
+        reopen/close sequence itself fails.
+        """
+        epic.labels = new_labels
+        try:
+            epic.save()
+            return "ok"
+        except Exception as e:
+            if getattr(e, "response_code", None) == 403:
+                epic.state_event = "reopen"
+                epic.labels = new_labels
+                epic.save()
+                epic.state_event = "close"
+                epic.save()
+                return "ok_reopen"
+            raise
+
     def graphql_query(self, query, variables=None):
         payload = {"query": query}
         if variables:

@@ -2092,9 +2092,9 @@ class ToolsMixin:
                 updated += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  REMOVED  #{epic.iid} '{epic.title[:55]}' — '{label}' stripped")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  REMOVED  #{epic.iid} '{epic.title[:55]}' — '{label}' stripped{suffix}")
                     updated += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
@@ -2390,9 +2390,9 @@ class ToolsMixin:
                 stripped += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:45]}'{suffix}")
                     stripped += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
@@ -2495,9 +2495,9 @@ class ToolsMixin:
                 stripped += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'{suffix}")
                     stripped += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
@@ -2622,9 +2622,9 @@ class ToolsMixin:
                 stripped += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:50]}'{suffix}")
                     stripped += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
