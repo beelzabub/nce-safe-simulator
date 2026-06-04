@@ -291,8 +291,26 @@ TOOLS = [
         ],
     },
     {
+        "key":         "set-business-value",
+        "description": "Randomly assign Business Value custom field (Fibonacci 1–21) to open epics that have none (or all when reassign=True)",
+        "method":      "_tool_set_business_value",
+        "params": [
+            {"name": "percent",  "prompt": "Percent of open epics to set (default 20)", "type": float, "default": 20.0},
+            {"name": "reassign", "prompt": "Replace existing Business Value too?",       "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                   "type": bool,  "default": False},
+        ],
+    },
+    {
+        "key":         "strip-business-value",
+        "description": "Clear the Business Value custom field from every epic (clean slate for testing)",
+        "method":      "_tool_strip_business_value",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-wsjf-labels",
-        "description": "Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
+        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
         "method":      "_tool_set_wsjf_labels",
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
@@ -402,6 +420,7 @@ TOOL_CATEGORIES = [
             "set-lifecycle-labels", "strip-lifecycle-labels",
             "set-piid-labels", "set-project-labels", "set-risk-labels",
             "set-work-type-labels", "strip-work-type-labels",
+            "set-business-value", "strip-business-value",
             "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
         ],
     },
@@ -2187,8 +2206,9 @@ class ToolsMixin:
             print("(dry-run — no changes saved)")
 
     def _tool_set_wsjf_labels(self, percent=None, reassign=False, dry_run=False):
-        """Randomly assign wsjf-value/urgency/risk Fibonacci labels to open epics.
+        """Randomly assign wsjf-urgency/risk Fibonacci labels to open epics.
 
+        Business Value is now a custom field — use set-business-value for that component.
         By default skips epics that already have any wsjf label.
         Pass reassign=True to replace existing wsjf labels too.
         """
@@ -2197,18 +2217,16 @@ class ToolsMixin:
 
         group = self.get_group_by_name(self.parent_group)
 
-        value_labels   = self._discover_labels(group, "wsjf-value::")
         urgency_labels = self._discover_labels(group, "wsjf-urgency::")
         risk_labels    = self._discover_labels(group, "wsjf-risk::")
 
-        if not value_labels and not urgency_labels and not risk_labels:
-            print("No wsjf-* labels found on group. Create them via bootstrap first.")
+        if not urgency_labels and not risk_labels:
+            print("No wsjf-urgency/risk labels found on group. Create them via bootstrap first.")
             return
 
-        all_wsjf = set(value_labels + urgency_labels + risk_labels)
+        all_wsjf = set(urgency_labels + risk_labels)
 
         print(f"Group          : {group.full_path}")
-        print(f"Value labels   : {value_labels}")
         print(f"Urgency labels : {urgency_labels}")
         print(f"Risk labels    : {risk_labels}")
         mode = "ALL open epics (reassign mode)" if reassign else "open epics with no existing wsjf label"
@@ -2236,13 +2254,8 @@ class ToolsMixin:
 
         updated = errors = 0
         for grp, epic in sample:
-            # Strip any existing wsjf labels before assigning new ones
             new_labels = [l for l in epic.labels if l not in all_wsjf]
             chosen = []
-            if value_labels:
-                v = random.choice(value_labels)
-                new_labels.append(v)
-                chosen.append(v)
             if urgency_labels:
                 u = random.choice(urgency_labels)
                 new_labels.append(u)
@@ -2267,6 +2280,130 @@ class ToolsMixin:
                     errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_set_business_value(self, percent=None, reassign=False, dry_run=False):
+        """Assign random Fibonacci Business Value to N% of open epics via custom field."""
+        if percent is None:
+            percent = 20.0
+
+        if not self.gitlab_namespace:
+            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            return
+
+        fields   = self._fetch_custom_fields(self.gitlab_namespace)
+        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        if not bv_field:
+            print("Business Value custom field not found. Run 'setup-bv-field' first.")
+            return
+
+        field_gid = bv_field["id"]
+        options   = [(opt["id"], opt["value"]) for opt in (bv_field.get("selectOptions") or [])]
+        if not options:
+            print("Business Value field has no options — check setup-bv-field.")
+            return
+
+        group = self.get_group_by_name(self.parent_group)
+
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True, state="opened"):
+                all_epics.append(epic)
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting open epics...")
+        _walk(group)
+        print(f"  {len(all_epics)} open epics found")
+
+        if reassign:
+            candidates = all_epics
+        else:
+            bv_map     = self._fetch_epic_business_values(all_epics)
+            candidates = [e for e in all_epics if e.id not in bv_map]
+            print(f"  {len(candidates)} without Business Value set")
+
+        k      = max(0, round(len(candidates) * percent / 100))
+        sample = random.sample(candidates, min(k, len(candidates)))
+        print(f"  Setting Business Value on {len(sample)} ({percent}%)\n")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        updated = errors = 0
+        for epic in sample:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                continue
+            opt_gid, opt_val = random.choice(options)
+            if dry_run:
+                print(f"  DRY  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
+                updated += 1
+            else:
+                try:
+                    self._set_work_item_business_value(wid, field_gid, opt_gid)
+                    print(f"  SET  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
+                    updated += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Set: {updated}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_business_value(self, dry_run=False):
+        """Clear the Business Value custom field from all epics."""
+        if not self.gitlab_namespace:
+            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            return
+
+        fields   = self._fetch_custom_fields(self.gitlab_namespace)
+        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        if not bv_field:
+            print("Business Value custom field not found — nothing to strip.")
+            return
+
+        field_gid = bv_field["id"]
+        group     = self.get_group_by_name(self.parent_group)
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                all_epics.append(epic)
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        print("\nCollecting epics...")
+        _walk(group)
+
+        bv_map    = self._fetch_epic_business_values(all_epics)
+        to_strip  = [e for e in all_epics if e.id in bv_map]
+        skipped   = len(all_epics) - len(to_strip)
+        print(f"  {len(to_strip)} with Business Value set, {skipped} already clear")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = errors = 0
+        for epic in to_strip:
+            wid = getattr(epic, 'work_item_id', None)
+            if not wid:
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:45]}'")
+                stripped += 1
+            else:
+                try:
+                    self._clear_work_item_business_value(wid, field_gid)
+                    print(f"  CLR  #{epic.iid} '{epic.title[:45]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Cleared: {stripped}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
@@ -2803,7 +2940,7 @@ class ToolsMixin:
 
     def _tool_generate_risk_reasons(self, conditions="all", percent=20.0,
                                      days_overdue=7, piid=None, dry_run=False):
-        """Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics."""
+        """Create Behind Schedule / Past Due / Child Overdue / Blocked on Capabilities, Features, and issues."""
         conds_all = {"behind_schedule", "past_due", "child_overdue", "blocked"}
         if conditions.strip().lower() == "all":
             conds = conds_all
@@ -2821,7 +2958,7 @@ class ToolsMixin:
 
         print(f"Group     : {group.full_path}")
         print(f"Conditions: {', '.join(sorted(conds))}")
-        print(f"Target    : {percent}% of eligible epics")
+        print(f"Target    : {percent}% of eligible items")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
@@ -2841,17 +2978,37 @@ class ToolsMixin:
         _walk(group)
         print(f"  Found {len(all_open)} open epics")
 
+        # ── Collect open issues (once, reused across conditions) ──────── #
+        needs_issues = conds & {"past_due", "child_overdue", "blocked"}
+        all_open_issues: list = []
+        if needs_issues:
+            print("\nCollecting open issues...")
+            for _proj in group.projects.list(all=True, include_subgroups=True):
+                try:
+                    _full_p = self.gl.projects.get(_proj.id)
+                    for _iss in _full_p.issues.list(all=True, state="opened"):
+                        all_open_issues.append((_full_p, _iss))
+                except Exception as _exc:
+                    print(f"  WARNING: {_proj.path}: {_exc}")
+            print(f"  Found {len(all_open_issues)} open issues")
+
+        def _epic_no_past_due(e):
+            dd = e.due_date or getattr(e, 'end_date', None)
+            return not dd or str(dd) >= today.isoformat()
+
         # ── Past Due ─────────────────────────────────────────────────── #
         if "past_due" in conds:
             print("\n── Past Due ──")
-            eligible = [
+
+            # Epics: Capabilities and Features
+            eligible_epics = [
                 (g, e) for g, e in all_open
-                if "Feature" not in e.labels
-                and (not e.due_date or e.due_date >= today.isoformat())
+                if ("Capability" in e.labels or "Feature" in e.labels)
+                and _epic_no_past_due(e)
             ]
-            k      = max(0, round(len(eligible) * percent / 100))
-            sample = random.sample(eligible, min(k, len(eligible)))
-            print(f"  Eligible (non-Feature, no existing past due_date): {len(eligible)}")
+            k      = max(0, round(len(eligible_epics) * percent / 100))
+            sample = random.sample(eligible_epics, min(k, len(eligible_epics)))
+            print(f"  Eligible Capability/Feature epics (no existing past due): {len(eligible_epics)}")
             print(f"  Targeting {len(sample)}\n")
             updated = errors = 0
             for g, epic in sample:
@@ -2860,27 +3017,53 @@ class ToolsMixin:
                     updated += 1
                 else:
                     try:
-                        epic.due_date = past_date
+                        epic.end_date = past_date
                         epic.save()
                         print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
                         updated += 1
                     except Exception as exc:
                         print(f"  ERROR #{epic.iid}: {exc}")
                         errors += 1
-            print(f"\n  Updated: {updated}  Errors: {errors}")
+            print(f"\n  Epics updated: {updated}  Errors: {errors}")
+
+            # Issues
+            eligible_issues = [
+                (p, iss) for p, iss in all_open_issues
+                if not (iss.due_date and str(iss.due_date) < today.isoformat())
+            ]
+            k      = max(0, round(len(eligible_issues) * percent / 100))
+            sample = random.sample(eligible_issues, min(k, len(eligible_issues)))
+            print(f"  Eligible issues (no existing past due): {len(eligible_issues)}")
+            print(f"  Targeting {len(sample)}\n")
+            updated = errors = 0
+            for proj, issue in sample:
+                if dry_run:
+                    print(f"  DRY  due={past_date}  #{issue.iid} '{issue.title[:55]}'")
+                    updated += 1
+                else:
+                    try:
+                        issue.due_date = past_date
+                        issue.save()
+                        print(f"  SET  due={past_date}  #{issue.iid} '{issue.title[:55]}'")
+                        updated += 1
+                    except Exception as exc:
+                        print(f"  ERROR #{issue.iid}: {exc}")
+                        errors += 1
+            print(f"\n  Issues updated: {updated}  Errors: {errors}")
 
         # ── Child Overdue ─────────────────────────────────────────────── #
         if "child_overdue" in conds:
             print("\n── Child Overdue ──")
-            eligible = [
+
+            # Feature epics: making them overdue triggers Child Overdue on their parent Capability
+            eligible_epics = [
                 (g, e) for g, e in all_open
                 if "Feature" in e.labels
-                and getattr(e, "parent_id", None) is not None
-                and (not e.due_date or e.due_date >= today.isoformat())
+                and _epic_no_past_due(e)
             ]
-            k      = max(0, round(len(eligible) * percent / 100))
-            sample = random.sample(eligible, min(k, len(eligible)))
-            print(f"  Eligible (Feature with parent, no existing past due_date): {len(eligible)}")
+            k      = max(0, round(len(eligible_epics) * percent / 100))
+            sample = random.sample(eligible_epics, min(k, len(eligible_epics)))
+            print(f"  Eligible Feature epics (no existing past due): {len(eligible_epics)}")
             print(f"  Targeting {len(sample)}\n")
             updated = errors = 0
             for g, epic in sample:
@@ -2889,14 +3072,39 @@ class ToolsMixin:
                     updated += 1
                 else:
                     try:
-                        epic.due_date = past_date
+                        epic.end_date = past_date
                         epic.save()
                         print(f"  SET  due={past_date}  #{epic.iid} '{epic.title[:55]}'")
                         updated += 1
                     except Exception as exc:
                         print(f"  ERROR #{epic.iid}: {exc}")
                         errors += 1
-            print(f"\n  Updated: {updated}  Errors: {errors}")
+            print(f"\n  Feature epics updated: {updated}  Errors: {errors}")
+
+            # Issues: making them overdue triggers Child Overdue on their parent Feature/Capability
+            eligible_issues = [
+                (p, iss) for p, iss in all_open_issues
+                if not (iss.due_date and str(iss.due_date) < today.isoformat())
+            ]
+            k      = max(0, round(len(eligible_issues) * percent / 100))
+            sample = random.sample(eligible_issues, min(k, len(eligible_issues)))
+            print(f"  Eligible issues (no existing past due): {len(eligible_issues)}")
+            print(f"  Targeting {len(sample)}\n")
+            updated = errors = 0
+            for proj, issue in sample:
+                if dry_run:
+                    print(f"  DRY  due={past_date}  #{issue.iid} '{issue.title[:55]}'")
+                    updated += 1
+                else:
+                    try:
+                        issue.due_date = past_date
+                        issue.save()
+                        print(f"  SET  due={past_date}  #{issue.iid} '{issue.title[:55]}'")
+                        updated += 1
+                    except Exception as exc:
+                        print(f"  ERROR #{issue.iid}: {exc}")
+                        errors += 1
+            print(f"\n  Issues updated: {updated}  Errors: {errors}")
 
         # ── Behind Schedule ───────────────────────────────────────────── #
         if "behind_schedule" in conds:
@@ -2960,26 +3168,23 @@ class ToolsMixin:
                 print(f"\n  Reopened: {updated}  Errors: {errors}")
 
         # ── Blocked ───────────────────────────────────────────────────── #
-        # Target Feature epics with a parent so the block propagates up to the
-        # Capability ancestor (⬆️ Risk propagation) and the portfolio Epic (⚠️ Portfolio risk flag).
         if "blocked" in conds:
             print("\n── Blocked ──")
             session = self._make_session()
 
-            # Blocked targets: Features that have a parent (guarantees ancestor propagation)
-            targets = [
+            # Epic targets: Capabilities and Features
+            epic_targets = [
                 (g, e) for g, e in all_open
-                if "Feature" in e.labels
-                and getattr(e, "parent_id", None) is not None
+                if "Capability" in e.labels or "Feature" in e.labels
             ]
-            # Blocker pool: non-Feature epics (Capabilities/Epics act as blockers)
+            # Blocker pool: Epics and Capabilities (non-Feature)
             blocker_pool = [(g, e) for g, e in all_open if "Feature" not in e.labels]
             if not blocker_pool:
                 blocker_pool = all_open
 
-            k      = max(0, round(len(targets) * percent / 100))
-            sample = random.sample(targets, min(k, len(targets)))
-            print(f"  Eligible (Feature with parent): {len(targets)}")
+            k      = max(0, round(len(epic_targets) * percent / 100))
+            sample = random.sample(epic_targets, min(k, len(epic_targets)))
+            print(f"  Eligible Capability/Feature epics: {len(epic_targets)}")
             print(f"  Targeting {len(sample)}\n")
 
             updated = errors = 0
@@ -2988,14 +3193,12 @@ class ToolsMixin:
                 if not valid_blockers:
                     print(f"  SKIP  #{epic.iid} (no valid blocker available)")
                     continue
-
                 blocker_grp, blocker_epic = random.choice(valid_blockers)
                 label = (
                     f"#{epic.iid} '{epic.title[:45]}'"
                     f"  <--[blocked by]--  "
                     f"#{blocker_epic.iid} '{blocker_epic.title[:45]}'"
                 )
-
                 if dry_run:
                     print(f"  DRY  {label}")
                     updated += 1
@@ -3014,8 +3217,48 @@ class ToolsMixin:
                     else:
                         print(f"  ERROR [{resp.status_code}] #{epic.iid}: {resp.text[:120]}")
                         errors += 1
+            print(f"\n  Epics blocked: {updated}  Errors: {errors}")
 
-            print(f"\n  Blocked: {updated}  Errors: {errors}")
+            # Issues: sample open issues and add "blocked by" a random other issue
+            issue_eligible = list(all_open_issues)
+            k      = max(0, round(len(issue_eligible) * percent / 100))
+            sample = random.sample(issue_eligible, min(k, len(issue_eligible)))
+            print(f"  Eligible issues: {len(issue_eligible)}")
+            print(f"  Targeting {len(sample)}\n")
+            updated = errors = 0
+            for target_proj, target_issue in sample:
+                valid_issue_blockers = [
+                    (p, iss) for p, iss in issue_eligible
+                    if not (p.id == target_proj.id and iss.iid == target_issue.iid)
+                ]
+                if not valid_issue_blockers:
+                    print(f"  SKIP  #{target_issue.iid} (no valid blocker)")
+                    continue
+                blocker_proj, blocker_issue = random.choice(valid_issue_blockers)
+                label = (
+                    f"#{target_issue.iid} '{target_issue.title[:45]}'"
+                    f"  <--[blocked by]--  "
+                    f"#{blocker_issue.iid} '{blocker_issue.title[:45]}'"
+                )
+                if dry_run:
+                    print(f"  DRY  {label}")
+                    updated += 1
+                else:
+                    url  = f"{self.url}/api/v4/projects/{target_proj.id}/issues/{target_issue.iid}/links"
+                    resp = session.post(url, json={
+                        "target_project_id": blocker_proj.id,
+                        "target_issue_iid":  blocker_issue.iid,
+                        "link_type":         "is_blocked_by",
+                    })
+                    if resp.status_code in (200, 201):
+                        print(f"  BLOCKED  {label}")
+                        updated += 1
+                    elif resp.status_code == 409:
+                        print(f"  SKIP (already linked)  #{target_issue.iid}")
+                    else:
+                        print(f"  ERROR [{resp.status_code}] #{target_issue.iid}: {resp.text[:120]}")
+                        errors += 1
+            print(f"\n  Issues blocked: {updated}  Errors: {errors}")
 
         print("\nDone.")
         if dry_run:

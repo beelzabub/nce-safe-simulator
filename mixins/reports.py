@@ -1596,7 +1596,8 @@ class ReportsMixin:
             status = risk.get("roam_status") or "roam::owned"
             roam_buckets.setdefault(status, []).append((risk, epics))
 
-        # ── Child-overdue bucket (Refs #8) ────────────────────────────── #
+        # ── Condition buckets — independent, an epic may appear in multiple ─ #
+        # Build parent→children map for child-overdue detection
         children_by_parent: defaultdict = defaultdict(list)
         for e in self._rd_epics_all:
             pid = e.get("parent_id")
@@ -1605,11 +1606,21 @@ class ReportsMixin:
 
         def _has_overdue_child_feature(epic_id):
             for child in children_by_parent.get(epic_id, []):
-                if "Feature" not in child.get("labels", []):
-                    continue
                 if (child.get("state") or "").lower() == "closed":
                     continue
                 dd = child.get("due_date")
+                if dd:
+                    try:
+                        if date.fromisoformat(str(dd)[:10]) < today:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+                if _has_overdue_child_feature(child["id"]):
+                    return True
+            for issue in self._rd_issues_by_epic.get(epic_id, []):
+                if (issue.get("state") or "").lower() == "closed":
+                    continue
+                dd = issue.get("due_date")
                 if dd:
                     try:
                         if date.fromisoformat(str(dd)[:10]) < today:
@@ -1624,35 +1635,34 @@ class ReportsMixin:
             except (ValueError, TypeError):
                 return False
 
-        all_flagged = roam_epics_seen
-        child_overdue_bucket = [
+        open_epics_caps = [
             e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and _has_overdue_child_feature(e["id"])
+            if e.get("type") in ("Epic", "Capability", "Feature")
+            and (e.get("state") or "").lower() != "closed"
         ]
 
-        all_flagged = all_flagged | {e["id"] for e in child_overdue_bucket}
+        blocked_bucket = [
+            e for e in open_epics_caps
+            if (e.get("blocked_by_count") or 0) > 0
+        ]
+        child_overdue_bucket = [
+            e for e in open_epics_caps
+            if _has_overdue_child_feature(e["id"])
+        ]
         past_due_bucket = [
-            e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and (e.get("state") or "").lower() != "closed"
+            e for e in open_epics_caps
+            if e.get("type") in ("Epic", "Capability")
             and _is_past_due(e.get("due_date"))
         ]
-
-        all_flagged = all_flagged | {e["id"] for e in past_due_bucket}
         behind_schedule_bucket = [
-            e for e in self._rd_epics_all
-            if e["id"] not in all_flagged
-            and e.get("type") in ("Epic", "Capability")
-            and (e.get("state") or "").lower() != "closed"
-            and e.get("pct_through_pi") is not None
+            e for e in open_epics_caps
+            if e.get("pct_through_pi") is not None
             and 0 < e["pct_through_pi"] < 100
             and e.get("pct_complete", 0) < e["pct_through_pi"]
         ]
 
         total_roam_risks   = len(risk_map)
+        total_blocked      = len(blocked_bucket)
         total_child_over   = len(child_overdue_bucket)
         total_past_due     = len(past_due_bucket)
         total_behind_sched = len(behind_schedule_bucket)
@@ -1690,20 +1700,44 @@ class ReportsMixin:
 
         panels = []
 
-        roam_rows = [(ROAM_ICONS.get(lbl, lbl), len(roam_buckets.get(lbl, [])))
-                     for lbl in ROAM_ORDER]
-        roam_rows.append(("<strong>Total</strong>", f"<strong>{total_roam_risks}</strong>"))
-        panels.append(_panel("ROAM Risk Issues", "Status", "Count", roam_rows))
+        # Count all issues per ROAM label from the snapshot (regardless of epic linkage)
+        all_roam_counts: dict = {lbl: 0 for lbl in ROAM_ORDER}
+        for issues in self._rd_issues_by_project.values():
+            for issue in issues:
+                for lbl in (issue.get("labels") or []):
+                    if lbl in all_roam_counts:
+                        all_roam_counts[lbl] += 1
 
-        if total_child_over or total_past_due or total_behind_sched:
-            flag_rows = []
-            if total_past_due:
-                flag_rows.append(("📅 Past Due", total_past_due))
-            if total_child_over:
-                flag_rows.append(("📅 Child Overdue", total_child_over))
-            if total_behind_sched:
-                flag_rows.append(("⏱️ Behind Schedule", total_behind_sched))
-            panels.append(_panel("Schedule Alerts", "Type", "Count", flag_rows))
+        def _roam_all_cell(lbl, n):
+            url = f"{group.web_url}/-/issues?label_name[]={lbl}&state=all"
+            return f"<a href='{url}' target='_blank'>{n}</a>" if n else "0"
+
+        total_all_roam = sum(all_roam_counts.values())
+        roam_rows = [(ROAM_ICONS.get(lbl, lbl),
+                      _roam_all_cell(lbl, all_roam_counts.get(lbl, 0)),
+                      len(roam_buckets.get(lbl, [])))
+                     for lbl in ROAM_ORDER]
+        roam_rows.append(("<strong>Total</strong>",
+                          f"<strong>{total_all_roam}</strong>",
+                          f"<strong>{total_roam_risks}</strong>"))
+        _roam_thead = "<tr><th align='left'>Status</th><th align='left'>All</th><th align='left'>Linked</th></tr>"
+        _roam_tbody = "".join(f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td></tr>" for r in roam_rows)
+        panels.append(
+            f"<td valign='top'><strong>ROAM Risk Issues</strong>"
+            f"<table>{_roam_thead}{_roam_tbody}</table></td>"
+        )
+
+        alert_rows = []
+        if total_blocked:
+            alert_rows.append(("🔒 Blocked", total_blocked))
+        if total_child_over:
+            alert_rows.append(("📅 Child Overdue", total_child_over))
+        if total_past_due:
+            alert_rows.append(("📅 Past Due", total_past_due))
+        if total_behind_sched:
+            alert_rows.append(("⏱️ Behind Schedule", total_behind_sched))
+        if alert_rows:
+            panels.append(_panel("Condition Alerts", "Condition", "Items", alert_rows))
 
         if vs_counts:
             panels.append(_panel("By Value Stream", "Value Stream", "ROAM Risks",
@@ -1713,6 +1747,11 @@ class ReportsMixin:
         md.append("## Summary")
         md.append("")
         md.append(f"<table><tr valign='top'>{spacer.join(panels)}</tr></table>")
+        md.append("")
+        md.append(
+            "_An epic may appear in more than one condition section below — "
+            "conditions are independent and cumulative._"
+        )
         md.append("")
 
         # ── Section 1: ROAM risk issues ──────────────────────────────── #
@@ -1775,30 +1814,39 @@ class ReportsMixin:
                 etype, eicon, pi, path, state = _epic_meta(epic)
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 reasons    = _item_risk_reasons(epic, today)
-                if prepend:
+                if prepend and prepend not in reasons:
                     reasons = (f"{prepend} · " + reasons) if reasons != "—" else prepend
                 md.append(f"| {eicon} {title_link} | {pi} | {path} | {state} | {reasons} |")
             md.append("")
 
-        # ── Section 2: Child Overdue ──────────────────────────────────── #
+        # ── Section 2: Blocked ───────────────────────────────────────────── #
+        if blocked_bucket:
+            md.append("---")
+            md.append(f"## 🔒 Blocked ({total_blocked})")
+            md.append("")
+            md.append("_Has one or more active blocking relationships._")
+            md.append("")
+            _render_epic_table(blocked_bucket, prepend="🔒 Blocked")
+
+        # ── Section 3: Child Overdue ──────────────────────────────────── #
         if child_overdue_bucket:
             md.append("---")
             md.append(f"## 📅 Child Overdue ({total_child_over})")
             md.append("")
-            md.append("_No ROAM issues — flagged because a child Feature has passed its due date._")
+            md.append("_A child Feature has passed its due date and is not Closed._")
             md.append("")
             _render_epic_table(child_overdue_bucket, prepend="📅 Child Overdue")
 
-        # ── Section 3: Past Due ───────────────────────────────────────── #
+        # ── Section 4: Past Due ───────────────────────────────────────── #
         if past_due_bucket:
             md.append("---")
             md.append(f"## 📅 Past Due ({total_past_due})")
             md.append("")
-            md.append("_No ROAM issues and no overdue children — flagged because the epic's own due date has passed._")
+            md.append("_The epic's own due date has passed and it is not Closed._")
             md.append("")
             _render_epic_table(past_due_bucket, prepend="📅 Past Due")
 
-        # ── Section 4: Behind Schedule ────────────────────────────────── #
+        # ── Section 5: Behind Schedule ────────────────────────────────── #
         if behind_schedule_bucket:
             md.append("---")
             md.append(f"## ⏱️ Behind Schedule ({total_behind_sched})")
@@ -3924,7 +3972,7 @@ class ReportsMixin:
             if epic.get("state", "").lower() != "opened":
                 continue
             labels  = epic.get("labels", [])
-            value   = _label_val(labels, "wsjf-value::")
+            value   = epic.get("business_value")
             urgency = _label_val(labels, "wsjf-urgency::")
             risk    = _label_val(labels, "wsjf-risk::")
             if value is None and urgency is None and risk is None:
@@ -3961,8 +4009,9 @@ class ReportsMixin:
 
         if not candidates:
             md.append(
-                "_No WSJF-scored epics found. Apply `wsjf-value::N`, `wsjf-urgency::N`, and "
-                "`wsjf-risk::N` labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
+                "_No WSJF-scored epics found. Set the Business Value custom field via "
+                "`set-business-value`, and apply `wsjf-urgency::N` and `wsjf-risk::N` labels "
+                "(Fibonacci scale: 1, 2, 3, 5, 8, 13) to open epics._"
             )
         else:
             scored    = [c for c in candidates if c["score"] is not None]
@@ -3982,8 +4031,8 @@ class ReportsMixin:
 
             md.append("## Ranked Board")
             md.append("")
-            md.append("| Rank | Epic | Type | PI | Value | Urgency | Risk | Size | WSJF |")
-            md.append("|------|------|------|----|-------|---------|------|------|------|")
+            md.append("| Rank | Epic | Type | PI | BV | Urgency | Risk | Size | WSJF |")
+            md.append("|------|------|------|----|----|---------|------|------|------|")
 
             for rank, c in enumerate(candidates, 1):
                 epic   = c["epic"]
@@ -4002,15 +4051,77 @@ class ReportsMixin:
 
             md.append("")
 
+        # ── Blocked Business Value ───────────────────────────────────────
+        bv_by_id      = {e["id"]: e.get("business_value")
+                         for tier in self._rd_metrics.values() for e in tier}
+        epic_url_by_id = {e["id"]: e.get("web_url", "")
+                          for tier in self._rd_metrics.values() for e in tier}
+
+        # rows: (pe_id, pe_link, pe_bv, blocked_link, type_str, blocker_str)
+        bv_rows    = []
+        seen_pe_bv = {}  # pe_id → bv — deduped for total
+
+        for rel in self._rd_blocking.get("relationships", []):
+            blocked  = rel["blocked_epic"]
+            blockers = rel.get("blocked_by", [])
+            ancs     = rel.get("at_risk_portfolio_epics", [])
+
+            # If the blocked item is itself a Portfolio Epic, treat it as its own ancestor
+            pe_candidates = ([blocked] + ancs) if blocked.get("type") == "Epic" else (ancs or [blocked])
+
+            blocker_str  = ", ".join(
+                f"[{b['title']}]({b['web_url']})" if b.get("web_url") else b["title"]
+                for b in blockers
+            )
+            b_type  = blocked.get("type", "Epic")
+            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
+            bl_link = (f"[{blocked['title']}]({blocked['web_url']})"
+                       if blocked.get("web_url") else blocked["title"])
+
+            for pe in pe_candidates:
+                pe_id   = pe.get("id") or pe.get("id_int")
+                pe_bv   = bv_by_id.get(pe_id)
+                pe_url  = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
+                pe_link = f"[{pe['title']}]({pe_url})" if pe_url else pe["title"]
+                bv_rows.append((pe_id, pe_link, pe_bv, bl_link, f"{b_icon} {b_type}", blocker_str))
+                if pe_id not in seen_pe_bv:
+                    seen_pe_bv[pe_id] = pe_bv
+
+        if bv_rows:
+            total_bv    = sum(v for v in seen_pe_bv.values() if v is not None)
+            n_pe        = len(seen_pe_bv)
+            pe_word     = "Portfolio Epics" if n_pe != 1 else "Portfolio Epic"
+            bv_rows.sort(key=lambda x: (x[2] is None, -(x[2] or 0)))
+
+            md.append("## Blocked Business Value")
+            md.append("")
+            md.append(
+                f"_{n_pe} {pe_word} {'have' if n_pe != 1 else 'has'} blocked descendants. "
+                f"Total BV at risk: **{total_bv}**_"
+            )
+            md.append("")
+            md.append("| Portfolio Epic | BV | Blocked Item | Type | Blocker(s) |")
+            md.append("|---|---|---|---|---|")
+            for _, pe_link, pe_bv, bl_link, type_str, blocker_str in bv_rows:
+                bv_str = str(pe_bv) if pe_bv is not None else "—"
+                md.append(f"| {pe_link} | {bv_str} | {bl_link} | {type_str} | {blocker_str} |")
+            md.append("")
+            md.append(
+                f"> **Total Business Value at Risk: {total_bv}** "
+                f"(sum of {n_pe} distinct Portfolio Epic BV scores)"
+            )
+            md.append("")
+
         md.extend([
             "---",
-            "## How WSJF Works",
+            "<details>",
+            "<summary>How WSJF Works</summary>",
             "",
-            "**WSJF = (User/Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
+            "**WSJF = (Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
             "",
-            "| Component | Label | What it measures |",
-            "|-----------|-------|-----------------|",
-            "| User/Business Value | `wsjf-value::N` | Economic benefit of delivering this work |",
+            "| Component | Source | What it measures |",
+            "|-----------|--------|-----------------|",
+            "| Business Value | Custom field (Fibonacci 1–21) | Economic benefit — set via `set-business-value` or the GitLab epic UI |",
             "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how fast does value decay? |",
             "| Risk Reduction | `wsjf-risk::N` | Risk reduced or opportunity enabled by this work |",
             "| Job Size | Epic planned weight | Relative effort (set the epic's weight field) |",
@@ -4028,6 +4139,7 @@ class ReportsMixin:
             "| **N.NN** (bold score) | All three label components present and job size > 0 |",
             "| _partial_ | One or more label components missing, or job size not set |",
             "",
+            "</details>",
         ])
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/WSJF Priority Board", "\n".join(md))
@@ -4826,6 +4938,12 @@ class ReportsMixin:
             self._run_reports_inner(reports, run_dir, data_dir, reuse_data)
 
     def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data):
+        # Always start with a clean fetch — stale caches from a prior run in
+        # the same session would silently re-publish old data to the wiki.
+        for _cache_attr in ('_metrics_cache', '_issues_cache', '_all_epics_cache'):
+            if hasattr(self, _cache_attr):
+                delattr(self, _cache_attr)
+
         group = self.get_group_by_name(self.parent_group)
         self._rd_root_obj = group
         gn = group.name
