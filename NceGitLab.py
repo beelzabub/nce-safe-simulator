@@ -125,12 +125,9 @@ class NceGitLab(
         ])
 
         _wsjf = config.get("wsjf_labels", {})
-        self.WSJF_LABELS = (
-            _wsjf.get("value", []) + _wsjf.get("urgency", []) + _wsjf.get("risk", [])
-        )
-        self.WSJF_VALUE_LABELS   = _wsjf.get("value",   [])
         self.WSJF_URGENCY_LABELS = _wsjf.get("urgency", [])
         self.WSJF_RISK_LABELS    = _wsjf.get("risk",    [])
+        self.WSJF_LABELS         = self.WSJF_URGENCY_LABELS + self.WSJF_RISK_LABELS
 
         work_type_env = parse_label_env("WORK_TYPE_LABELS")
         self.WORK_TYPE_LABELS = work_type_env if work_type_env else config.get("work_type_labels", [])
