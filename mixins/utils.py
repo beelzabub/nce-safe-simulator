@@ -149,7 +149,8 @@ class UtilitiesMixin:
                 return "ok_reopen"
             raise
 
-    def graphql_query(self, query, variables=None):
+    def graphql_query(self, query, variables=None, retries=0):
+        import time
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
@@ -164,6 +165,9 @@ class UtilitiesMixin:
         response.raise_for_status()
         data = response.json()
         if "errors" in data:
+            if retries > 0:
+                time.sleep(1.5)
+                return self.graphql_query(query, variables=variables, retries=retries - 1)
             for err in data["errors"]:
                 print(f"GraphQL error: {err['message']}")
             return None
@@ -182,7 +186,7 @@ class UtilitiesMixin:
           }
         }
         """
-        data = self.graphql_query(mutation, variables={"id": f"gid://gitlab/WorkItem/{wid}", "weight": weight})
+        data = self.graphql_query(mutation, variables={"id": f"gid://gitlab/WorkItem/{wid}", "weight": weight}, retries=1)
         if data:
             errors = data.get("workItemUpdate", {}).get("errors", [])
             if errors:
@@ -278,7 +282,7 @@ class UtilitiesMixin:
           }
         }
         """ % (f"gid://gitlab/WorkItem/{work_item_id}", field_gid, option_gid)
-        data   = self.graphql_query(mutation)
+        data   = self.graphql_query(mutation, retries=1)
         errors = (data or {}).get("workItemUpdate", {}).get("errors", [])
         if errors:
             print(f"  Business Value set error: {errors}")
