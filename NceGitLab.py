@@ -57,7 +57,7 @@ class NceGitLab(
                         "epic_type_labels": ["Epic", "Capability", "Feature"],
                         "risk_labels": ["risk::high", "risk::medium", "risk::low"],
                         "work_type_labels": ["type::feature", "type::enabler", "type::infrastructure", "type::defect"],
-                        "wsjf_labels": { "value": ["wsjf-value::1", "..."], "urgency": [...], "risk": [...] }
+                        "wsjf_labels": { "urgency": [...], "risk": [...] }
                     }
             ''')
             exit(1)
