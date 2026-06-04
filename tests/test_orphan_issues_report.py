@@ -24,7 +24,6 @@ def _issue(iid=1, title="An issue", epic_id=None, labels=None, state="opened"):
         "state":     state,
         "epic_id":   epic_id,
         "labels":    labels or [],
-        "milestone": None,
         "assignees": [],
     }
 
