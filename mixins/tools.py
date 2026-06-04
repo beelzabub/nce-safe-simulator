@@ -227,12 +227,13 @@ TOOLS = [
     },
     {
         "key":         "set-lifecycle-labels",
-        "description": "Randomly assign lifecycle::funnel/analyzing/backlog/implementing/done labels to open epics (or all when reassign=True)",
+        "description": "Randomly assign lifecycle::* labels to epics (open + closed by default)",
         "method":      "_tool_set_lifecycle_labels",
         "params": [
-            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
-            {"name": "reassign", "prompt": "Replace existing lifecycle:: labels too?",     "type": bool,  "default": False},
-            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+            {"name": "percent",   "prompt": "Percent of epics to label (default 20)",          "type": float, "default": 20.0},
+            {"name": "reassign",  "prompt": "Replace existing lifecycle:: labels too?",         "type": bool,  "default": False},
+            {"name": "open_only", "prompt": "Restrict to open epics only?",                    "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False},
         ],
     },
     {
@@ -2572,8 +2573,8 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_set_lifecycle_labels(self, percent=None, reassign=False, dry_run=False):
-        """Randomly assign lifecycle::* labels to open epics using SAFe Kanban state distribution."""
+    def _tool_set_lifecycle_labels(self, percent=None, reassign=False, open_only=False, dry_run=False):
+        """Randomly assign lifecycle::* labels to epics (open + closed by default) using SAFe Kanban state distribution."""
         if percent is None:
             percent = 20.0
 
@@ -2596,9 +2597,12 @@ class ToolsMixin:
         if not pool:
             pool = lifecycle_lbls  # fallback: uniform
 
+        state_filter = "opened" if open_only else "all"
+
         print(f"Group   : {group.full_path}")
         print(f"Labels  : {lifecycle_lbls}")
-        mode = "ALL open epics (reassign mode)" if reassign else "open epics without lifecycle:: label"
+        scope = "open epics" if open_only else "all epics (open + closed)"
+        mode  = f"ALL {scope} (reassign mode)" if reassign else f"{scope} without lifecycle:: label"
         print(f"Target  : {percent}% of {mode}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
@@ -2606,16 +2610,17 @@ class ToolsMixin:
         candidates = []
 
         def _walk(grp):
-            for epic in grp.epics.list(all=True, state="opened"):
+            for epic in grp.epics.list(all=True, state=state_filter):
                 if reassign or not (set(epic.labels) & all_lc):
                     candidates.append((grp, epic))
             for sg in grp.subgroups.list(all=True):
                 _walk(self.gl.groups.get(sg.id))
 
-        print("\nCollecting open epics...")
+        scope_label = "open epics" if open_only else "epics (open + closed)"
+        print(f"\nCollecting {scope_label}...")
         _walk(group)
-        label_state = "total" if reassign else "without lifecycle:: label"
-        print(f"  {len(candidates)} open epics {label_state}")
+        label_state = "total" if reassign else f"without lifecycle:: label"
+        print(f"  {len(candidates)} {scope_label} {label_state}")
 
         k      = max(0, round(len(candidates) * percent / 100))
         sample = random.sample(candidates, min(k, len(candidates)))
@@ -2636,8 +2641,24 @@ class ToolsMixin:
                     print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
                     updated += 1
                 except Exception as e:
-                    print(f"  ERROR #{epic.iid}: {e}")
-                    errors += 1
+                    if (getattr(e, "response_code", None) == 403
+                            and getattr(epic, "state", None) == "closed"):
+                        # GitLab rejects label-only saves on closed epics;
+                        # reopen, apply label, then close again.
+                        try:
+                            epic.state_event = "reopen"
+                            epic.labels = new_labels
+                            epic.save()
+                            epic.state_event = "close"
+                            epic.save()
+                            print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}' (via reopen)")
+                            updated += 1
+                        except Exception as e2:
+                            print(f"  ERROR #{epic.iid} (reopen/close failed): {e2}")
+                            errors += 1
+                    else:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
