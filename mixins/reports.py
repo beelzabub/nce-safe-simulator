@@ -1651,7 +1651,8 @@ class ReportsMixin:
         ]
         past_due_bucket = [
             e for e in open_epics_caps
-            if _is_past_due(e.get("due_date"))
+            if e.get("type") in ("Epic", "Capability")
+            and _is_past_due(e.get("due_date"))
         ]
         behind_schedule_bucket = [
             e for e in open_epics_caps

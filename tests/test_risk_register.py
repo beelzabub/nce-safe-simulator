@@ -79,13 +79,13 @@ class TestRoamSection:
             make_risk(iid=3, roam_status="roam::accepted"),
         ])]
         md = _render(epics)
-        assert "<td>⚠️ Owned</td><td>2</td>" in md
-        assert "<td>✋ Accepted</td><td>1</td>" in md
+        assert "<td>⚠️ Owned</td><td>0</td><td>2</td>" in md
+        assert "<td>✋ Accepted</td><td>0</td><td>1</td>" in md
 
     def test_total_risk_count_in_summary(self):
         epics = [make_epic(id=1, roam_risks=[make_risk(iid=1), make_risk(iid=2)])]
         md = _render(epics)
-        assert "<strong>Total</strong></td><td><strong>2</strong>" in md
+        assert "<strong>Total</strong></td><td><strong>0</strong></td><td><strong>2</strong>" in md
 
 
 # ---------------------------------------------------------------------------
