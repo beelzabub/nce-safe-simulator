@@ -9,11 +9,6 @@ from urllib.parse import quote
 from .utils import _clear, _fmt_duration, _tee_to_log
 
 
-# GitLab work_items URL numeric type ID for Epics (type[]=8).
-# Inferred from browser URL when filtering by Epic in the work_items UI.
-# May differ on self-managed instances — check /-/work_items if links misbehave.
-_WI_EPIC_TYPE = "8"
-
 
 def _gid_to_int(gid_str):
     """Convert 'gid://gitlab/Epic/123' → 123, or return None."""
@@ -553,9 +548,8 @@ class ReportsMixin:
 
         def _board_url(proj, piid):
             return (
-                f"{group.web_url}/-/work_items"
-                f"?type%5B%5D={_WI_EPIC_TYPE}"
-                f"&label_name[]={quote(piid, safe='')}"
+                f"{group.web_url}/-/epics"
+                f"?label_name[]={quote(piid, safe='')}"
                 f"&label_name[]={quote(proj, safe='')}"
                 f"&state=all"
             )
@@ -719,9 +713,8 @@ class ReportsMixin:
                 delta_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
                 blocked_str = str(blocked) if blocked else "—"
                 board_url = (
-                    f"{group.web_url}/-/work_items"
-                    f"?type%5B%5D={_WI_EPIC_TYPE}"
-                    f"&label_name[]={quote(piid, safe='')}"
+                    f"{group.web_url}/-/epics"
+                    f"?label_name[]={quote(piid, safe='')}"
                     f"&label_name[]={quote(proj, safe='')}"
                     f"&state=all"
                 )
@@ -981,11 +974,9 @@ class ReportsMixin:
 
                 if grp:
                     wi_url = (
-                        f"{self.url}/groups/{grp['full_path']}/-/work_items"
-                        f"?sort=created_date&state=opened"
-                        f"&type%5B%5D={_WI_EPIC_TYPE}"
-                        f"&label_name%5B%5D={quote(piid, safe='')}"
-                        f"&first_page_size=100"
+                        f"{self.url}/groups/{grp['full_path']}/-/epics"
+                        f"?state=opened"
+                        f"&label_name[]={quote(piid, safe='')}"
                     )
                     epics_cell = f'<a href="{wi_url}" target="_blank" rel="noopener noreferrer">{len(fs)}</a>'
                 else:
@@ -3280,19 +3271,21 @@ class ReportsMixin:
         # ── Work Items deep links ─────────────────────────────────────────── #
         from urllib.parse import quote as _pquote
 
+        _epics_base = f"{root_group.web_url}/-/epics"
+
         def _wi(params):
             parts = [f"{_pquote(k, safe='')}={_pquote(v, safe='')}" for k, v in params]
-            return f"{root_group.web_url}/-/work_items?{'&'.join(parts)}"
+            return f"{_epics_base}?{'&'.join(parts)}"
 
-        _wi_all   = _wi([("state", "all"),    ("type[]", _WI_EPIC_TYPE)])
+        _wi_all   = _wi([("state", "all")])
         _wi_pi    = (
-            _wi([("state", "opened"), ("type[]", _WI_EPIC_TYPE), ("label_name[]", current_pi)])
+            _wi([("state", "opened"), ("label_name[]", current_pi)])
             if current_pi else _wi_all
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
         _wi_risk = _wi_all
-        _wi_unasn = _wi([("state", "opened"), ("type[]", _WI_EPIC_TYPE)])
+        _wi_unasn = _wi([("state", "opened")])
 
         md.append("## Portfolio Summary")
         md.append("")
@@ -3515,13 +3508,12 @@ class ReportsMixin:
             ages = [a for a in ages if a is not None]
             return max(ages) if ages else None
 
-        wi_base = f"{group.web_url}/-/work_items"
+        epics_base = f"{group.web_url}/-/epics"
 
         def _wi_lc(lc_key):
             return (
-                f"{wi_base}?state=all"
-                f"&type%5B%5D={_WI_EPIC_TYPE}"
-                f"&label_name%5B%5D={quote(lc_key, safe='')}"
+                f"{epics_base}?state=all"
+                f"&label_name[]={quote(lc_key, safe='')}"
             )
 
         md.append("| State | Count | Avg Age | Oldest | Threshold |")
@@ -3542,11 +3534,11 @@ class ReportsMixin:
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
         _not_lc = "".join(
-            f"&not%5Blabel_name%5D%5B%5D={quote(lc, safe='')}"
+            f"&not[label_name][]={quote(lc, safe='')}"
             for lc in self._rd_lifecycle_labels
         )
         unlab_count = (
-            f'<a href="{wi_base}?state=all&type%5B%5D={_WI_EPIC_TYPE}{_not_lc}" target="_blank">{len(unlab)}</a>'
+            f'<a href="{epics_base}?state=all{_not_lc}" target="_blank">{len(unlab)}</a>'
             if unlab else "0"
         )
         md.append(
