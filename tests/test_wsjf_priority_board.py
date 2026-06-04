@@ -155,7 +155,7 @@ class TestBlockedBVSummaryTable:
         blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
         blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
         content = _run(_blocking_harness(pe, blocked, blocker))
-        assert "### BV at Risk by Epic" in content
+        assert "- [Portfolio Epic A]" in content
 
     def test_summary_table_shows_pe_bv(self):
         pe      = _epic_with_wsjf(id=10, business_value=8, title="Portfolio Epic A")
@@ -165,15 +165,15 @@ class TestBlockedBVSummaryTable:
         assert "Portfolio Epic A" in content
         assert "| 8 |" in content
 
-    def test_summary_table_shows_type_column(self):
+    def test_summary_bullet_shows_bv(self):
         pe      = _epic_with_wsjf(id=10, business_value=8, title="Portfolio Epic A")
         blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
         blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
         content = _run(_blocking_harness(pe, blocked, blocker))
-        idx = content.index("### BV at Risk by Epic")
+        idx = content.index("## Blocked Business Value")
         summary_section = content[idx: content.index("### Blocking Detail", idx)]
-        assert "Epic at Risk" in summary_section
-        assert "Type" in summary_section
+        assert "Portfolio Epic A" in summary_section
+        assert "BV: 8" in summary_section
 
     def test_summary_table_blocked_items_count(self):
         pe = _epic_with_wsjf(id=10, business_value=5, title="PE Alpha")
@@ -189,11 +189,11 @@ class TestBlockedBVSummaryTable:
             ]
         }
         content = _run(h)
-        # PE Alpha appears once in summary table with count 2
-        idx = content.index("### BV at Risk by Epic")
+        # PE Alpha appears once in the bullet list before the detail table
+        idx = content.index("## Blocked Business Value")
         summary_section = content[idx: content.index("### Blocking Detail", idx)]
         assert "PE Alpha" in summary_section
-        assert "| 2 |" in summary_section
+        assert summary_section.count("PE Alpha") == 1
 
     def test_blocking_detail_heading_present(self):
         pe      = _epic_with_wsjf(id=10, business_value=8, title="PE A")
@@ -205,4 +205,4 @@ class TestBlockedBVSummaryTable:
     def test_no_blocking_section_when_no_relationships(self):
         content = _run(_harness())
         assert "## Blocked Business Value" not in content
-        assert "### BV at Risk by Epic" not in content
+        assert "### Blocking Detail" not in content
