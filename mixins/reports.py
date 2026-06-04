@@ -3532,8 +3532,12 @@ class ReportsMixin:
             )
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
+        _not_lc = "".join(
+            f"&not%5Blabel_name%5D%5B%5D={quote(lc, safe='')}"
+            for lc in self._rd_lifecycle_labels
+        )
         unlab_count = (
-            f'<a href="{wi_base}?state=all&type%5B%5D=epic" target="_blank">{len(unlab)}</a>'
+            f'<a href="{wi_base}?state=all&type%5B%5D=epic{_not_lc}" target="_blank">{len(unlab)}</a>'
             if unlab else "0"
         )
         md.append(
