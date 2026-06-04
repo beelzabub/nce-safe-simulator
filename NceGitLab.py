@@ -226,7 +226,11 @@ def _confirm_create(gl):
     print()
     confirm = input("  Proceed? [y/N]: ").strip().lower()
     if confirm in ("y", "yes"):
-        gl.create_all_lorem_objects()
+        now      = datetime.now()
+        log_path = Path("logs") / now.strftime("%Y-%m-%d") / f"{now.strftime('%H-%M-%S')}_create.log"
+        with _tee_to_log(log_path):
+            print(f"  log → {log_path}\n")
+            gl.create_all_lorem_objects()
     else:
         print("  Cancelled.")
 
@@ -256,7 +260,11 @@ def _confirm_clean(gl):
     print()
     typed = input("  Group name: ").strip()
     if typed == grp:
-        gl.cleanup_group()
+        now      = datetime.now()
+        log_path = Path("logs") / now.strftime("%Y-%m-%d") / f"{now.strftime('%H-%M-%S')}_clean.log"
+        with _tee_to_log(log_path):
+            print(f"  log → {log_path}\n")
+            gl.cleanup_group()
     else:
         print(f"  '{typed}' does not match '{grp}' — cancelled.")
 
