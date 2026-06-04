@@ -119,6 +119,9 @@ class ReportsHarness(ReportsMixin):
         self._rd_groups_by_id     = groups_by_id or {}
         self._rd_groups_by_parent = groups_by_parent or {}
         self._vs_groups           = vs_groups or []
+        self._rd_issues_by_epic    = defaultdict(list)
+        self._rd_issues_by_project = defaultdict(list)
+        self._rd_blocking          = {"relationships": [], "summary": {}}
         self._wiki_t1 = "Portfolio/00 Executive Pulse"
         self._wiki_t2 = "Portfolio/01 Program Management"
         self._wiki_t3 = "Portfolio/02 Operational Detail"
