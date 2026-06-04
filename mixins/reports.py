@@ -1341,7 +1341,9 @@ class ReportsMixin:
             if not project.get("issues_enabled", True):
                 continue
             issues   = self._rd_issues_by_project.get(project["path_with_namespace"], [])
-            orphaned = [i for i in issues if not i.get("epic_id")]
+            orphaned = [i for i in issues
+                        if not i.get("epic_id")
+                        and not any(l.startswith("roam::") for l in (i.get("labels") or []))]
             if orphaned:
                 orphans_by_project[project["path_with_namespace"]] = (project, orphaned)
 
@@ -3632,8 +3634,7 @@ class ReportsMixin:
         md.append("---")
 
         # ── About section ─────────────────────────────────────────────── #
-        md.append("## ℹ️ SAFe Portfolio Kanban States")
-        md.append("")
+        md.extend(["---", "<details>", "<summary>ℹ️ SAFe Portfolio Kanban States</summary>", ""])
         md.append("| State | Label | Meaning | Flag if > |")
         md.append("|-------|-------|---------|-----------|")
         for key, label, desc in STATES:
@@ -3648,7 +3649,7 @@ class ReportsMixin:
             "often map to contract modification cycles, funding decisions, or requirements "
             "reviews — identifying them early enables proactive stakeholder engagement."
         )
-        md.append("")
+        md.extend(["", "</details>"])
 
         page_title = f"{self._wiki_t3}/Epic Lifecycle"
         self.upload_to_wiki(group, page_title, "\n".join(md))
@@ -3942,8 +3943,7 @@ class ReportsMixin:
         md.append("---")
 
         # ── About section ─────────────────────────────────────────────── #
-        md.append("## ℹ️ About Flow Metrics")
-        md.append("")
+        md.extend(["---", "<details>", "<summary>ℹ️ About Flow Metrics</summary>", ""])
         md.append("SAFe 6.0 defines six flow metrics measured at Team, ART, and Portfolio level:")
         md.append("")
         md.append("| Metric | This Report | Status |")
@@ -3954,7 +3954,7 @@ class ReportsMixin:
         md.append("| Flow Time | Cycle time (open age + closed proxy) | ✅ |")
         md.append("| Flow Predictability | % PI objectives met | ✅ (link to Scorecard) |")
         md.append("| Flow Efficiency | Value-added vs wait time | ⬜ Requires time tracking |")
-        md.append("")
+        md.extend(["", "</details>"])
 
         page_title = f"{self._wiki_t3}/Flow Metrics"
         self.upload_to_wiki(group, page_title, "\n".join(md))
