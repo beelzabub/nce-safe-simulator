@@ -43,7 +43,7 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
   utils.py         # GraphQL helpers, PI math, portfolio metrics calculation
   groups.py        # Group CRUD
   projects.py      # Project CRUD
-  epics.py         # Epic operations, CSV import/export, markdown report
+  epics.py         # Epic CRUD operations
   issues.py        # Issue operations
   milestones.py    # Milestone operations
   wiki.py          # Wiki page upload/delete
