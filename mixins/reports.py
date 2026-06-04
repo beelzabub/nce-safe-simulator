@@ -3506,6 +3506,15 @@ class ReportsMixin:
             ages = [a for a in ages if a is not None]
             return max(ages) if ages else None
 
+        wi_base = f"{group.web_url}/-/work_items"
+
+        def _wi_lc(lc_key):
+            return (
+                f"{wi_base}?state=all"
+                f"&type%5B%5D=epic"
+                f"&label_name%5B%5D={quote(lc_key, safe='')}"
+            )
+
         md.append("| State | Count | Avg Age | Oldest | Threshold |")
         md.append("|-------|-------|---------|--------|-----------|")
         for key, label, _ in STATES:
@@ -3517,13 +3526,18 @@ class ReportsMixin:
             avg_str = f"{avg}d" if avg is not None else "—"
             old_str = f"{oldest}d" if oldest is not None else "—"
             warn    = " ⚠️" if (thresh and oldest and oldest > thresh) else ""
+            count   = f"[{len(epics)}]({_wi_lc(key)})" if epics else "0"
             md.append(
-                f"| {label} | {len(epics)} | {avg_str} | {old_str}{warn} | {t_str} |"
+                f"| {label} | {count} | {avg_str} | {old_str}{warn} | {t_str} |"
             )
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
+        unlab_count = (
+            f"[{len(unlab)}]({wi_base}?state=all&type%5B%5D=epic)"
+            if unlab else "0"
+        )
         md.append(
-            f"| _(unlabelled)_ | {len(unlab)} | "
+            f"| _(unlabelled)_ | {unlab_count} | "
             f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
         )
         md.append("")
