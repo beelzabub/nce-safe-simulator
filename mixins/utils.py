@@ -118,6 +118,37 @@ class UtilitiesMixin:
         sess.mount("http://",  adapter)
         return sess
 
+    def _epic_save_with_reopen(self, epic, new_labels):
+        """Apply new_labels to epic and save, routing to the epic's own group.
+
+        group.epics.list() returns epics whose python-gitlab manager points at
+        the portfolio group, so epic.save() would silently PATCH the wrong epic
+        (the portfolio-level epic with the same iid).  We use http_put directly
+        with the epic's own group_id to target the correct API endpoint.
+
+        GitLab also rejects label-only saves on closed epics with 403 Forbidden
+        even when the list was filtered by state=opened (a small number of closed
+        epics can leak through).  On a 403 this method reopens the epic, applies
+        the labels, saves, then closes again.
+
+        Returns 'ok' on a direct save or 'ok_reopen' when the workaround was
+        needed.  Raises the original exception for any non-403 error, or if the
+        reopen/close sequence itself fails.
+        """
+        path   = f"/groups/{epic.group_id}/epics/{epic.iid}"
+        labels = ",".join(new_labels)
+        try:
+            self.gl.http_put(path, post_data={"labels": labels})
+            epic.labels = new_labels
+            return "ok"
+        except Exception as e:
+            if getattr(e, "response_code", None) == 403:
+                self.gl.http_put(path, post_data={"state_event": "reopen", "labels": labels})
+                self.gl.http_put(path, post_data={"state_event": "close"})
+                epic.labels = new_labels
+                return "ok_reopen"
+            raise
+
     def graphql_query(self, query, variables=None):
         payload = {"query": query}
         if variables:
@@ -749,7 +780,11 @@ class UtilitiesMixin:
         }}
         """
 
-        print(f"  Fetching ROAM risk issues for {group.full_path}...")
+        ns   = getattr(self, "gitlab_namespace", "") or ""
+        path = group.full_path
+        if ns and path.lower().startswith(ns.lower() + "/"):
+            path = path[len(ns) + 1:]
+        print(f"  Fetching ROAM risk issues for {path}...")
         result = defaultdict(list)
         total  = 0
 
