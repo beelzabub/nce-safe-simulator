@@ -3708,12 +3708,6 @@ class ReportsMixin:
             f"**Group:** [{gn}]({group.web_url})"
         )
         md.append("")
-        md.append(
-            "> SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
-            "not just whether it is on schedule. Five of the six metrics are reported here; "
-            "Flow Efficiency requires time-tracking data not yet available."
-        )
-        md.append("")
         md.append("---")
 
         # ── Section 1: Flow Velocity ──────────────────────────────────── #
@@ -3944,7 +3938,10 @@ class ReportsMixin:
 
         # ── About section ─────────────────────────────────────────────── #
         md.extend(["---", "<details>", "<summary>ℹ️ About Flow Metrics</summary>", ""])
-        md.append("SAFe 6.0 defines six flow metrics measured at Team, ART, and Portfolio level:")
+        md.append(
+            "SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
+            "not just whether it is on schedule. Six metrics are defined at Team, ART, and Portfolio level:"
+        )
         md.append("")
         md.append("| Metric | This Report | Status |")
         md.append("|--------|-------------|--------|")
