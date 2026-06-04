@@ -2182,8 +2182,7 @@ class ToolsMixin:
 
         all_wsjf = set(urgency_labels + risk_labels)
 
-        state_filter = "opened" if open_only else "all"
-        scope        = "open epics" if open_only else "epics (open + closed)"
+        scope = "open epics" if open_only else "epics (open + closed)"
 
         print(f"Group          : {group.full_path}")
         print(f"Urgency labels : {urgency_labels}")
@@ -2196,7 +2195,8 @@ class ToolsMixin:
         candidates = []
 
         print(f"\nCollecting {scope}...")
-        for epic in group.epics.list(all=True, state=state_filter):
+        list_kwargs = {"all": True, "state": "opened"} if open_only else {"all": True}
+        for epic in group.epics.list(**list_kwargs):
             if reassign or not (set(epic.labels) & all_wsjf):
                 candidates.append(epic)
         label_state = "total" if reassign else "without wsjf labels"
@@ -2225,27 +2225,13 @@ class ToolsMixin:
                 updated += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'{suffix}")
                     updated += 1
                 except Exception as e:
-                    if (getattr(e, "response_code", None) == 403
-                            and getattr(epic, "state", None) == "closed"):
-                        try:
-                            epic.state_event = "reopen"
-                            epic.labels = new_labels
-                            epic.save()
-                            epic.state_event = "close"
-                            epic.save()
-                            print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}' (via reopen)")
-                            updated += 1
-                        except Exception as e2:
-                            print(f"  ERROR #{epic.iid} (reopen/close failed): {e2}")
-                            errors += 1
-                    else:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
@@ -2257,7 +2243,7 @@ class ToolsMixin:
             percent = 20.0
 
         if not self.gitlab_namespace:
-            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            print("Root namespace not configured — cannot manage Business Value custom field.")
             return
 
         fields   = self._fetch_custom_fields(self.gitlab_namespace)
@@ -2316,7 +2302,7 @@ class ToolsMixin:
     def _tool_strip_business_value(self, dry_run=False):
         """Clear the Business Value custom field from all epics."""
         if not self.gitlab_namespace:
-            print("gitlab_namespace not configured — cannot manage Business Value custom field.")
+            print("Root namespace not configured — cannot manage Business Value custom field.")
             return
 
         fields   = self._fetch_custom_fields(self.gitlab_namespace)
@@ -2530,8 +2516,6 @@ class ToolsMixin:
         if not pool:
             pool = lifecycle_lbls  # fallback: uniform
 
-        state_filter = "opened" if open_only else "all"
-
         print(f"Group   : {group.full_path}")
         print(f"Labels  : {lifecycle_lbls}")
         scope = "open epics" if open_only else "all epics (open + closed)"
@@ -2544,7 +2528,8 @@ class ToolsMixin:
 
         scope_label = "open epics" if open_only else "epics (open + closed)"
         print(f"\nCollecting {scope_label}...")
-        for epic in group.epics.list(all=True, state=state_filter):
+        list_kwargs = {"all": True, "state": "opened"} if open_only else {"all": True}
+        for epic in group.epics.list(**list_kwargs):
             if reassign or not (set(epic.labels) & all_lc):
                 candidates.append(epic)
         label_state = "total" if reassign else f"without lifecycle:: label"
@@ -2565,29 +2550,13 @@ class ToolsMixin:
                 updated += 1
             else:
                 try:
-                    epic.labels = new_labels
-                    epic.save()
-                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'")
+                    result = self._epic_save_with_reopen(epic, new_labels)
+                    suffix = " (via reopen)" if result == "ok_reopen" else ""
+                    print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}'{suffix}")
                     updated += 1
                 except Exception as e:
-                    if (getattr(e, "response_code", None) == 403
-                            and getattr(epic, "state", None) == "closed"):
-                        # GitLab rejects label-only saves on closed epics;
-                        # reopen, apply label, then close again.
-                        try:
-                            epic.state_event = "reopen"
-                            epic.labels = new_labels
-                            epic.save()
-                            epic.state_event = "close"
-                            epic.save()
-                            print(f"  SET  [{label}]  #{epic.iid} '{epic.title[:50]}' (via reopen)")
-                            updated += 1
-                        except Exception as e2:
-                            print(f"  ERROR #{epic.iid} (reopen/close failed): {e2}")
-                            errors += 1
-                    else:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
@@ -3216,7 +3185,7 @@ class ToolsMixin:
         print(f"  Type    : {cfg['field_type']}")
         print(f"  Options : {cfg['select_options']}")
         print(f"  Scope   : Epic / Capability / Feature (all GitLab Epic work item type)")
-        print(f"  Namespace: {self.gitlab_namespace}")
+        print(f"  Namespace: {self.gitlab_namespace or '(not set)'}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
         print()

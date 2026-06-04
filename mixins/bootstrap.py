@@ -66,7 +66,7 @@ class BootstrapMixin:
         if self.gitlab_namespace:
             parent = self.get_group_by_name(self.gitlab_namespace)
             if parent is None:
-                print(f"gitlab_namespace '{self.gitlab_namespace}' not found. Aborting.")
+                print(f"Root namespace '{self.gitlab_namespace}' not found. Aborting.")
                 return None
             print(f"  Using namespace: {parent.full_path}")
         else:
@@ -736,7 +736,7 @@ class BootstrapMixin:
         Raises SystemExit(0) if the user chooses to quit.
         """
         if not self.gitlab_namespace:
-            print("  WARNING: gitlab_namespace not set — cannot manage custom fields.")
+            print("  WARNING: root namespace not set — cannot manage custom fields.")
             return "skipped"
 
         cfg            = self.BUSINESS_VALUE_FIELD
