@@ -472,16 +472,19 @@ class BootstrapMixin:
         _link_to_parents(direct_features, all_portfolio_epics)
         _link_to_parents(cap_features,    all_art_caps)
 
-        self._simulate_history(art_items_map)
+        extra = list(all_portfolio_epics) + list(all_vs_caps)
+        self._simulate_history(art_items_map, extra_epics=extra)
 
-    def _simulate_history(self, art_items_map):
-        """Close past-PI epics per ART at a realistic reliability rate; partially close current-PI issues."""
+    def _simulate_history(self, art_items_map, extra_epics=None):
+        """Close past-PI epics per ART at a realistic reliability rate; partially close current-PI issues.
+        Then apply lifecycle:: labels to every epic based on its final state and PI bucket."""
         today = date.today()
 
         past_piids    = [p for p in self.PIID_LABELS
                          if (lambda s, e: e is not None and e < today)(*self._pi_dates_from_label(p))]
         current_piids = [p for p in self.PIID_LABELS
                          if (lambda s, e: s is not None and s <= today <= e)(*self._pi_dates_from_label(p))]
+        future_piids  = set(self.PIID_LABELS) - set(past_piids) - set(current_piids)
 
         if not past_piids and not current_piids:
             print("\nNo past or current PIIDs configured — skipping history simulation.")
@@ -491,12 +494,19 @@ class BootstrapMixin:
         rate_max = self.default_history_close_rate_max
         curr_pct = self.default_current_pi_issue_close_pct
 
+        # Collect every (epic, label) tuple across all scopes for the lifecycle pass
+        all_epic_tuples = list(extra_epics or [])
+        for data in art_items_map.values():
+            all_epic_tuples.extend(data["epics"])
+
         # Each ART gets a stable base reliability for the entire run
         reliabilities = {aid: random.uniform(rate_min, rate_max) for aid in art_items_map}
 
         print("\n--- Historical PI close simulation ---")
         for aid, data in art_items_map.items():
             print(f"  {data['art'].name}: base reliability {reliabilities[aid]:.0%}")
+
+        all_closed_ids = set()  # tracks every epic closed across all ARTs and PIs
 
         # Past PIs: close epics per ART at base ± 10%, then close child issues of closed epics
         if past_piids:
@@ -510,9 +520,9 @@ class BootstrapMixin:
                     if not pi_epics:
                         continue
 
-                    rate      = min(1.0, max(0.5, reliability + random.uniform(-0.10, 0.10)))
-                    n_close   = round(len(pi_epics) * rate)
-                    to_close  = random.sample(pi_epics, n_close)
+                    rate       = min(1.0, max(0.5, reliability + random.uniform(-0.10, 0.10)))
+                    n_close    = round(len(pi_epics) * rate)
+                    to_close   = random.sample(pi_epics, n_close)
                     closed_ids = set()
 
                     for epic in to_close:
@@ -520,6 +530,7 @@ class BootstrapMixin:
                             epic.state_event = 'close'
                             epic.save()
                             closed_ids.add(epic.id)
+                            all_closed_ids.add(epic.id)
                         except Exception as exc:
                             print(f"    Warning: could not close epic {getattr(epic, 'iid', '?')}: {exc}")
 
@@ -550,6 +561,31 @@ class BootstrapMixin:
                         print(f"  {project.name}: closed {n_close}/{len(open_issues)} issues")
                     except Exception as exc:
                         print(f"  Warning: issue close error in {project.name}: {exc}")
+
+        # Lifecycle label pass — assign deterministically based on state and PI bucket
+        past_set    = set(past_piids)
+        current_set = set(current_piids)
+        print("\n--- Lifecycle label assignment ---")
+        labeled = errors = 0
+        for epic, _ in all_epic_tuples:
+            try:
+                existing = [l for l in getattr(epic, 'labels', []) if not l.startswith('lifecycle::')]
+                piid     = next((l for l in existing if l.startswith('PIID::')), None)
+                if epic.id in all_closed_ids:
+                    lc = 'lifecycle::done'
+                elif piid in past_set or piid in current_set:
+                    lc = 'lifecycle::implementing'
+                elif piid in future_piids:
+                    lc = 'lifecycle::backlog'
+                else:
+                    lc = 'lifecycle::funnel'
+                epic.labels = existing + [lc]
+                epic.save()
+                labeled += 1
+            except Exception as exc:
+                print(f"    Warning: could not label epic {getattr(epic, 'iid', '?')}: {exc}")
+                errors += 1
+        print(f"  {labeled} epics labeled{f'  ({errors} errors)' if errors else ''}")
 
     def create_safe_hierarchy(self, target_path=None):
         if target_path is None:
