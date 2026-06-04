@@ -24,7 +24,7 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
-from mixins.utils import _clear, _pause
+from mixins.utils import _clear, _pause, _tee_to_log
 
 
 class NceGitLab(
@@ -152,7 +152,10 @@ class NceGitLab(
         self.default_vs_caps_per_vs       = _bd.get("vs_caps_per_vs",       3)
         self.default_art_caps_per_art     = _bd.get("art_caps_per_art",     4)
         self.default_features_per_team    = _bd.get("features_per_team",    4)
-        self.default_direct_feature_ratio = _bd.get("direct_feature_ratio", 0.70)
+        self.default_direct_feature_ratio       = _bd.get("direct_feature_ratio",       0.70)
+        self.default_history_close_rate_min     = _bd.get("history_close_rate_min",     0.70)
+        self.default_history_close_rate_max     = _bd.get("history_close_rate_max",     0.95)
+        self.default_current_pi_issue_close_pct = _bd.get("current_pi_issue_close_pct", 0.50)
 
         _td = config.get("defaults", {}).get("tools", {})
         self.default_close_percent             = _td.get("close_percent",                30.0)
@@ -223,7 +226,11 @@ def _confirm_create(gl):
     print()
     confirm = input("  Proceed? [y/N]: ").strip().lower()
     if confirm in ("y", "yes"):
-        gl.create_all_lorem_objects()
+        now      = datetime.now()
+        log_path = Path("logs") / now.strftime("%Y-%m-%d") / f"{now.strftime('%H-%M-%S')}_create.log"
+        with _tee_to_log(log_path):
+            print(f"  log → {log_path}\n")
+            gl.create_all_lorem_objects()
     else:
         print("  Cancelled.")
 
@@ -253,7 +260,11 @@ def _confirm_clean(gl):
     print()
     typed = input("  Group name: ").strip()
     if typed == grp:
-        gl.cleanup_group()
+        now      = datetime.now()
+        log_path = Path("logs") / now.strftime("%Y-%m-%d") / f"{now.strftime('%H-%M-%S')}_clean.log"
+        with _tee_to_log(log_path):
+            print(f"  log → {log_path}\n")
+            gl.cleanup_group()
     else:
         print(f"  '{typed}' does not match '{grp}' — cancelled.")
 
@@ -451,19 +462,30 @@ def main():
 
     phases = []
 
-    def _run_phase(label, fn):
+    def _run_phase(label, fn, log_stem=None):
         _phase[0] = label
-        start = datetime.now()
+        now      = datetime.now()
+        log_path = (
+            Path("logs")
+            / now.strftime("%Y-%m-%d")
+            / f"{now.strftime('%H-%M-%S')}_{log_stem or label}.log"
+        ) if log_stem is not None else None
+        start = now
         t0    = time.monotonic()
-        fn()
+        if log_path:
+            with _tee_to_log(log_path):
+                print(f"  log → {log_path}\n")
+                fn()
+        else:
+            fn()
         elapsed = time.monotonic() - t0
         end     = datetime.now()
         phases.append((label, start, end, elapsed))
 
     if args.all or args.clean:
-        _run_phase("cleanup", gl.cleanup_group)
+        _run_phase("cleanup", gl.cleanup_group, log_stem="clean")
     if args.all or args.create:
-        _run_phase("create",  gl.create_all_lorem_objects)
+        _run_phase("create",  gl.create_all_lorem_objects, log_stem="create")
 
     if args.all:
         _phase[0] = "reports"
