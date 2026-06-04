@@ -14,7 +14,6 @@ def _open_issue(iid=1, title="Open issue"):
         "web_url":   f"https://gitlab.com/test/issues/{iid}",
         "state":     "opened",
         "assignees": [],
-        "milestone": None,
     }
 
 

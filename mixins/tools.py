@@ -322,7 +322,7 @@ TOOLS = [
     },
     {
         "key":         "strip-wsjf-labels",
-        "description": "Remove all wsjf-value/urgency/risk labels from every epic (clean slate for testing)",
+        "description": "Remove all wsjf-urgency/risk labels from every epic (clean slate for testing)",
         "method":      "_tool_strip_wsjf_labels",
         "params": [
             {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
@@ -2386,13 +2386,12 @@ class ToolsMixin:
             print("(dry-run — no changes saved)")
 
     def _tool_strip_wsjf_labels(self, dry_run=False):
-        """Remove all wsjf-value::*, wsjf-urgency::*, and wsjf-risk::* labels from every open epic."""
+        """Remove all wsjf-urgency::* and wsjf-risk::* labels from every open epic."""
         group = self.get_group_by_name(self.parent_group)
 
-        value_labels   = self._discover_labels(group, "wsjf-value::")
         urgency_labels = self._discover_labels(group, "wsjf-urgency::")
         risk_labels    = self._discover_labels(group, "wsjf-risk::")
-        all_wsjf = set(value_labels + urgency_labels + risk_labels)
+        all_wsjf = set(urgency_labels + risk_labels)
 
         if not all_wsjf:
             print("No wsjf-* labels found on group — nothing to strip.")
