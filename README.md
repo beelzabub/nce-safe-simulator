@@ -254,6 +254,28 @@ Features are then split by `direct_feature_ratio` (default 70%):
 
 All epics are labelled with a random project label, PIID label, and type label. Planned weights are set via the GraphQL `workItemUpdate` mutation (the REST API silently ignores epic weight).
 
+### PI distribution and history simulation
+
+PIID labels are drawn from a weighted distribution: **65% past PIs / 20% current PI / 15% future PIs**, so the bootstrapped portfolio naturally looks like one with history rather than a uniform spread across all quarters.
+
+After all epics and issues are created, `_simulate_history()` runs a second pass:
+
+1. Each ART is assigned a **stable base reliability** drawn from `history_close_rate_min`–`history_close_rate_max` (default 70–95%).
+2. For each past PI, that ART's epics are closed at `base ± 10%` (floor 50%, ceiling 100%).
+3. Child issues of closed epics are closed in the same pass.
+4. For the current PI, `current_pi_issue_close_pct` (default 50%) of issues are closed but **epics are left open** — this drives health-dashboard at-risk flags.
+
+After the close pass, `lifecycle::` labels are applied deterministically to every epic:
+
+| Condition | Label |
+|-----------|-------|
+| Closed epic | `lifecycle::done` |
+| Open epic, past or current PI | `lifecycle::implementing` |
+| Open epic, future PI | `lifecycle::backlog` |
+| Open epic, no PI label | `lifecycle::funnel` |
+
+This means the Epic Lifecycle / Portfolio Kanban report shows meaningful data immediately after `--create` without needing to run `set-lifecycle-labels` separately.
+
 ---
 
 ## What `--scaffold` Builds
