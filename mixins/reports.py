@@ -4462,7 +4462,7 @@ class ReportsMixin:
             "",
             "| Component | Label family | Meaning |",
             "|-----------|-------------|---------|",
-            "| Business Value | `wsjf-value::N` | Revenue, mission impact, or customer satisfaction |",
+            "| Business Value | Custom field (Fibonacci 1–21) | Revenue, mission impact, or customer satisfaction — set via `set-business-value` |",
             "| Time Criticality | `wsjf-urgency::N` | Cost of delay — how quickly does value decay if deferred? |",
             "| Risk Reduction | `wsjf-risk::N` | Risk or opportunity enabled by doing this item |",
             "| Job Size | `planned_weight` | Relative effort (from epic planned weight) |",
