@@ -10,6 +10,9 @@ import pytest
 sys.path.insert(0, "/root/.venv/beelzabub-project")
 
 from mixins.reports import ReportsMixin, _item_risk_reasons
+from mixins.tools import ToolsMixin
+from mixins.labels import LabelsMixin
+from mixins.wiki import WikiMixin
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +165,82 @@ class ReportsHarness(ReportsMixin):
 @pytest.fixture
 def reports():
     return ReportsHarness()
+
+
+# ---------------------------------------------------------------------------
+# Epic / issue mock factories (shared by report AND tool tests)
+# ---------------------------------------------------------------------------
+
+def _make_epic_mock(id=100, iid=1, title="Test Epic", labels=None, group_id=1):
+    """Return a MagicMock that looks like a python-gitlab Epic object."""
+    epic = MagicMock()
+    epic.id = id
+    epic.iid = iid
+    epic.title = title
+    epic.labels = labels if labels is not None else []
+    epic.group_id = group_id
+    return epic
+
+
+def _make_issue_mock(id=200, iid=1, title="Test Issue", epic_id=None):
+    """Return a MagicMock that looks like a python-gitlab Issue object."""
+    issue = MagicMock()
+    issue.id = id
+    issue.iid = iid
+    issue.title = title
+    issue.epic = {"id": epic_id} if epic_id is not None else None
+    return issue
+
+
+# ---------------------------------------------------------------------------
+# Testable ToolsMixin harness
+# ---------------------------------------------------------------------------
+
+class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin):
+    """Concrete subclass of ToolsMixin with all external calls pre-wired for tests."""
+
+    EPIC_TYPE_ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_PLANNED_WEIGHTS = {
+        "Epic": [100, 150, 200],
+        "Capability": [30, 50, 80],
+        "Feature": [5, 8, 13],
+    }
+
+    def __init__(self, lifecycle_labels=None, metrics=None):
+        self.gl = MagicMock()
+        self.parent_group = "test-portfolio"
+        self.url = "https://gitlab.com"
+        self.default_close_percent = 50.0
+        self.default_generate_issues_count = 3
+        self.default_generate_blocks_count = 2
+        self.default_simulate_pi_percent = 50.0
+        self.default_weight_drift_threshold = 20.0
+        self.fibonacci_weights = [1, 2, 3, 5, 8, 13]
+
+        # Root group: flat (no subgroups) so all _walk loops terminate after root
+        self._root_group = MagicMock()
+        self._root_group.id = 1
+        self._root_group.full_path = "test-portfolio"
+        self._root_group.subgroups.list.return_value = []
+
+        self._lifecycle_labels = lifecycle_labels or []
+        self._metrics = metrics or {}
+
+    def get_group_by_name(self, name):
+        return self._root_group
+
+    def _discover_labels(self, group, prefix):
+        if prefix == "lifecycle::":
+            return list(self._lifecycle_labels)
+        return []
+
+    def calculate_portfolio_metrics(self, group_name):
+        return self._metrics
+
+    def _make_session(self):
+        return MagicMock()
+
+
+@pytest.fixture
+def tools():
+    return ToolsHarness()
