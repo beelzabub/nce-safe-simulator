@@ -586,10 +586,9 @@ An **orphan summary table** is printed at the end of any run that produces epics
 
 ---
 
-## Known Issues / TODO
+## Known Issues
 
 - **Direct Features in ART-level reports:** `ART Feature Status` and `ART Capacity Balance` still assume the full three-tier chain (Epic → Capability → Feature) and do not surface Features parented directly to a Portfolio Epic. Both reports need hierarchy traversal updates to handle the two-tier (Epic → Feature) case.
-- **Wiki folder page links:** Folder pages (tier landing pages) rely on GitLab's wiki slug matching the slug passed at creation time. If a page was created before the explicit-slug fix, its URL may differ from what the index links expect. Re-running `--report wiki-index` will recreate all tier pages with correct slugs.
 
 ---
 
@@ -621,3 +620,32 @@ An **orphan summary table** is printed at the end of any run that produces epics
 **Job timing** — Each phase (`--clean`, `--create`, individual reports, `--all`) prints start/stop times and duration. `--all` aggregates all phases into a single summary table.
 
 **Data snapshots** — Every report run writes `epics.json`, `issues.json`, and `blocking.json` to `reports/YYYYMMDD/HHMMSS/` before any wiki pages are generated. The data comes from `calculate_portfolio_metrics()` (which already fetches and caches all epics and issues) plus a dedicated GraphQL call for the full blocking graph. Multiple runs per day each get their own timestamped subdirectory. The `.gitlab-ci.yml` `generate-reports` job exposes this directory as a downloadable CI artifact.
+
+---
+
+## SAFe 6.0 Reference
+
+SAFe 6.0 defines three measurement domains applied at every level (Team → ART → Portfolio):
+
+| Domain | What it measures |
+|--------|-----------------|
+| **Outcomes** | Business and customer success: KPIs, OKRs, value realized |
+| **Flow** | Delivery efficiency: velocity, time, load, efficiency, distribution, predictability |
+| **Competency** | Proficiency in SAFe practices (assessed via surveys/maturity models) |
+
+### Six Flow Metrics
+
+| Metric | Definition | This tool |
+|--------|-----------|-----------|
+| Flow Velocity | Features/Capabilities completed per PI | ✅ Flow Metrics report |
+| Flow Load | Open epics/features (WIP) vs prior PIs | ✅ Flow Metrics report |
+| Flow Distribution | % Feature vs Enabler vs Infrastructure vs Defect | ✅ Flow Metrics report (`type::` labels) |
+| Flow Time | Average days from epic created to closed | ✅ Flow Metrics report (proxy via `updated_at`) |
+| Flow Predictability | % of PI objectives met, trended | ✅ PI Predictability Scorecard |
+| Flow Efficiency | Value-added time vs total wait time | ⬜ Requires time-in-state tracking not available via GitLab epics API |
+
+Flow Predictability (% PI objectives met) is the single most-watched metric at ART and portfolio level for DoD programs.
+
+### Relationship to Earned Value Management (EVM)
+
+For DoD acquisition programs, SAFe flow metrics complement rather than replace traditional EVM. Flow metrics address *what* is being delivered and *how efficiently*; EVM addresses cost and schedule variance against the baseline contract. Both are needed for large acquisition programs.
