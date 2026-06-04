@@ -3300,7 +3300,7 @@ class ReportsMixin:
             f"({pct_pi}% elapsed) {port_tl_sched} |"
         )
         md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_pi}) |")
-        md.append(f"| Epics with Active ROAM Risks | [{portfolio_risk_epics}]({_wi_risk}) |")
+        md.append(f"| Epics with Active ROAM Risks | <a href=\"{_wi_risk}\" target=\"_blank\">{portfolio_risk_epics}</a> |")
         md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
         if port_wt_str != "—":
             md.append(f"| Story Points (current PI) | {port_wt_str} |")
