@@ -311,12 +311,13 @@ TOOLS = [
     },
     {
         "key":         "set-wsjf-labels",
-        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to open epics that have none (or all when reassign=True)",
+        "description": "Randomly assign wsjf-urgency/risk Fibonacci labels to epics that have none (or all when reassign=True)",
         "method":      "_tool_set_wsjf_labels",
         "params": [
-            {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
-            {"name": "reassign", "prompt": "Replace existing wsjf labels too?",           "type": bool,  "default": False},
-            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+            {"name": "percent",   "prompt": "Percent of epics to label (default 20)",          "type": float, "default": 20.0},
+            {"name": "reassign",  "prompt": "Replace existing wsjf labels too?",               "type": bool,  "default": False},
+            {"name": "open_only", "prompt": "Restrict to open epics only?",                    "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False},
         ],
     },
     {
@@ -2186,8 +2187,8 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
-    def _tool_set_wsjf_labels(self, percent=None, reassign=False, dry_run=False):
-        """Randomly assign wsjf-urgency/risk Fibonacci labels to open epics.
+    def _tool_set_wsjf_labels(self, percent=None, reassign=False, open_only=False, dry_run=False):
+        """Randomly assign wsjf-urgency/risk Fibonacci labels to epics.
 
         Business Value is now a custom field — use set-business-value for that component.
         By default skips epics that already have any wsjf label.
@@ -2207,22 +2208,25 @@ class ToolsMixin:
 
         all_wsjf = set(urgency_labels + risk_labels)
 
+        state_filter = "opened" if open_only else "all"
+        scope        = "open epics" if open_only else "epics (open + closed)"
+
         print(f"Group          : {group.full_path}")
         print(f"Urgency labels : {urgency_labels}")
         print(f"Risk labels    : {risk_labels}")
-        mode = "ALL open epics (reassign mode)" if reassign else "open epics with no existing wsjf label"
+        mode = f"ALL {scope} (reassign mode)" if reassign else f"{scope} without wsjf labels"
         print(f"Target         : {percent}% of {mode}")
         if dry_run:
             print("(dry-run — no changes will be saved)")
 
         candidates = []
 
-        print("\nCollecting open epics...")
-        for epic in group.epics.list(all=True, state="opened"):
+        print(f"\nCollecting {scope}...")
+        for epic in group.epics.list(all=True, state=state_filter):
             if reassign or not (set(epic.labels) & all_wsjf):
                 candidates.append(epic)
         label_state = "total" if reassign else "without wsjf labels"
-        print(f"  {len(candidates)} open epics {label_state}")
+        print(f"  {len(candidates)} {scope} {label_state}")
 
         k      = max(0, round(len(candidates) * percent / 100))
         sample = random.sample(candidates, min(k, len(candidates)))
@@ -2252,8 +2256,22 @@ class ToolsMixin:
                     print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}'")
                     updated += 1
                 except Exception as e:
-                    print(f"  ERROR #{epic.iid}: {e}")
-                    errors += 1
+                    if (getattr(e, "response_code", None) == 403
+                            and getattr(epic, "state", None) == "closed"):
+                        try:
+                            epic.state_event = "reopen"
+                            epic.labels = new_labels
+                            epic.save()
+                            epic.state_event = "close"
+                            epic.save()
+                            print(f"  SET  {tag}  #{epic.iid} '{epic.title[:45]}' (via reopen)")
+                            updated += 1
+                        except Exception as e2:
+                            print(f"  ERROR #{epic.iid} (reopen/close failed): {e2}")
+                            errors += 1
+                    else:
+                        print(f"  ERROR #{epic.iid}: {e}")
+                        errors += 1
 
         print(f"\nDone.  Labelled: {updated}  Errors: {errors}")
         if dry_run:
