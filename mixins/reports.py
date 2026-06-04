@@ -249,6 +249,21 @@ def _item_risk_reasons(item, today=None):
 
 class ReportsMixin:
 
+    def _relative_project_name(self, project):
+        """Return project name_with_namespace with the top-level gitlab_namespace stripped.
+
+        GitLab's name_with_namespace includes the root namespace
+        (e.g. "gl-demo-ultimate-lmwilliams / PMW-120 / VS 01 / ...").
+        Wiki reports should only show paths starting from parent_group.
+        """
+        name = project.get("name_with_namespace", project.get("path_with_namespace", ""))
+        ns   = getattr(self, "gitlab_namespace", "")
+        if ns:
+            prefix = ns + " / "
+            if name.lower().startswith(prefix.lower()):
+                return name[len(prefix):]
+        return name
+
     def generate_summary_report(self, group):
         try:
             group_name = group.name
@@ -1326,7 +1341,9 @@ class ReportsMixin:
             if not project.get("issues_enabled", True):
                 continue
             issues   = self._rd_issues_by_project.get(project["path_with_namespace"], [])
-            orphaned = [i for i in issues if not i.get("epic_id")]
+            orphaned = [i for i in issues
+                        if not i.get("epic_id")
+                        and not any(l.startswith("roam::") for l in (i.get("labels") or []))]
             if orphaned:
                 orphans_by_project[project["path_with_namespace"]] = (project, orphaned)
 
@@ -1346,7 +1363,7 @@ class ReportsMixin:
             md.append("")
 
             for _key, (project, issues) in sorted(orphans_by_project.items()):
-                md.append(f"### {project['name_with_namespace']}")
+                md.append(f"### {self._relative_project_name(project)}")
                 md.append("")
                 md.append("| # | Title | State | Milestone | Assignees |")
                 md.append("|---|-------|-------|-----------|-----------|")
@@ -3617,8 +3634,7 @@ class ReportsMixin:
         md.append("---")
 
         # ── About section ─────────────────────────────────────────────── #
-        md.append("## ℹ️ SAFe Portfolio Kanban States")
-        md.append("")
+        md.extend(["---", "<details>", "<summary>ℹ️ SAFe Portfolio Kanban States</summary>", ""])
         md.append("| State | Label | Meaning | Flag if > |")
         md.append("|-------|-------|---------|-----------|")
         for key, label, desc in STATES:
@@ -3633,7 +3649,7 @@ class ReportsMixin:
             "often map to contract modification cycles, funding decisions, or requirements "
             "reviews — identifying them early enables proactive stakeholder engagement."
         )
-        md.append("")
+        md.extend(["", "</details>"])
 
         page_title = f"{self._wiki_t3}/Epic Lifecycle"
         self.upload_to_wiki(group, page_title, "\n".join(md))
@@ -3690,12 +3706,6 @@ class ReportsMixin:
         md.append(
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
             f"**Group:** [{gn}]({group.web_url})"
-        )
-        md.append("")
-        md.append(
-            "> SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
-            "not just whether it is on schedule. Five of the six metrics are reported here; "
-            "Flow Efficiency requires time-tracking data not yet available."
         )
         md.append("")
         md.append("---")
@@ -3927,9 +3937,11 @@ class ReportsMixin:
         md.append("---")
 
         # ── About section ─────────────────────────────────────────────── #
-        md.append("## ℹ️ About Flow Metrics")
-        md.append("")
-        md.append("SAFe 6.0 defines six flow metrics measured at Team, ART, and Portfolio level:")
+        md.extend(["---", "<details>", "<summary>ℹ️ About Flow Metrics</summary>", ""])
+        md.append(
+            "SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio, "
+            "not just whether it is on schedule. Six metrics are defined at Team, ART, and Portfolio level:"
+        )
         md.append("")
         md.append("| Metric | This Report | Status |")
         md.append("|--------|-------------|--------|")
@@ -3939,7 +3951,7 @@ class ReportsMixin:
         md.append("| Flow Time | Cycle time (open age + closed proxy) | ✅ |")
         md.append("| Flow Predictability | % PI objectives met | ✅ (link to Scorecard) |")
         md.append("| Flow Efficiency | Value-added vs wait time | ⬜ Requires time tracking |")
-        md.append("")
+        md.extend(["", "</details>"])
 
         page_title = f"{self._wiki_t3}/Flow Metrics"
         self.upload_to_wiki(group, page_title, "\n".join(md))

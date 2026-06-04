@@ -43,7 +43,10 @@
       "vs_caps_per_vs":       {"min": 2, "max": 5, "desired": 3},
       "art_caps_per_art":     {"min": 2, "max": 6, "desired": 4},
       "features_per_team":    {"min": 3, "max": 6, "desired": 4},
-      "direct_feature_ratio": 0.70
+      "direct_feature_ratio": 0.70,
+      "history_close_rate_min": 0.70,
+      "history_close_rate_max": 0.95,
+      "current_pi_issue_close_pct": 0.50
     },
     "tools": {
       "close_percent":                30.0,
