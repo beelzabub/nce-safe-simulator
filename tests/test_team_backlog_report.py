@@ -44,7 +44,6 @@ def _issue(iid=1, title="Story", state="opened", weight=3, epic_id=None):
         "state":     state,
         "weight":    weight,
         "epic_id":   epic_id,
-        "milestone": None,
     }
 
 
