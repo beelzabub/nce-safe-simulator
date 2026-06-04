@@ -580,9 +580,15 @@ class BootstrapMixin:
                     except Exception as exc:
                         print(f"  Warning: issue close error in {project.name}: {exc}")
 
-        # Lifecycle label pass — assign deterministically based on state and PI bucket
+        # Lifecycle label pass — assign deterministically based on state and PI bucket.
+        # Future PIIDs are split: nearest PI → backlog (planned, awaiting capacity),
+        # farther-out PIIDs → analyzing (Lean Business Case in progress), no PIID → funnel.
         past_set    = set(past_piids)
         current_set = set(current_piids)
+        future_sorted = sorted(future_piids, key=lambda p: (self._pi_dates_from_label(p)[0] or date.min))
+        backlog_piids  = set(future_sorted[:1])
+        analyzing_piids = set(future_sorted[1:])
+
         print("\n--- Lifecycle label assignment ---")
         labeled = errors = 0
         for epic, _ in all_epic_tuples:
@@ -593,8 +599,10 @@ class BootstrapMixin:
                     lc = 'lifecycle::done'
                 elif piid in past_set or piid in current_set:
                     lc = 'lifecycle::implementing'
-                elif piid in future_piids:
+                elif piid in backlog_piids:
                     lc = 'lifecycle::backlog'
+                elif piid in analyzing_piids:
+                    lc = 'lifecycle::analyzing'
                 else:
                     lc = 'lifecycle::funnel'
                 epic.labels = existing + [lc]
@@ -604,6 +612,11 @@ class BootstrapMixin:
                 print(f"    Warning: could not label epic {getattr(epic, 'iid', '?')}: {exc}")
                 errors += 1
         print(f"  {labeled} epics labeled{f'  ({errors} errors)' if errors else ''}")
+
+        # WSJF label pass — seed urgency/risk on open epics so the priority board is
+        # immediately useful after a fresh create.
+        print("\n--- WSJF label seeding ---")
+        self._tool_set_wsjf_labels(percent=70)
 
     def create_safe_hierarchy(self, target_path=None):
         if target_path is None:
