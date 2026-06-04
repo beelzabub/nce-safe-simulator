@@ -3275,15 +3275,15 @@ class ReportsMixin:
             parts = [f"{_pquote(k, safe='')}={_pquote(v, safe='')}" for k, v in params]
             return f"{root_group.web_url}/-/work_items?{'&'.join(parts)}"
 
-        _wi_all   = _wi([("state", "all"),    ("type[]", "epic")])
+        _wi_all   = _wi([("state", "all"),    ("type[]", "8")])
         _wi_pi    = (
-            _wi([("state", "opened"), ("type[]", "epic"), ("label_name[]", current_pi)])
+            _wi([("state", "opened"), ("type[]", "8"), ("label_name[]", current_pi)])
             if current_pi else _wi_all
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
         _wi_risk = _wi_all
-        _wi_unasn = _wi([("state", "opened"), ("type[]", "epic")])
+        _wi_unasn = _wi([("state", "opened"), ("type[]", "8")])
 
         md.append("## Portfolio Summary")
         md.append("")
@@ -3585,7 +3585,8 @@ class ReportsMixin:
                 age = _age_days(e) or 0
                 md.append(
                     f"| {e['title'][:50]} | {e.get('type','?')} | **{age}d** "
-                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                    f"| {_pi(e)} | {_group_name(e)} "
+                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
                 )
             md.append("")
             md.append("---")
@@ -3627,7 +3628,8 @@ class ReportsMixin:
                 age_str = f"**{age}d** ⚠️" if (thresh and age and age > thresh) else (f"{age}d" if age else "—")
                 md.append(
                     f"| {e['title'][:50]} | {e.get('type','?')} | {age_str} "
-                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                    f"| {_pi(e)} | {_group_name(e)} "
+                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
                 )
             md.append("")
 
@@ -3645,7 +3647,8 @@ class ReportsMixin:
                 age = _age_days(e)
                 md.append(
                     f"| {e['title'][:50]} | {e.get('type','?')} | {age or '—'} "
-                    f"| {_pi(e)} | {_group_name(e)} | [→]({e['web_url']}) |"
+                    f"| {_pi(e)} | {_group_name(e)} "
+                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
                 )
             md.append("")
 
