@@ -152,7 +152,10 @@ class NceGitLab(
         self.default_vs_caps_per_vs       = _bd.get("vs_caps_per_vs",       3)
         self.default_art_caps_per_art     = _bd.get("art_caps_per_art",     4)
         self.default_features_per_team    = _bd.get("features_per_team",    4)
-        self.default_direct_feature_ratio = _bd.get("direct_feature_ratio", 0.70)
+        self.default_direct_feature_ratio       = _bd.get("direct_feature_ratio",       0.70)
+        self.default_history_close_rate_min     = _bd.get("history_close_rate_min",     0.70)
+        self.default_history_close_rate_max     = _bd.get("history_close_rate_max",     0.95)
+        self.default_current_pi_issue_close_pct = _bd.get("current_pi_issue_close_pct", 0.50)
 
         _td = config.get("defaults", {}).get("tools", {})
         self.default_close_percent             = _td.get("close_percent",                30.0)
