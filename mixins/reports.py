@@ -4989,7 +4989,7 @@ class ReportsMixin:
         self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
         self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
         self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
-        print(f"\nGenerating reports for group: {group.full_path}\n")
+        print(f"\nGenerating reports for group: {group.name}\n")
 
         # Preload existing wiki pages so upload_to_wiki can look them up without
         # calling wikis.get(slug), which URL-encodes slashes and returns 404 for
