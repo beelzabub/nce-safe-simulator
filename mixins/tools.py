@@ -1067,22 +1067,17 @@ class ToolsMixin:
         results = {t: {"ok": 0, "bad": []} for t in safe_types}
         no_type = []
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                etype = next((t for t in safe_types if t in epic.labels), None)
-                w     = getattr(epic, "weight", None)
-                if etype is None:
-                    no_type.append(epic)
-                    continue
-                pool = weight_pools.get(etype, [])
-                if w in pool:
-                    results[etype]["ok"] += 1
-                else:
-                    results[etype]["bad"].append((epic, w, pool))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            etype = next((t for t in safe_types if t in epic.labels), None)
+            w     = getattr(epic, "weight", None)
+            if etype is None:
+                no_type.append(epic)
+                continue
+            pool = weight_pools.get(etype, [])
+            if w in pool:
+                results[etype]["ok"] += 1
+            else:
+                results[etype]["bad"].append((epic, w, pool))
 
         print(f"\n{'Type':<15} {'Expected pool':<45} {'OK':>5} {'FAIL':>5}")
         print("-" * 74)
@@ -1381,21 +1376,15 @@ class ToolsMixin:
         missing = defaultdict(list)   # "type" | "piid" | "project" → [epic]
         total   = 0
 
-        def _walk(grp):
-            nonlocal total
-            for epic in grp.epics.list(all=True):
-                total += 1
-                labels = set(epic.labels)
-                if not labels & type_set:
-                    missing["type"].append(epic)
-                if not labels & piid_set:
-                    missing["piid"].append(epic)
-                if not labels & proj_set:
-                    missing["project"].append(epic)
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            total += 1
+            labels = set(epic.labels)
+            if not labels & type_set:
+                missing["type"].append(epic)
+            if not labels & piid_set:
+                missing["piid"].append(epic)
+            if not labels & proj_set:
+                missing["project"].append(epic)
 
         print(f"Total epics scanned: {total}\n")
         all_ok = True
@@ -1655,35 +1644,29 @@ class ToolsMixin:
 
         updated = skipped = errors = 0
 
-        def _walk(grp):
-            nonlocal updated, skipped, errors
-            for epic in grp.epics.list(all=True):
-                if piid and piid not in epic.labels:
-                    skipped += 1
-                    continue
-                if epic_type and epic_type not in epic.labels:
-                    skipped += 1
-                    continue
-                current = epic.state.lower()
-                if (state == "close" and current == "closed") or (state == "open" and current == "opened"):
-                    skipped += 1
-                    continue
-                if dry_run:
-                    print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → {state}")
+        for epic in group.epics.list(all=True):
+            if piid and piid not in epic.labels:
+                skipped += 1
+                continue
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            current = epic.state.lower()
+            if (state == "close" and current == "closed") or (state == "open" and current == "opened"):
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"  DRY  #{epic.iid} '{epic.title[:55]}' → {state}")
+                updated += 1
+            else:
+                try:
+                    epic.state_event = state_event
+                    epic.save()
+                    print(f"  {state.upper()}D  #{epic.iid} '{epic.title[:55]}'")
                     updated += 1
-                else:
-                    try:
-                        epic.state_event = state_event
-                        epic.save()
-                        print(f"  {state.upper()}D  #{epic.iid} '{epic.title[:55]}'")
-                        updated += 1
-                    except Exception as e:
-                        print(f"  ERROR #{epic.iid}: {e}")
-                        errors += 1
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
-        _walk(group)
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
         print(f"\nDone.  Updated: {updated}  Skipped: {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -1700,16 +1683,12 @@ class ToolsMixin:
         all_epics  = {}   # id → epic
         parent_map = {}   # epic_id → parent_id
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                all_epics[epic.id] = epic
-                pid = getattr(epic, "parent_id", None)
-                if pid:
-                    parent_map[epic.id] = pid
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
+        for epic in group.epics.list(all=True):
+            all_epics[epic.id] = epic
+            pid = getattr(epic, "parent_id", None)
+            if pid:
+                parent_map[epic.id] = pid
 
-        _walk(group)
         print(f"Total epics: {len(all_epics)}\n")
 
         violations = []
@@ -1808,16 +1787,11 @@ class ToolsMixin:
         epic_index   = {}  # epic_id → (group_id, iid)
         candidates   = []  # (child_id, child_iid, child_title, parent_id)
 
-        def _walk(grp):
-            for epic in grp.epics.list(all=True):
-                epic_index[epic.id] = (grp.id, epic.iid)
-                if getattr(epic, 'parent_id', None):
-                    candidates.append((epic.id, epic.iid, epic.title, epic.parent_id))
-            for sg in grp.subgroups.list(all=True):
-                _walk(self.gl.groups.get(sg.id))
-
         print("\nCollecting epics with parents...")
-        _walk(group)
+        for epic in group.epics.list(all=True):
+            epic_index[epic.id] = (getattr(epic, 'group_id', group.id), epic.iid)
+            if getattr(epic, 'parent_id', None):
+                candidates.append((epic.id, epic.iid, epic.title, epic.parent_id))
         print(f"  {len(candidates)} epics have a parent")
 
         if count is not None:
