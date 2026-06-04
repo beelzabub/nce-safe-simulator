@@ -3511,7 +3511,7 @@ class ReportsMixin:
         def _wi_lc(lc_key):
             return (
                 f"{wi_base}?state=all"
-                f"&type%5B%5D=epic"
+                f"&type%5B%5D=8"
                 f"&label_name%5B%5D={quote(lc_key, safe='')}"
             )
 
@@ -3537,7 +3537,7 @@ class ReportsMixin:
             for lc in self._rd_lifecycle_labels
         )
         unlab_count = (
-            f'<a href="{wi_base}?state=all&type%5B%5D=epic{_not_lc}" target="_blank">{len(unlab)}</a>'
+            f'<a href="{wi_base}?state=all&type%5B%5D=8{_not_lc}" target="_blank">{len(unlab)}</a>'
             if unlab else "0"
         )
         md.append(
