@@ -117,9 +117,6 @@ class BootstrapMixin:
 
         self.delete_all_wiki_pages(group)
         self.delete_all_group_epics(self.parent_group)
-        self.delete_all_milestones(group)
-        for sg in subgroups:
-            self.delete_all_milestones(sg)
 
         print(f"Deleting all issues across group hierarchy ({self.delete_workers} workers)...")
 
@@ -317,20 +314,17 @@ class BootstrapMixin:
                 'namespace_id': group.id,
             })
             print(f"  Team Backlog → {project.path_with_namespace}")
-            milestones        = self.create_lorem_milestones(project)
             issue_weight_pool = [1, 2, 3, 5, 8, 13]
 
             for feature_epic, _ in feature_epics:
                 total_stories = random.randint(8, 15)
 
                 for i in range(total_stories):
-                    ms          = random.choice(milestones) if milestones else None
                     lorem_title = lorem.sentence().rstrip('.')
                     issue = project.issues.create({
-                        'title':        lorem_title,
-                        'description':  lorem.paragraph(),
-                        'weight':       random.choice(issue_weight_pool),
-                        'milestone_id': ms.id if ms else None,
+                        'title':       lorem_title,
+                        'description': lorem.paragraph(),
+                        'weight':      random.choice(issue_weight_pool),
                     })
                     project.issues.update(issue.iid, {
                         'title':   f"{issue.iid} - {lorem_title}",

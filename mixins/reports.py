@@ -1365,14 +1365,13 @@ class ReportsMixin:
             for _key, (project, issues) in sorted(orphans_by_project.items()):
                 md.append(f"### {self._relative_project_name(project)}")
                 md.append("")
-                md.append("| # | Title | State | Milestone | Assignees |")
-                md.append("|---|-------|-------|-----------|-----------|")
+                md.append("| # | Title | State | Assignees |")
+                md.append("|---|-------|-------|-----------|")
                 for issue in issues:
                     title_link = f"[{issue['title']}]({issue['web_url']})"
                     state      = issue["state"].capitalize()
-                    milestone  = issue["milestone"] or "_None_"
                     assignees  = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
-                    md.append(f"| #{issue['iid']} | {title_link} | {state} | {milestone} | {assignees} |")
+                    md.append(f"| #{issue['iid']} | {title_link} | {state} | {assignees} |")
                 md.append("")
 
         self.upload_to_wiki(group, f"{self._wiki_t4}/Orphaned Issues", "\n".join(md))
@@ -1483,13 +1482,12 @@ class ReportsMixin:
                 if open_issues:
                     md.append("**Open linked issues:**")
                     md.append("")
-                    md.append("| # | Issue | Assignee | Milestone |")
-                    md.append("|---|-------|----------|-----------|")
+                    md.append("| # | Issue | Assignee |")
+                    md.append("|---|-------|----------|")
                     for issue in sorted(open_issues, key=lambda i: i.get("iid", 0)):
                         ilink     = f"[{issue['title']}]({issue['web_url']})"
                         assignees = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
-                        milestone = issue.get("milestone") or "—"
-                        md.append(f"| #{issue['iid']} | {ilink} | {assignees} | {milestone} |")
+                        md.append(f"| #{issue['iid']} | {ilink} | {assignees} |")
                     md.append("")
 
         md.extend(_LEGEND_OPEN + _TYPE_ICON_LEGEND + _LEGEND_CLOSE)
@@ -2146,15 +2144,14 @@ class ReportsMixin:
                 md.append("")
                 md.append(f"**Feature state:** {f_state}")
                 md.append("")
-                md.append("| Issue | State | Weight | Milestone |")
-                md.append("|-------|-------|--------|-----------|")
+                md.append("| Issue | State | Weight |")
+                md.append("|-------|-------|--------|")
                 for issue in sorted(issues, key=lambda i: i["state"]):
-                    ms    = issue.get("milestone") or "—"
                     w     = issue.get("weight") or "—"
                     state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                     md.append(
                         f"| [{issue['title']}]({issue['web_url']}) "
-                        f"| {state} | {w} pt | {ms} |"
+                        f"| {state} | {w} pt |"
                     )
                 md.append("")
                 md.append("</details>")
@@ -2163,15 +2160,14 @@ class ReportsMixin:
         if unlinked:
             md.append("## Unlinked Issues (no Feature)")
             md.append("")
-            md.append("| Issue | State | Weight | Milestone |")
-            md.append("|-------|-------|--------|-----------|")
+            md.append("| Issue | State | Weight |")
+            md.append("|-------|-------|--------|")
             for issue in unlinked:
-                ms    = issue.get("milestone") or "—"
                 w     = issue.get("weight") or "—"
                 state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                 md.append(
                     f"| [{issue['title']}]({issue['web_url']}) "
-                    f"| {state} | {w} pt | {ms} |"
+                    f"| {state} | {w} pt |"
                 )
             md.append("")
 
