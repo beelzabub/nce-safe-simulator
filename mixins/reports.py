@@ -3284,22 +3284,24 @@ class ReportsMixin:
         )
         # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
         # report wiki page once the Tier 2 blocking report consolidation is complete.
-        _wi_risk = _wi_all
+        # ROAM risks are linked issues, not labels — no epics-filter URL can show them;
+        # link to the Risk Register wiki page instead.
+        _wi_risk = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/Risk Register')}"
         _wi_unasn = _wi([("state", "opened")])
 
         md.append("## Portfolio Summary")
         md.append("")
         md.append("| Metric | Value |")
         md.append("|--------|-------|")
-        md.append(f"| Total Epics (all PIs) | [{portfolio_epics_total}]({_wi_all}) |")
-        md.append(f"| Epics in Current PI | [{len(all_pi_epics)}]({_wi_pi}) |")
+        md.append(f"| Total Epics (all PIs) | <a href=\"{_wi_all}\" target=\"_blank\">{portfolio_epics_total}</a> |")
+        md.append(f"| Epics in Current PI | <a href=\"{_wi_pi}\" target=\"_blank\">{len(all_pi_epics)}</a> |")
         md.append(
-            f"| Current PI Progress | [{port_pct_done}% done]({_wi_pi})  "
+            f"| Current PI Progress | <a href=\"{_wi_pi}\" target=\"_blank\">{port_pct_done}% done</a>  "
             f"({pct_pi}% elapsed) {port_tl_sched} |"
         )
-        md.append(f"| Blocked Epics (current PI) | [{portfolio_blocked_total}]({_wi_pi}) |")
-        md.append(f"| Epics with Active ROAM Risks | [{portfolio_risk_epics}]({_wi_risk}) |")
-        md.append(f"| Unassigned to PI | [{portfolio_unassigned}]({_wi_unasn}) |")
+        md.append(f"| Blocked Epics (current PI) | <a href=\"{_wi_pi}\" target=\"_blank\">{portfolio_blocked_total}</a> |")
+        md.append(f"| Epics with Active ROAM Risks | <a href=\"{_wi_risk}\" target=\"_blank\">{portfolio_risk_epics}</a> |")
+        md.append(f"| Unassigned to PI | <a href=\"{_wi_unasn}\" target=\"_blank\">{portfolio_unassigned}</a> |")
         if port_wt_str != "—":
             md.append(f"| Story Points (current PI) | {port_wt_str} |")
         md.append("")
@@ -3533,11 +3535,16 @@ class ReportsMixin:
             )
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
-        _not_lc = "".join(
-            f"&not[label_name][]={quote(lc, safe='')}"
-            for lc in self._rd_lifecycle_labels
+        # GitLab epics browser has no URL filter for "no lifecycle label" — link to the
+        # dedicated unlabelled section on the Epic Lifecycle wiki page instead.
+        _lc_page = (
+            f"{group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/Epic Lifecycle')}"
+            "#unlabelled"
         )
-        unlab_count = str(len(unlab)) if unlab else "0"
+        unlab_count = (
+            f'<a href="{_lc_page}" target="_blank">{len(unlab)}</a>'
+            if unlab else "0"
+        )
         md.append(
             f"| _(unlabelled)_ | {unlab_count} | "
             f"{'—' if avg_u is None else str(avg_u)+'d'} | — | — |"
@@ -4982,7 +4989,7 @@ class ReportsMixin:
         self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
         self._wiki_t3 = f"{gn} — Portfolio Home/02 Operational Detail"
         self._wiki_t4 = f"{gn} — Portfolio Home/03 Data Quality"
-        print(f"\nGenerating reports for group: {group.full_path}\n")
+        print(f"\nGenerating reports for group: {group.name}\n")
 
         # Preload existing wiki pages so upload_to_wiki can look them up without
         # calling wikis.get(slug), which URL-encodes slashes and returns 404 for
