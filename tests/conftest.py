@@ -171,7 +171,7 @@ def reports():
 # Epic / issue mock factories (shared by report AND tool tests)
 # ---------------------------------------------------------------------------
 
-def _make_epic_mock(id=100, iid=1, title="Test Epic", labels=None, group_id=1):
+def _make_epic_mock(id=100, iid=1, title="Test Epic", labels=None, group_id=1, parent_id=None):
     """Return a MagicMock that looks like a python-gitlab Epic object."""
     epic = MagicMock()
     epic.id = id
@@ -179,6 +179,8 @@ def _make_epic_mock(id=100, iid=1, title="Test Epic", labels=None, group_id=1):
     epic.title = title
     epic.labels = labels if labels is not None else []
     epic.group_id = group_id
+    epic.parent_id = parent_id
+    epic.work_item_id = None
     return epic
 
 
@@ -200,6 +202,7 @@ class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin):
     """Concrete subclass of ToolsMixin with all external calls pre-wired for tests."""
 
     EPIC_TYPE_ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    ROAM_LABELS = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
     EPIC_TYPE_PLANNED_WEIGHTS = {
         "Epic": [100, 150, 200],
         "Capability": [30, 50, 80],
