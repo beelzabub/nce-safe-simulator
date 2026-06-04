@@ -131,7 +131,7 @@ Copy and edit `config.json`:
 | `risk_labels` | `risk::*` labels used by the Risk Register report and `set-risk-labels` tool |
 | `work_type_labels` | `type::*` labels classifying epics by SAFe work type (feature, enabler, infrastructure, defect) |
 | `lifecycle_labels` | `lifecycle::*` labels representing SAFe Portfolio Kanban states (funnel → done) |
-| `wsjf_labels` | Fibonacci label sets for WSJF scoring — `wsjf-value::N`, `wsjf-urgency::N`, `wsjf-risk::N` (N from 1–13) |
+| `wsjf_labels` | Fibonacci label sets for WSJF Time Criticality and Risk Reduction — `wsjf-urgency::N`, `wsjf-risk::N` (N from 1–13); Business Value uses the native custom field |
 | `fibonacci_weights` | Valid issue story-point values |
 | `epic_type_planned_weights` | Valid planned-weight pools per epic type |
 | `defaults.bootstrap` | Default counts and ratios for `--create` (see below) |
@@ -149,7 +149,7 @@ All label families are defined in `config.json` and created in GitLab at bootstr
 | **Risk** | `risk::` | `risk::high`, `risk::medium`, `risk::low` — feeds the Risk Register |
 | **Work type** | `type::` | `type::feature`, `type::enabler`, `type::infrastructure`, `type::defect` — SAFe work classification for Flow Distribution metric |
 | **Lifecycle** | `lifecycle::` | `lifecycle::funnel` → `lifecycle::analyzing` → `lifecycle::backlog` → `lifecycle::implementing` → `lifecycle::done` — SAFe Portfolio Kanban states for Epic Lifecycle report |
-| **WSJF** | `wsjf-value::`, `wsjf-urgency::`, `wsjf-risk::` | Fibonacci 1–13 scores for WSJF priority calculation; job size comes from planned weight |
+| **WSJF** | `wsjf-urgency::`, `wsjf-risk::` | Fibonacci 1–13 scores for Time Criticality and Risk Reduction; Business Value comes from the native custom field; job size comes from planned weight |
 
 #### `defaults.bootstrap`
 
@@ -399,7 +399,7 @@ All epics carrying a `risk::high`, `risk::medium`, or `risk::low` label, sorted 
 Measures ART predictability — the % of Features and Capabilities that were committed at PI planning and actually delivered by PI close. One row per ART per PI. Trend arrows show whether predictability is improving or declining. Useful for identifying systemic over-commitment.
 
 #### WSJF Priority Board (T2)
-Ranks portfolio backlog epics by Weighted Shortest Job First score: `(Business Value + Time Criticality + Risk Reduction) ÷ Job Size`. The three numerator components come from `wsjf-value::N`, `wsjf-urgency::N`, and `wsjf-risk::N` Fibonacci labels. Job size is the epic's planned weight. Higher scores should be scheduled first. Epics missing WSJF labels are listed separately with a prompt to use `set-wsjf-labels`.
+Ranks portfolio backlog epics by Weighted Shortest Job First score: `(Business Value + Time Criticality + Risk Reduction) ÷ Job Size`. Business Value comes from the native GitLab **Business Value custom field** (Fibonacci 1–21, set via `set-business-value` or the epic UI). Time Criticality and Risk Reduction come from `wsjf-urgency::N` and `wsjf-risk::N` labels. Job Size is the epic's planned weight. Higher scores should be scheduled first.
 
 #### Flow Metrics (T3)
 Five SAFe 6.0 flow metrics across the portfolio:
@@ -458,6 +458,8 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 | `export-epics` | Export all epics from the group hierarchy to CSV or JSON |
 | `export-issues` | Export all issues from the group hierarchy to CSV or JSON |
 | `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
+| `set-business-value` | Randomly assign Business Value custom field (Fibonacci 1–21) to open epics that have none (or all when `reassign=True`) |
+| `strip-business-value` | Clear the Business Value custom field from every epic (clean slate for testing) |
 | `generate-issues` | Create issues in team backlog projects linked to Feature epics |
 | `import-epics` | Import epics from CSV or JSON with pre-flight validation and dry-run |
 | `import-issues` | Import issues from CSV or JSON with pre-flight validation and dry-run |
@@ -475,7 +477,7 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 | `set-risk-labels` | Randomly assign `risk::high/medium/low` labels to open epics that have none |
 | `set-work-type-labels` | Randomly assign `type::*` labels to open epics (skip already-labelled unless `reassign=True`) |
 | `strip-work-type-labels` | Remove all `type::*` labels from every epic (clean slate for testing) |
-| `set-wsjf-labels` | Randomly assign `wsjf-value::N`, `wsjf-urgency::N`, `wsjf-risk::N` Fibonacci labels to open epics |
+| `set-wsjf-labels` | Randomly assign `wsjf-urgency::N` and `wsjf-risk::N` Fibonacci labels to open epics |
 | `strip-wsjf-labels` | Remove all `wsjf-*` labels from every epic (clean slate for testing) |
 | `simulate-pi-progress` | Close X% of open issues linked to epics in a specific PI |
 | `strip-labels` | Remove a specific label from all epics (optionally filtered by type) |
@@ -488,11 +490,14 @@ Run interactively with `--utilities` or pass a key directly (e.g. `--utilities a
 The `set-*` and `strip-*` utility pairs are designed for rapid test-data cycling. A typical pattern:
 
 ```bash
-# Seed WSJF labels on 50% of epics, run WSJF report, strip and repeat
-python3 NceGitLab.py --utilities set-wsjf-labels    # percent=50, reassign=False
+# Seed WSJF data, run the board, strip and repeat
+python3 NceGitLab.py --utilities set-business-value  # percent=50, reassign=False (Business Value custom field)
+python3 NceGitLab.py --utilities set-wsjf-labels     # percent=50, reassign=False (urgency + risk labels)
 python3 NceGitLab.py --report wsjf
-python3 NceGitLab.py --utilities strip-wsjf-labels  # clean slate
-python3 NceGitLab.py --utilities set-wsjf-labels    # percent=80, reassign=False
+python3 NceGitLab.py --utilities strip-business-value  # clean slate
+python3 NceGitLab.py --utilities strip-wsjf-labels     # clean slate
+python3 NceGitLab.py --utilities set-business-value  # percent=80, reassign=False
+python3 NceGitLab.py --utilities set-wsjf-labels     # percent=80, reassign=False
 
 # Same pattern works for lifecycle, work-type, and risk labels
 ```

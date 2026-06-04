@@ -79,13 +79,13 @@ class TestRoamSection:
             make_risk(iid=3, roam_status="roam::accepted"),
         ])]
         md = _render(epics)
-        assert "<td>⚠️ Owned</td><td>2</td>" in md
-        assert "<td>✋ Accepted</td><td>1</td>" in md
+        assert "<td>⚠️ Owned</td><td>0</td><td>2</td>" in md
+        assert "<td>✋ Accepted</td><td>0</td><td>1</td>" in md
 
     def test_total_risk_count_in_summary(self):
         epics = [make_epic(id=1, roam_risks=[make_risk(iid=1), make_risk(iid=2)])]
         md = _render(epics)
-        assert "<strong>Total</strong></td><td><strong>2</strong>" in md
+        assert "<strong>Total</strong></td><td><strong>0</strong></td><td><strong>2</strong>" in md
 
 
 # ---------------------------------------------------------------------------
@@ -165,21 +165,22 @@ class TestPastDueSection:
         md = _render([epic])
         assert "<td>📅 Past Due</td><td>1</td>" in md
 
-    def test_past_due_epic_not_shown_when_has_roam_risk(self):
+    def test_past_due_epic_also_shown_when_has_roam_risk(self):
+        # Conditions are independent — epic appears in both ROAM and Past Due
         epic = make_epic(id=1, etype="Epic", labels=["Epic"],
                          due_date=YESTERDAY, roam_risks=[make_risk()])
         md = _render([epic])
-        assert "## 📅 Past Due" not in md
+        assert "## 📅 Past Due" in md
         assert "## ⚠️ ROAM Risk Issues" in md
 
-    def test_past_due_epic_not_double_counted_with_child_overdue(self):
-        # Parent has past due_date AND overdue child — child_overdue wins
+    def test_past_due_shown_alongside_child_overdue(self):
+        # Parent qualifies for both child_overdue and past_due — appears in both
         parent = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
         child  = make_epic(id=2, etype="Feature", labels=["Feature"],
                            due_date=YESTERDAY, parent_id=1)
         md = _render([parent, child])
         assert "## 📅 Child Overdue" in md
-        assert "## 📅 Past Due" not in md
+        assert "## 📅 Past Due" in md
 
     def test_prepend_reason_in_row(self):
         epic = make_epic(id=1, etype="Epic", labels=["Epic"], due_date=YESTERDAY)
@@ -221,20 +222,22 @@ class TestBehindScheduleSection:
         md = _render([epic])
         assert "<td>⏱️ Behind Schedule</td><td>1</td>" in md
 
-    def test_behind_schedule_not_shown_when_has_roam_risk(self):
+    def test_behind_schedule_also_shown_when_has_roam_risk(self):
+        # Conditions are independent — epic appears in both ROAM and Behind Schedule
         epic = make_epic(id=1, etype="Epic", labels=["Epic"],
                          pct_complete=10, pct_through_pi=60,
                          roam_risks=[make_risk()])
         md = _render([epic])
-        assert "## ⏱️ Behind Schedule" not in md
+        assert "## ⏱️ Behind Schedule" in md
+        assert "## ⚠️ ROAM Risk Issues" in md
 
-    def test_behind_schedule_not_double_counted_with_past_due(self):
-        # Epic is both past due and behind schedule — past_due bucket wins
+    def test_behind_schedule_shown_alongside_past_due(self):
+        # Epic is both past due and behind schedule — appears in both sections
         epic = make_epic(id=1, etype="Epic", labels=["Epic"],
                          due_date=YESTERDAY, pct_complete=10, pct_through_pi=60)
         md = _render([epic])
         assert "## 📅 Past Due" in md
-        assert "## ⏱️ Behind Schedule" not in md
+        assert "## ⏱️ Behind Schedule" in md
 
     def test_prepend_reason_in_row(self):
         epic = make_epic(id=1, etype="Epic", labels=["Epic"],

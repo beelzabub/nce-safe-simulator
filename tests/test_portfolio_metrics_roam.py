@@ -30,10 +30,12 @@ def _make_epic_obj(id, iid, labels, work_item_id, state="opened"):
 
 class ConcreteUtils(UtilitiesMixin):
     def __init__(self, epics, roam_by_epic=None):
-        self.gl            = MagicMock()
-        self.url           = "https://gitlab.com"
-        self.private_token = "test-token"
-        self.ROAM_LABELS   = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
+        self.gl               = MagicMock()
+        self.url              = "https://gitlab.com"
+        self.private_token    = "test-token"
+        self.gitlab_namespace = None
+        self.BUSINESS_VALUE_FIELD = {"name": "Business Value"}
+        self.ROAM_LABELS      = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
         self._epics        = epics
         self._roam_by_epic = roam_by_epic or {}
 
