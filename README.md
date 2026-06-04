@@ -200,7 +200,10 @@ Any config value can be overridden at runtime without editing the file:
 | `RISK_LABELS` | `risk_labels` (comma-separated) |
 | `WORK_TYPE_LABELS` | `work_type_labels` (comma-separated) |
 | `LIFECYCLE_LABELS` | `lifecycle_labels` (comma-separated) |
+| `ROAM_LABELS` | `roam_labels` (comma-separated) |
 | `FIBONACCI_WEIGHTS` | `fibonacci_weights` (comma-separated integers) |
+
+In a GitLab pipeline, set these as [CI/CD variables](https://docs.gitlab.com/ee/ci/variables/) under **Settings → CI/CD → Variables**. Mark `ACCESS_TOKEN` as **Masked** to keep the token out of job logs. `ACCESS_TOKEN` and `GROUP_NAME` are the minimum required for the `generate-reports` job.
 
 ---
 
