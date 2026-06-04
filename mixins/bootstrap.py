@@ -66,7 +66,7 @@ class BootstrapMixin:
         if self.gitlab_namespace:
             parent = self.get_group_by_name(self.gitlab_namespace)
             if parent is None:
-                print(f"gitlab_namespace '{self.gitlab_namespace}' not found. Aborting.")
+                print(f"Root namespace '{self.gitlab_namespace}' not found. Aborting.")
                 return None
             print(f"  Using namespace: {parent.full_path}")
         else:
@@ -574,9 +574,15 @@ class BootstrapMixin:
                     except Exception as exc:
                         print(f"  Warning: issue close error in {project.name}: {exc}")
 
-        # Lifecycle label pass — assign deterministically based on state and PI bucket
+        # Lifecycle label pass — assign deterministically based on state and PI bucket.
+        # Future PIIDs are split: nearest PI → backlog (planned, awaiting capacity),
+        # farther-out PIIDs → analyzing (Lean Business Case in progress), no PIID → funnel.
         past_set    = set(past_piids)
         current_set = set(current_piids)
+        future_sorted = sorted(future_piids, key=lambda p: (self._pi_dates_from_label(p)[0] or date.min))
+        backlog_piids  = set(future_sorted[:1])
+        analyzing_piids = set(future_sorted[1:])
+
         print("\n--- Lifecycle label assignment ---")
         labeled = errors = 0
         for epic, _ in all_epic_tuples:
@@ -587,8 +593,10 @@ class BootstrapMixin:
                     lc = 'lifecycle::done'
                 elif piid in past_set or piid in current_set:
                     lc = 'lifecycle::implementing'
-                elif piid in future_piids:
+                elif piid in backlog_piids:
                     lc = 'lifecycle::backlog'
+                elif piid in analyzing_piids:
+                    lc = 'lifecycle::analyzing'
                 else:
                     lc = 'lifecycle::funnel'
                 epic.labels = existing + [lc]
@@ -598,6 +606,11 @@ class BootstrapMixin:
                 print(f"    Warning: could not label epic {getattr(epic, 'iid', '?')}: {exc}")
                 errors += 1
         print(f"  {labeled} epics labeled{f'  ({errors} errors)' if errors else ''}")
+
+        # WSJF label pass — seed urgency/risk on open epics so the priority board is
+        # immediately useful after a fresh create.
+        print("\n--- WSJF label seeding ---")
+        self._tool_set_wsjf_labels(percent=70)
 
     def create_safe_hierarchy(self, target_path=None):
         if target_path is None:
@@ -723,7 +736,7 @@ class BootstrapMixin:
         Raises SystemExit(0) if the user chooses to quit.
         """
         if not self.gitlab_namespace:
-            print("  WARNING: gitlab_namespace not set — cannot manage custom fields.")
+            print("  WARNING: root namespace not set — cannot manage custom fields.")
             return "skipped"
 
         cfg            = self.BUSINESS_VALUE_FIELD
