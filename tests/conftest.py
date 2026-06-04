@@ -3,7 +3,7 @@ import sys
 import types
 from collections import defaultdict
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, create_autospec
 
 import pytest
 
@@ -136,6 +136,12 @@ class ReportsHarness(ReportsMixin):
         self._wiki_t3 = "Portfolio/02 Operational Detail"
         self._wiki_t4 = "Portfolio/03 Data Quality"
         self._uploaded = {}
+        # Additional attributes used by Group C report methods
+        self.url = "https://gitlab.com"
+        self._rd_projects_by_nsid  = {}
+        self._rd_epics_by_id       = {e["id"]: e for e in (epics_all or [])}
+        self._rd_work_type_labels  = []
+        self.gl                    = MagicMock()
 
     def upload_to_wiki(self, group, title, content):
         self._uploaded[title] = content
