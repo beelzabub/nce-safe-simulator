@@ -4136,10 +4136,7 @@ class ReportsMixin:
 
             md.append("## Blocked Business Value")
             md.append("")
-            md.append(
-                f"_{n_pe} {pe_word} {'have' if n_pe != 1 else 'has'} blocked descendants. "
-                f"Total BV at risk: **{total_bv}**_"
-            )
+            md.append(f"**Total Business Value at Risk: {total_bv}** _(sum of {n_pe} distinct {pe_word})_")
             md.append("")
 
             pe_summary = sorted(
@@ -4147,14 +4144,9 @@ class ReportsMixin:
                  for pid in seen_pe_bv],
                 key=lambda x: (x[2] is None, -(x[2] or 0)),
             )
-            md.append("### BV at Risk by Epic")
-            md.append("")
-            md.append("| Epic at Risk | Type | BV | Blocked Items |")
-            md.append("|---|---|---|---|")
-            for _, pe_link, pe_bv, pe_type, n_blocked in pe_summary:
-                bv_str   = str(pe_bv) if pe_bv is not None else "—"
-                type_icon = self.EPIC_TYPE_ICONS.get(pe_type, "🏆")
-                md.append(f"| {pe_link} | {type_icon} {pe_type} | {bv_str} | {n_blocked} |")
+            for _, pe_link, pe_bv, _pe_type, _n_blocked in pe_summary:
+                bv_str = str(pe_bv) if pe_bv is not None else "—"
+                md.append(f"- {pe_link} — BV: {bv_str}")
             md.append("")
 
             md.append("### Blocking Detail")
@@ -4164,11 +4156,6 @@ class ReportsMixin:
             for _, pe_link, pe_bv, bl_link, type_str, blocker_str in bv_rows:
                 bv_str = str(pe_bv) if pe_bv is not None else "—"
                 md.append(f"| {pe_link} | {bv_str} | {bl_link} | {type_str} | {blocker_str} |")
-            md.append("")
-            md.append(
-                f"> **Total Business Value at Risk: {total_bv}** "
-                f"(sum of {n_pe} distinct Portfolio Epic BV scores)"
-            )
             md.append("")
 
         md.extend([
