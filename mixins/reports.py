@@ -3526,14 +3526,14 @@ class ReportsMixin:
             avg_str = f"{avg}d" if avg is not None else "—"
             old_str = f"{oldest}d" if oldest is not None else "—"
             warn    = " ⚠️" if (thresh and oldest and oldest > thresh) else ""
-            count   = f"[{len(epics)}]({_wi_lc(key)})" if epics else "0"
+            count   = f'<a href="{_wi_lc(key)}" target="_blank">{len(epics)}</a>' if epics else "0"
             md.append(
                 f"| {label} | {count} | {avg_str} | {old_str}{warn} | {t_str} |"
             )
         unlab = buckets["_unlabelled"]
         avg_u = _avg_age(unlab)
         unlab_count = (
-            f"[{len(unlab)}]({wi_base}?state=all&type%5B%5D=epic)"
+            f'<a href="{wi_base}?state=all&type%5B%5D=epic" target="_blank">{len(unlab)}</a>'
             if unlab else "0"
         )
         md.append(
