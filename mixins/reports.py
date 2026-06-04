@@ -4050,9 +4050,71 @@ class ReportsMixin:
 
             md.append("")
 
+        # ── Blocked Business Value ───────────────────────────────────────
+        bv_by_id      = {e["id"]: e.get("business_value")
+                         for tier in self._rd_metrics.values() for e in tier}
+        epic_url_by_id = {e["id"]: e.get("web_url", "")
+                          for tier in self._rd_metrics.values() for e in tier}
+
+        # rows: (pe_id, pe_link, pe_bv, blocked_link, type_str, blocker_str)
+        bv_rows    = []
+        seen_pe_bv = {}  # pe_id → bv — deduped for total
+
+        for rel in self._rd_blocking.get("relationships", []):
+            blocked  = rel["blocked_epic"]
+            blockers = rel.get("blocked_by", [])
+            ancs     = rel.get("at_risk_portfolio_epics", [])
+
+            # If the blocked item is itself a Portfolio Epic, treat it as its own ancestor
+            pe_candidates = ([blocked] + ancs) if blocked.get("type") == "Epic" else (ancs or [blocked])
+
+            blocker_str  = ", ".join(
+                f"[{b['title']}]({b['web_url']})" if b.get("web_url") else b["title"]
+                for b in blockers
+            )
+            b_type  = blocked.get("type", "Epic")
+            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
+            bl_link = (f"[{blocked['title']}]({blocked['web_url']})"
+                       if blocked.get("web_url") else blocked["title"])
+
+            for pe in pe_candidates:
+                pe_id   = pe.get("id") or pe.get("id_int")
+                pe_bv   = bv_by_id.get(pe_id)
+                pe_url  = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
+                pe_link = f"[{pe['title']}]({pe_url})" if pe_url else pe["title"]
+                bv_rows.append((pe_id, pe_link, pe_bv, bl_link, f"{b_icon} {b_type}", blocker_str))
+                if pe_id not in seen_pe_bv:
+                    seen_pe_bv[pe_id] = pe_bv
+
+        if bv_rows:
+            total_bv    = sum(v for v in seen_pe_bv.values() if v is not None)
+            n_pe        = len(seen_pe_bv)
+            pe_word     = "Portfolio Epics" if n_pe != 1 else "Portfolio Epic"
+            bv_rows.sort(key=lambda x: (x[2] is None, -(x[2] or 0)))
+
+            md.append("## Blocked Business Value")
+            md.append("")
+            md.append(
+                f"_{n_pe} {pe_word} {'have' if n_pe != 1 else 'has'} blocked descendants. "
+                f"Total BV at risk: **{total_bv}**_"
+            )
+            md.append("")
+            md.append("| Portfolio Epic | BV | Blocked Item | Type | Blocker(s) |")
+            md.append("|---|---|---|---|---|")
+            for _, pe_link, pe_bv, bl_link, type_str, blocker_str in bv_rows:
+                bv_str = str(pe_bv) if pe_bv is not None else "—"
+                md.append(f"| {pe_link} | {bv_str} | {bl_link} | {type_str} | {blocker_str} |")
+            md.append("")
+            md.append(
+                f"> **Total Business Value at Risk: {total_bv}** "
+                f"(sum of {n_pe} distinct Portfolio Epic BV scores)"
+            )
+            md.append("")
+
         md.extend([
             "---",
-            "## How WSJF Works",
+            "<details>",
+            "<summary>How WSJF Works</summary>",
             "",
             "**WSJF = (Business Value + Time Criticality + Risk Reduction) ÷ Job Size**",
             "",
@@ -4076,6 +4138,7 @@ class ReportsMixin:
             "| **N.NN** (bold score) | All three label components present and job size > 0 |",
             "| _partial_ | One or more label components missing, or job size not set |",
             "",
+            "</details>",
         ])
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/WSJF Priority Board", "\n".join(md))
