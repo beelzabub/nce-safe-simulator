@@ -3,6 +3,7 @@ image: python:latest
 stages:
   - build
   - report
+  - pages
 
 python-version-test:
   stage: build
@@ -21,6 +22,23 @@ generate-reports:
     paths:
       - reports.zip
     expire_in: 30 days
+  variables:
+    ACCESS_TOKEN: $ACCESS_TOKEN
+    GROUP_NAME: $GROUP_NAME
+  when: manual
+
+pages:
+  stage: pages
+  image: ghcr.io/quarto-dev/quarto:latest
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - python NceGitLab.py --report health-dashboard
+    - quarto render
+  artifacts:
+    paths:
+      - public/
+    expire_in: 7 days
   variables:
     ACCESS_TOKEN: $ACCESS_TOKEN
     GROUP_NAME: $GROUP_NAME

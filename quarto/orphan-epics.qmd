@@ -1,0 +1,55 @@
+---
+title: "Orphaned Epics"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML
+
+_candidates = [Path("data/orphan-epics.json"), Path("../data/orphan-epics.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/orphan-epics.json not found. "
+        "Run: python NceGitLab.py --report orphan-epics"
+    )
+
+d       = json.loads(data_file.read_text())
+group   = d["group"]
+orphans = d["orphans"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>An <strong>orphaned epic</strong> has no parent and no children — it is completely
+disconnected from the portfolio hierarchy.</p>
+""")
+```
+
+```{python}
+if not orphans:
+    HTML("<p>✅ No orphaned epics found.</p>")
+else:
+    html = f"<p><strong>{len(orphans)} orphaned epic(s) found.</strong></p>"
+    html += """
+<table class="table table-sm table-striped">
+  <thead><tr><th>Title</th><th>Type</th><th>State</th></tr></thead>
+  <tbody>
+"""
+    for row in orphans:
+        link = f'<a href="{row["url"]}" target="_blank">{row["icon"]} {row["title"]}</a>' if row["url"] else f'{row["icon"]} {row["title"]}'
+        html += f"<tr><td>{link}</td><td>{row['type']}</td><td>{row['state']}</td></tr>"
+    html += "  </tbody>\n</table>"
+    HTML(html)
+```
