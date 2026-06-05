@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/unassigned-pi.json"), Path("../data/unassigned-pi.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -42,7 +42,7 @@ Program Increment. <strong>Total unassigned: {total}</strong></p>
 
 ```{python}
 if total == 0:
-    HTML("<p>✅ All epics are assigned to a PI.</p>")
+    display(HTML("<p>✅ All epics are assigned to a PI.</p>"))
 else:
     html = ""
     for etype in ("Epic", "Capability", "Feature", "Unknown"):
@@ -61,7 +61,7 @@ else:
             parent = f'<em>{row["parent"]}</em>' if row["parent"] else "—"
             html  += f"<tr><td>{link}</td><td>{row['state']}</td><td>{parent}</td></tr>"
         html += "  </tbody>\n</table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ::: {.callout-note collapse="true"}

@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/risk-register.json"), Path("../data/risk-register.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -95,10 +95,10 @@ ROAM_LABELS = {"roam::owned": "⚠️ Owned", "roam::accepted": "✋ Accepted",
 
 has_any = any(roam_rows.get(lbl) for lbl in ROAM_ORDER)
 if not has_any:
-    HTML("<p><em>No ROAM risk issues found. Create issues with <code>roam::owned</code>, "
+    display(HTML("<p><em>No ROAM risk issues found. Create issues with <code>roam::owned</code>, "
          "<code>roam::accepted</code>, <code>roam::mitigated</code>, or "
          "<code>roam::resolved</code> labels and link them to the threatened epic via "
-         "<strong>\"relates to\"</strong>.</em></p>")
+         "<strong>\"relates to\"</strong>.</em></p>"))
 else:
     html = ""
     for lbl in ROAM_ORDER:
@@ -116,7 +116,7 @@ else:
             )
             html += f"<tr><td>{rlink}</td><td>{row['assignee']}</td><td>{e_links}</td></tr>"
         html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ## Condition Alerts

@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/orphan-issues.json"), Path("../data/orphan-issues.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -40,7 +40,7 @@ portfolio hierarchy.</p>
 
 ```{python}
 if not projects:
-    HTML("<p>✅ No orphaned issues found.</p>")
+    display(HTML("<p>✅ No orphaned issues found.</p>"))
 else:
     html = f"<p><strong>{total} orphaned issue(s) across {len(projects)} project(s).</strong></p>"
     for proj in projects:
@@ -55,5 +55,5 @@ else:
             assignees = ", ".join(issue["assignees"]) if issue["assignees"] else "<em>Unassigned</em>"
             html     += f"<tr><td>#{issue['iid']}</td><td>{link}</td><td>{issue['state']}</td><td>{assignees}</td></tr>"
         html += "  </tbody>\n</table>"
-    HTML(html)
+    display(HTML(html))
 ```
