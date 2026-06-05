@@ -1,6 +1,6 @@
 {
   "url": "https://gitlab.com",
-  "parent_group": "PMW-120",
+  "parent_group": "BMW-120",
   "api_timeout": 300,
   "delete_workers": 5,
   "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
