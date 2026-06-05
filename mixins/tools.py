@@ -255,6 +255,17 @@ TOOLS = [
         ],
     },
     {
+        "key":         "strip-piid-labels",
+        "description": "Remove PIID:: labels from N or X% of epics (create unassigned-PI test data)",
+        "method":      "_tool_strip_piid_labels",
+        "params": [
+            {"name": "count",     "prompt": "Number of epics to strip (blank to use percent instead)", "type": int,   "optional": True},
+            {"name": "percent",   "prompt": "Percent of epics to strip (used when count is blank)",    "type": float, "default": 20.0},
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",    "type": str,   "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                                 "type": bool,  "default": False},
+        ],
+    },
+    {
         "key":         "set-project-labels",
         "description": "Bulk-assign a project label to epics that are missing one",
         "method":      "_tool_set_project_labels",
@@ -1507,6 +1518,57 @@ class ToolsMixin:
                     errors += 1
 
         print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_piid_labels(self, count=None, percent=20.0, epic_type=None, dry_run=False):
+        """Remove PIID:: labels from N or X% of epics to create unassigned-PI test data."""
+        if percent is None:
+            percent = 20.0
+        group    = self.get_group_by_name(self.parent_group)
+        piid_set = set(self._discover_labels(group, "PIID::"))
+
+        if not piid_set:
+            print("No PIID:: labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"PIID pool : {sorted(piid_set)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        candidates = [
+            e for e in group.epics.list(all=True)
+            if set(e.labels) & piid_set
+            and (not epic_type or epic_type in e.labels)
+        ]
+
+        if count is not None:
+            n = min(int(count), len(candidates))
+        else:
+            n = max(1, round(len(candidates) * percent / 100)) if candidates else 0
+
+        targets = random.sample(candidates, n) if n < len(candidates) else list(candidates)
+
+        stripped = errors = 0
+        for epic in targets:
+            existing   = set(epic.labels) & piid_set
+            new_labels = [l for l in epic.labels if l not in piid_set]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                stripped += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        skipped = len(candidates) - len(targets)
+        print(f"\nDone.  Stripped: {stripped}  Skipped (sampled out or filtered): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
