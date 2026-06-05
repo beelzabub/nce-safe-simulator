@@ -1,0 +1,59 @@
+---
+title: "Orphaned Issues"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/orphan-issues.json"), Path("../data/orphan-issues.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/orphan-issues.json not found. "
+        "Run: python NceGitLab.py --report orphan-issues"
+    )
+
+d        = json.loads(data_file.read_text())
+group    = d["group"]
+projects = d["projects"]
+total    = d["total"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>An <strong>orphaned issue</strong> has no epic assigned — it is not tracked within the
+portfolio hierarchy.</p>
+""")
+```
+
+```{python}
+if not projects:
+    display(HTML("<p>✅ No orphaned issues found.</p>"))
+else:
+    html = f"<p><strong>{total} orphaned issue(s) across {len(projects)} project(s).</strong></p>"
+    for proj in projects:
+        html += f"<h3>{proj['name']}</h3>"
+        html += """
+<table class="table table-sm table-bordered">
+  <thead><tr><th>#</th><th>Title</th><th>State</th><th>Assignees</th></tr></thead>
+  <tbody>
+"""
+        for issue in proj["issues"]:
+            link      = f'<a href="{issue["url"]}" target="_blank">{issue["title"]}</a>' if issue["url"] else issue["title"]
+            assignees = ", ".join(issue["assignees"]) if issue["assignees"] else "<em>Unassigned</em>"
+            html     += f"<tr><td>#{issue['iid']}</td><td>{link}</td><td>{issue['state']}</td><td>{assignees}</td></tr>"
+        html += "  </tbody>\n</table>"
+    display(HTML(html))
+```

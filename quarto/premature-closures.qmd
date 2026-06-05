@@ -1,0 +1,81 @@
+---
+title: "Premature Closures"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/premature-closures.json"), Path("../data/premature-closures.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/premature-closures.json not found. "
+        "Run: python NceGitLab.py --report premature-closures"
+    )
+
+d        = json.loads(data_file.read_text())
+group    = d["group"]
+findings = d["findings"]
+total    = d["total"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>A <strong>premature closure</strong> is a closed Epic or Capability that still has open
+child epics or open linked issues. Either reopen the parent to reflect in-flight work, or
+close and reassign the remaining items.</p>
+""")
+```
+
+```{python}
+if not findings:
+    display(HTML("<p>✅ No premature closures found — all closed epics have fully closed descendants.</p>"))
+else:
+    html = f"<p><strong>{total} closed epic(s) with open work remaining.</strong></p>"
+
+    for etype in ("Epic", "Capability"):
+        rows = [f for f in findings if f["type"] == etype]
+        if not rows:
+            continue
+        icon   = "🏆" if etype == "Epic" else "🧩"
+        plural = "Epics" if etype == "Epic" else "Capabilities"
+        html  += f"<h2>{icon} Closed {plural} with Open Work ({len(rows)})</h2>"
+
+        for f in sorted(rows, key=lambda x: x["title"]):
+            link        = f'<a href="{f["url"]}" target="_blank">{f["icon"]} {f["title"]}</a>' if f["url"] else f'{f["icon"]} {f["title"]}'
+            child_note  = f'⚠️ {len(f["open_children"])} open child epic(s)' if f["open_children"] else ""
+            issue_note  = f'⚠️ {len(f["open_issues"])} open issue(s)' if f["open_issues"] else ""
+            notes       = " · ".join(x for x in (child_note, issue_note) if x)
+            html       += f"<h3>{link} — {notes}</h3>"
+
+            if f["open_children"]:
+                html += "<p><strong>Open child epics:</strong></p>"
+                html += '<table class="table table-sm"><thead><tr><th>Title</th><th>PI</th></tr></thead><tbody>'
+                for c in f["open_children"]:
+                    clink = f'<a href="{c["url"]}" target="_blank">{c["icon"]} {c["title"]}</a>' if c["url"] else f'{c["icon"]} {c["title"]}'
+                    html += f"<tr><td>{clink}</td><td>{c['piid']}</td></tr>"
+                html += "</tbody></table>"
+
+            if f["open_issues"]:
+                html += "<p><strong>Open linked issues:</strong></p>"
+                html += '<table class="table table-sm"><thead><tr><th>#</th><th>Issue</th><th>Assignees</th></tr></thead><tbody>'
+                for i in f["open_issues"]:
+                    ilink     = f'<a href="{i["url"]}" target="_blank">{i["title"]}</a>' if i["url"] else i["title"]
+                    assignees = ", ".join(i["assignees"]) if i["assignees"] else "<em>Unassigned</em>"
+                    html     += f"<tr><td>#{i['iid']}</td><td>{ilink}</td><td>{assignees}</td></tr>"
+                html += "</tbody></table>"
+
+    display(HTML(html))
+```

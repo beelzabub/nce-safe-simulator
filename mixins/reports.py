@@ -3022,11 +3022,13 @@ class ReportsMixin:
 
         return (vs_group["name"], wiki_url, len(deps), critical)
 
-    def generate_portfolio_health_dashboard(self):
-        """Tier 1 executive pulse — single wiki page with per-VS traffic-light status."""
-        root_group = self._rd_root_obj
-        print(f"Generating Portfolio Health Dashboard for: {root_group.full_path}")
+    def _data_portfolio_health(self) -> dict:
+        """Compute portfolio health snapshot → JSON-serializable dict.
 
+        Returns a structured dict consumed by both generate_portfolio_health_dashboard
+        (markdown renderer) and write_report_json (Quarto data layer).
+        """
+        root_group = self._rd_root_obj
         today = date.today()
 
         # ── Identify current PI ──────────────────────────────────────────── #
@@ -3043,8 +3045,8 @@ class ReportsMixin:
                     past_pis,
                     key=lambda p: self._pi_dates_from_label(p)[1] or date.min
                 )
-        pct_pi             = self._pct_through_pi(current_pi) or 0
-        pi_start, pi_end   = self._pi_dates_from_label(current_pi) if current_pi else (None, None)
+        pct_pi           = self._pct_through_pi(current_pi) or 0
+        pi_start, pi_end = self._pi_dates_from_label(current_pi) if current_pi else (None, None)
 
         # ── Traffic-light helpers ────────────────────────────────────────── #
         def _tl_schedule(pct_done, pct_through):
@@ -3062,15 +3064,14 @@ class ReportsMixin:
             scope_only = [e for e in epics if e.get("actual_weight", 0) == 0
                           and e.get("planned_weight", 0) > 0]
 
-            issue_pts  = sum(e["actual_weight"]          for e in has_issues)
-            scope_pts  = sum(e["planned_weight"]          for e in scope_only)
-            total_plan = sum(e.get("planned_weight", 0)  for e in epics)
+            issue_pts  = sum(e["actual_weight"]         for e in has_issues)
+            scope_pts  = sum(e["planned_weight"]         for e in scope_only)
+            total_plan = sum(e.get("planned_weight", 0) for e in epics)
 
             if not issue_pts and not total_plan:
                 return "⬜", "—"
 
             if has_issues and scope_only:
-                # Mixed: some epics estimated via child issues, others scoped at epic level only
                 return "⬜", (
                     f"{issue_pts}pt estimated + {scope_pts}pt scoped"
                     f" / {total_plan}pt planned"
@@ -3124,15 +3125,12 @@ class ReportsMixin:
 
         # ── Per-VS stats ─────────────────────────────────────────────────── #
         vs_rows = []
-        portfolio_epics_total   = 0
         portfolio_blocked_total = 0
-        portfolio_risk_epics    = 0
         portfolio_unassigned    = 0
 
         for vs_group in self._iter_vs_groups():
             vs_ids = _all_descendant_ids(vs_group["id"])
 
-            # Typed epics only — used for schedule/capacity (need pct_complete/weights)
             pi_epics = [
                 e for tier in self._rd_metrics.values()
                 for e in tier
@@ -3143,7 +3141,6 @@ class ReportsMixin:
                 for e in tier
                 if e.get("group_id") in vs_ids
             ]
-            # All epics (typed + untyped) — used for risk and unassigned counts
             all_vs_epics_raw = [
                 e for e in self._rd_epics_all
                 if e.get("group_id") in vs_ids
@@ -3158,54 +3155,47 @@ class ReportsMixin:
                 else:
                     pct_done_vs = round(sum(e["pct_complete"] for e in pi_epics) / len(pi_epics))
             else:
-                pct_done_vs  = 0
-                planned_w_vs = 0
+                pct_done_vs = 0
 
             tl_sched, sched_detail = _tl_schedule(pct_done_vs, pct_pi)
-
-            tl_cap, cap_detail = _tl_capacity(pi_epics)
+            tl_cap,   cap_detail   = _tl_capacity(pi_epics)
 
             vs_roam_count = sum(
                 1 for e in all_vs_epics_raw
                 if any(r.get("roam_status") in _active_roam
                        for r in (e.get("roam_risks") or []))
             )
-            tl_risk, risk_detail = _tl_risk(vs_roam_count)
+            tl_risk,  risk_detail  = _tl_risk(vs_roam_count)
 
             vs_epic_ids = {e["id"] for e in (pi_epics if pi_epics else all_vs_epics_raw)}
             vs_blocked  = sum(1 for eid in vs_epic_ids if blocked_counts.get(eid, 0) > 0)
             tl_block, block_detail = _tl_blocking(vs_blocked)
 
-            overall     = _worst(tl_sched, tl_cap, tl_risk, tl_block)
+            overall       = _worst(tl_sched, tl_cap, tl_risk, tl_block)
             unassigned_vs = sum(
                 1 for e in all_vs_epics_raw
                 if not any(l.startswith("PIID::") for l in e.get("labels", []))
             )
-            risk_epic_count = vs_roam_count
 
             vs_rows.append({
-                "vs":          vs_group,
+                "vs":          {"name": vs_group["name"], "web_url": vs_group["web_url"]},
                 "overall":     overall,
-                "tl_sched":    tl_sched,   "sched_detail":  sched_detail,
-                "tl_cap":      tl_cap,     "cap_detail":    cap_detail,
-                "tl_risk":     tl_risk,    "risk_detail":   risk_detail,
-                "tl_block":    tl_block,   "block_detail":  block_detail,
+                "tl_sched":    tl_sched,  "sched_detail": sched_detail,
+                "tl_cap":      tl_cap,    "cap_detail":   cap_detail,
+                "tl_risk":     tl_risk,   "risk_detail":  risk_detail,
+                "tl_block":    tl_block,  "block_detail": block_detail,
                 "epics_total": len(all_vs_epics),
                 "pi_epics":    len(pi_epics),
                 "blocked":     vs_blocked,
                 "unassigned":  unassigned_vs,
             })
 
-            portfolio_epics_total   += len(all_vs_epics)
             portfolio_blocked_total += vs_blocked
-            portfolio_risk_epics    += risk_epic_count
             portfolio_unassigned    += unassigned_vs
 
-        # ── Portfolio-level totals (all epics, all groups including root) ──── #
-        # VS loop only traverses VS subgroup descendants — root-level epics are excluded.
-        # Exclude cross-group children (injected for rollup only; they live outside the portfolio).
+        # ── Portfolio-level totals ────────────────────────────────────────── #
         portfolio_epics_total = sum(1 for e in self._rd_epics_all if not e.get("is_cross_group"))
-        portfolio_risk_epics = sum(
+        portfolio_risk_epics  = sum(
             1 for e in self._rd_epics_all
             if not e.get("is_cross_group")
             and any(r.get("roam_status") in _active_roam
@@ -3225,22 +3215,1029 @@ class ReportsMixin:
                     sum(e["planned_weight"] * e["pct_complete"] for e in all_pi_epics) / planned_t
                 )
             else:
-                port_pct_done = round(sum(e["pct_complete"] for e in all_pi_epics) / len(all_pi_epics))
+                port_pct_done = round(
+                    sum(e["pct_complete"] for e in all_pi_epics) / len(all_pi_epics)
+                )
         else:
             port_pct_done = 0
         port_tl_sched, _ = _tl_schedule(port_pct_done, pct_pi)
-        _, port_wt_str = _tl_capacity(all_pi_epics)
+        _, port_wt_str    = _tl_capacity(all_pi_epics)
 
         # ── Needs Attention ─────────────────────────────────────────────── #
-        top_blocked = sorted(
+        top_blocked_rels = sorted(
             self._rd_blocking.get("relationships", []),
             key=lambda r: -len(r.get("blocked_by", []))
         )[:5]
+        top_blocked = []
+        for rel in top_blocked_rels:
+            epic   = rel["blocked_epic"]
+            e_meta = self._rd_epics_by_id.get(
+                epic.get("id_int") or epic.get("id"), {}
+            )
+            top_blocked.append({
+                "title":     epic.get("title", "—"),
+                "url":       epic.get("web_url"),
+                "type":      epic.get("type", "—"),
+                "n_blockers": len(rel.get("blocked_by", [])),
+                "piid":      e_meta.get("piid") or "—",
+            })
 
-        at_risk_epics = sorted(
+        at_risk_raw = sorted(
             [e for e in all_pi_epics if pct_pi - e.get("pct_complete", 0) > 20],
             key=lambda e: -(pct_pi - e.get("pct_complete", 0))
         )[:5]
+        at_risk_epics = []
+        for e in at_risk_raw:
+            pw = e.get("planned_weight", 0)
+            aw = e.get("actual_weight",  0)
+            if pw and aw:
+                wt_str = f"{aw}pt/{pw}pt"
+            elif pw:
+                wt_str = f"{pw}pt (epic)"
+            elif aw:
+                wt_str = f"{aw}pt (issues)"
+            else:
+                wt_str = "—"
+            at_risk_epics.append({
+                "title":      e.get("title", "—"),
+                "url":        e.get("web_url"),
+                "type":       e.get("type", "—"),
+                "pct_done":   e.get("pct_complete", 0),
+                "pct_elapsed": pct_pi,
+                "gap":        pct_pi - e.get("pct_complete", 0),
+                "weight_str": wt_str,
+                "piid":       e.get("piid", "—"),
+            })
+
+        return {
+            "generated_at": today.isoformat(),
+            "report_date":  today.isoformat(),
+            "group": {
+                "name":    root_group.name,
+                "url":     root_group.web_url,
+                "wiki_t2": self._wiki_t2,
+            },
+            "pi": {
+                "current":     current_pi,
+                "pct_elapsed": pct_pi,
+                "start":       pi_start.isoformat() if pi_start else None,
+                "end":         pi_end.isoformat()   if pi_end   else None,
+            },
+            "portfolio": {
+                "epics_total":    portfolio_epics_total,
+                "pi_epics_count": len(all_pi_epics),
+                "pct_done":       port_pct_done,
+                "tl_schedule":    port_tl_sched,
+                "blocked_total":  portfolio_blocked_total,
+                "risk_epics":     portfolio_risk_epics,
+                "unassigned":     portfolio_unassigned,
+                "capacity_str":   port_wt_str,
+            },
+            "vs_rows":       vs_rows,
+            "top_blocked":   top_blocked,
+            "at_risk_epics": at_risk_epics,
+        }
+
+    # ------------------------------------------------------------------
+    # Quarto data extraction — one _data_* per report key
+    # ------------------------------------------------------------------
+
+    def _data_orphan_epics(self) -> dict:
+        group = self._rd_root_obj
+        epic_ids_with_children = {
+            e["parent_id"] for e in self._rd_epics_all if e.get("parent_id") is not None
+        }
+        orphans = [
+            e for e in self._rd_epics_all
+            if e.get("parent_id") is None and e["id"] not in epic_ids_with_children
+        ]
+        rows = []
+        for e in orphans:
+            etype = next(
+                (t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])),
+                "Unknown",
+            )
+            rows.append({
+                "title": e["title"],
+                "url":   e.get("web_url", ""),
+                "state": e["state"],
+                "type":  etype,
+                "icon":  self.EPIC_TYPE_ICONS.get(etype, "❓"),
+            })
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "orphans":     rows,
+        }
+
+    def _data_orphan_issues(self) -> dict:
+        group = self._rd_root_obj
+        all_projects = sorted(
+            [p for plist in self._rd_projects_by_nsid.values() for p in plist],
+            key=lambda p: p.get("path_with_namespace", ""),
+        )
+        project_rows = []
+        total = 0
+        for project in all_projects:
+            if not project.get("issues_enabled", True):
+                continue
+            issues  = self._rd_issues_by_project.get(project["path_with_namespace"], [])
+            orphans = [
+                i for i in issues
+                if not i.get("epic_id")
+                and not any(l.startswith("roam::") for l in (i.get("labels") or []))
+            ]
+            if orphans:
+                total += len(orphans)
+                project_rows.append({
+                    "name": self._relative_project_name(project),
+                    "issues": [
+                        {
+                            "iid":       i["iid"],
+                            "title":     i["title"],
+                            "url":       i.get("web_url", ""),
+                            "state":     i["state"].capitalize(),
+                            "assignees": i.get("assignees") or [],
+                        }
+                        for i in orphans
+                    ],
+                })
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "total":       total,
+            "projects":    project_rows,
+        }
+
+    def _data_premature_closures(self) -> dict:
+        group = self._rd_root_obj
+        children_by_parent: defaultdict = defaultdict(list)
+        for e in self._rd_epics_all:
+            pid = e.get("parent_id")
+            if pid is not None:
+                children_by_parent[pid].append(e)
+
+        findings = []
+        for etype in ("Epic", "Capability"):
+            for epic in self._rd_epics_all:
+                if epic.get("type") != etype:
+                    continue
+                if (epic.get("state") or "").lower() != "closed":
+                    continue
+                open_children = [
+                    c for c in children_by_parent.get(epic["id"], [])
+                    if (c.get("state") or "").lower() != "closed"
+                ]
+                open_issues = [
+                    i for i in self._rd_issues_by_epic.get(epic["id"], [])
+                    if i.get("state", "").lower() != "closed"
+                ]
+                if not open_children and not open_issues:
+                    continue
+                findings.append({
+                    "type":  etype,
+                    "icon":  self.EPIC_TYPE_ICONS.get(etype, "❓"),
+                    "title": epic["title"],
+                    "url":   epic.get("web_url", ""),
+                    "open_children": [
+                        {
+                            "title": c["title"],
+                            "url":   c.get("web_url", ""),
+                            "type":  next(
+                                (t for t in ("Capability", "Feature") if t in c.get("labels", [])),
+                                "Unknown",
+                            ),
+                            "icon":  self.EPIC_TYPE_ICONS.get(
+                                next(
+                                    (t for t in ("Capability", "Feature") if t in c.get("labels", [])),
+                                    "Unknown",
+                                ),
+                                "❓",
+                            ),
+                            "piid": next(
+                                (l for l in c.get("labels", []) if l.startswith("PIID::")), "—"
+                            ),
+                        }
+                        for c in sorted(open_children, key=lambda c: c["title"])
+                    ],
+                    "open_issues": [
+                        {
+                            "iid":       i["iid"],
+                            "title":     i["title"],
+                            "url":       i.get("web_url", ""),
+                            "assignees": i.get("assignees") or [],
+                        }
+                        for i in sorted(open_issues, key=lambda i: i.get("iid", 0))
+                    ],
+                })
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "total":       len(findings),
+            "findings":    findings,
+        }
+
+    def _data_unassigned_pi(self) -> dict:
+        group = self._rd_root_obj
+        all_epics = self._rd_epics_all
+        epic_title_by_id = {e["id"]: e["title"] for e in all_epics}
+        unassigned = [
+            e for e in all_epics
+            if not any(l.startswith("PIID::") for l in e.get("labels", []))
+        ]
+        by_type: dict = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
+        for e in unassigned:
+            etype = next(
+                (t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])),
+                "Unknown",
+            )
+            parent_id = e.get("parent_id")
+            by_type[etype].append({
+                "title":  e["title"],
+                "url":    e.get("web_url", ""),
+                "state":  e["state"],
+                "parent": epic_title_by_id.get(parent_id) if parent_id else None,
+            })
+        for rows in by_type.values():
+            rows.sort(key=lambda x: x["title"])
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "total":       len(unassigned),
+            "by_type":     by_type,
+        }
+
+    def _data_risk_register(self) -> dict:
+        group = self._rd_root_obj
+        today = date.today()
+
+        ROAM_ORDER = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
+        ROAM_LABELS = {
+            "roam::owned":     "Owned",
+            "roam::accepted":  "Accepted",
+            "roam::mitigated": "Mitigated",
+            "roam::resolved":  "Resolved",
+        }
+        ROAM_ICONS = {
+            "roam::owned":     "⚠️",
+            "roam::accepted":  "✋",
+            "roam::mitigated": "🛡️",
+            "roam::resolved":  "✅",
+        }
+        root_id = self._rd_root["id"]
+
+        def _group_path(gid):
+            parts = []
+            cur = self._rd_groups_by_id.get(gid)
+            while cur and cur["id"] != root_id:
+                parts.append(cur["name"])
+                cur = self._rd_groups_by_id.get(cur.get("parent_id"))
+            return " / ".join(reversed(parts)) if parts else group.name
+
+        risk_map: dict = {}
+        roam_epics_seen: set = set()
+        for epic in self._rd_epics_all:
+            for risk in epic.get("roam_risks") or []:
+                iid = risk["iid"]
+                if iid not in risk_map:
+                    risk_map[iid] = (risk, [])
+                risk_map[iid][1].append(epic)
+                roam_epics_seen.add(epic["id"])
+
+        roam_buckets: dict = {lbl: [] for lbl in ROAM_ORDER}
+        for iid, (risk, epics) in risk_map.items():
+            status = risk.get("roam_status") or "roam::owned"
+            roam_buckets.setdefault(status, []).append((risk, epics))
+
+        all_roam_counts: dict = {lbl: 0 for lbl in ROAM_ORDER}
+        for issues in self._rd_issues_by_project.values():
+            for issue in issues:
+                for lbl in (issue.get("labels") or []):
+                    if lbl in all_roam_counts:
+                        all_roam_counts[lbl] += 1
+
+        roam_summary = [
+            {
+                "label":  lbl,
+                "icon":   ROAM_ICONS[lbl],
+                "status": ROAM_LABELS[lbl],
+                "all":    all_roam_counts.get(lbl, 0),
+                "linked": len(roam_buckets.get(lbl, [])),
+                "url":    f"{group.web_url}/-/issues?label_name[]={lbl}&state=all",
+            }
+            for lbl in ROAM_ORDER
+        ]
+
+        children_by_parent: defaultdict = defaultdict(list)
+        for e in self._rd_epics_all:
+            pid = e.get("parent_id")
+            if pid is not None:
+                children_by_parent[pid].append(e)
+
+        def _has_overdue_child(epic_id):
+            for child in children_by_parent.get(epic_id, []):
+                if (child.get("state") or "").lower() == "closed":
+                    continue
+                dd = child.get("due_date")
+                if dd:
+                    try:
+                        if date.fromisoformat(str(dd)[:10]) < today:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+                if _has_overdue_child(child["id"]):
+                    return True
+            for issue in self._rd_issues_by_epic.get(epic_id, []):
+                if (issue.get("state") or "").lower() == "closed":
+                    continue
+                dd = issue.get("due_date")
+                if dd:
+                    try:
+                        if date.fromisoformat(str(dd)[:10]) < today:
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+            return False
+
+        def _is_past_due(dd_str):
+            try:
+                return date.fromisoformat(str(dd_str)[:10]) < today
+            except (ValueError, TypeError):
+                return False
+
+        open_all = [
+            e for e in self._rd_epics_all
+            if e.get("type") in ("Epic", "Capability", "Feature")
+            and (e.get("state") or "").lower() != "closed"
+        ]
+
+        def _pi_sort(e):
+            piid = next(
+                (l for l in e.get("labels", []) if l.startswith("PIID::")), "PIID::ZZZZ"
+            )
+            return (piid, e["title"])
+
+        def _epic_row(epic):
+            etype = next(
+                (t for t in ("Epic", "Capability", "Feature") if t in epic.get("labels", [])),
+                "Unknown",
+            )
+            return {
+                "title":   epic["title"],
+                "url":     epic.get("web_url", ""),
+                "type":    etype,
+                "icon":    self.EPIC_TYPE_ICONS.get(etype, "❓"),
+                "piid":    next(
+                    (l for l in epic.get("labels", []) if l.startswith("PIID::")), "—"
+                ),
+                "path":    _group_path(epic.get("group_id")),
+                "state":   epic["state"].capitalize(),
+                "reasons": _item_risk_reasons(epic, today),
+            }
+
+        blocked_list   = sorted(
+            [e for e in open_all if (e.get("blocked_by_count") or 0) > 0], key=_pi_sort
+        )
+        child_over_list = sorted(
+            [e for e in open_all if _has_overdue_child(e["id"])], key=_pi_sort
+        )
+        past_due_list  = sorted(
+            [e for e in open_all
+             if e.get("type") in ("Epic", "Capability") and _is_past_due(e.get("due_date"))],
+            key=_pi_sort,
+        )
+        behind_list    = sorted(
+            [e for e in open_all
+             if e.get("pct_through_pi") is not None
+             and 0 < e["pct_through_pi"] < 100
+             and e.get("pct_complete", 0) < e["pct_through_pi"]],
+            key=_pi_sort,
+        )
+
+        vs_counts = []
+        for vs in self._iter_vs_groups():
+            vs_desc: set = set()
+            def _collect(gid, _vs_desc=vs_desc):
+                _vs_desc.add(gid)
+                for child in self._rd_groups_by_parent.get(gid, []):
+                    _collect(child["id"], _vs_desc)
+            _collect(vs["id"])
+            vs_counts.append({
+                "name":  vs["name"],
+                "count": sum(
+                    1 for e in self._rd_epics_all
+                    if e.get("group_id") in vs_desc and e["id"] in roam_epics_seen
+                ),
+            })
+
+        roam_rows = {
+            lbl: [
+                {
+                    "title":    risk["title"],
+                    "url":      risk.get("web_url", ""),
+                    "assignee": risk.get("assignee") or "—",
+                    "epics": [
+                        {"title": e["title"], "url": e.get("web_url", "")} for e in epics
+                    ],
+                }
+                for risk, epics in sorted(
+                    roam_buckets.get(lbl, []), key=lambda x: x[0].get("title", "")
+                )
+            ]
+            for lbl in ROAM_ORDER
+        }
+
+        return {
+            "report_date": today.isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "summary": {
+                "roam":           roam_summary,
+                "total_all_roam": sum(r["all"] for r in roam_summary),
+                "total_linked":   len(risk_map),
+                "alerts": {
+                    "blocked":         len(blocked_list),
+                    "child_overdue":   len(child_over_list),
+                    "past_due":        len(past_due_list),
+                    "behind_schedule": len(behind_list),
+                },
+                "vs_counts": vs_counts,
+            },
+            "roam_rows":       roam_rows,
+            "blocked":         [_epic_row(e) for e in blocked_list],
+            "child_overdue":   [_epic_row(e) for e in child_over_list],
+            "past_due":        [_epic_row(e) for e in past_due_list],
+            "behind_schedule": [_epic_row(e) for e in behind_list],
+        }
+
+    def _data_wsjf(self) -> dict:
+        group = self._rd_root_obj
+
+        def _label_val(labels, prefix):
+            for lbl in labels:
+                if lbl.startswith(prefix):
+                    try:
+                        return int(lbl.split("::")[-1])
+                    except ValueError:
+                        pass
+            return None
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+        candidates = []
+        for epic in all_typed:
+            if epic.get("state", "").lower() != "opened":
+                continue
+            labels  = epic.get("labels", [])
+            value   = epic.get("business_value")
+            urgency = _label_val(labels, "wsjf-urgency::")
+            risk    = _label_val(labels, "wsjf-risk::")
+            if value is None and urgency is None and risk is None:
+                continue
+            size  = epic.get("planned_weight") or None
+            v, u, r = (value or 0), (urgency or 0), (risk or 0)
+            score = round((v + u + r) / size, 2) if size else None
+            candidates.append({
+                "title":   epic["title"],
+                "url":     epic.get("web_url", ""),
+                "type":    epic.get("type", "Unknown"),
+                "icon":    self.EPIC_TYPE_ICONS.get(epic.get("type", "Unknown"), "🏆"),
+                "piid":    epic.get("piid"),
+                "value":   value,
+                "urgency": urgency,
+                "risk":    risk,
+                "size":    size,
+                "score":   score,
+            })
+        candidates.sort(key=lambda x: (x["score"] is None, -(x["score"] or 0)))
+        for i, c in enumerate(candidates, 1):
+            c["rank"] = i
+
+        scored    = sum(1 for c in candidates if c["score"] is not None)
+        partial   = sum(1 for c in candidates if c["score"] is None)
+        backlog   = sum(1 for c in candidates if not c["piid"])
+        in_flight = sum(1 for c in candidates if c["piid"])
+
+        bv_by_id = {
+            e["id"]: e.get("business_value")
+            for bucket in self._rd_metrics.values()
+            for e in bucket
+        }
+        epic_url_by_id = {
+            e["id"]: e.get("web_url", "")
+            for bucket in self._rd_metrics.values()
+            for e in bucket
+        }
+
+        detail_rows = []
+        seen_pe_bv: dict  = {}
+        seen_pe: dict     = {}
+        pe_blocked_ct: dict = {}
+
+        for rel in self._rd_blocking.get("relationships", []):
+            blocked  = rel["blocked_epic"]
+            blockers = rel.get("blocked_by", [])
+            ancs     = rel.get("at_risk_portfolio_epics", [])
+            pe_candidates = (
+                ([blocked] + ancs) if blocked.get("type") == "Epic" else (ancs or [blocked])
+            )
+            b_type = blocked.get("type", "Epic")
+            for pe in pe_candidates:
+                pe_id  = pe.get("id") or pe.get("id_int")
+                pe_bv  = bv_by_id.get(pe_id)
+                pe_url = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
+                detail_rows.append({
+                    "pe_title":      pe["title"],
+                    "pe_url":        pe_url,
+                    "pe_bv":         pe_bv,
+                    "blocked_title": blocked["title"],
+                    "blocked_url":   blocked.get("web_url", ""),
+                    "blocked_type":  b_type,
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blockers": [
+                        {"title": b["title"], "url": b.get("web_url", "")} for b in blockers
+                    ],
+                })
+                if pe_id not in seen_pe_bv:
+                    seen_pe_bv[pe_id] = pe_bv
+                    seen_pe[pe_id]    = {"title": pe["title"], "url": pe_url, "bv": pe_bv}
+                pe_blocked_ct[pe_id] = pe_blocked_ct.get(pe_id, 0) + 1
+
+        detail_rows.sort(key=lambda x: (x["pe_bv"] is None, -(x["pe_bv"] or 0)))
+        total_bv   = sum(v for v in seen_pe_bv.values() if v is not None)
+        pe_summary = sorted(
+            [
+                {
+                    "title":     v["title"],
+                    "url":       v["url"],
+                    "bv":        v["bv"],
+                    "n_blocked": pe_blocked_ct[pid],
+                }
+                for pid, v in seen_pe.items()
+            ],
+            key=lambda x: (x["bv"] is None, -(x["bv"] or 0)),
+        )
+
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "summary": {
+                "scored": scored, "partial": partial,
+                "backlog": backlog, "in_flight": in_flight,
+            },
+            "candidates":  candidates,
+            "blocked_bv":  {
+                "total_bv":        total_bv,
+                "portfolio_epics": pe_summary,
+                "detail_rows":     detail_rows,
+            } if detail_rows else None,
+        }
+
+    def _data_blocking(self) -> dict:
+        group = self._rd_root_obj
+        today = date.today()
+        rels  = self._rd_blocking.get("relationships", [])
+        summ  = self._rd_blocking.get("summary", {})
+
+        id_to_ancestor: dict = {}
+        epic_to_blocked_descendants: defaultdict = defaultdict(list)
+        for rel in rels:
+            for anc in rel.get("at_risk_portfolio_epics", []):
+                id_to_ancestor[anc["id"]] = anc
+                epic_to_blocked_descendants[anc["id"]].append(rel["blocked_epic"])
+
+        epic_int_to_group = {
+            e["id"]: e.get("group_id")
+            for tier in self._rd_metrics.values() for e in tier
+        }
+        epic_int_to_piid = {
+            e["id"]: e.get("piid")
+            for tier in self._rd_metrics.values() for e in tier
+        }
+        art_of_group: dict = {}
+        vs_of_group: dict  = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_of_group[art_group["id"]] = art_group
+            vs_of_group[art_group["id"]]  = vs_group
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            art_of_group[team_group["id"]] = art_group
+            vs_of_group[team_group["id"]]  = vs_group
+
+        vs_deps: defaultdict = defaultdict(list)
+        for rel in rels:
+            blocked = rel["blocked_epic"]
+            b_int   = blocked.get("id_int") or _gid_to_int(blocked["id"])
+            b_gid   = epic_int_to_group.get(b_int)
+            b_art   = art_of_group.get(b_gid)
+            b_vs    = vs_of_group.get(b_gid)
+            b_piid  = epic_int_to_piid.get(b_int)
+            if not b_vs or not b_art:
+                continue
+            for blocker in rel.get("blocked_by", []):
+                bl_int = blocker.get("id_int") or _gid_to_int(blocker["id"])
+                bl_gid = epic_int_to_group.get(bl_int)
+                bl_art = art_of_group.get(bl_gid)
+                bl_vs  = vs_of_group.get(bl_gid)
+                if not bl_vs or not bl_art:
+                    continue
+                if b_vs["id"] != bl_vs["id"] or b_art["id"] == bl_art["id"]:
+                    continue
+                vs_deps[b_vs["id"]].append({
+                    "blocked_title": blocked["title"],
+                    "blocked_url":   blocked.get("web_url", ""),
+                    "blocked_art":   b_art["name"],
+                    "blocked_piid":  b_piid or "—",
+                    "blocker_title": blocker["title"],
+                    "blocker_url":   blocker.get("web_url", ""),
+                    "blocker_art":   bl_art["name"],
+                })
+
+        vs_cross_art = []
+        for vs_group in self._iter_vs_groups():
+            deps = vs_deps.get(vs_group["id"], [])
+            vs_cross_art.append({
+                "vs_name": vs_group["name"],
+                "vs_url":  vs_group.get("web_url", ""),
+                "deps":    deps,
+            })
+
+        total_cross_art = sum(len(d["deps"]) for d in vs_cross_art)
+
+        portfolio_risk = [
+            {
+                "title": id_to_ancestor[eid]["title"],
+                "url":   id_to_ancestor[eid].get("web_url", ""),
+                "blocked_descendants": [
+                    {
+                        "title": d["title"],
+                        "url":   d.get("web_url", ""),
+                        "type":  d.get("type", "Epic"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", "Epic"), "🏆"),
+                    }
+                    for d in descendants
+                ],
+            }
+            for eid, descendants in sorted(
+                epic_to_blocked_descendants.items(), key=lambda kv: -len(kv[1])
+            )
+        ]
+
+        blocked_items = []
+        for rel in rels:
+            epic  = rel["blocked_epic"]
+            etype = epic.get("type", "Epic")
+            blocked_items.append({
+                "title":  epic["title"],
+                "url":    epic.get("web_url", ""),
+                "type":   etype,
+                "icon":   self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "state":  epic.get("state", "").capitalize(),
+                "blockers": [
+                    {
+                        "title": b["title"],
+                        "url":   b.get("web_url", ""),
+                        "type":  b.get("type", "Epic"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", "Epic"), "🏆"),
+                    }
+                    for b in rel.get("blocked_by", [])
+                ],
+                "ancestors": [
+                    {
+                        "title": a["title"],
+                        "url":   a.get("web_url", ""),
+                        "type":  a.get("type", "Epic"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", "Epic"), "🏆"),
+                    }
+                    for a in rel.get("at_risk_portfolio_epics", [])
+                ],
+            })
+
+        return {
+            "report_date": today.isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "summary": {
+                "total_blocked":        len(rels),
+                "total_relationships":  summ.get("total_relationships", 0),
+                "total_portfolio_risk": len(epic_to_blocked_descendants),
+                "total_cross_art":      total_cross_art,
+            },
+            "portfolio_risk": portfolio_risk,
+            "vs_cross_art":   vs_cross_art,
+            "blocked_items":  blocked_items,
+        }
+
+    def _data_epic_lifecycle(self) -> dict:
+        group = self._rd_root_obj
+        today = date.today()
+
+        STATES = [
+            ("lifecycle::funnel",       "💡 Funnel",            "Ideas submitted, not yet analyzed",       90),
+            ("lifecycle::analyzing",    "🔍 Analyzing",         "Lean Business Case in development",        30),
+            ("lifecycle::backlog",      "📋 Portfolio Backlog", "Approved, awaiting capacity",              60),
+            ("lifecycle::implementing", "⚙️ Implementing",      "Active in a Program Increment",           None),
+            ("lifecycle::done",         "✅ Done",              "Delivered",                               None),
+        ]
+        STATE_KEYS = {s[0] for s in STATES}
+
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+
+        def _age(epic):
+            raw = epic.get("created_at")
+            if not raw:
+                return None
+            try:
+                return (today - date.fromisoformat(str(raw)[:10])).days
+            except ValueError:
+                return None
+
+        def _group_name(epic):
+            gid = epic.get("group_id")
+            g   = self._rd_groups_by_id.get(gid) if gid else None
+            return g["name"] if g else "—"
+
+        def _epic_row(e, threshold=None):
+            age = _age(e)
+            return {
+                "title": e["title"],
+                "url":   e.get("web_url", ""),
+                "type":  e.get("type", "Unknown"),
+                "icon":  self.EPIC_TYPE_ICONS.get(e.get("type", "Unknown"), "❓"),
+                "age":   age,
+                "piid":  e.get("piid") or "—",
+                "group": _group_name(e),
+                "stuck": bool(threshold and age and age > threshold),
+            }
+
+        buckets: dict = {key: [] for key, *_ in STATES}
+        buckets["_unlabelled"] = []
+        for epic in all_typed:
+            labels  = set(epic.get("labels", []))
+            matched = labels & STATE_KEYS
+            if not matched:
+                buckets["_unlabelled"].append(epic)
+            else:
+                for key, *_ in STATES:
+                    if key in matched:
+                        buckets[key].append(epic)
+                        break
+
+        def _avg(epics):
+            ages = [a for a in (_age(e) for e in epics) if a is not None]
+            return round(sum(ages) / len(ages)) if ages else None
+
+        def _max(epics):
+            ages = [a for a in (_age(e) for e in epics) if a is not None]
+            return max(ages) if ages else None
+
+        states_out = []
+        for key, label, description, threshold in STATES:
+            epics    = buckets[key]
+            max_age  = _max(epics)
+            states_out.append({
+                "key":           key,
+                "label":         label,
+                "description":   description,
+                "threshold":     threshold,
+                "count":         len(epics),
+                "avg_age":       _avg(epics),
+                "max_age":       max_age,
+                "over_threshold": bool(threshold and max_age and max_age > threshold),
+                "url":           f"{group.web_url}/-/epics?state=all&label_name[]={key}",
+                "epics": sorted(
+                    [_epic_row(e, threshold) for e in epics],
+                    key=lambda r: r["age"] or 0, reverse=True,
+                ),
+            })
+
+        stuck_out = []
+        for key, label, description, threshold in STATES:
+            if not threshold:
+                continue
+            stuck = [
+                _epic_row(e, threshold) for e in buckets[key]
+                if (_age(e) or 0) > threshold
+            ]
+            if stuck:
+                stuck_out.append({
+                    "key": key, "label": label, "threshold": threshold,
+                    "guidance": {
+                        "lifecycle::analyzing": "Lean Business Case is overdue for a decision. Review and either approve to backlog or cancel.",
+                        "lifecycle::backlog":   "Approved work waiting too long for capacity. Consider re-sequencing or rescoping.",
+                        "lifecycle::funnel":    "Ideas not yet analyzed beyond the threshold. Either analyze or close.",
+                    }.get(key, ""),
+                    "epics": sorted(stuck, key=lambda r: r["age"] or 0, reverse=True),
+                })
+
+        unlabelled = sorted(
+            [_epic_row(e) for e in buckets["_unlabelled"]],
+            key=lambda r: r["age"] or 0, reverse=True,
+        )
+
+        return {
+            "report_date": today.isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "states":      states_out,
+            "stuck":       stuck_out,
+            "unlabelled":  unlabelled,
+        }
+
+    def _data_pi_predictability(self) -> dict:
+        group = self._rd_root_obj
+        today = date.today()
+
+        art_group_ids: dict = {}
+        for vs_group, art_group in self._iter_art_groups():
+            ids = {art_group["id"]}
+            for team in self._rd_groups_by_parent.get(art_group["id"], []):
+                ids.add(team["id"])
+            art_group_ids[art_group["id"]] = ids
+
+        commitment_epics = (
+            self._rd_metrics.get("Feature", []) +
+            self._rd_metrics.get("Capability", [])
+        )
+        art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
+        for epic in commitment_epics:
+            gid  = epic.get("group_id")
+            piid = epic.get("piid")
+            if not piid:
+                continue
+            for art_id, gids in art_group_ids.items():
+                if gid in gids:
+                    art_pi_data[art_id][piid].append(epic)
+                    break
+
+        all_pis = sorted(
+            {piid for pi_map in art_pi_data.values() for piid in pi_map},
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+        )
+
+        def _pred(epics):
+            total  = len(epics)
+            closed = sum(1 for e in epics if e["state"].lower() == "closed")
+            pct    = round(closed / total * 100) if total else None
+            return closed, total, pct
+
+        def _cell(epics, piid):
+            closed, total, pct = _pred(epics)
+            if total == 0:
+                return {"closed": 0, "total": 0, "pct": None, "icon": "—", "label": "—", "status": "no_data"}
+            pct_pi = self._pct_through_pi(piid)
+            if pct_pi is None or pct_pi == 0:
+                return {"closed": closed, "total": total, "pct": None, "icon": "🔵", "label": f"{total} planned", "status": "future"}
+            if pct_pi < 100:
+                icon = "✅" if (pct or 0) >= 80 else ("⚠️" if (pct or 0) >= 60 else "🟡")
+                return {"closed": closed, "total": total, "pct": pct, "icon": icon, "label": f"{closed}/{total} in progress", "status": "current"}
+            icon = "✅" if (pct or 0) >= 80 else ("⚠️" if (pct or 0) >= 60 else "❌")
+            return {"closed": closed, "total": total, "pct": pct, "icon": icon, "label": f"{pct}% ({closed}/{total})", "status": "past"}
+
+        rows = []
+        portfolio_by_pi: defaultdict = defaultdict(list)
+        for vs_group, art_group in self._iter_art_groups():
+            art_id  = art_group["id"]
+            pi_data = art_pi_data.get(art_id)
+            if not pi_data:
+                continue
+            cells = []
+            for piid in all_pis:
+                epics = pi_data.get(piid, [])
+                portfolio_by_pi[piid].extend(epics)
+                cells.append({"piid": piid, **_cell(epics, piid)})
+            rows.append({
+                "art_name": art_group["name"],
+                "art_url":  art_group.get("web_url", ""),
+                "vs_name":  vs_group["name"],
+                "cells":    cells,
+            })
+
+        portfolio_row = [
+            {"piid": piid, **_cell(portfolio_by_pi.get(piid, []), piid)}
+            for piid in all_pis
+        ]
+
+        return {
+            "report_date":   today.isoformat(),
+            "group":         {"name": group.name, "url": group.web_url},
+            "pis":           all_pis,
+            "rows":          rows,
+            "portfolio_row": portfolio_row,
+        }
+
+    def _data_art_capacity_balance(self) -> dict:
+        group = self._rd_root_obj
+
+        features = self._rd_metrics.get("Feature", [])
+
+        team_hierarchy: dict = {}
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
+
+        art_pi_buckets: defaultdict = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
+        for f in features:
+            gid  = f.get("group_id")
+            piid = f.get("piid")
+            if gid in team_hierarchy and piid:
+                _, art_grp, _ = team_hierarchy[gid]
+                art_pi_buckets[art_grp["id"]][piid][gid].append(f)
+
+        arts_out = []
+        for vs_group, art_group in self._iter_art_groups():
+            art_id = art_group["id"]
+            if art_id not in art_pi_buckets:
+                continue
+
+            sorted_pis = sorted(
+                art_pi_buckets[art_id].keys(),
+                key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+            )
+
+            total_over = total_under = 0
+            pis_out = []
+            for piid in sorted_pis:
+                team_buckets = art_pi_buckets[art_id][piid]
+                start, end   = self._pi_dates_from_label(piid)
+                date_range   = (
+                    f"{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}"
+                    if start else ""
+                )
+                teams_out = []
+                for team_id, fs in sorted(
+                    team_buckets.items(),
+                    key=lambda x: team_hierarchy[x[0]][2]["name"],
+                ):
+                    _, _, team_group = team_hierarchy[team_id]
+                    planned  = sum(f.get("planned_weight", 0) for f in fs)
+                    actual   = sum(f.get("actual_weight",  0) for f in fs)
+                    delta    = actual - planned
+                    load_pct = round(actual / planned * 100) if planned > 0 else 0
+
+                    if load_pct > 120:
+                        status = "🔴 Over"
+                        total_over += 1
+                    elif load_pct > 100:
+                        status = "🟡 High"
+                    elif load_pct >= 80:
+                        status = "✅ Balanced"
+                    elif planned > 0:
+                        status = "🔵 Under"
+                        total_under += 1
+                    else:
+                        status = "—"
+
+                    teams_out.append({
+                        "name":     team_group["name"],
+                        "url":      team_group.get("web_url", ""),
+                        "planned":  planned,
+                        "actual":   actual,
+                        "delta":    delta,
+                        "load_pct": load_pct,
+                        "status":   status,
+                    })
+                pis_out.append({
+                    "piid":       piid,
+                    "date_range": date_range,
+                    "teams":      teams_out,
+                })
+
+            arts_out.append({
+                "vs_name":     vs_group["name"],
+                "art_name":    art_group["name"],
+                "art_url":     art_group.get("web_url", ""),
+                "over_count":  total_over,
+                "under_count": total_under,
+                "pis":         pis_out,
+            })
+
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "arts":        arts_out,
+        }
+
+    def generate_portfolio_health_dashboard(self):
+        """Tier 1 executive pulse — single wiki page with per-VS traffic-light status."""
+        root_group = self._rd_root_obj
+        print(f"Generating Portfolio Health Dashboard for: {root_group.full_path}")
+
+        d = self._data_portfolio_health()
+
+        today      = date.fromisoformat(d["report_date"])
+        current_pi = d["pi"]["current"]
+        pct_pi     = d["pi"]["pct_elapsed"]
+        pi_start   = date.fromisoformat(d["pi"]["start"]) if d["pi"]["start"] else None
+        pi_end     = date.fromisoformat(d["pi"]["end"])   if d["pi"]["end"]   else None
+
+        portfolio_epics_total   = d["portfolio"]["epics_total"]
+        portfolio_blocked_total = d["portfolio"]["blocked_total"]
+        portfolio_risk_epics    = d["portfolio"]["risk_epics"]
+        portfolio_unassigned    = d["portfolio"]["unassigned"]
+        all_pi_epics_count      = d["portfolio"]["pi_epics_count"]
+        port_pct_done           = d["portfolio"]["pct_done"]
+        port_tl_sched           = d["portfolio"]["tl_schedule"]
+        port_wt_str             = d["portfolio"]["capacity_str"]
+        vs_rows                 = d["vs_rows"]
+        top_blocked             = d["top_blocked"]
+        at_risk_epics           = d["at_risk_epics"]
 
         # ── Render ───────────────────────────────────────────────────────── #
         pi_label   = current_pi or "—"
@@ -3278,11 +4275,9 @@ class ReportsMixin:
             _wi([("state", "opened"), ("label_name[]", current_pi)])
             if current_pi else _wi_all
         )
-        # TODO: link Blocked Epics metric to the consolidated Blocking & Cross-ART Risk
-        # report wiki page once the Tier 2 blocking report consolidation is complete.
         # ROAM risks are linked issues, not labels — no epics-filter URL can show them;
         # link to the Risk Register wiki page instead.
-        _wi_risk = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/Risk Register')}"
+        _wi_risk  = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/Risk Register')}"
         _wi_unasn = _wi([("state", "opened")])
 
         md.append("## Portfolio Summary")
@@ -3290,7 +4285,7 @@ class ReportsMixin:
         md.append("| Metric | Value |")
         md.append("|--------|-------|")
         md.append(f"| Total Epics (all PIs) | <a href=\"{_wi_all}\" target=\"_blank\">{portfolio_epics_total}</a> |")
-        md.append(f"| Epics in Current PI | <a href=\"{_wi_pi}\" target=\"_blank\">{len(all_pi_epics)}</a> |")
+        md.append(f"| Epics in Current PI | <a href=\"{_wi_pi}\" target=\"_blank\">{all_pi_epics_count}</a> |")
         md.append(
             f"| Current PI Progress | <a href=\"{_wi_pi}\" target=\"_blank\">{port_pct_done}% done</a>  "
             f"({pct_pi}% elapsed) {port_tl_sched} |"
@@ -3330,20 +4325,14 @@ class ReportsMixin:
         if top_blocked:
             md.append("| Epic | Blockers | PI |")
             md.append("|------|---------|-----|")
-            for rel in top_blocked:
-                epic   = rel["blocked_epic"]
-                etype  = epic.get("type", "—")
-                icon   = self.EPIC_TYPE_ICONS.get(etype, "🏆")
-                link   = (
-                    f'[{icon} {epic["title"]}]({epic["web_url"]})'
-                    if epic.get("web_url") else f'{icon} {epic["title"]}'
+            for item in top_blocked:
+                etype = item["type"]
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                link  = (
+                    f'[{icon} {item["title"]}]({item["url"]})'
+                    if item["url"] else f'{icon} {item["title"]}'
                 )
-                n_blk  = len(rel.get("blocked_by", []))
-                e_meta = self._rd_epics_by_id.get(
-                    epic.get("id_int") or epic.get("id"), {}
-                )
-                piid   = e_meta.get("piid") or "—"
-                md.append(f"| {link} | {n_blk} | {piid} |")
+                md.append(f"| {link} | {item['n_blockers']} | {item['piid']} |")
         else:
             md.append("✅ No blocked epics found.")
         md.append("")
@@ -3353,27 +4342,17 @@ class ReportsMixin:
         if at_risk_epics:
             md.append("| Epic | Done | PI Elapsed | Gap | Weight | PI |")
             md.append("|------|------|-----------|-----|--------|-----|")
-            for e in at_risk_epics:
-                etype = e.get("type", "—")
+            for item in at_risk_epics:
+                etype = item["type"]
                 icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
                 link  = (
-                    f'[{icon} {e["title"]}]({e["web_url"]})'
-                    if e.get("web_url") else f'{icon} {e["title"]}'
+                    f'[{icon} {item["title"]}]({item["url"]})'
+                    if item["url"] else f'{icon} {item["title"]}'
                 )
-                gap = pct_pi - e.get("pct_complete", 0)
-                pw = e.get("planned_weight", 0)
-                aw = e.get("actual_weight",  0)
-                if pw and aw:
-                    wt_str = f"{aw}pt/{pw}pt"
-                elif pw:
-                    wt_str = f"{pw}pt (epic)"
-                elif aw:
-                    wt_str = f"{aw}pt (issues)"
-                else:
-                    wt_str = "—"
                 md.append(
-                    f"| {link} | {e.get('pct_complete', 0)}% "
-                    f"| {pct_pi}% | {gap}pp | {wt_str} | {e.get('piid', '—')} |"
+                    f"| {link} | {item['pct_done']}% "
+                    f"| {item['pct_elapsed']}% | {item['gap']}pp "
+                    f"| {item['weight_str']} | {item['piid']} |"
                 )
         else:
             md.append("✅ No epics significantly behind schedule.")
@@ -4903,6 +5882,27 @@ class ReportsMixin:
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
+    def write_report_json(self, data_dir):
+        """Write all Quarto data-layer JSON files to data_dir."""
+        data_dir = Path(data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        for key, fn in (
+            ("health-dashboard",     self._data_portfolio_health),
+            ("orphan-epics",         self._data_orphan_epics),
+            ("orphan-issues",        self._data_orphan_issues),
+            ("premature-closures",   self._data_premature_closures),
+            ("unassigned-pi",        self._data_unassigned_pi),
+            ("risk-register",        self._data_risk_register),
+            ("wsjf",                 self._data_wsjf),
+            ("blocking",             self._data_blocking),
+            ("epic-lifecycle",       self._data_epic_lifecycle),
+            ("pi-predictability",    self._data_pi_predictability),
+            ("art-capacity-balance", self._data_art_capacity_balance),
+        ):
+            out = data_dir / f"{key}.json"
+            out.write_text(json.dumps(fn(), indent=2, default=str), encoding="utf-8")
+            print(f"  → {out}")
+
     def _load_report_data(self, data_dir):
         """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
         epics_data    = json.loads((data_dir / "epics.json").read_text(encoding="utf-8"))
@@ -5038,6 +6038,9 @@ class ReportsMixin:
             print(f"  ↳ {start.strftime('%H:%M:%S')} → {end.strftime('%H:%M:%S')}  {_fmt_duration(elapsed)}\n")
 
         self._print_timing_table(phases, f"{total} report(s) completed")
+
+        print("Writing Quarto data layer...")
+        self.write_report_json(Path("data"))
 
         # expose aggregate for --all phase summary
         if phases:

@@ -1,0 +1,168 @@
+---
+title: "Risk Register"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/risk-register.json"), Path("../data/risk-register.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/risk-register.json not found. "
+        "Run: python NceGitLab.py --report risk-register"
+    )
+
+d       = json.loads(data_file.read_text())
+group   = d["group"]
+summary = d["summary"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+""")
+```
+
+## Summary
+
+```{python}
+roam = summary["roam"]
+alerts = summary["alerts"]
+vs_counts = summary["vs_counts"]
+
+roam_html = '<table class="table table-sm"><thead><tr><th>Status</th><th>All Issues</th><th>Linked to Epics</th></tr></thead><tbody>'
+for r in roam:
+    all_cell = f'<a href="{r["url"]}" target="_blank">{r["all"]}</a>' if r["all"] else "0"
+    roam_html += f'<tr><td>{r["icon"]} {r["status"]}</td><td>{all_cell}</td><td>{r["linked"]}</td></tr>'
+roam_html += f'<tr><td><strong>Total</strong></td><td><strong>{summary["total_all_roam"]}</strong></td><td><strong>{summary["total_linked"]}</strong></td></tr>'
+roam_html += "</tbody></table>"
+
+alert_rows = [
+    ("🔒 Blocked",         alerts["blocked"]),
+    ("📅 Child Overdue",   alerts["child_overdue"]),
+    ("📅 Past Due",        alerts["past_due"]),
+    ("⏱️ Behind Schedule", alerts["behind_schedule"]),
+]
+alert_html = ""
+if any(v for _, v in alert_rows):
+    alert_html = '<table class="table table-sm"><thead><tr><th>Condition</th><th>Items</th></tr></thead><tbody>'
+    for label, count in alert_rows:
+        if count:
+            alert_html += f"<tr><td>{label}</td><td>{count}</td></tr>"
+    alert_html += "</tbody></table>"
+
+vs_html = ""
+if vs_counts:
+    vs_html = '<table class="table table-sm"><thead><tr><th>Value Stream</th><th>ROAM Risks</th></tr></thead><tbody>'
+    for vs in vs_counts:
+        vs_html += f"<tr><td>{vs['name']}</td><td>{vs['count']}</td></tr>"
+    vs_html += "</tbody></table>"
+
+panels = [
+    ("<strong>ROAM Risk Issues</strong>", roam_html),
+]
+if alert_html:
+    panels.append(("<strong>Condition Alerts</strong>", alert_html))
+if vs_html:
+    panels.append(("<strong>By Value Stream</strong>", vs_html))
+
+cells = "".join(
+    f"<td valign='top' style='padding-right:40px'>{title}<br>{body}</td>"
+    for title, body in panels
+)
+HTML(f"<table><tr>{cells}</tr></table>")
+```
+
+## ⚠️ ROAM Risk Issues
+
+```{python}
+roam_rows = d["roam_rows"]
+ROAM_ORDER  = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
+ROAM_LABELS = {"roam::owned": "⚠️ Owned", "roam::accepted": "✋ Accepted",
+               "roam::mitigated": "🛡️ Mitigated", "roam::resolved": "✅ Resolved"}
+
+has_any = any(roam_rows.get(lbl) for lbl in ROAM_ORDER)
+if not has_any:
+    display(HTML("<p><em>No ROAM risk issues found. Create issues with <code>roam::owned</code>, "
+         "<code>roam::accepted</code>, <code>roam::mitigated</code>, or "
+         "<code>roam::resolved</code> labels and link them to the threatened epic via "
+         "<strong>\"relates to\"</strong>.</em></p>"))
+else:
+    html = ""
+    for lbl in ROAM_ORDER:
+        rows = roam_rows.get(lbl, [])
+        if not rows:
+            continue
+        label = ROAM_LABELS[lbl]
+        html += f"<h3>{label} ({len(rows)})</h3>"
+        html += '<table class="table table-sm"><thead><tr><th>Risk Issue</th><th>Assignee</th><th>Epics Threatened</th></tr></thead><tbody>'
+        for row in rows:
+            rlink   = f'<a href="{row["url"]}" target="_blank">{row["title"]}</a>' if row["url"] else row["title"]
+            e_links = ", ".join(
+                f'<a href="{e["url"]}" target="_blank">{e["title"]}</a>' if e["url"] else e["title"]
+                for e in row["epics"]
+            )
+            html += f"<tr><td>{rlink}</td><td>{row['assignee']}</td><td>{e_links}</td></tr>"
+        html += "</tbody></table>"
+    display(HTML(html))
+```
+
+## Condition Alerts
+
+```{python}
+def _render_epic_table(rows, header=""):
+    if not rows:
+        return ""
+    html = header
+    html += '<table class="table table-sm"><thead><tr><th>Epic</th><th>PI</th><th>Group / ART</th><th>State</th><th>At Risk Reasons</th></tr></thead><tbody>'
+    for row in rows:
+        link = f'<a href="{row["url"]}" target="_blank">{row["icon"]} {row["title"]}</a>' if row["url"] else f'{row["icon"]} {row["title"]}'
+        html += f"<tr><td>{link}</td><td>{row['piid']}</td><td>{row['path']}</td><td>{row['state']}</td><td>{row['reasons']}</td></tr>"
+    html += "</tbody></table>"
+    return html
+
+sections = [
+    (d["blocked"],         "🔒 Blocked",          "_Has one or more active blocking relationships._"),
+    (d["child_overdue"],   "📅 Child Overdue",     "_A child Feature has passed its due date and is not Closed._"),
+    (d["past_due"],        "📅 Past Due",          "_The epic's own due date has passed and it is not Closed._"),
+    (d["behind_schedule"], "⏱️ Behind Schedule",   "_Open in an active PI with % complete below % of PI elapsed._"),
+]
+
+html = ""
+for rows, title, note in sections:
+    if rows:
+        html += f"<h3>{title} ({len(rows)})</h3><p><em>{note}</em></p>"
+        html += _render_epic_table(rows)
+
+if not html:
+    html = "<p>✅ No condition alerts.</p>"
+
+HTML(html)
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Meaning |
+|------|---------|
+| ⚠️ Owned | Someone owns this risk and is actively managing it |
+| ✋ Accepted | Risk acknowledged; no action planned |
+| 🛡️ Mitigated | Steps taken to reduce probability or impact |
+| ✅ Resolved | Risk eliminated — close or remove the issue |
+| 🔒 Blocked | Item has one or more active blocking relationships |
+| 📅 Past Due | Item's due date has passed and it is not Closed |
+| 📅 Child Overdue | A child Feature has passed its due date and is not Closed |
+| ⏱️ Behind Schedule | Active PI: % Done is less than % of PI elapsed |
+:::
