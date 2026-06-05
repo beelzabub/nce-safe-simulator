@@ -166,6 +166,13 @@ class NceGitLab(
         self.default_roam_risk_relations_min   = _rr.get("min", 1)
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
+        members_file = self.config_file.parent / "team_members.json"
+        if members_file.exists():
+            with open(members_file, "r", encoding="utf-8") as f:
+                self.team_members = json.load(f).get("members", [])
+        else:
+            self.team_members = []
+
         missing_fields = [
             field for field, val in [
                 ("url",              self.url),
