@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/blocking.json"), Path("../data/blocking.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -53,7 +53,7 @@ HTML(html)
 ```{python}
 portfolio_risk = d["portfolio_risk"]
 if not portfolio_risk:
-    HTML("<p>✅ No Portfolio Epics contain blocked descendants.</p>")
+    display(HTML("<p>✅ No Portfolio Epics contain blocked descendants.</p>"))
 else:
     html = "<p>Top-level Epics that contain one or more blocked descendants:</p>"
     html += '<table class="table table-sm table-bordered"><thead><tr><th>Epic</th><th>Blocked Descendants</th></tr></thead><tbody>'
@@ -65,7 +65,7 @@ else:
         )
         html += f"<tr><td>{elink}</td><td><strong>{len(row['blocked_descendants'])}:</strong> {desc_links}</td></tr>"
     html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ## Cross-ART Risk by Value Stream
@@ -74,7 +74,7 @@ else:
 vs_cross_art = d["vs_cross_art"]
 has_deps = any(vs["deps"] for vs in vs_cross_art)
 if not has_deps:
-    HTML("<p>✅ No cross-ART dependencies found.</p>")
+    display(HTML("<p>✅ No cross-ART dependencies found.</p>"))
 else:
     html = "<p>Blocking relationships where an epic in one ART is blocked by an epic from a different ART within the same Value Stream.</p>"
     for vs in vs_cross_art:
@@ -89,7 +89,7 @@ else:
             bk_link = f'<a href="{dep["blocker_url"]}" target="_blank">{dep["blocker_title"]}</a>' if dep["blocker_url"] else dep["blocker_title"]
             html += f"<tr><td>{bl_link}</td><td>{dep['blocked_art']}</td><td>{dep['blocked_piid']}</td><td>{bk_link}</td><td>{dep['blocker_art']}</td></tr>"
         html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ## Blocked Items Detail
@@ -97,7 +97,7 @@ else:
 ```{python}
 blocked_items = d["blocked_items"]
 if not blocked_items:
-    HTML("<p>✅ No blocked epics found.</p>")
+    display(HTML("<p>✅ No blocked epics found.</p>"))
 else:
     html = ""
     for item in blocked_items:
@@ -113,7 +113,7 @@ else:
                 alink = f'<a href="{a["url"]}" target="_blank">{a["icon"]} {a["title"]}</a>' if a["url"] else f'{a["icon"]} {a["title"]}'
                 html += f"<p>⬆️ <strong>{alink}</strong></p>"
         html += "</div></details>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ::: {.callout-note collapse="true"}

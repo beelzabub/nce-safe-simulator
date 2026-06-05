@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/epic-lifecycle.json"), Path("../data/epic-lifecycle.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -63,7 +63,7 @@ HTML(html)
 
 ```{python}
 if not stuck:
-    HTML("<p>✅ No epics have exceeded their state thresholds. Kanban is flowing.</p>")
+    display(HTML("<p>✅ No epics have exceeded their state thresholds. Kanban is flowing.</p>"))
 else:
     html = ""
     for section in stuck:
@@ -74,7 +74,7 @@ else:
             link = f'<a href="{e["url"]}" target="_blank">{e["title"]}</a>' if e["url"] else e["title"]
             html += f"<tr><td>{link}</td><td>{e['icon']} {e['type']}</td><td><strong>{e['age']}d</strong></td><td>{e['piid']}</td><td>{e['group']}</td></tr>"
         html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ## Kanban Detail — By State
