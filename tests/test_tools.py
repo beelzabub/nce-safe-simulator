@@ -228,6 +228,92 @@ def test_strip_lifecycle_labels_removes_lifecycle_labels():
     assert "lifecycle::analyzing" not in e2.labels
 
 
+# ─── strip-piid-labels ──────────────────────────────────────────────────────
+
+_PIID_LABELS = ["PIID::2026Q2", "PIID::2026Q3"]
+
+
+def test_strip_piid_labels_removes_piid_from_sampled_epics():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    epics = [_make_epic_mock(id=i, iid=i, labels=["Feature", "PIID::2026Q2"]) for i in range(1, 11)]
+    h._root_group.epics.list.return_value = epics
+
+    h._tool_strip_piid_labels(percent=50, dry_run=False)
+
+    stripped = sum(e.save.called for e in epics)
+    assert stripped == 5
+    for e in epics:
+        if e.save.called:
+            assert "PIID::2026Q2" not in e.labels
+
+
+def test_strip_piid_labels_count_overrides_percent():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    epics = [_make_epic_mock(id=i, iid=i, labels=["Feature", "PIID::2026Q2"]) for i in range(1, 11)]
+    h._root_group.epics.list.return_value = epics
+
+    h._tool_strip_piid_labels(count=3, percent=100, dry_run=False)
+
+    assert sum(e.save.called for e in epics) == 3
+
+
+def test_strip_piid_labels_100_percent_strips_all():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    epics = [_make_epic_mock(id=i, iid=i, labels=["Feature", "PIID::2026Q3"]) for i in range(1, 6)]
+    h._root_group.epics.list.return_value = epics
+
+    h._tool_strip_piid_labels(percent=100, dry_run=False)
+
+    assert all(e.save.called for e in epics)
+    for e in epics:
+        assert "PIID::2026Q3" not in e.labels
+
+
+def test_strip_piid_labels_skips_epics_without_piid():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    e1 = _make_epic_mock(id=1, iid=1, labels=["Feature", "PIID::2026Q2"])
+    e2 = _make_epic_mock(id=2, iid=2, labels=["Feature"])  # no PIID
+    h._root_group.epics.list.return_value = [e1, e2]
+
+    h._tool_strip_piid_labels(percent=100, dry_run=False)
+
+    assert e1.save.called
+    assert not e2.save.called
+
+
+def test_strip_piid_labels_respects_epic_type_filter():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    e1 = _make_epic_mock(id=1, iid=1, labels=["Feature",    "PIID::2026Q2"])
+    e2 = _make_epic_mock(id=2, iid=2, labels=["Capability", "PIID::2026Q2"])
+    h._root_group.epics.list.return_value = [e1, e2]
+
+    h._tool_strip_piid_labels(percent=100, epic_type="Feature", dry_run=False)
+
+    assert e1.save.called
+    assert not e2.save.called
+
+
+def test_strip_piid_labels_dry_run_makes_no_changes():
+    h = ToolsHarness(piid_labels=_PIID_LABELS)
+    epics = [_make_epic_mock(id=i, iid=i, labels=["Feature", "PIID::2026Q2"]) for i in range(1, 4)]
+    h._root_group.epics.list.return_value = epics
+
+    h._tool_strip_piid_labels(percent=100, dry_run=True)
+
+    assert not any(e.save.called for e in epics)
+    for e in epics:
+        assert "PIID::2026Q2" in e.labels
+
+
+def test_strip_piid_labels_no_piid_labels_on_group(capsys):
+    h = ToolsHarness(piid_labels=[])
+    h._root_group.epics.list.return_value = []
+
+    h._tool_strip_piid_labels(percent=100, dry_run=False)
+
+    assert "nothing to strip" in capsys.readouterr().out
+
+
 # ─── weight-drift ───────────────────────────────────────────────────────────
 
 def test_weight_drift_flags_epics_above_threshold(capsys):

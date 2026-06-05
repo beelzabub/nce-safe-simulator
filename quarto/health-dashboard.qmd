@@ -1,0 +1,193 @@
+---
+title: "Portfolio Health Dashboard"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML
+
+# Quarto may run kernel from this file's directory or the project root.
+_candidates = [
+    Path("data/health-dashboard.json"),
+    Path("../data/health-dashboard.json"),
+]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/health-dashboard.json not found. "
+        "Run: python NceGitLab.py --report health-dashboard"
+    )
+
+d = json.loads(data_file.read_text())
+group    = d["group"]
+pi       = d["pi"]
+port     = d["portfolio"]
+vs_rows  = d["vs_rows"]
+blocked  = d["top_blocked"]
+at_risk  = d["at_risk_epics"]
+```
+
+```{python}
+# Header metadata
+pi_label   = pi["current"] or "—"
+pi_elapsed = f"{pi['pct_elapsed']}% elapsed" if pi["pct_elapsed"] else "Not started"
+if pi["start"] and pi["end"]:
+    pi_range = f"{pi['start']} – {pi['end']}"
+else:
+    pi_range = "—"
+
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>
+  <strong>Current PI:</strong> {pi_label} &nbsp;|&nbsp;
+  <strong>PI Period:</strong> {pi_range} &nbsp;|&nbsp;
+  <strong>PI Elapsed:</strong> {pi_elapsed}
+</p>
+""")
+```
+
+## Portfolio Summary
+
+```{python}
+tl = port["tl_schedule"]
+rows = [
+    ("Total Epics (all PIs)",       port["epics_total"]),
+    ("Epics in Current PI",         port["pi_epics_count"]),
+    (f"Current PI Progress {tl}",   f"{port['pct_done']}% done ({pi['pct_elapsed']}% elapsed)"),
+    ("Blocked Epics (current PI)",  port["blocked_total"]),
+    ("Epics with Active ROAM Risks", port["risk_epics"]),
+    ("Unassigned to PI",            port["unassigned"]),
+]
+if port["capacity_str"] not in ("—", ""):
+    rows.append(("Story Points (current PI)", port["capacity_str"]))
+
+html = '<table class="table table-sm table-striped"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>'
+for label, val in rows:
+    html += f"<tr><td>{label}</td><td>{val}</td></tr>"
+html += "</tbody></table>"
+HTML(html)
+```
+
+## Value Stream Status
+
+```{python}
+if vs_rows:
+    html = """
+<table class="table table-sm table-bordered">
+  <thead>
+    <tr>
+      <th>Value Stream</th><th>Status</th><th>Schedule</th>
+      <th>Capacity</th><th>Risk</th><th>Blocking</th>
+      <th>Epics</th><th>Unassigned</th>
+    </tr>
+  </thead>
+  <tbody>
+"""
+    for row in vs_rows:
+        vs = row["vs"]
+        vs_link = f'<a href="{vs["web_url"]}" target="_blank">{vs["name"]}</a>'
+        html += f"""
+    <tr>
+      <td>{vs_link}</td>
+      <td>{row['overall']}</td>
+      <td>{row['tl_sched']} {row['sched_detail']}</td>
+      <td>{row['tl_cap']} {row['cap_detail']}</td>
+      <td>{row['tl_risk']} {row['risk_detail']}</td>
+      <td>{row['tl_block']} {row['block_detail']}</td>
+      <td>{row['pi_epics']} in PI / {row['epics_total']} total</td>
+      <td>{row['unassigned']}</td>
+    </tr>"""
+    html += "\n  </tbody>\n</table>"
+else:
+    html = "<p><em>No Value Stream groups found.</em></p>"
+HTML(html)
+```
+
+## Needs Attention
+
+### ⛔ Blocked Epics
+
+```{python}
+ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+
+if blocked:
+    html = """
+<table class="table table-sm">
+  <thead><tr><th>Epic</th><th>Blockers</th><th>PI</th></tr></thead>
+  <tbody>
+"""
+    for item in blocked:
+        icon = ICONS.get(item["type"], "🏆")
+        if item["url"]:
+            link = f'<a href="{item["url"]}" target="_blank">{icon} {item["title"]}</a>'
+        else:
+            link = f'{icon} {item["title"]}'
+        html += f"<tr><td>{link}</td><td>{item['n_blockers']}</td><td>{item['piid']}</td></tr>"
+    html += "  </tbody>\n</table>"
+else:
+    html = "<p>✅ No blocked epics found.</p>"
+HTML(html)
+```
+
+### 🟡 At-Risk Epics (behind schedule)
+
+```{python}
+if at_risk:
+    html = """
+<table class="table table-sm">
+  <thead>
+    <tr><th>Epic</th><th>Done</th><th>PI Elapsed</th><th>Gap</th><th>Weight</th><th>PI</th></tr>
+  </thead>
+  <tbody>
+"""
+    for item in at_risk:
+        icon = ICONS.get(item["type"], "🏆")
+        if item["url"]:
+            link = f'<a href="{item["url"]}" target="_blank">{icon} {item["title"]}</a>'
+        else:
+            link = f'{icon} {item["title"]}'
+        html += (
+            f"<tr><td>{link}</td><td>{item['pct_done']}%</td>"
+            f"<td>{item['pct_elapsed']}%</td><td>{item['gap']}pp</td>"
+            f"<td>{item['weight_str']}</td><td>{item['piid']}</td></tr>"
+        )
+    html += "  </tbody>\n</table>"
+else:
+    html = "<p>✅ No epics significantly behind schedule.</p>"
+HTML(html)
+```
+
+---
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Meaning |
+|------|---------|
+| 🏆 | Epic |
+| 🧩 | Capability |
+| 🛠️ | Feature |
+| 🟢 | On track — within threshold |
+| 🟡 | Watch — approaching threshold |
+| 🔴 | At risk — threshold exceeded |
+| ⬜ | No data |
+
+**Traffic Light Thresholds**
+
+| Column | 🟢 On Track | 🟡 Watch | 🔴 At Risk |
+|--------|------------|---------|-----------|
+| Schedule | ≤ 10pp behind PI elapsed | ≤ 20pp behind | > 20pp behind |
+| Capacity | 80–110% loaded | 70–120% | Outside 70–120% |
+| Risk | No active ROAM risks | 1–2 active risks | 3+ active risks |
+| Blocking | 0 blockers | 1–2 blockers | 3+ blockers |
+:::

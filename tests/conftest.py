@@ -210,7 +210,7 @@ class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
         "Feature": [5, 8, 13],
     }
 
-    def __init__(self, lifecycle_labels=None, metrics=None):
+    def __init__(self, lifecycle_labels=None, piid_labels=None, metrics=None):
         self.gl = MagicMock()
         self.parent_group = "test-portfolio"
         self.url = "https://gitlab.com"
@@ -228,6 +228,7 @@ class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
         self._root_group.subgroups.list.return_value = []
 
         self._lifecycle_labels = lifecycle_labels or []
+        self._piid_labels      = piid_labels or []
         self._metrics = metrics or {}
 
     def get_group_by_name(self, name):
@@ -236,6 +237,8 @@ class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
     def _discover_labels(self, group, prefix):
         if prefix == "lifecycle::":
             return list(self._lifecycle_labels)
+        if prefix == "PIID::":
+            return list(self._piid_labels)
         return []
 
     def calculate_portfolio_metrics(self, group_name):

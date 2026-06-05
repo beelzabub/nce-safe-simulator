@@ -1,0 +1,93 @@
+---
+title: "ART Capacity Balance"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/art-capacity-balance.json"), Path("../data/art-capacity-balance.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/art-capacity-balance.json not found. "
+        "Run: python NceGitLab.py --report art-capacity-balance"
+    )
+
+d     = json.loads(data_file.read_text())
+group = d["group"]
+arts  = d["arts"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Per-team planned vs actual capacity by Program Increment for each ART.
+Load% = Actual ÷ Planned × 100.</p>
+""")
+```
+
+```{python}
+if not arts:
+    display(HTML("<p><em>No ART capacity data found. Ensure Features have planned weights and are assigned to teams via PIID labels.</em></p>"))
+else:
+    html = ""
+    current_vs = None
+    for art in arts:
+        if art["vs_name"] != current_vs:
+            html += f"<h2>🔷 {art['vs_name']}</h2>"
+            current_vs = art["vs_name"]
+
+        art_link = f'<a href="{art["art_url"]}" target="_blank">{art["art_name"]}</a>' if art["art_url"] else art["art_name"]
+        flags = []
+        if art["over_count"]:
+            flags.append(f"🔴 {art['over_count']} over-capacity")
+        if art["under_count"]:
+            flags.append(f"🔵 {art['under_count']} under-capacity")
+        flag_str = " &nbsp;·&nbsp; ".join(flags)
+        html += f"<h3>{art_link}"
+        if flag_str:
+            html += f" &nbsp;<small>{flag_str}</small>"
+        html += "</h3>"
+
+        for pi in art["pis"]:
+            html += f"<h4>{pi['piid']}"
+            if pi["date_range"]:
+                html += f" <small><em>{pi['date_range']}</em></small>"
+            html += "</h4>"
+            html += '<table class="table table-sm table-bordered"><thead><tr>'
+            html += "<th>Team</th><th>Planned</th><th>Actual</th><th>Δ</th><th>Load%</th><th>Status</th>"
+            html += "</tr></thead><tbody>"
+            for t in pi["teams"]:
+                tlink   = f'<a href="{t["url"]}" target="_blank">{t["name"]}</a>' if t["url"] else t["name"]
+                delta   = t["delta"]
+                d_str   = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                html += f"<tr><td>{tlink}</td><td>{t['planned']} pt</td><td>{t['actual']} pt</td><td>{d_str}</td><td>{t['load_pct']}%</td><td>{t['status']}</td></tr>"
+            html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Status Thresholds
+
+| Status | Load% | Meaning |
+|--------|-------|---------|
+| 🔴 Over | > 120% | Actual work significantly exceeds planned capacity |
+| 🟡 High | 101–120% | Slightly over plan — monitor closely |
+| ✅ Balanced | 80–100% | Actual work aligns with planned capacity |
+| 🔵 Under | < 80% | Team has more capacity than committed work |
+
+**Planned** — sum of planned weights on Features assigned to this team for the PI.
+**Actual** — sum of story-point weights on all issues linked to those Features.
+**Δ** — Actual minus Planned: ▲ more · ▼ less · = matched.
+:::
