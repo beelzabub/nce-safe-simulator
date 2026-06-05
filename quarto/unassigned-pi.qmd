@@ -1,0 +1,78 @@
+---
+title: "Unassigned PI"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML
+
+_candidates = [Path("data/unassigned-pi.json"), Path("../data/unassigned-pi.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/unassigned-pi.json not found. "
+        "Run: python NceGitLab.py --report unassigned-pi"
+    )
+
+d       = json.loads(data_file.read_text())
+group   = d["group"]
+by_type = d["by_type"]
+total   = d["total"]
+
+ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️", "Unknown": "❓"}
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Items listed here have no <code>PIID::</code> label and are not committed to any
+Program Increment. <strong>Total unassigned: {total}</strong></p>
+""")
+```
+
+```{python}
+if total == 0:
+    HTML("<p>✅ All epics are assigned to a PI.</p>")
+else:
+    html = ""
+    for etype in ("Epic", "Capability", "Feature", "Unknown"):
+        rows = by_type.get(etype, [])
+        if not rows:
+            continue
+        icon  = ICONS[etype]
+        html += f"<h2>{icon} {etype} ({len(rows)})</h2>"
+        html += """
+<table class="table table-sm table-striped">
+  <thead><tr><th>Title</th><th>State</th><th>Parent</th></tr></thead>
+  <tbody>
+"""
+        for row in rows:
+            link   = f'<a href="{row["url"]}" target="_blank">{row["title"]}</a>' if row["url"] else row["title"]
+            parent = f'<em>{row["parent"]}</em>' if row["parent"] else "—"
+            html  += f"<tr><td>{link}</td><td>{row['state']}</td><td>{parent}</td></tr>"
+        html += "  </tbody>\n</table>"
+    HTML(html)
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Type | Description |
+|------|------|-------------|
+| 🏆 | Epic | Portfolio-level initiative spanning multiple PIs and ARTs |
+| 🧩 | Capability | Large Solution deliverable sized to fit within a PI |
+| 🛠️ | Feature | Service or function delivered by a single ART within one PI |
+
+**Parent** — direct parent epic in the hierarchy, if one exists. Items with no parent and no
+children are also captured by the Orphaned Epics report.
+:::
