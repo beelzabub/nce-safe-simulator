@@ -11,7 +11,7 @@ execute:
 ```{python}
 import json
 from pathlib import Path
-from IPython.display import HTML
+from IPython.display import HTML, display
 
 _candidates = [Path("data/wsjf.json"), Path("../data/wsjf.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -56,10 +56,10 @@ HTML(html)
 
 ```{python}
 if not candidates:
-    HTML("<p><em>No WSJF-scored epics found. Set the Business Value custom field via "
+    display(HTML("<p><em>No WSJF-scored epics found. Set the Business Value custom field via "
          "<code>set-business-value</code>, and apply <code>wsjf-urgency::N</code> and "
          "<code>wsjf-risk::N</code> labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open "
-         "epics.</em></p>")
+         "epics.</em></p>"))
 else:
     html = '<table class="table table-sm table-bordered"><thead><tr>'
     html += "<th>Rank</th><th>Epic</th><th>Type</th><th>PI</th><th>BV</th><th>Urgency</th><th>Risk</th><th>Size</th><th>WSJF</th>"
@@ -74,7 +74,7 @@ else:
         sc_str = f'<strong>{c["score"]}</strong>' if c["score"] is not None else "<em>partial</em>"
         html  += f"<tr><td>{c['rank']}</td><td>{link}</td><td>{c['icon']} {c['type']}</td><td>{piid}</td><td>{v_str}</td><td>{u_str}</td><td>{r_str}</td><td>{s_str}</td><td>{sc_str}</td></tr>"
     html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ```{python}
@@ -102,7 +102,7 @@ if blocked_bv:
         )
         html += f'<tr><td>{pe_link}</td><td>{bv_str}</td><td>{bl_link}</td><td>{row["blocked_icon"]} {row["blocked_type"]}</td><td>{blk_str}</td></tr>'
     html += "</tbody></table>"
-    HTML(html)
+    display(HTML(html))
 ```
 
 ::: {.callout-note collapse="true"}

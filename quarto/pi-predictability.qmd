@@ -1,0 +1,79 @@
+---
+title: "PI Predictability Scorecard"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/pi-predictability.json"), Path("../data/pi-predictability.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/pi-predictability.json not found. "
+        "Run: python NceGitLab.py --report pi-predictability"
+    )
+
+d     = json.loads(data_file.read_text())
+group = d["group"]
+pis   = d["pis"]
+rows  = d["rows"]
+port  = d["portfolio_row"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Percentage of committed Features and Capabilities delivered in each PI.
+Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a
+systemic problem.</p>
+""")
+```
+
+```{python}
+if not pis:
+    display(HTML("<p><em>No PI-committed Features or Capabilities found. Ensure epics carry <code>PIID::</code> labels.</em></p>"))
+else:
+    # Header
+    pi_headers = "".join(f"<th>{p}</th>" for p in pis)
+    html  = f'<table class="table table-sm table-bordered"><thead><tr><th>ART</th>{pi_headers}</tr></thead><tbody>'
+
+    for row in rows:
+        art_link = f'<a href="{row["art_url"]}" target="_blank">{row["art_name"]}</a>' if row["art_url"] else row["art_name"]
+        cells = "".join(f'<td>{c["icon"]} {c["label"]}</td>' for c in row["cells"])
+        html += f"<tr><td><strong>{art_link}</strong></td>{cells}</tr>"
+
+    if port:
+        port_cells = "".join(f'<td>{c["icon"]} {c["label"]}</td>' for c in port)
+        html += f"<tr><td><strong>Portfolio Total</strong></td>{port_cells}</tr>"
+
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+**Predictability %** = closed Features + Capabilities ÷ total committed to PI × 100
+
+| Icon | Range | Meaning |
+|------|-------|---------|
+| ✅ | ≥ 80% | On target — team reliably delivers commitments |
+| ⚠️ | 60–79% | Watch — delivery shortfall, investigate root cause |
+| ❌ | < 60% | At risk — systemic delivery problem, escalate |
+| 🟡 | Current PI | In progress — final score not yet determined |
+| 🔵 | Future PI | Not yet started — shows planned commitment count |
+
+> **Sandbagging signal:** an ART consistently at 100% across multiple past PIs may be
+> under-committing. Healthy predictability is typically 80–90%.
+:::

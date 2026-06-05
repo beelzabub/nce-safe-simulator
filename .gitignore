@@ -4,7 +4,7 @@ __pycache__/
 .env
 
 /.quarto/
-**/*.quarto_ipynb
+**/*.quarto_ipynb*
 /public/
 /data/
 /logs/

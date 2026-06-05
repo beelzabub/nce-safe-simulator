@@ -1,0 +1,118 @@
+---
+title: "Epic Lifecycle / Portfolio Kanban"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/epic-lifecycle.json"), Path("../data/epic-lifecycle.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/epic-lifecycle.json not found. "
+        "Run: python NceGitLab.py --report epic-lifecycle"
+    )
+
+d      = json.loads(data_file.read_text())
+group  = d["group"]
+states = d["states"]
+stuck  = d["stuck"]
+unlab  = d["unlabelled"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<blockquote>The SAFe Portfolio Kanban tracks where epics are in their approval-to-delivery
+lifecycle. Use this report to identify bottlenecks in the funding and approval pipeline.
+Epics stuck in <strong>Analyzing</strong> or <strong>Portfolio Backlog</strong> signal
+decision-making delays that block downstream delivery.</blockquote>
+""")
+```
+
+## Portfolio Kanban — Current State
+
+```{python}
+html = '<table class="table table-sm table-bordered"><thead><tr>'
+html += "<th>State</th><th>Count</th><th>Avg Age</th><th>Oldest</th><th>Threshold</th>"
+html += "</tr></thead><tbody>"
+for s in states:
+    count_cell = f'<a href="{s["url"]}" target="_blank">{s["count"]}</a>' if s["count"] and s["url"] else str(s["count"])
+    avg_str   = f'{s["avg_age"]}d' if s["avg_age"] is not None else "—"
+    old_str   = f'{s["max_age"]}d {"⚠️" if s["over_threshold"] else ""}' if s["max_age"] is not None else "—"
+    thresh_str = f'{s["threshold"]}d' if s["threshold"] else "—"
+    html += f"<tr><td>{s['label']}</td><td>{count_cell}</td><td>{avg_str}</td><td>{old_str}</td><td>{thresh_str}</td></tr>"
+unlab_count = len(unlab)
+html += f"<tr><td><em>(unlabelled)</em></td><td>{unlab_count}</td><td>—</td><td>—</td><td>—</td></tr>"
+html += "</tbody></table>"
+HTML(html)
+```
+
+## ⚠️ Stuck Items
+
+```{python}
+if not stuck:
+    display(HTML("<p>✅ No epics have exceeded their state thresholds. Kanban is flowing.</p>"))
+else:
+    html = ""
+    for section in stuck:
+        html += f"<h3>⚠️ {section['label']} (&gt; {section['threshold']} days)</h3>"
+        html += f"<p><em>{section['guidance']}</em></p>"
+        html += '<table class="table table-sm table-bordered"><thead><tr><th>Epic</th><th>Type</th><th>Age</th><th>PI</th><th>Group</th></tr></thead><tbody>'
+        for e in section["epics"]:
+            link = f'<a href="{e["url"]}" target="_blank">{e["title"]}</a>' if e["url"] else e["title"]
+            html += f"<tr><td>{link}</td><td>{e['icon']} {e['type']}</td><td><strong>{e['age']}d</strong></td><td>{e['piid']}</td><td>{e['group']}</td></tr>"
+        html += "</tbody></table>"
+    display(HTML(html))
+```
+
+## Kanban Detail — By State
+
+```{python}
+html = ""
+for s in states:
+    html += f"<h3>{s['label']}</h3><p><em>{s['description']}</em></p>"
+    if not s["epics"]:
+        html += "<p>No epics in this state.</p>"
+        continue
+    html += '<table class="table table-sm table-striped"><thead><tr><th>Epic</th><th>Type</th><th>Age</th><th>PI</th><th>Group</th></tr></thead><tbody>'
+    for e in s["epics"]:
+        link    = f'<a href="{e["url"]}" target="_blank">{e["title"]}</a>' if e["url"] else e["title"]
+        age_str = f'<strong>{e["age"]}d</strong> ⚠️' if e["stuck"] else (f'{e["age"]}d' if e["age"] is not None else "—")
+        html += f"<tr><td>{link}</td><td>{e['icon']} {e['type']}</td><td>{age_str}</td><td>{e['piid']}</td><td>{e['group']}</td></tr>"
+    html += "</tbody></table>"
+
+if unlab:
+    html += "<h3><em>(Unlabelled)</em></h3>"
+    html += "<p><em>Epics without a <code>lifecycle::</code> label. Apply a lifecycle label or use <code>set-lifecycle-labels</code> to assign in bulk.</em></p>"
+    html += '<table class="table table-sm table-striped"><thead><tr><th>Epic</th><th>Type</th><th>Age</th><th>PI</th><th>Group</th></tr></thead><tbody>'
+    for e in unlab:
+        link = f'<a href="{e["url"]}" target="_blank">{e["title"]}</a>' if e["url"] else e["title"]
+        html += f"<tr><td>{link}</td><td>{e['icon']} {e['type']}</td><td>{e['age'] or '—'}</td><td>{e['piid']}</td><td>{e['group']}</td></tr>"
+    html += "</tbody></table>"
+
+HTML(html)
+```
+
+::: {.callout-note collapse="true"}
+## SAFe Portfolio Kanban States
+
+| State | Label | Meaning | Flag if > |
+|-------|-------|---------|-----------|
+| 💡 Funnel | `lifecycle::funnel` | Ideas submitted, not yet analyzed | 90 days |
+| 🔍 Analyzing | `lifecycle::analyzing` | Lean Business Case in development | 30 days |
+| 📋 Portfolio Backlog | `lifecycle::backlog` | Approved, awaiting capacity | 60 days |
+| ⚙️ Implementing | `lifecycle::implementing` | Active in a Program Increment | — |
+| ✅ Done | `lifecycle::done` | Delivered | — |
+:::
