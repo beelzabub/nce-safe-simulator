@@ -1,0 +1,128 @@
+---
+title: "WSJF Priority Board"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/wsjf.json"), Path("../data/wsjf.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/wsjf.json not found. "
+        "Run: python NceGitLab.py --report wsjf"
+    )
+
+d          = json.loads(data_file.read_text())
+group      = d["group"]
+summary    = d["summary"]
+candidates = d["candidates"]
+blocked_bv = d["blocked_bv"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Weighted Shortest Job First (WSJF) ranks portfolio backlog items by the ratio of
+Cost of Delay to Job Size. Higher score = should be sequenced first.</p>
+""")
+```
+
+## Summary
+
+```{python}
+s = summary
+html = '<table class="table table-sm table-striped" style="max-width:400px"><thead><tr><th></th><th>Count</th></tr></thead><tbody>'
+html += f"<tr><td>Fully scored</td><td>{s['scored']}</td></tr>"
+html += f"<tr><td>Partially scored (missing component or job size)</td><td>{s['partial']}</td></tr>"
+html += f"<tr><td>Portfolio Backlog (no PI)</td><td>{s['backlog']}</td></tr>"
+html += f"<tr><td>In-flight (PI assigned)</td><td>{s['in_flight']}</td></tr>"
+html += "</tbody></table>"
+HTML(html)
+```
+
+## Ranked Board
+
+```{python}
+if not candidates:
+    display(HTML("<p><em>No WSJF-scored epics found. Set the Business Value custom field via "
+         "<code>set-business-value</code>, and apply <code>wsjf-urgency::N</code> and "
+         "<code>wsjf-risk::N</code> labels (Fibonacci scale: 1, 2, 3, 5, 8, 13) to open "
+         "epics.</em></p>"))
+else:
+    html = '<table class="table table-sm table-bordered"><thead><tr>'
+    html += "<th>Rank</th><th>Epic</th><th>Type</th><th>PI</th><th>BV</th><th>Urgency</th><th>Risk</th><th>Size</th><th>WSJF</th>"
+    html += "</tr></thead><tbody>"
+    for c in candidates:
+        link   = f'<a href="{c["url"]}" target="_blank">{c["title"]}</a>' if c["url"] else c["title"]
+        piid   = c["piid"] or "<em>backlog</em>"
+        v_str  = str(c["value"])   if c["value"]   is not None else "—"
+        u_str  = str(c["urgency"]) if c["urgency"] is not None else "—"
+        r_str  = str(c["risk"])    if c["risk"]    is not None else "—"
+        s_str  = str(c["size"])    if c["size"]    is not None else "—"
+        sc_str = f'<strong>{c["score"]}</strong>' if c["score"] is not None else "<em>partial</em>"
+        html  += f"<tr><td>{c['rank']}</td><td>{link}</td><td>{c['icon']} {c['type']}</td><td>{piid}</td><td>{v_str}</td><td>{u_str}</td><td>{r_str}</td><td>{s_str}</td><td>{sc_str}</td></tr>"
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+```{python}
+if blocked_bv:
+    bv   = blocked_bv
+    html = f"<h2>Blocked Business Value</h2>"
+    html += f"<p><strong>Total Business Value at Risk: {bv['total_bv']}</strong> <em>(sum of {len(bv['portfolio_epics'])} distinct Portfolio Epic(s))</em></p>"
+
+    for pe in bv["portfolio_epics"]:
+        link   = f'<a href="{pe["url"]}" target="_blank">{pe["title"]}</a>' if pe["url"] else pe["title"]
+        bv_str = str(pe["bv"]) if pe["bv"] is not None else "—"
+        html  += f"<p>- {link} — BV: {bv_str}</p>"
+
+    html += "<h3>Blocking Detail</h3>"
+    html += '<table class="table table-sm table-bordered"><thead><tr>'
+    html += "<th>Epic at Risk</th><th>BV</th><th>Blocked Item</th><th>Type</th><th>Blocker(s)</th>"
+    html += "</tr></thead><tbody>"
+    for row in bv["detail_rows"]:
+        pe_link  = f'<a href="{row["pe_url"]}" target="_blank">{row["pe_title"]}</a>' if row["pe_url"] else row["pe_title"]
+        bl_link  = f'<a href="{row["blocked_url"]}" target="_blank">{row["blocked_title"]}</a>' if row["blocked_url"] else row["blocked_title"]
+        bv_str   = str(row["pe_bv"]) if row["pe_bv"] is not None else "—"
+        blk_str  = ", ".join(
+            f'<a href="{b["url"]}" target="_blank">{b["title"]}</a>' if b["url"] else b["title"]
+            for b in row["blockers"]
+        )
+        html += f'<tr><td>{pe_link}</td><td>{bv_str}</td><td>{bl_link}</td><td>{row["blocked_icon"]} {row["blocked_type"]}</td><td>{blk_str}</td></tr>'
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## How WSJF Works
+
+**WSJF = (Business Value + Time Criticality + Risk Reduction) ÷ Job Size**
+
+| Component | Source | What it measures |
+|-----------|--------|-----------------|
+| Business Value | Custom field (Fibonacci 1–21) | Economic benefit |
+| Time Criticality | `wsjf-urgency::N` | Cost of delay — how fast does value decay? |
+| Risk Reduction | `wsjf-risk::N` | Risk reduced or opportunity enabled by this work |
+| Job Size | Epic planned weight | Relative effort |
+
+**Fibonacci scale:** 1 · 2 · 3 · 5 · 8 · 13 _(higher = more)_
+
+A score of 8.0 means the item delivers 8× more value per unit of effort than a score-1 item.
+
+| Score display | Condition |
+|---------------|-----------|
+| **N.NN** (bold) | All three components present and job size > 0 |
+| _partial_ | Missing a component or job size |
+:::

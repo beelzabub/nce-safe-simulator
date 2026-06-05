@@ -1,0 +1,63 @@
+project:
+  type: website
+  output-dir: public
+  render:
+    - index.qmd
+    - quarto/health-dashboard.qmd
+    - quarto/risk-register.qmd
+    - quarto/wsjf.qmd
+    - quarto/blocking.qmd
+    - quarto/epic-lifecycle.qmd
+    - quarto/pi-predictability.qmd
+    - quarto/art-capacity-balance.qmd
+    - quarto/unassigned-pi.qmd
+    - quarto/orphan-epics.qmd
+    - quarto/orphan-issues.qmd
+    - quarto/premature-closures.qmd
+
+website:
+  title: "Portfolio Reports"
+  navbar:
+    left:
+      - text: "Executive"
+        menu:
+          - href: quarto/health-dashboard.qmd
+            text: "Portfolio Health"
+          - href: quarto/risk-register.qmd
+            text: "Risk Register"
+          - href: quarto/wsjf.qmd
+            text: "WSJF Priority Board"
+      - text: "Program"
+        menu:
+          - href: quarto/blocking.qmd
+            text: "Blocking & Cross-ART Risk"
+          - href: quarto/epic-lifecycle.qmd
+            text: "Epic Lifecycle"
+          - href: quarto/pi-predictability.qmd
+            text: "PI Predictability"
+          - href: quarto/art-capacity-balance.qmd
+            text: "ART Capacity Balance"
+      - text: "Data Quality"
+        menu:
+          - href: quarto/unassigned-pi.qmd
+            text: "Unassigned PI"
+          - href: quarto/orphan-epics.qmd
+            text: "Orphaned Epics"
+          - href: quarto/orphan-issues.qmd
+            text: "Orphaned Issues"
+          - href: quarto/premature-closures.qmd
+            text: "Premature Closures"
+
+execute:
+  execute-dir: project
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    embed-resources: false
+    grid:
+      sidebar-width: 0px
+      body-width: 1200px
