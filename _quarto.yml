@@ -1,0 +1,27 @@
+project:
+  type: website
+  output-dir: public
+  render:
+    - index.qmd
+    - quarto/health-dashboard.qmd
+
+website:
+  title: "Portfolio Reports"
+  navbar:
+    left:
+      - href: quarto/health-dashboard.qmd
+        text: "Portfolio Health"
+
+execute:
+  execute-dir: project
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    embed-resources: false
+    grid:
+      sidebar-width: 0px
+      body-width: 1200px
