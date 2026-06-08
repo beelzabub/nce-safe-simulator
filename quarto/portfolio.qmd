@@ -1,0 +1,117 @@
+---
+title: "SAFe Portfolio Hierarchy"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/portfolio.json"), Path("../data/portfolio.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/portfolio.json not found. "
+        "Run: python NceGitLab.py --report portfolio"
+    )
+
+d         = json.loads(data_file.read_text())
+group     = d["group"]
+summary   = d["summary"]
+hierarchy = d["hierarchy"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+""")
+```
+
+## Portfolio Summary
+
+```{python}
+if not summary:
+    display(HTML("<p><em>No epics found.</em></p>"))
+else:
+    html = (
+        '<table class="table table-sm table-bordered">'
+        "<thead><tr>"
+        "<th>Type</th><th>Total</th><th>Open</th><th>Closed</th>"
+        "<th>Blocked By</th><th>Blocks</th><th>% Done</th><th>% Through PI</th>"
+        "</tr></thead><tbody>"
+    )
+    for row in summary:
+        risk   = " ⚠️" if row["at_risk"] else ""
+        pi_str = f"{row['avg_pct_pi']}%{risk}" if row["avg_pct_pi"] is not None else "—"
+        html  += (
+            f'<tr>'
+            f'<td>{row["icon"]} <strong>{row["type"]}</strong></td>'
+            f'<td><a href="{row["url_all"]}" target="_blank">{row["total"]}</a></td>'
+            f'<td><a href="{row["url_open"]}" target="_blank">{row["open"]}</a></td>'
+            f'<td><a href="{row["url_closed"]}" target="_blank">{row["closed"]}</a></td>'
+            f'<td>{row["blocked_by"]}</td>'
+            f'<td>{row["blocks"]}</td>'
+            f'<td>{row["avg_pct_done"]}%</td>'
+            f'<td>{pi_str}</td>'
+            f'</tr>'
+        )
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+## Initiative Hierarchy
+
+```{python}
+def _render_node(node):
+    icon      = node["icon"]
+    blk       = '<span style="font-size:0.62em">⛔</span> ' if node["blocked"] else ""
+    pct_done  = node["pct_done"]
+    pct_pi    = node["pct_pi"]
+    pi_str    = f" | PI: {pct_pi}%" if pct_pi is not None else ""
+    risk      = " ⚠️" if pct_pi is not None and pct_done < pct_pi else ""
+    pw, aw    = node["planned_weight"], node["actual_weight"]
+    if pw and aw:
+        drift     = node["drift"]
+        drift_str = f" | {pw}pt → {aw}pt {'▲' if drift > 0 else '▼' if drift < 0 else '='}"
+    elif pw:
+        drift_str = f" | {pw}pt planned"
+    else:
+        drift_str = ""
+    label = (
+        f'{blk}{icon} <a href="{node["url"]}" target="_blank">{node["title"]}</a> '
+        f'<small style="color:#666">(State: {node["state"]} | {pct_done}%{risk}{pi_str}{drift_str})</small>'
+    )
+    children = node.get("children", [])
+    if not children:
+        return f"<p style='margin:2px 0'>{label}</p>"
+    inner = "".join(_render_node(c) for c in children)
+    return (
+        f"<details><summary style='cursor:pointer'>{label}</summary>"
+        f"<div style='margin-left:1.5em'>{inner}</div></details>"
+    )
+
+if not hierarchy:
+    display(HTML("<p><em>No epics found in the portfolio.</em></p>"))
+else:
+    html = "".join(_render_node(node) for node in hierarchy)
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+- **🏆 Epic** — Portfolio-level initiative spanning multiple PIs and ARTs
+- **🧩 Capability** — Large Solution-level deliverable decomposed from an Epic; fits within one PI
+- **🛠️ Feature** — Service or function delivered by a single ART within one PI
+- **⚠️** — % Done is below % of PI elapsed (at risk)
+- **⛔** — Epic is blocked by one or more other epics
+:::
