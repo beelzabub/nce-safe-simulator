@@ -13,7 +13,7 @@ $Manifest  = Join-Path $ScriptDir "original_files.txt"
 
 function Invoke-Rename {
     if (Test-Path $Manifest) {
-        Write-Error "Manifest already exists — run 'reverse' first."
+        Write-Error "Manifest already exists - run 'reverse' first."
         exit 1
     }
 
