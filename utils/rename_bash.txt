@@ -21,7 +21,7 @@ cmd_rename() {
     fi
 
     # Capture the list before creating the manifest so the manifest is not in it.
-    mapfile -t files < <(find "$REPO_ROOT" -type f -not -path "*/.git/*" | sort)
+    mapfile -t files < <(find "$REPO_ROOT" -type f -not -path "*/.git/*" -not -path "*/.claude/*" | sort)
 
     printf '%s\n' "${files[@]}" > "$MANIFEST"
     echo "Manifest written: $MANIFEST  (${#files[@]} files)"

@@ -18,9 +18,10 @@ function Invoke-Rename {
         exit 1
     }
 
-    $gitDir = [IO.Path]::Combine($RepoRoot, ".git")
+    $gitDir    = [IO.Path]::Combine($RepoRoot, ".git")
+    $claudeDir = [IO.Path]::Combine($RepoRoot, ".claude")
     $files = Get-ChildItem -Path $RepoRoot -Recurse -File |
-             Where-Object { -not $_.FullName.StartsWith($gitDir) } |
+             Where-Object { -not $_.FullName.StartsWith($gitDir) -and -not $_.FullName.StartsWith($claudeDir) } |
              Sort-Object FullName |
              Select-Object -ExpandProperty FullName
 
