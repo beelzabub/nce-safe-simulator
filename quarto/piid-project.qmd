@@ -1,0 +1,112 @@
+---
+title: "Program × PI Matrix"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/piid-project.json"), Path("../data/piid-project.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/piid-project.json not found. "
+        "Run: python NceGitLab.py --report piid-project"
+    )
+
+d               = json.loads(data_file.read_text())
+group           = d["group"]
+project_labels  = d["project_labels"]
+piid_labels     = d["piid_labels"]
+piid_meta       = d["piid_meta"]
+cells           = d["cells"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Each cell: <strong>Status · Epics (open/total) · % Done (PI elapsed%) · Planned → Actual pt</strong></p>
+""")
+```
+
+```{python}
+if not project_labels or not piid_labels:
+    display(HTML("<p><em>No project or PIID labels found. Ensure epics carry <code>project::</code> and <code>PIID::</code> labels.</em></p>"))
+else:
+    STATUS_BG = {
+        "✅ On Track":   "#d4edda",
+        "✅ Complete":   "#d4edda",
+        "⚠️ At Risk":   "#fff3cd",
+        "❌ Incomplete": "#f8d7da",
+        "🔵 Planned":   "#e2e3e5",
+    }
+
+    # Header
+    pi_ths = "".join(
+        f'<th style="white-space:nowrap">{p}<br>'
+        f'<small style="font-weight:normal">{piid_meta[p]["phase"]} '
+        f'{"· " + str(piid_meta[p]["pct"]) + "%" if piid_meta[p]["pct"] is not None else ""}'
+        f'</small></th>'
+        for p in piid_labels
+    )
+    html = (
+        '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+        f'<thead><tr><th>Project</th>{pi_ths}</tr></thead><tbody>'
+    )
+
+    for proj in project_labels:
+        row = f'<td><strong>{proj}</strong></td>'
+        for piid in piid_labels:
+            key  = f"{proj}|{piid}"
+            cell = cells.get(key)
+            if not cell:
+                row += '<td style="color:#999;text-align:center">—</td>'
+                continue
+            bg    = STATUS_BG.get(cell["status"], "")
+            pi_s  = f"{cell['pct_pi']}%" if cell["pct_pi"] is not None else "—"
+            delta = cell["delta"]
+            d_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+            blk   = f" · 🔒{cell['blocked']}" if cell["blocked"] else ""
+            row  += (
+                f'<td style="background:{bg};vertical-align:top;font-size:0.82em">'
+                f'<strong>{cell["status"]}{blk}</strong><br>'
+                f'{cell["open"]}/{cell["total"]} epics<br>'
+                f'{cell["avg_pct"]}% done (PI {pi_s})<br>'
+                f'{cell["planned"]}pt → {cell["actual"]}pt {d_str}<br>'
+                f'<a href="{cell["board_url"]}" target="_blank">View →</a>'
+                f'</td>'
+            )
+        html += f"<tr>{row}</tr>"
+
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Meaning |
+|------|---------|
+| ✅ On Track | Current PI: % Done ≥ % of PI quarter elapsed |
+| ⚠️ At Risk | Current PI: % Done < % of PI quarter elapsed |
+| ✅ Complete | Past PI: all committed work finished (% Done = 100%) |
+| ❌ Incomplete | Past PI: PI ended with work remaining |
+| 🔵 Planned | Future PI: not yet started |
+| 🔒 N | N epics in this cell are blocked |
+
+- **% Done** — weighted average completion across epics in the cell (weighted by planned weight)
+- **PI elapsed%** — `(today − PI start) ÷ (PI end − PI start) × 100`
+- **Planned pt** — sum of planned weights set on those epics
+- **Actual pt** — sum of story-point weights on all linked issues
+- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched
+:::

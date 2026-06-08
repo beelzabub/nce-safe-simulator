@@ -1,0 +1,102 @@
+---
+title: "Program PI Detail"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/piid-project-detail.json"), Path("../data/piid-project-detail.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/piid-project-detail.json not found. "
+        "Run: python NceGitLab.py --report piid-project-detail"
+    )
+
+d              = json.loads(data_file.read_text())
+group          = d["group"]
+project_labels = d["project_labels"]
+pis            = d["pis"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>One section per Program Increment. Each row is a project workstream.</p>
+""")
+```
+
+```{python}
+if not pis:
+    display(HTML("<p><em>No PIID labels found. Ensure epics carry <code>PIID::</code> labels.</em></p>"))
+else:
+    html = ""
+    for pi in pis:
+        pi_str  = f"{pi['pct_pi']}%" if pi["pct_pi"] is not None else "—"
+        date_r  = ""
+        if pi["start"] and pi["end"]:
+            date_r = f" &nbsp;·&nbsp; {pi['start']} → {pi['end']}"
+        html += (
+            f'<h3>{pi["phase_icon"]} {pi["piid"]} — {pi["phase"]}'
+            f'<small style="font-weight:normal;font-size:0.75em">{date_r} &nbsp;·&nbsp; PI elapsed: {pi_str}</small></h3>'
+            '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+            "<thead><tr>"
+            "<th>Project</th><th>Epics (open/total)</th><th>% Done</th>"
+            "<th>Status</th><th>Planned</th><th>Actual</th><th>Δ</th><th>Blocked</th>"
+            "</tr></thead><tbody>"
+        )
+        for proj in pi["projects"]:
+            if proj["has_data"]:
+                delta  = proj["delta"]
+                d_str  = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+                blk    = str(proj["blocked"]) if proj["blocked"] else "—"
+                name   = f'<a href="{proj["board_url"]}" target="_blank">{proj["project"]}</a>' if proj["board_url"] else proj["project"]
+                html  += (
+                    f"<tr>"
+                    f"<td><strong>{name}</strong></td>"
+                    f"<td>{proj['open']}/{proj['total']}</td>"
+                    f"<td>{proj['avg_pct']}%</td>"
+                    f"<td>{proj['status']}</td>"
+                    f"<td>{proj['planned']} pt</td>"
+                    f"<td>{proj['actual']} pt</td>"
+                    f"<td>{d_str}</td>"
+                    f"<td>{blk}</td>"
+                    f"</tr>"
+                )
+            else:
+                html += (
+                    f'<tr><td><strong>{proj["project"]}</strong></td>'
+                    '<td colspan="7" style="color:#999">—</td></tr>'
+                )
+        html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Status | Condition |
+|------|--------|-----------|
+| ✅ On Track | Current PI | % Done ≥ % of PI quarter elapsed |
+| ⚠️ At Risk | Current PI | % Done < % of PI quarter elapsed |
+| ✅ Complete | Past PI | % Done = 100% |
+| ❌ Incomplete | Past PI | % Done < 100% at PI end |
+| 🔵 Planned | Future PI | PI has not yet started |
+
+- **% Done** — weighted average completion (weighted by planned weight)
+- **Planned** — sum of planned weights set on epics
+- **Actual** — sum of story-point weights on linked issues
+- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched
+- **Blocked** — number of epics with at least one active blocker
+:::
