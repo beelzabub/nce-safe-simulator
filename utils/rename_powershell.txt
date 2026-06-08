@@ -12,7 +12,7 @@ $RepoRoot        = Split-Path -Parent $ScriptDir
 $Manifest        = Join-Path $ScriptDir "original_files.txt"
 $ManifestRenamed = "$Manifest.txt"
 
-function Invoke-Add {
+function Invoke-Rename {
     if ((Test-Path $Manifest) -or (Test-Path $ManifestRenamed)) {
         Write-Error "Manifest already exists — run 'reverse' first."
         exit 1
@@ -66,7 +66,7 @@ function Invoke-Reverse {
 }
 
 switch ($Mode) {
-    "rename"  { Invoke-Add }
+    "rename"  { Invoke-Rename }
     "reverse" { Invoke-Reverse }
     default   {
         Write-Host "Usage: powershell rename_powershell.txt [-Mode rename|reverse]"
