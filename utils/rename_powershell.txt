@@ -1,8 +1,8 @@
 # Append .txt to every file in the repo (add), or reverse that operation.
-# Usage: powershell rename_powershell.txt [-Mode add|reverse]
+# Usage: powershell rename_powershell.txt [-Mode rename|reverse]
 param(
-    [ValidateSet("add","reverse")]
-    [string]$Mode = "add"
+    [ValidateSet("rename","reverse")]
+    [string]$Mode = "rename"
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,10 +66,10 @@ function Invoke-Reverse {
 }
 
 switch ($Mode) {
-    "add"     { Invoke-Add }
+    "rename"  { Invoke-Add }
     "reverse" { Invoke-Reverse }
     default   {
-        Write-Host "Usage: powershell rename_powershell.txt [-Mode add|reverse]"
+        Write-Host "Usage: powershell rename_powershell.txt [-Mode rename|reverse]"
         exit 1
     }
 }

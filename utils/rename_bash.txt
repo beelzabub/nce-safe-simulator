@@ -9,8 +9,8 @@ MANIFEST="$SCRIPT_DIR/original_files.txt"
 MANIFEST_RENAMED="${MANIFEST}.txt"
 
 usage() {
-    echo "Usage: bash $(basename "${BASH_SOURCE[0]}") [add|reverse]"
-    echo "  add     Snapshot file list, then append .txt to every repo file"
+    echo "Usage: bash $(basename "${BASH_SOURCE[0]}") [rename|reverse]"
+    echo "  rename  Snapshot file list, then append .txt to every repo file"
     echo "  reverse Restore every repo file to its original name"
 }
 
@@ -55,8 +55,8 @@ cmd_reverse() {
     echo "Done. Restored $count files. Manifest removed."
 }
 
-case "${1:-add}" in
-    add)     cmd_add ;;
+case "${1:-rename}" in
+    rename)  cmd_add ;;
     reverse) cmd_reverse ;;
     *)       usage; exit 1 ;;
 esac
