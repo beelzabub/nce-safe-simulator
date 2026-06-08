@@ -4214,6 +4214,526 @@ class ReportsMixin:
             "arts":        arts_out,
         }
 
+    # ------------------------------------------------------------------
+    # Phase 4a Quarto data-layer methods
+    # ------------------------------------------------------------------
+
+    def _data_piid_project(self) -> dict:
+        """Cross-tab: rows = project labels, columns = PIID quarters."""
+        group     = self._rd_root_obj
+        all_epics = [e for bucket in self._rd_metrics.values() for e in bucket]
+        piid_set  = set(self._rd_piid_labels)
+        proj_set  = set(self._rd_project_labels)
+
+        cell_data: defaultdict = defaultdict(list)
+        for e in all_epics:
+            proj = next((l for l in e["labels"] if l in proj_set), None)
+            piid = e.get("piid")
+            if proj and piid and piid in piid_set:
+                cell_data[(proj, piid)].append(e)
+
+        def _agg(epics):
+            total    = len(epics)
+            open_cnt = sum(1 for e in epics if e["state"].lower() == "opened")
+            planned  = sum(e["planned_weight"] for e in epics)
+            actual   = sum(e["actual_weight"]  for e in epics)
+            blocked  = sum(1 for e in epics if e["blocked_by_count"] > 0)
+            if planned > 0:
+                avg_pct = round(sum(e["pct_complete"] * (e["planned_weight"] or 1) for e in epics) / planned)
+            elif total > 0:
+                avg_pct = round(sum(e["pct_complete"] for e in epics) / total)
+            else:
+                avg_pct = 0
+            return total, open_cnt, planned, actual, avg_pct, blocked
+
+        def _status(pct_pi, avg_pct):
+            if pct_pi is None or pct_pi == 0:
+                return "🔵 Planned"
+            if pct_pi >= 100:
+                return "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+            return "✅ On Track" if avg_pct >= pct_pi else "⚠️ At Risk"
+
+        piid_meta = {}
+        for piid in self._rd_piid_labels:
+            start, end = self._pi_dates_from_label(piid)
+            pct_pi     = self._pct_through_pi(piid)
+            phase      = ("Future" if (pct_pi is None or pct_pi == 0) else
+                          ("Past" if pct_pi >= 100 else "Current"))
+            piid_meta[piid] = {
+                "start": start.isoformat() if start else None,
+                "end":   end.isoformat()   if end   else None,
+                "pct":   pct_pi,
+                "phase": phase,
+            }
+
+        cells = {}
+        for proj in self._rd_project_labels:
+            for piid in self._rd_piid_labels:
+                epics = cell_data.get((proj, piid), [])
+                key   = f"{proj}|{piid}"
+                if not epics:
+                    cells[key] = None
+                    continue
+                total, open_cnt, planned, actual, avg_pct, blocked = _agg(epics)
+                pct_pi = piid_meta[piid]["pct"]
+                board_url = (
+                    f"{group.web_url}/-/epics"
+                    f"?label_name[]={quote(piid, safe='')}"
+                    f"&label_name[]={quote(proj, safe='')}"
+                    f"&state=all"
+                )
+                cells[key] = {
+                    "project":   proj,
+                    "piid":      piid,
+                    "total":     total,
+                    "open":      open_cnt,
+                    "planned":   planned,
+                    "actual":    actual,
+                    "delta":     actual - planned,
+                    "avg_pct":   avg_pct,
+                    "blocked":   blocked,
+                    "status":    _status(pct_pi, avg_pct),
+                    "pct_pi":    pct_pi,
+                    "board_url": board_url,
+                }
+
+        return {
+            "report_date":    date.today().isoformat(),
+            "group":          {"name": group.name, "url": group.web_url},
+            "project_labels": self._rd_project_labels,
+            "piid_labels":    self._rd_piid_labels,
+            "piid_meta":      piid_meta,
+            "cells":          cells,
+        }
+
+    def _data_piid_project_detail(self) -> dict:
+        """Per-PI section view — one row per project label per PI."""
+        group     = self._rd_root_obj
+        all_epics = [e for bucket in self._rd_metrics.values() for e in bucket]
+        piid_set  = set(self._rd_piid_labels)
+        proj_set  = set(self._rd_project_labels)
+
+        cell_data: defaultdict = defaultdict(list)
+        for e in all_epics:
+            proj = next((l for l in e["labels"] if l in proj_set), None)
+            piid = e.get("piid")
+            if proj and piid and piid in piid_set:
+                cell_data[(proj, piid)].append(e)
+
+        def _agg(epics):
+            total    = len(epics)
+            open_cnt = sum(1 for e in epics if e["state"].lower() == "opened")
+            planned  = sum(e["planned_weight"] for e in epics)
+            actual   = sum(e["actual_weight"]  for e in epics)
+            blocked  = sum(1 for e in epics if e["blocked_by_count"] > 0)
+            if planned > 0:
+                avg_pct = round(sum(e["pct_complete"] * (e["planned_weight"] or 1) for e in epics) / planned)
+            elif total > 0:
+                avg_pct = round(sum(e["pct_complete"] for e in epics) / total)
+            else:
+                avg_pct = 0
+            return total, open_cnt, planned, actual, avg_pct, blocked
+
+        def _status(pct_pi, avg_pct):
+            if pct_pi is None or pct_pi == 0:
+                return "🔵 Planned"
+            if pct_pi >= 100:
+                return "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+            return "✅ On Track" if avg_pct >= pct_pi else "⚠️ At Risk"
+
+        pis_out = []
+        for piid in self._rd_piid_labels:
+            pct_pi     = self._pct_through_pi(piid)
+            start, end = self._pi_dates_from_label(piid)
+            phase      = ("Future" if (pct_pi is None or pct_pi == 0) else
+                          ("Past" if pct_pi >= 100 else "Current"))
+            phase_icon = {"Future": "🔵", "Current": "🟢", "Past": "⬜"}.get(phase, "")
+
+            projects_out = []
+            for proj in self._rd_project_labels:
+                epics    = cell_data.get((proj, piid), [])
+                has_data = bool(epics)
+                if has_data:
+                    total, open_cnt, planned, actual, avg_pct, blocked = _agg(epics)
+                    status = _status(pct_pi, avg_pct)
+                    board_url = (
+                        f"{group.web_url}/-/epics"
+                        f"?label_name[]={quote(piid, safe='')}"
+                        f"&label_name[]={quote(proj, safe='')}"
+                        f"&state=all"
+                    )
+                else:
+                    total = open_cnt = planned = actual = avg_pct = blocked = 0
+                    status    = "—"
+                    board_url = ""
+                projects_out.append({
+                    "project":   proj,
+                    "board_url": board_url,
+                    "total":     total,
+                    "open":      open_cnt,
+                    "planned":   planned,
+                    "actual":    actual,
+                    "delta":     actual - planned,
+                    "avg_pct":   avg_pct,
+                    "blocked":   blocked,
+                    "status":    status,
+                    "has_data":  has_data,
+                })
+
+            pis_out.append({
+                "piid":       piid,
+                "phase":      phase,
+                "phase_icon": phase_icon,
+                "pct_pi":     pct_pi,
+                "start":      start.isoformat() if start else None,
+                "end":        end.isoformat()   if end   else None,
+                "projects":   projects_out,
+            })
+
+        return {
+            "report_date":    date.today().isoformat(),
+            "group":          {"name": group.name, "url": group.web_url},
+            "project_labels": self._rd_project_labels,
+            "pis":            pis_out,
+        }
+
+    def _data_portfolio(self) -> dict:
+        """Summary counts + recursive Initiative Hierarchy tree."""
+        group   = self._rd_root_obj
+        metrics = self._rd_metrics
+        base    = f"{group.web_url}/-/epics"
+
+        summary = []
+        for metric_type in ("Epic", "Capability", "Feature"):
+            data_list = metrics.get(metric_type, [])
+            if not data_list:
+                continue
+            total      = len(data_list)
+            open_cnt   = sum(1 for d in data_list if d["state"].lower() == "opened")
+            closed_cnt = sum(1 for d in data_list if d["state"].lower() == "closed")
+            blocked_by = sum(d.get("blocked_by_count", 0) for d in data_list)
+            blocks     = sum(d.get("blocks_count",    0) for d in data_list)
+            avg_done   = round(sum(d["pct_complete"] for d in data_list) / total)
+            pcts_pi    = [d["pct_through_pi"] for d in data_list if d.get("pct_through_pi") is not None]
+            avg_pi     = round(sum(pcts_pi) / len(pcts_pi)) if pcts_pi else None
+            summary.append({
+                "type":        metric_type,
+                "icon":        self.EPIC_TYPE_ICONS.get(metric_type, "🏆"),
+                "total":       total,
+                "open":        open_cnt,
+                "closed":      closed_cnt,
+                "blocked_by":  blocked_by,
+                "blocks":      blocks,
+                "avg_pct_done": avg_done,
+                "avg_pct_pi":  avg_pi,
+                "at_risk":     avg_pi is not None and avg_done < avg_pi,
+                "url_all":    f"{base}?label_name[]={metric_type}&state=all",
+                "url_open":   f"{base}?label_name[]={metric_type}&state=opened",
+                "url_closed": f"{base}?label_name[]={metric_type}&state=closed",
+            })
+
+        all_epics = (metrics.get("Epic", []) + metrics.get("Capability", []) +
+                     metrics.get("Feature", []))
+        by_parent: defaultdict = defaultdict(list)
+        for e in all_epics:
+            if e.get("parent_id") is not None:
+                by_parent[e["parent_id"]].append(e)
+
+        def _node(epic):
+            etype    = epic.get("type", "Epic")
+            pw       = epic.get("planned_weight", 0) or 0
+            aw       = epic.get("actual_weight",  0) or 0
+            pct_done = epic.get("pct_complete", 0)
+            pct_pi   = epic.get("pct_through_pi")
+            if pct_pi is None:
+                status_icon = "🔵"
+            elif pct_pi >= 100:
+                status_icon = "✅" if pct_done >= 100 else "❌"
+            else:
+                status_icon = "✅" if pct_done >= pct_pi else "⚠️"
+            return {
+                "id":             epic["id"],
+                "title":          epic["title"],
+                "url":            epic.get("web_url", ""),
+                "type":           etype,
+                "icon":           self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "state":          epic.get("state", ""),
+                "pct_done":       pct_done,
+                "pct_pi":         pct_pi,
+                "planned_weight": pw,
+                "actual_weight":  aw,
+                "drift":          aw - pw,
+                "blocked":        epic.get("blocked_by_count", 0) > 0,
+                "status_icon":    status_icon,
+                "children":       [_node(c) for c in by_parent.get(epic["id"], [])],
+            }
+
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "summary":     summary,
+            "hierarchy":   [_node(e) for e in metrics.get("Epic", [])],
+        }
+
+    def _data_workload(self) -> dict:
+        """Per-PI workload: one row per GitLab group (ART/team) per PI."""
+        group        = self._rd_root_obj
+        all_epics    = [e for bucket in self._rd_metrics.values() for e in bucket]
+        groups_by_id = self._rd_groups_by_id
+        today        = date.today()
+
+        pi_group_epics: defaultdict = defaultdict(lambda: defaultdict(list))
+        for e in all_epics:
+            piid = e.get("piid")
+            gid  = e.get("group_id")
+            if piid and gid:
+                pi_group_epics[piid][gid].append(e)
+
+        def _phase(piid):
+            start, end = self._pi_dates_from_label(piid)
+            if not start:
+                return "unknown"
+            if today < start:
+                return "future"
+            if today > end:
+                return "past"
+            return "current"
+
+        sorted_pis = sorted(
+            pi_group_epics.keys(),
+            key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+        )
+
+        pis_out = []
+        for piid in sorted_pis:
+            phase      = _phase(piid)
+            pct_pi     = self._pct_through_pi(piid) or 0
+            start, end = self._pi_dates_from_label(piid)
+            group_data = pi_group_epics[piid]
+
+            def _avg_pct(fs, total_planned):
+                if total_planned:
+                    return round(sum(f["planned_weight"] * f["pct_complete"] for f in fs) / total_planned)
+                return round(sum(f["pct_complete"] for f in fs) / len(fs)) if fs else 0
+
+            def _risk_key(gid):
+                fs = group_data[gid]
+                tp = sum(f["planned_weight"] for f in fs)
+                ap = _avg_pct(fs, tp)
+                if phase == "past":
+                    return (0 if ap < 100 else 2, -len(fs))
+                if phase == "current":
+                    return (0 if ap < pct_pi else 2, -len(fs))
+                return (1, -len(fs))
+
+            groups_out = []
+            for gid in sorted(group_data.keys(), key=_risk_key):
+                fs            = group_data[gid]
+                grp           = groups_by_id.get(gid)
+                total_planned = sum(f["planned_weight"] for f in fs)
+                total_actual  = sum(f["actual_weight"]  for f in fs)
+                avg_pct       = _avg_pct(fs, total_planned)
+
+                if phase == "current":
+                    status = "⚠️ At Risk" if avg_pct < pct_pi else "✅ On Track"
+                elif phase == "past":
+                    status = "✅ Complete" if avg_pct == 100 else "❌ Incomplete"
+                else:
+                    status = "🔵 Planned"
+
+                epics_url = ""
+                if grp and grp.get("full_path"):
+                    epics_url = (
+                        f"{self.url}/groups/{grp['full_path']}/-/epics"
+                        f"?state=opened&label_name[]={quote(piid, safe='')}"
+                    )
+
+                groups_out.append({
+                    "name":       grp["name"] if grp else f"Group {gid}",
+                    "url":        grp.get("web_url", "") if grp else "",
+                    "epics_url":  epics_url,
+                    "epic_count": len(fs),
+                    "planned":    total_planned,
+                    "actual":     total_actual,
+                    "delta":      total_actual - total_planned,
+                    "avg_pct":    avg_pct,
+                    "status":     status,
+                })
+
+            pis_out.append({
+                "piid":   piid,
+                "phase":  phase,
+                "pct_pi": pct_pi,
+                "start":  start.isoformat() if start else None,
+                "end":    end.isoformat()   if end   else None,
+                "groups": groups_out,
+            })
+
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "pis":         pis_out,
+        }
+
+    def _data_flow_metrics(self) -> dict:
+        """Flow Metrics: velocity, load, distribution, cycle time, predictability."""
+        group     = self._rd_root_obj
+        today     = date.today()
+        all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
+        piids     = self._rd_piid_labels
+        feat_types = {"Feature", "Capability"}
+
+        def _parse_dt(s):
+            if not s:
+                return None
+            try:
+                return date.fromisoformat(str(s)[:10])
+            except ValueError:
+                return None
+
+        def _age(epic):
+            c = _parse_dt(epic.get("created_at"))
+            if not c:
+                return None
+            if epic.get("state", "").lower() == "closed":
+                u = _parse_dt(epic.get("updated_at"))
+                return (u - c).days if u else None
+            return (today - c).days
+
+        def _avg(vals):
+            v = [x for x in vals if x is not None]
+            return round(sum(v) / len(v)) if v else None
+
+        def _pct_str(n, total):
+            return f"{round(n / total * 100)}%" if total else "—"
+
+        open_epics   = [e for e in all_typed if e.get("state", "").lower() != "closed"]
+        closed_epics = [e for e in all_typed if e.get("state", "").lower() == "closed"]
+
+        # Section 1: velocity
+        velocity = []
+        for pi in piids:
+            pi_closed = [e for e in closed_epics if e.get("piid") == pi and e.get("type") in feat_types]
+            feat_c = sum(1 for e in pi_closed if e["type"] == "Feature")
+            cap_c  = sum(1 for e in pi_closed if e["type"] == "Capability")
+            velocity.append({"piid": pi, "features": feat_c, "capabilities": cap_c, "total": feat_c + cap_c})
+
+        # Section 2: load (WIP)
+        load = []
+        for pi in piids:
+            pi_open = [e for e in open_epics if e.get("piid") == pi]
+            f  = sum(1 for e in pi_open if e["type"] == "Feature")
+            c  = sum(1 for e in pi_open if e["type"] == "Capability")
+            ep = sum(1 for e in pi_open if e["type"] == "Epic")
+            pw = sum(e.get("planned_weight") or 0 for e in pi_open)
+            load.append({"piid": pi, "features": f, "capabilities": c, "epics": ep, "total": f + c + ep, "planned_weight": pw})
+
+        no_pi_open = [e for e in open_epics if not e.get("piid")]
+        load_no_pi = None
+        if no_pi_open:
+            f  = sum(1 for e in no_pi_open if e["type"] == "Feature")
+            c  = sum(1 for e in no_pi_open if e["type"] == "Capability")
+            ep = sum(1 for e in no_pi_open if e["type"] == "Epic")
+            pw = sum(e.get("planned_weight") or 0 for e in no_pi_open)
+            load_no_pi = {"features": f, "capabilities": c, "epics": ep, "total": f + c + ep, "planned_weight": pw}
+
+        # Section 3: distribution
+        total_epics = len(all_typed)
+        total_pw    = sum(e.get("planned_weight") or 0 for e in all_typed)
+        by_type = []
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = self._rd_metrics.get(t, [])
+            pw     = sum(e.get("planned_weight") or 0 for e in bucket)
+            by_type.append({
+                "type":           t,
+                "count":          len(bucket),
+                "pct_items":      _pct_str(len(bucket), total_epics),
+                "planned_weight": pw,
+                "pct_weight":     _pct_str(pw, total_pw),
+            })
+
+        work_type_set = set(self._rd_work_type_labels)
+        has_wt = bool(work_type_set)
+        by_work_type    = []
+        unlabeled_count = 0
+        if has_wt:
+            labeled         = [e for e in all_typed if set(e.get("labels", [])) & work_type_set]
+            unlabeled_count = len(all_typed) - len(labeled)
+            n_lab           = len(labeled) or 1
+            targets = {
+                "type::feature":        "~50%",
+                "type::enabler":        "~30%",
+                "type::infrastructure": "~20%",
+                "type::defect":         "minimize",
+            }
+            for lbl in sorted(work_type_set):
+                epics_lbl = [e for e in all_typed if lbl in e.get("labels", [])]
+                by_work_type.append({
+                    "label":         lbl,
+                    "count":         len(epics_lbl),
+                    "pct_labelled":  _pct_str(len(epics_lbl), n_lab),
+                    "safe_target":   targets.get(lbl, "—"),
+                })
+
+        # Section 4: flow time
+        open_ages = []
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = [e for e in open_epics if e.get("type") == t]
+            ages   = [a for a in (_age(e) for e in bucket) if a is not None]
+            open_ages.append({
+                "type":     t,
+                "count":    len(bucket),
+                "avg_days": _avg(ages),
+                "min_days": min(ages) if ages else None,
+                "max_days": max(ages) if ages else None,
+            })
+
+        closed_cycles = []
+        for t in ("Feature", "Capability", "Epic"):
+            bucket = [e for e in closed_epics if e.get("type") == t]
+            times  = [a for a in (_age(e) for e in bucket) if a is not None]
+            closed_cycles.append({
+                "type":     t,
+                "count":    len(bucket),
+                "avg_days": _avg(times),
+                "min_days": min(times) if times else None,
+                "max_days": max(times) if times else None,
+            })
+
+        # Section 5: predictability
+        predictability = []
+        for pi in piids:
+            pi_epics  = [e for e in all_typed if e.get("piid") == pi and e.get("type") in feat_types]
+            if not pi_epics:
+                continue
+            committed = len(pi_epics)
+            delivered = sum(1 for e in pi_epics if e.get("state", "").lower() == "closed")
+            pct       = round(delivered / committed * 100) if committed else 0
+            icon      = "🟢" if pct >= 80 else ("🟡" if pct >= 60 else "🔴")
+            predictability.append({"piid": pi, "committed": committed, "delivered": delivered, "pct": pct, "icon": icon})
+
+        return {
+            "report_date": today.isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "velocity":    velocity,
+            "load":        load,
+            "load_no_pi":  load_no_pi,
+            "distribution": {
+                "total_epics":          total_epics,
+                "total_planned_weight": total_pw,
+                "by_type":              by_type,
+                "has_work_type_labels": has_wt,
+                "by_work_type":         by_work_type,
+                "unlabeled_count":      unlabeled_count,
+            },
+            "flow_time": {
+                "open_ages":      open_ages,
+                "closed_cycles":  closed_cycles,
+                "has_closed_data": bool(closed_epics),
+            },
+            "predictability": predictability,
+        }
+
     def generate_portfolio_health_dashboard(self):
         """Tier 1 executive pulse — single wiki page with per-VS traffic-light status."""
         root_group = self._rd_root_obj
@@ -5887,17 +6407,22 @@ class ReportsMixin:
         data_dir = Path(data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
         for key, fn in (
-            ("health-dashboard",     self._data_portfolio_health),
-            ("orphan-epics",         self._data_orphan_epics),
-            ("orphan-issues",        self._data_orphan_issues),
-            ("premature-closures",   self._data_premature_closures),
-            ("unassigned-pi",        self._data_unassigned_pi),
-            ("risk-register",        self._data_risk_register),
-            ("wsjf",                 self._data_wsjf),
-            ("blocking",             self._data_blocking),
-            ("epic-lifecycle",       self._data_epic_lifecycle),
-            ("pi-predictability",    self._data_pi_predictability),
-            ("art-capacity-balance", self._data_art_capacity_balance),
+            ("health-dashboard",       self._data_portfolio_health),
+            ("orphan-epics",           self._data_orphan_epics),
+            ("orphan-issues",          self._data_orphan_issues),
+            ("premature-closures",     self._data_premature_closures),
+            ("unassigned-pi",          self._data_unassigned_pi),
+            ("risk-register",          self._data_risk_register),
+            ("wsjf",                   self._data_wsjf),
+            ("blocking",               self._data_blocking),
+            ("epic-lifecycle",         self._data_epic_lifecycle),
+            ("pi-predictability",      self._data_pi_predictability),
+            ("art-capacity-balance",   self._data_art_capacity_balance),
+            ("piid-project",           self._data_piid_project),
+            ("piid-project-detail",    self._data_piid_project_detail),
+            ("portfolio",              self._data_portfolio),
+            ("workload",               self._data_workload),
+            ("flow-metrics",           self._data_flow_metrics),
         ):
             out = data_dir / f"{key}.json"
             out.write_text(json.dumps(fn(), indent=2, default=str), encoding="utf-8")
