@@ -1,0 +1,157 @@
+/*-- scss:defaults --*/
+
+$primary:        #0a2447;
+$link-color:     #1a4a8a;
+$navbar-bg:      #0a2447;
+$navbar-fg:      #dce6f5;
+$navbar-hl:      #c8a951;
+
+$headings-color: #0a2447;
+$font-family-sans-serif: "Segoe UI", system-ui, -apple-system, sans-serif;
+
+/*-- scss:rules --*/
+
+/* ── Navbar ─────────────────────────────────────────────── */
+
+.navbar {
+  background-color: #0a2447 !important;
+  border-bottom: 3px solid #c8a951;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+}
+
+.navbar-brand,
+.navbar-title {
+  color: #dce6f5 !important;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 1.05rem;
+}
+
+.navbar img.navbar-logo {
+  height: 40px;
+  margin-right: 0.5rem;
+}
+
+.navbar .nav-link {
+  color: #b8ccdf !important;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+
+.navbar .nav-link:hover,
+.navbar .nav-link:focus,
+.navbar .active > .nav-link {
+  color: #c8a951 !important;
+}
+
+.navbar .dropdown-menu {
+  background-color: #0f2e5a;
+  border: 1px solid #c8a951;
+  border-radius: 4px;
+}
+
+.navbar .dropdown-item {
+  color: #b8ccdf;
+  font-size: 0.88rem;
+}
+
+.navbar .dropdown-item:hover,
+.navbar .dropdown-item:focus {
+  background-color: #1a3a6b;
+  color: #c8a951;
+}
+
+.navbar-toggler {
+  border-color: #c8a951 !important;
+}
+
+/* ── Page headings ──────────────────────────────────────── */
+
+h1.title {
+  color: #0a2447;
+  font-size: 1.7rem;
+  font-weight: 700;
+  border-bottom: 3px solid #c8a951;
+  padding-bottom: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+h2 {
+  color: #1a3a6b;
+  font-size: 1.2rem;
+  font-weight: 600;
+  border-bottom: 1px solid #c0cce0;
+  padding-bottom: 0.2rem;
+  margin-top: 1.6rem;
+}
+
+h3 {
+  color: #1a3a6b;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+/* ── Links ──────────────────────────────────────────────── */
+
+a {
+  color: #1a4a8a;
+}
+
+a:hover {
+  color: #c8a951;
+  text-decoration: underline;
+}
+
+/* ── Tables ─────────────────────────────────────────────── */
+
+thead tr th[data-quarto-table-cell-role="th"],
+thead tr th {
+  background-color: #0a2447 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  border-color: #1a3a6b !important;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+  background-color: rgba(10,36,71,0.04);
+}
+
+.table-bordered {
+  border-color: #c0cce0;
+}
+
+/* ── Callouts ───────────────────────────────────────────── */
+
+div.callout-note {
+  border-left-color: #c8a951 !important;
+}
+
+div.callout-note > .callout-header {
+  background-color: rgba(200,169,81,0.12);
+}
+
+div.callout-warning {
+  border-left-color: #c8a951 !important;
+}
+
+/* ── Report date/group metadata line ────────────────────── */
+
+p strong:first-child {
+  color: #0a2447;
+}
+
+/* ── Scrollable table wrappers ──────────────────────────── */
+
+.table-responsive {
+  border: 1px solid #c0cce0;
+  border-radius: 4px;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+
+.nav-footer {
+  background-color: #0a2447;
+  color: #8ca8cc;
+  font-size: 0.8rem;
+  border-top: 2px solid #c8a951;
+}
