@@ -57,11 +57,12 @@ else:
             "</tr></thead><tbody>"
         )
         for proj in pi["projects"]:
+            proj_display = proj["project"][len("project::"):] if proj["project"].startswith("project::") else proj["project"]
             if proj["has_data"]:
                 delta  = proj["delta"]
                 d_str  = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
                 blk    = str(proj["blocked"]) if proj["blocked"] else "—"
-                name   = f'<a href="{proj["board_url"]}" target="_blank">{proj["project"]}</a>' if proj["board_url"] else proj["project"]
+                name   = f'<a href="{proj["board_url"]}" target="_blank">{proj_display}</a>' if proj["board_url"] else proj_display
                 html  += (
                     f"<tr>"
                     f"<td><strong>{name}</strong></td>"
@@ -76,7 +77,7 @@ else:
                 )
             else:
                 html += (
-                    f'<tr><td><strong>{proj["project"]}</strong></td>'
+                    f'<tr><td><strong>{proj_display}</strong></td>'
                     '<td colspan="7" style="color:#999">—</td></tr>'
                 )
         html += "</tbody></table>"

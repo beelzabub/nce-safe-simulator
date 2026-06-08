@@ -40,6 +40,16 @@ HTML(f"""
 ```
 
 ```{python}
+import re as _re
+
+def _abbrev_piid(p):
+    """PIID::2024Q1 → 2024 Q1"""
+    m = _re.match(r'PIID::(\d{4})Q(\d)', p)
+    return f"{m.group(1)} Q{m.group(2)}" if m else p
+
+def _strip_prefix(label, prefix):
+    return label[len(prefix):] if label.startswith(prefix) else label
+
 if not project_labels or not piid_labels:
     display(HTML("<p><em>No project or PIID labels found. Ensure epics carry <code>project::</code> and <code>PIID::</code> labels.</em></p>"))
 else:
@@ -50,45 +60,53 @@ else:
         "❌ Incomplete": "#f8d7da",
         "🔵 Planned":   "#e2e3e5",
     }
+    PHASE_ICON = {"Past": "⬜", "Current": "🟢", "Future": "🔵"}
 
-    # Header
+    # Sticky-first-column styles
+    th_sticky = 'style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;min-width:7em"'
+    td_sticky = 'style="position:sticky;left:0;z-index:1;background:#fff;white-space:nowrap;font-weight:600"'
+
+    # Column headers: abbreviated PI label + phase icon + elapsed%
     pi_ths = "".join(
-        f'<th style="white-space:nowrap">{p}<br>'
-        f'<small style="font-weight:normal">{piid_meta[p]["phase"]} '
-        f'{"· " + str(piid_meta[p]["pct"]) + "%" if piid_meta[p]["pct"] is not None else ""}'
+        f'<th style="white-space:nowrap;text-align:center;min-width:7em">'
+        f'{PHASE_ICON.get(piid_meta[p]["phase"], "")} {_abbrev_piid(p)}<br>'
+        f'<small style="font-weight:normal;color:#666">'
+        f'{"" if piid_meta[p]["pct"] is None else str(piid_meta[p]["pct"]) + "% elapsed"}'
         f'</small></th>'
         for p in piid_labels
     )
+
     html = (
-        '<table class="table table-sm table-bordered" style="font-size:0.85em">'
-        f'<thead><tr><th>Project</th>{pi_ths}</tr></thead><tbody>'
+        '<div style="overflow-x:auto">'
+        '<table class="table table-sm table-bordered" style="font-size:0.82em;min-width:max-content">'
+        f'<thead><tr><th {th_sticky}>Project</th>{pi_ths}</tr></thead><tbody>'
     )
 
     for proj in project_labels:
-        row = f'<td><strong>{proj}</strong></td>'
+        proj_display = _strip_prefix(proj, "project::")
+        row = f'<td {td_sticky}>{proj_display}</td>'
         for piid in piid_labels:
             key  = f"{proj}|{piid}"
             cell = cells.get(key)
             if not cell:
-                row += '<td style="color:#999;text-align:center">—</td>'
+                row += '<td style="color:#bbb;text-align:center;vertical-align:middle">—</td>'
                 continue
             bg    = STATUS_BG.get(cell["status"], "")
             pi_s  = f"{cell['pct_pi']}%" if cell["pct_pi"] is not None else "—"
             delta = cell["delta"]
             d_str = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
-            blk   = f" · 🔒{cell['blocked']}" if cell["blocked"] else ""
+            blk   = f" 🔒{cell['blocked']}" if cell["blocked"] else ""
             row  += (
-                f'<td style="background:{bg};vertical-align:top;font-size:0.82em">'
+                f'<td style="background:{bg};vertical-align:top;font-size:0.82em;padding:4px 6px">'
                 f'<strong>{cell["status"]}{blk}</strong><br>'
-                f'{cell["open"]}/{cell["total"]} epics<br>'
-                f'{cell["avg_pct"]}% done (PI {pi_s})<br>'
-                f'{cell["planned"]}pt → {cell["actual"]}pt {d_str}<br>'
-                f'<a href="{cell["board_url"]}" target="_blank">View →</a>'
+                f'<span style="color:#444">{cell["open"]}/{cell["total"]} epics · {cell["avg_pct"]}% (PI {pi_s})</span><br>'
+                f'<span style="color:#555">{cell["planned"]}→{cell["actual"]}pt {d_str}</span><br>'
+                f'<a href="{cell["board_url"]}" target="_blank" style="font-size:0.9em">View →</a>'
                 f'</td>'
             )
         html += f"<tr>{row}</tr>"
 
-    html += "</tbody></table>"
+    html += "</tbody></table></div>"
     display(HTML(html))
 ```
 
