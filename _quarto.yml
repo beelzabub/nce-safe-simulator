@@ -6,10 +6,15 @@ project:
     - quarto/health-dashboard.qmd
     - quarto/risk-register.qmd
     - quarto/wsjf.qmd
+    - quarto/portfolio.qmd
     - quarto/blocking.qmd
     - quarto/epic-lifecycle.qmd
     - quarto/pi-predictability.qmd
     - quarto/art-capacity-balance.qmd
+    - quarto/piid-project.qmd
+    - quarto/piid-project-detail.qmd
+    - quarto/workload.qmd
+    - quarto/flow-metrics.qmd
     - quarto/unassigned-pi.qmd
     - quarto/orphan-epics.qmd
     - quarto/orphan-issues.qmd
@@ -27,6 +32,8 @@ website:
             text: "Risk Register"
           - href: quarto/wsjf.qmd
             text: "WSJF Priority Board"
+          - href: quarto/portfolio.qmd
+            text: "SAFe Portfolio Hierarchy"
       - text: "Program"
         menu:
           - href: quarto/blocking.qmd
@@ -37,6 +44,14 @@ website:
             text: "PI Predictability"
           - href: quarto/art-capacity-balance.qmd
             text: "ART Capacity Balance"
+          - href: quarto/piid-project.qmd
+            text: "Program × PI Matrix"
+          - href: quarto/piid-project-detail.qmd
+            text: "Program PI Detail"
+          - href: quarto/workload.qmd
+            text: "ART-Team Workload"
+          - href: quarto/flow-metrics.qmd
+            text: "Flow Metrics"
       - text: "Data Quality"
         menu:
           - href: quarto/unassigned-pi.qmd

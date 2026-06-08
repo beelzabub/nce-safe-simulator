@@ -1,0 +1,240 @@
+---
+title: "Flow Metrics"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/flow-metrics.json"), Path("../data/flow-metrics.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/flow-metrics.json not found. "
+        "Run: python NceGitLab.py --report flow-metrics"
+    )
+
+d     = json.loads(data_file.read_text())
+group = d["group"]
+dist  = d["distribution"]
+ft    = d["flow_time"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+""")
+```
+
+## 📈 Flow Velocity — Delivered per PI
+
+Features and Capabilities closed per PI. Consistent delivery of committed items is the primary ART health signal.
+
+```{python}
+rows = d["velocity"]
+if not any(r["total"] > 0 for r in rows):
+    display(HTML(
+        "<p><em>No closed epics found — velocity will populate as PIs complete.</em></p>"
+    ))
+else:
+    html = (
+        '<table class="table table-sm table-bordered">'
+        "<thead><tr><th>PI</th><th>Features</th><th>Capabilities</th><th>Total Delivered</th></tr></thead>"
+        "<tbody>"
+    )
+    for r in rows:
+        html += f'<tr><td><code>{r["piid"]}</code></td><td>{r["features"]}</td><td>{r["capabilities"]}</td><td><strong>{r["total"]}</strong></td></tr>'
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+---
+
+## 📦 Flow Load — Work in Progress
+
+Open epics by PI. High WIP signals overloaded PIs and increases the risk of context-switching and delayed delivery.
+
+```{python}
+rows    = d["load"]
+no_pi   = d["load_no_pi"]
+html = (
+    '<table class="table table-sm table-bordered">'
+    "<thead><tr><th>PI</th><th>Features</th><th>Capabilities</th><th>Epics</th><th>Total</th><th>Planned Weight</th></tr></thead>"
+    "<tbody>"
+)
+for r in rows:
+    html += (
+        f'<tr><td><code>{r["piid"]}</code></td>'
+        f'<td>{r["features"]}</td><td>{r["capabilities"]}</td>'
+        f'<td>{r["epics"]}</td><td><strong>{r["total"]}</strong></td>'
+        f'<td>{r["planned_weight"]:,}</td></tr>'
+    )
+if no_pi:
+    html += (
+        f'<tr><td><em>(no PI)</em></td>'
+        f'<td>{no_pi["features"]}</td><td>{no_pi["capabilities"]}</td>'
+        f'<td>{no_pi["epics"]}</td><td><strong>{no_pi["total"]}</strong></td>'
+        f'<td>{no_pi["planned_weight"]:,}</td></tr>'
+    )
+html += "</tbody></table>"
+display(HTML(html))
+```
+
+---
+
+## 🔀 Flow Distribution — Work Type Mix
+
+### By SAFe Hierarchy Level
+
+```{python}
+html = (
+    '<table class="table table-sm table-bordered">'
+    "<thead><tr><th>Type</th><th>Count</th><th>% Items</th><th>Planned Weight</th><th>% Weight</th></tr></thead>"
+    "<tbody>"
+)
+for r in dist["by_type"]:
+    html += (
+        f'<tr><td>{r["type"]}</td><td>{r["count"]}</td>'
+        f'<td>{r["pct_items"]}</td><td>{r["planned_weight"]:,}</td>'
+        f'<td>{r["pct_weight"]}</td></tr>'
+    )
+html += (
+    f'<tr><td><strong>Total</strong></td>'
+    f'<td><strong>{dist["total_epics"]}</strong></td>'
+    f'<td></td>'
+    f'<td><strong>{dist["total_planned_weight"]:,}</strong></td>'
+    f'<td></td></tr>'
+)
+html += "</tbody></table>"
+display(HTML(html))
+```
+
+### By Work Type Label
+
+```{python}
+if not dist["has_work_type_labels"]:
+    display(HTML(
+        "<p><em>No <code>type::</code> labels found. Apply "
+        "<code>type::feature</code>, <code>type::enabler</code>, "
+        "<code>type::infrastructure</code>, or <code>type::defect</code> "
+        "labels to epics to enable this view.</em></p>"
+        "<table class='table table-sm table-bordered'>"
+        "<thead><tr><th>Work Type</th><th>SAFe 6.0 Target</th></tr></thead>"
+        "<tbody>"
+        "<tr><td>Features (business value)</td><td>~50%</td></tr>"
+        "<tr><td>Enablers (tech / architecture)</td><td>~30%</td></tr>"
+        "<tr><td>Infrastructure / DevSecOps</td><td>~20%</td></tr>"
+        "<tr><td>Defects</td><td>minimize</td></tr>"
+        "</tbody></table>"
+    ))
+else:
+    html = (
+        '<table class="table table-sm table-bordered">'
+        "<thead><tr><th>Work Type</th><th>Count</th><th>% of Labelled</th><th>SAFe Target</th></tr></thead>"
+        "<tbody>"
+    )
+    for r in dist["by_work_type"]:
+        html += (
+            f'<tr><td><code>{r["label"]}</code></td>'
+            f'<td>{r["count"]}</td><td>{r["pct_labelled"]}</td>'
+            f'<td>{r["safe_target"]}</td></tr>'
+        )
+    if dist["unlabeled_count"]:
+        html += f'<tr><td><em>(unlabelled)</em></td><td>{dist["unlabeled_count"]}</td><td>—</td><td>—</td></tr>'
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+---
+
+## ⏱ Flow Time — Cycle Time Analysis
+
+How long epics spend in-flight. Shorter, more consistent cycle times indicate a healthy flow system.
+
+### Age of Open Epics (days since created)
+
+```{python}
+html = (
+    '<table class="table table-sm table-bordered">'
+    "<thead><tr><th>Type</th><th>Count</th><th>Avg Age</th><th>Min</th><th>Max</th></tr></thead>"
+    "<tbody>"
+)
+for r in ft["open_ages"]:
+    avg = f'{r["avg_days"]} days' if r["avg_days"] is not None else "—"
+    mn  = r["min_days"] if r["min_days"] is not None else "—"
+    mx  = r["max_days"] if r["max_days"] is not None else "—"
+    html += f'<tr><td>{r["type"]}</td><td>{r["count"]}</td><td>{avg}</td><td>{mn}</td><td>{mx}</td></tr>'
+html += "</tbody></table>"
+display(HTML(html))
+```
+
+### Cycle Time — Closed Epics _(updated_at used as close_date proxy)_
+
+```{python}
+if not ft["has_closed_data"]:
+    display(HTML("<p><em>No closed epics — cycle time will populate as work completes.</em></p>"))
+else:
+    html = (
+        '<table class="table table-sm table-bordered">'
+        "<thead><tr><th>Type</th><th>Count</th><th>Avg Cycle Time</th><th>Min</th><th>Max</th></tr></thead>"
+        "<tbody>"
+    )
+    for r in ft["closed_cycles"]:
+        avg = f'{r["avg_days"]} days' if r["avg_days"] is not None else "—"
+        mn  = r["min_days"] if r["min_days"] is not None else "—"
+        mx  = r["max_days"] if r["max_days"] is not None else "—"
+        html += f'<tr><td>{r["type"]}</td><td>{r["count"]}</td><td>{avg}</td><td>{mn}</td><td>{mx}</td></tr>'
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+---
+
+## 🎯 Flow Predictability
+
+Percentage of PI objectives met as committed. SAFe guidance: 80–100% is the healthy range. Consistently at 100% may indicate sandbagging.
+
+```{python}
+rows = d["predictability"]
+if not rows:
+    display(HTML("<p><em>No PI-committed Features or Capabilities found.</em></p>"))
+else:
+    html = (
+        '<table class="table table-sm table-bordered">'
+        "<thead><tr><th>PI</th><th>Committed</th><th>Delivered</th><th>Predictability</th></tr></thead>"
+        "<tbody>"
+    )
+    for r in rows:
+        html += (
+            f'<tr><td><code>{r["piid"]}</code></td>'
+            f'<td>{r["committed"]}</td><td>{r["delivered"]}</td>'
+            f'<td>{r["icon"]} {r["pct"]}%</td></tr>'
+        )
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## About Flow Metrics
+
+SAFe 6.0 flow metrics measure *how efficiently* work moves through the portfolio.
+
+| Metric | This Report | Status |
+|--------|-------------|--------|
+| Flow Velocity | Delivered epics per PI | ✅ |
+| Flow Load | Open epics per PI (WIP) | ✅ |
+| Flow Distribution | Work type mix | ✅ |
+| Flow Time | Cycle time (open age + closed proxy) | ✅ |
+| Flow Predictability | % PI objectives met | ✅ |
+| Flow Efficiency | Value-added vs wait time | ⬜ Requires time tracking |
+:::
