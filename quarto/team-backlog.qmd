@@ -1,0 +1,116 @@
+---
+title: "Team Backlogs"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/team-backlog.json"), Path("../data/team-backlog.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+
+d     = json.loads(data_file.read_text()) if data_file else None
+group = d["group"] if d else {"name": "—", "url": "#"}
+teams = d["teams"] if d else []
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Per-team backlog: issues grouped by linked Feature. Teams are organized by Value Stream and ART.</p>
+""")
+```
+
+```{python}
+if not teams:
+    display(HTML("<p><em>No team data found.</em></p>"))
+else:
+    html = ""
+    current_vs  = None
+    current_art = None
+    for team in teams:
+        if team["vs_name"] != current_vs:
+            html += f"<h2>🔷 {team['vs_name']}</h2>"
+            current_vs  = team["vs_name"]
+            current_art = None
+        if team["art_name"] != current_art:
+            html += f"<h3>{team['art_name']}</h3>"
+            current_art = team["art_name"]
+
+        team_link = (f'<a href="{team["team_url"]}" target="_blank">{team["team_name"]}</a>'
+                     if team["team_url"] else team["team_name"])
+        html += f"<h4>{team_link}</h4>"
+
+        if not team["has_backlog_project"]:
+            html += "<p><em>No team backlog project found for this team.</em></p>"
+            continue
+
+        backlog_link = (f'<a href="{team["backlog_url"]}" target="_blank">View Project ↗</a>'
+                        if team["backlog_url"] else "")
+
+        html += f"<p>{backlog_link}</p>" if backlog_link else ""
+        html += (
+            "<h5>Summary</h5>"
+            '<table class="table table-sm table-bordered" style="width:auto;font-size:0.85em">'
+            "<thead><tr><th></th><th>Count</th><th>Weight</th></tr></thead><tbody>"
+            f"<tr><td><strong>Total issues</strong></td><td>{team['total']}</td><td>{team['total_weight']} pt</td></tr>"
+            f"<tr><td>Open</td><td>{team['open']}</td><td>{team['total_weight'] - team['closed_weight']} pt</td></tr>"
+            f"<tr><td>Closed</td><td>{team['closed']}</td><td>{team['closed_weight']} pt</td></tr>"
+            f"<tr><td><strong>% Done</strong></td><td></td><td><strong>{team['pct_done']}%</strong></td></tr>"
+            "</tbody></table>"
+        )
+
+        if team["by_feature"]:
+            html += "<h5>Issues by Feature</h5>"
+            for grp in team["by_feature"]:
+                epic_link = (f'<a href="{grp["epic_url"]}" target="_blank">{grp["epic_title"]}</a>'
+                             if grp["epic_url"] and grp["epic_url"] != "#" else grp["epic_title"])
+                html += (
+                    f"<details><summary>🛠️ {epic_link} "
+                    f"— {grp['open']} open · {grp['pct_done']}% done "
+                    f"· {grp['closed_weight']}/{grp['total_weight']} pt</summary>"
+                    f"<p><strong>Feature state:</strong> {grp['epic_state']}</p>"
+                    '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+                    "<thead><tr><th>Issue</th><th>State</th><th>Weight</th></tr></thead><tbody>"
+                )
+                for issue in grp["issues"]:
+                    html += (
+                        f'<tr><td><a href="{issue["url"]}" target="_blank">{issue["title"]}</a></td>'
+                        f"<td>{issue['state']}</td><td>{issue['weight']} pt</td></tr>"
+                    )
+                html += "</tbody></table></details>"
+
+        if team["unlinked"]:
+            html += (
+                "<h5>Unlinked Issues (no Feature)</h5>"
+                '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+                "<thead><tr><th>Issue</th><th>State</th><th>Weight</th></tr></thead><tbody>"
+            )
+            for issue in team["unlinked"]:
+                html += (
+                    f'<tr><td><a href="{issue["url"]}" target="_blank">{issue["title"]}</a></td>'
+                    f"<td>{issue['state']}</td><td>{issue['weight']} pt</td></tr>"
+                )
+            html += "</tbody></table>"
+
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Notes
+
+- **Issues by Feature** — issues linked to a Feature epic via GitLab parent relationship
+- **Unlinked Issues** — issues with no linked Feature
+- **% Done** — closed issue weight ÷ total issue weight
+- **Weight** — story-point weight assigned to each issue
+:::
