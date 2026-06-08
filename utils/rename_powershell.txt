@@ -1,0 +1,72 @@
+# Append .txt to every non-.txt file in the repo, or reverse that operation.
+# Usage: powershell rename_powershell.txt [-Mode rename|reverse]
+param([string]$Mode)
+
+$ErrorActionPreference = "Stop"
+
+function Show-Usage {
+    Write-Host "Usage: powershell rename_powershell.txt [-Mode rename|reverse]"
+    Write-Host "  rename   Snapshot file list, then append .txt to every non-.txt repo file"
+    Write-Host "  reverse  Restore every repo file to its original name"
+}
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot  = Split-Path -Parent $ScriptDir
+$Manifest  = Join-Path $ScriptDir "original_files.txt"
+
+function Invoke-Rename {
+    if (Test-Path $Manifest) {
+        Write-Error "Manifest already exists - run 'reverse' first."
+        exit 1
+    }
+
+    $gitDir    = [IO.Path]::Combine($RepoRoot, ".git")
+    $files = Get-ChildItem -Path $RepoRoot -Recurse -File |
+             Where-Object {
+                 -not $_.FullName.StartsWith($gitDir) -and
+                 $_.Extension -ne ".txt"
+             } |
+             Sort-Object FullName |
+             Select-Object -ExpandProperty FullName
+
+    # Capture list before any renaming; manifest is not included.
+    $files | Set-Content -Path $Manifest -Encoding UTF8
+    Write-Host "Manifest written: $Manifest  ($($files.Count) files)"
+
+    foreach ($f in $files) {
+        if (Test-Path $f -PathType Leaf) {
+            $newName = [IO.Path]::GetFileName($f) + ".txt"
+            Rename-Item -Path $f -NewName $newName -Force
+        }
+    }
+
+    Write-Host "Done."
+}
+
+function Invoke-Reverse {
+    if (-not (Test-Path $Manifest)) {
+        Write-Error "Manifest not found at $Manifest"
+        exit 1
+    }
+
+    $originals = Get-Content -Path $Manifest -Encoding UTF8
+    $count = 0
+    foreach ($original in $originals) {
+        if ([string]::IsNullOrWhiteSpace($original)) { continue }
+        $renamed = "$original.txt"
+        if (Test-Path $renamed -PathType Leaf) {
+            $newName = [IO.Path]::GetFileName($original)
+            Rename-Item -Path $renamed -NewName $newName -Force
+            $count++
+        }
+    }
+
+    Remove-Item -Path $Manifest -Force
+    Write-Host "Done. Restored $count files. Manifest removed."
+}
+
+switch ($Mode) {
+    "rename"  { Invoke-Rename }
+    "reverse" { Invoke-Reverse }
+    default   { Show-Usage; exit 1 }
+}
