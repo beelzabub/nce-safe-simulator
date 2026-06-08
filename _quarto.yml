@@ -15,6 +15,9 @@ project:
     - quarto/piid-project-detail.qmd
     - quarto/workload.qmd
     - quarto/flow-metrics.qmd
+    - quarto/art-feature-status.qmd
+    - quarto/team-backlog.qmd
+    - quarto/vs-capability-dashboard.qmd
     - quarto/unassigned-pi.qmd
     - quarto/orphan-epics.qmd
     - quarto/orphan-issues.qmd
@@ -58,6 +61,12 @@ website:
             text: "ART-Team Workload"
           - href: quarto/flow-metrics.qmd
             text: "Flow Metrics"
+          - href: quarto/art-feature-status.qmd
+            text: "ART Feature Status"
+          - href: quarto/team-backlog.qmd
+            text: "Team Backlogs"
+          - href: quarto/vs-capability-dashboard.qmd
+            text: "VS Capability Dashboard"
       - text: "Data Quality"
         menu:
           - href: quarto/unassigned-pi.qmd
