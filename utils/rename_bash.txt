@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Append .txt to every file in the repo (add), or reverse that operation.
+# Usage: bash rename_bash.txt [add|reverse]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+MANIFEST="$SCRIPT_DIR/original_files.txt"
+MANIFEST_RENAMED="${MANIFEST}.txt"
+
+usage() {
+    echo "Usage: bash $(basename "${BASH_SOURCE[0]}") [add|reverse]"
+    echo "  add     Snapshot file list, then append .txt to every repo file"
+    echo "  reverse Restore every repo file to its original name"
+}
+
+cmd_add() {
+    if [[ -f "$MANIFEST" || -f "$MANIFEST_RENAMED" ]]; then
+        echo "Error: manifest already exists — run 'reverse' first." >&2
+        exit 1
+    fi
+
+    # Capture the list before creating the manifest so the manifest is not in it.
+    mapfile -t files < <(find "$REPO_ROOT" -type f -not -path "*/.git/*" | sort)
+
+    printf '%s\n' "${files[@]}" > "$MANIFEST"
+    echo "Manifest written: $MANIFEST  (${#files[@]} files)"
+
+    for f in "${files[@]}"; do
+        [[ -f "$f" ]] && mv "$f" "${f}.txt"
+    done
+
+    mv "$MANIFEST" "$MANIFEST_RENAMED"
+    echo "Done. Manifest saved as $MANIFEST_RENAMED"
+}
+
+cmd_reverse() {
+    if [[ ! -f "$MANIFEST_RENAMED" ]]; then
+        echo "Error: manifest not found at $MANIFEST_RENAMED" >&2
+        exit 1
+    fi
+
+    mv "$MANIFEST_RENAMED" "$MANIFEST"
+
+    count=0
+    while IFS= read -r original; do
+        [[ -z "$original" ]] && continue
+        if [[ -f "${original}.txt" ]]; then
+            mv "${original}.txt" "$original"
+            count=$((count + 1))
+        fi
+    done < "$MANIFEST"
+
+    rm "$MANIFEST"
+    echo "Done. Restored $count files. Manifest removed."
+}
+
+case "${1:-add}" in
+    add)     cmd_add ;;
+    reverse) cmd_reverse ;;
+    *)       usage; exit 1 ;;
+esac

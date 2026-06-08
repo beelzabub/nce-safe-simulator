@@ -1,0 +1,75 @@
+# Append .txt to every file in the repo (add), or reverse that operation.
+# Usage: powershell rename_powershell.txt [-Mode add|reverse]
+param(
+    [ValidateSet("add","reverse")]
+    [string]$Mode = "add"
+)
+
+$ErrorActionPreference = "Stop"
+
+$ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot        = Split-Path -Parent $ScriptDir
+$Manifest        = Join-Path $ScriptDir "original_files.txt"
+$ManifestRenamed = "$Manifest.txt"
+
+function Invoke-Add {
+    if ((Test-Path $Manifest) -or (Test-Path $ManifestRenamed)) {
+        Write-Error "Manifest already exists — run 'reverse' first."
+        exit 1
+    }
+
+    $gitDir = [IO.Path]::Combine($RepoRoot, ".git")
+    $files = Get-ChildItem -Path $RepoRoot -Recurse -File |
+             Where-Object { -not $_.FullName.StartsWith($gitDir) } |
+             Sort-Object FullName |
+             Select-Object -ExpandProperty FullName
+
+    # Capture list before any renaming; manifest is not included.
+    $files | Set-Content -Path $Manifest -Encoding UTF8
+    Write-Host "Manifest written: $Manifest  ($($files.Count) files)"
+
+    foreach ($f in $files) {
+        if (Test-Path $f -PathType Leaf) {
+            $newName = [IO.Path]::GetFileName($f) + ".txt"
+            Rename-Item -Path $f -NewName $newName -Force
+        }
+    }
+
+    $manifestName = [IO.Path]::GetFileName($Manifest) + ".txt"
+    Rename-Item -Path $Manifest -NewName $manifestName -Force
+    Write-Host "Done. Manifest saved as $ManifestRenamed"
+}
+
+function Invoke-Reverse {
+    if (-not (Test-Path $ManifestRenamed)) {
+        Write-Error "Manifest not found at $ManifestRenamed"
+        exit 1
+    }
+
+    $manifestName = [IO.Path]::GetFileName($Manifest)
+    Rename-Item -Path $ManifestRenamed -NewName $manifestName -Force
+
+    $originals = Get-Content -Path $Manifest -Encoding UTF8
+    $count = 0
+    foreach ($original in $originals) {
+        if ([string]::IsNullOrWhiteSpace($original)) { continue }
+        $renamed = "$original.txt"
+        if (Test-Path $renamed -PathType Leaf) {
+            $newName = [IO.Path]::GetFileName($original)
+            Rename-Item -Path $renamed -NewName $newName -Force
+            $count++
+        }
+    }
+
+    Remove-Item -Path $Manifest -Force
+    Write-Host "Done. Restored $count files. Manifest removed."
+}
+
+switch ($Mode) {
+    "add"     { Invoke-Add }
+    "reverse" { Invoke-Reverse }
+    default   {
+        Write-Host "Usage: powershell rename_powershell.txt [-Mode add|reverse]"
+        exit 1
+    }
+}
