@@ -15,21 +15,16 @@ from IPython.display import HTML, display
 
 _candidates = [Path("data/team-backlog.json"), Path("../data/team-backlog.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
-if data_file is None:
-    raise FileNotFoundError(
-        "data/team-backlog.json not found. "
-        "Run: python NceGitLab.py --report team-backlog"
-    )
 
-d     = json.loads(data_file.read_text())
-group = d["group"]
-teams = d["teams"]
+d     = json.loads(data_file.read_text()) if data_file else None
+group = d["group"] if d else {"name": "—", "url": "#"}
+teams = d["teams"] if d else []
 ```
 
 ```{python}
 HTML(f"""
 <p>
-  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
   <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
 </p>
 <p>Per-team backlog: issues grouped by linked Feature. Teams are organized by Value Stream and ART.</p>

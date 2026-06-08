@@ -15,21 +15,16 @@ from IPython.display import HTML, display
 
 _candidates = [Path("data/art-feature-status.json"), Path("../data/art-feature-status.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
-if data_file is None:
-    raise FileNotFoundError(
-        "data/art-feature-status.json not found. "
-        "Run: python NceGitLab.py --report art-feature-status"
-    )
 
-d              = json.loads(data_file.read_text())
-group          = d["group"]
-value_streams  = d["value_streams"]
+d             = json.loads(data_file.read_text()) if data_file else None
+group         = d["group"]         if d else {"name": "—", "url": "#"}
+value_streams = d["value_streams"] if d else []
 ```
 
 ```{python}
 HTML(f"""
 <p>
-  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
   <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
 </p>
 <p>All Features per ART, grouped by Team, with completion %, PI progress, and risk flags.</p>

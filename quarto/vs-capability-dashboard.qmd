@@ -15,21 +15,16 @@ from IPython.display import HTML, display
 
 _candidates = [Path("data/vs-capability-dashboard.json"), Path("../data/vs-capability-dashboard.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
-if data_file is None:
-    raise FileNotFoundError(
-        "data/vs-capability-dashboard.json not found. "
-        "Run: python NceGitLab.py --report vs-capability-dashboard"
-    )
 
-d             = json.loads(data_file.read_text())
-group         = d["group"]
-value_streams = d["value_streams"]
+d             = json.loads(data_file.read_text()) if data_file else None
+group         = d["group"]         if d else {"name": "—", "url": "#"}
+value_streams = d["value_streams"] if d else []
 ```
 
 ```{python}
 HTML(f"""
 <p>
-  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
   <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
 </p>
 <p>Delivery status per Value Stream, broken down by PI and ART.</p>
