@@ -1,0 +1,101 @@
+---
+title: "ART Feature Status"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/art-feature-status.json"), Path("../data/art-feature-status.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+
+d             = json.loads(data_file.read_text()) if data_file else None
+group         = d["group"]         if d else {"name": "—", "url": "#"}
+value_streams = d["value_streams"] if d else []
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>All Features per ART, grouped by Team, with completion %, PI progress, and risk flags.</p>
+""")
+```
+
+```{python}
+if not value_streams:
+    display(HTML("<p><em>No Feature data found. Ensure Features are assigned to teams via group membership.</em></p>"))
+else:
+    html = ""
+    for vs in value_streams:
+        html += f"<h2>🔷 {vs['vs_name']}</h2>"
+        for art in vs["arts"]:
+            art_link = (f'<a href="{art["art_url"]}" target="_blank">{art["art_name"]}</a>'
+                        if art["art_url"] else art["art_name"])
+            flags = []
+            if art["at_risk"]:
+                flags.append(f"⚠️ {art['at_risk']} at risk")
+            if art["blocked"]:
+                flags.append(f"🔒 {art['blocked']} blocked")
+            flag_str = " &nbsp;·&nbsp; ".join(flags)
+            html += f"<h3>{art_link} &nbsp;<small style='font-weight:normal'>({art['total_features']} features"
+            if flag_str:
+                html += f" &nbsp;·&nbsp; {flag_str}"
+            html += ")</small></h3>"
+
+            for team in art["teams"]:
+                team_link = (f'<a href="{team["team_url"]}" target="_blank">{team["team_name"]}</a>'
+                             if team["team_url"] else team["team_name"])
+                html += f"<h4>{team_link}</h4>"
+                if not team["features"]:
+                    html += "<p><em>No features assigned to this team.</em></p>"
+                    continue
+                html += (
+                    '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+                    "<thead><tr>"
+                    "<th>Feature</th><th>PI</th><th>State</th>"
+                    "<th>% Done</th><th>PI Elapsed</th><th>Weight</th>"
+                    "<th>Status</th><th>At Risk Reason</th>"
+                    "</tr></thead><tbody>"
+                )
+                for f in team["features"]:
+                    feat_link  = f'<a href="{f["url"]}" target="_blank">{f["title"]}</a>'
+                    pi_elapsed = f"{f['pct_pi']}%" if f["pct_pi"] is not None else "—"
+                    weight_str = f"{f['planned']}pt → {f['actual']}pt"
+                    html += (
+                        f"<tr>"
+                        f"<td>{feat_link}</td>"
+                        f"<td>{f['piid']}</td>"
+                        f"<td>{f['state']}</td>"
+                        f"<td>{f['pct_complete']}%</td>"
+                        f"<td>{pi_elapsed}</td>"
+                        f"<td>{weight_str}</td>"
+                        f"<td>{f['status']}</td>"
+                        f"<td>{f['risk_reason']}</td>"
+                        f"</tr>"
+                    )
+                html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+- **% Done** — closed issue weight ÷ total issue weight for all issues linked to this Feature
+- **PI Elapsed** — how far through the PI quarter today falls: `(today − PI start) ÷ (PI end − PI start) × 100`
+- **Weight** — Planned pt → Actual pt (planned set via GraphQL; actual = sum of linked issue weights)
+- **✅ On Track** — % Done ≥ PI Elapsed for the current PI
+- **⚠️ At Risk** — % Done < PI Elapsed for the current PI
+- **✅ Complete** / **❌ Incomplete** — outcome for a past PI
+- **🔵 Planned** — future PI or PI not yet started
+- **🔒 Blocked** — Feature has one or more active blocking relationships
+:::

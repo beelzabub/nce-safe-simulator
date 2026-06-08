@@ -1,0 +1,148 @@
+---
+title: "VS Capability Dashboard"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/vs-capability-dashboard.json"), Path("../data/vs-capability-dashboard.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+
+d             = json.loads(data_file.read_text()) if data_file else None
+group         = d["group"]         if d else {"name": "—", "url": "#"}
+value_streams = d["value_streams"] if d else []
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date'] if d else '—'} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+<p>Delivery status per Value Stream, broken down by PI and ART.</p>
+<ul>
+  <li><strong>🧩 Capabilities</strong> — cross-ART/VS deliverables that may span multiple ARTs</li>
+  <li><strong>🛠️ Direct Features</strong> — Features parented directly to an Epic (no Capability wrapper), owned by a single ART</li>
+</ul>
+""")
+```
+
+```{python}
+def _delta_str(delta):
+    if delta > 0:
+        return f"▲{delta}"
+    if delta < 0:
+        return f"▼{abs(delta)}"
+    return "="
+
+def _art_summary_table(arts, label):
+    if not arts:
+        return ""
+    html = (
+        f"<h4>{label}</h4>"
+        '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+        "<thead><tr>"
+        "<th>ART</th><th>Count</th><th>Planned</th><th>Actual</th>"
+        "<th>Δ</th><th>% Done</th><th>Status</th>"
+        "</tr></thead><tbody>"
+    )
+    for art in arts:
+        art_link = (f'<a href="{art["art_url"]}" target="_blank">{art["art_name"]}</a>'
+                    if art["art_url"] else art["art_name"])
+        html += (
+            f"<tr>"
+            f"<td>{art_link}</td>"
+            f"<td>{art['count']}</td>"
+            f"<td>{art['planned']} pt</td>"
+            f"<td>{art['actual']} pt</td>"
+            f"<td>{_delta_str(art['delta'])}</td>"
+            f"<td>{art['avg_pct']}%</td>"
+            f"<td>{art['status']}</td>"
+            f"</tr>"
+        )
+    html += "</tbody></table>"
+
+    for art in arts:
+        art_link = (f'<a href="{art["art_url"]}" target="_blank">{art["art_name"]}</a>'
+                    if art["art_url"] else art["art_name"])
+        html += (
+            f"<details><summary><strong>{art['art_name']} — Detail</strong></summary>"
+            '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+            "<thead><tr>"
+            "<th>Item</th><th>State</th><th>% Done</th>"
+            "<th>Weight</th><th>Status</th><th>At Risk Reason</th>"
+            "</tr></thead><tbody>"
+        )
+        for item in art["items"]:
+            item_link  = f'<a href="{item["url"]}" target="_blank">{item["title"]}</a>'
+            weight_str = f"{item['planned']}pt → {item['actual']}pt"
+            html += (
+                f"<tr>"
+                f"<td>{item_link}</td>"
+                f"<td>{item['state']}</td>"
+                f"<td>{item['pct_complete']}%</td>"
+                f"<td>{weight_str}</td>"
+                f"<td>{item['status']}</td>"
+                f"<td>{item['risk_reason']}</td>"
+                f"</tr>"
+            )
+        html += "</tbody></table></details>"
+    return html
+
+if not value_streams:
+    display(HTML("<p><em>No Capability or Direct Feature data found. Ensure items have PIID labels and are assigned to groups in the hierarchy.</em></p>"))
+else:
+    html = ""
+    for vs in value_streams:
+        vs_link = (f'<a href="{vs["vs_url"]}" target="_blank">{vs["vs_name"]}</a>'
+                   if vs["vs_url"] else vs["vs_name"])
+        parts = []
+        if vs["total_caps"]:
+            parts.append(f"{vs['total_caps']} capabilities")
+        if vs["total_direct"]:
+            parts.append(f"{vs['total_direct']} direct features")
+        counts = " · ".join(parts)
+        flags  = []
+        if vs["at_risk"]:
+            flags.append(f"⚠️ {vs['at_risk']} at risk")
+        if vs["blocked"]:
+            flags.append(f"🔒 {vs['blocked']} blocked")
+        flag_str = " · ".join(flags)
+        subtitle = " &nbsp;·&nbsp; ".join(filter(None, [counts, flag_str]))
+        html += f"<h2>🔷 {vs_link}"
+        if subtitle:
+            html += f" &nbsp;<small style='font-weight:normal'>{subtitle}</small>"
+        html += "</h2>"
+
+        for pi in vs["pis"]:
+            html += f"<h3>{pi['piid']}"
+            if pi["date_range"]:
+                html += f" <small><em>{pi['date_range']}</em></small>"
+            html += "</h3>"
+            html += _art_summary_table(pi["capabilities"],    "🧩 Capabilities")
+            html += _art_summary_table(pi["direct_features"], "🛠️ Direct Features")
+
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+- **🧩 Capability** — cross-ART/VS deliverable decomposed from a Portfolio Epic
+- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper)
+- **% Done** — closed issue weight ÷ total issue weight
+- **Weight** — Planned pt → Actual pt
+- **✅ On Track** — % Done ≥ PI Elapsed
+- **⚠️ At Risk** — % Done < PI Elapsed
+- **✅ Complete** / **❌ Incomplete** — outcome for a past PI
+- **🔵 Planned** — future PI or not yet started
+- **🔒 Blocked** — has one or more active blocking relationships
+:::

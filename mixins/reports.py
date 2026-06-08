@@ -6402,27 +6402,400 @@ class ReportsMixin:
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
+    # ------------------------------------------------------------------
+    # Phase 4b Quarto data-layer methods
+    # ------------------------------------------------------------------
+
+    def _data_art_feature_status(self) -> dict:
+        """ART Feature Status: VS → ART → team → feature list."""
+        group    = self._rd_root_obj
+        features = self._rd_metrics.get("Feature", [])
+
+        team_hierarchy: dict = {}
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
+
+        art_buckets: defaultdict = defaultdict(lambda: defaultdict(list))
+        for f in features:
+            gid = f.get("group_id")
+            if gid in team_hierarchy:
+                _, art_grp, _ = team_hierarchy[gid]
+                art_buckets[art_grp["id"]][gid].append(f)
+
+        vs_out: defaultdict = defaultdict(list)
+        for vs_group, art_group in self._iter_art_groups():
+            art_id = art_group["id"]
+            if art_id not in art_buckets:
+                continue
+            team_buckets = art_buckets[art_id]
+            total_f = at_risk = blocked_c = 0
+            teams_out = []
+            for team_id, feature_list in sorted(
+                team_buckets.items(),
+                key=lambda x: team_hierarchy[x[0]][2]["name"],
+            ):
+                _, _, team_group = team_hierarchy[team_id]
+                features_out = []
+                for f in sorted(feature_list, key=lambda x: x.get("title", "")):
+                    pct_done = f["pct_complete"]
+                    pct_pi   = f.get("pct_through_pi")
+                    blocked  = f.get("blocked_by_count", 0)
+                    if blocked:
+                        status = "🔒 Blocked"
+                        blocked_c += 1
+                    elif pct_pi is None or pct_pi == 0:
+                        status = "🔵 Planned"
+                    elif pct_pi >= 100:
+                        status = "✅ Complete" if pct_done >= 100 else "❌ Incomplete"
+                    elif pct_done >= pct_pi:
+                        status = "✅ On Track"
+                    else:
+                        status = "⚠️ At Risk"
+                        at_risk += 1
+                    total_f += 1
+                    features_out.append({
+                        "title":        f["title"],
+                        "url":          f["web_url"],
+                        "piid":         f.get("piid") or "—",
+                        "state":        f["state"].capitalize(),
+                        "pct_complete": pct_done,
+                        "pct_pi":       pct_pi,
+                        "planned":      f.get("planned_weight", 0),
+                        "actual":       f.get("actual_weight", 0),
+                        "status":       status,
+                        "risk_reason":  _item_risk_reasons(f),
+                    })
+                teams_out.append({
+                    "team_name": team_group["name"],
+                    "team_url":  team_group.get("web_url", ""),
+                    "features":  features_out,
+                })
+            vs_out[vs_group["name"]].append({
+                "art_name":       art_group["name"],
+                "art_url":        art_group.get("web_url", ""),
+                "total_features": total_f,
+                "at_risk":        at_risk,
+                "blocked":        blocked_c,
+                "teams":          teams_out,
+            })
+
+        return {
+            "report_date":   date.today().isoformat(),
+            "group":         {"name": group.name, "url": group.web_url},
+            "value_streams": [
+                {"vs_name": vs_name, "arts": arts}
+                for vs_name, arts in vs_out.items()
+            ],
+        }
+
+    def _data_team_backlog(self) -> dict:
+        """Team Backlog: per-team issue list grouped by linked Feature."""
+        group     = self._rd_root_obj
+        teams_out = []
+
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            projects        = self._rd_projects_by_nsid.get(team_group["id"], [])
+            backlog_project = next(
+                (p for p in projects if p["path"].endswith("-backlog")), None
+            )
+
+            if not backlog_project:
+                teams_out.append({
+                    "vs_name":             vs_group["name"],
+                    "art_name":            art_group["name"],
+                    "team_name":           team_group["name"],
+                    "team_url":            team_group.get("web_url", ""),
+                    "has_backlog_project": False,
+                    "backlog_url":         "",
+                    "total":               0,
+                    "open":                0,
+                    "closed":              0,
+                    "total_weight":        0,
+                    "closed_weight":       0,
+                    "pct_done":            0,
+                    "by_feature":          [],
+                    "unlinked":            [],
+                })
+                continue
+
+            all_issues = self._rd_issues_by_project.get(
+                backlog_project["path_with_namespace"], []
+            )
+
+            by_feature: defaultdict = defaultdict(list)
+            unlinked = []
+            for issue in all_issues:
+                eid = issue.get("epic_id")
+                if eid:
+                    by_feature[eid].append(issue)
+                else:
+                    unlinked.append(issue)
+
+            total_w  = sum(i.get("weight") or 0 for i in all_issues)
+            closed_w = sum(
+                i.get("weight") or 0 for i in all_issues if i["state"] == "closed"
+            )
+            open_cnt = sum(1 for i in all_issues if i["state"] == "opened")
+            pct      = round(closed_w / total_w * 100) if total_w else 0
+
+            def _issue_row(issue):
+                return {
+                    "iid":    issue["iid"],
+                    "title":  issue["title"],
+                    "url":    issue["web_url"],
+                    "state":  "✅ Closed" if issue["state"] == "closed" else "🔵 Open",
+                    "weight": issue.get("weight") or 0,
+                }
+
+            by_feature_out = []
+            for epic_id, issues in by_feature.items():
+                epic_info = self._rd_epics_by_id.get(epic_id, {})
+                f_total   = sum(i.get("weight") or 0 for i in issues)
+                f_closed  = sum(
+                    i.get("weight") or 0 for i in issues if i["state"] == "closed"
+                )
+                f_pct  = round(f_closed / f_total * 100) if f_total else 0
+                f_open = sum(1 for i in issues if i["state"] == "opened")
+                by_feature_out.append({
+                    "epic_id":       epic_id,
+                    "epic_title":    epic_info.get("title", f"Epic {epic_id}"),
+                    "epic_url":      epic_info.get("web_url", "#"),
+                    "epic_state":    (
+                        epic_info.get("state", "").capitalize()
+                        if epic_info else "Unknown"
+                    ),
+                    "total":         len(issues),
+                    "open":          f_open,
+                    "closed":        len(issues) - f_open,
+                    "total_weight":  f_total,
+                    "closed_weight": f_closed,
+                    "pct_done":      f_pct,
+                    "issues": [
+                        _issue_row(i)
+                        for i in sorted(issues, key=lambda i: i["state"])
+                    ],
+                })
+
+            teams_out.append({
+                "vs_name":             vs_group["name"],
+                "art_name":            art_group["name"],
+                "team_name":           team_group["name"],
+                "team_url":            team_group.get("web_url", ""),
+                "has_backlog_project": True,
+                "backlog_url":         backlog_project.get("web_url", ""),
+                "total":               len(all_issues),
+                "open":                open_cnt,
+                "closed":              len(all_issues) - open_cnt,
+                "total_weight":        total_w,
+                "closed_weight":       closed_w,
+                "pct_done":            pct,
+                "by_feature":          by_feature_out,
+                "unlinked":            [_issue_row(i) for i in unlinked],
+            })
+
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "teams":       teams_out,
+        }
+
+    def _data_vs_capability_dashboard(self) -> dict:
+        """VS Capability Dashboard: VS → PI → ART capabilities + direct features."""
+        group        = self._rd_root_obj
+        capabilities = self._rd_metrics.get("Capability", [])
+        features     = self._rd_metrics.get("Feature", [])
+
+        art_hierarchy: dict  = {}
+        team_hierarchy: dict = {}
+        for vs_group, art_group in self._iter_art_groups():
+            art_hierarchy[art_group["id"]] = (vs_group, art_group)
+        for vs_group, art_group, team_group in self._iter_team_groups():
+            team_hierarchy[team_group["id"]] = (vs_group, art_group, team_group)
+
+        def _vs_art_for(gid):
+            if gid in art_hierarchy:
+                return art_hierarchy[gid]
+            if gid in team_hierarchy:
+                vs_g, art_g, _ = team_hierarchy[gid]
+                return vs_g, art_g
+            return None, None
+
+        def _art_name_url(art_id):
+            if art_id in art_hierarchy:
+                _, g = art_hierarchy[art_id]
+                return g["name"], g.get("web_url", "")
+            return f"ART {art_id}", ""
+
+        vs_cap_buckets: defaultdict = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
+        for cap in capabilities:
+            vs_g, art_g = _vs_art_for(cap.get("group_id"))
+            piid = cap.get("piid")
+            if vs_g and art_g and piid:
+                vs_cap_buckets[vs_g["id"]][piid][art_g["id"]].append(cap)
+
+        epic_type_by_id = {
+            e["id"]: t for t, tier in self._rd_metrics.items() for e in tier
+        }
+        direct_features = [
+            f for f in features
+            if epic_type_by_id.get(f.get("parent_id")) != "Capability"
+        ]
+
+        vs_direct_buckets: defaultdict = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
+        for feat in direct_features:
+            vs_g, art_g = _vs_art_for(feat.get("group_id"))
+            piid = feat.get("piid")
+            if vs_g and art_g and piid:
+                vs_direct_buckets[vs_g["id"]][piid][art_g["id"]].append(feat)
+
+        def _item_rows(items, pct_pi):
+            rows = []
+            for item in sorted(items, key=lambda x: x.get("title", "")):
+                pct_done = item["pct_complete"]
+                blocked  = item.get("blocked_by_count", 0)
+                if blocked:
+                    s = "🔒 Blocked"
+                elif pct_pi is None or pct_pi == 0:
+                    s = "🔵 Planned"
+                elif pct_pi >= 100:
+                    s = "✅ Complete" if pct_done >= 100 else "❌ Incomplete"
+                elif pct_done >= pct_pi:
+                    s = "✅ On Track"
+                else:
+                    s = "⚠️ At Risk"
+                rows.append({
+                    "title":        item["title"],
+                    "url":          item["web_url"],
+                    "state":        item["state"].capitalize(),
+                    "pct_complete": pct_done,
+                    "planned":      item.get("planned_weight", 0),
+                    "actual":       item.get("actual_weight", 0),
+                    "status":       s,
+                    "risk_reason":  _item_risk_reasons(item),
+                })
+            return rows
+
+        def _art_section(pi_buckets, piid, pct_pi):
+            arts_out  = []
+            at_risk_n = blocked_n = 0
+            for art_id, items in sorted(
+                pi_buckets.get(piid, {}).items(),
+                key=lambda x: _art_name_url(x[0])[0],
+            ):
+                art_name, art_url = _art_name_url(art_id)
+                planned  = sum(c.get("planned_weight", 0) for c in items)
+                actual   = sum(c.get("actual_weight",  0) for c in items)
+                n_blk    = sum(1 for c in items if c.get("blocked_by_count", 0) > 0)
+                avg_pct  = (
+                    round(sum(c["planned_weight"] * c["pct_complete"] for c in items) / planned)
+                    if planned else
+                    (round(sum(c["pct_complete"] for c in items) / len(items)) if items else 0)
+                )
+                if n_blk:
+                    s = "🔒 Blocked"
+                    blocked_n += n_blk
+                elif pct_pi is None or pct_pi == 0:
+                    s = "🔵 Planned"
+                elif pct_pi >= 100:
+                    s = "✅ Complete" if avg_pct >= 100 else "❌ Incomplete"
+                elif avg_pct >= pct_pi:
+                    s = "✅ On Track"
+                else:
+                    s = "⚠️ At Risk"
+                    at_risk_n += 1
+                arts_out.append({
+                    "art_name": art_name,
+                    "art_url":  art_url,
+                    "count":    len(items),
+                    "planned":  planned,
+                    "actual":   actual,
+                    "delta":    actual - planned,
+                    "avg_pct":  avg_pct,
+                    "status":   s,
+                    "items":    _item_rows(items, pct_pi),
+                })
+            return arts_out, at_risk_n, blocked_n
+
+        value_streams = []
+        for vs_group in self._iter_vs_groups():
+            vid       = vs_group["id"]
+            cap_pi    = vs_cap_buckets.get(vid, {})
+            direct_pi = vs_direct_buckets.get(vid, {})
+            if not cap_pi and not direct_pi:
+                continue
+
+            all_pis = sorted(
+                set(cap_pi) | set(direct_pi),
+                key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
+            )
+
+            total_caps = total_direct = vs_at_risk = vs_blocked = 0
+            pis_out = []
+            for piid in all_pis:
+                pct_pi     = self._pct_through_pi(piid)
+                start, end = self._pi_dates_from_label(piid)
+                date_range = (
+                    f"{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}"
+                    if start else ""
+                )
+                caps_out,   ar_c, bl_c = _art_section(cap_pi,    piid, pct_pi)
+                direct_out, ar_d, bl_d = _art_section(direct_pi, piid, pct_pi)
+                total_caps   += sum(a["count"] for a in caps_out)
+                total_direct += sum(a["count"] for a in direct_out)
+                vs_at_risk   += ar_c + ar_d
+                vs_blocked   += bl_c + bl_d
+                pis_out.append({
+                    "piid":            piid,
+                    "pct_pi":          pct_pi,
+                    "date_range":      date_range,
+                    "capabilities":    caps_out,
+                    "direct_features": direct_out,
+                })
+
+            value_streams.append({
+                "vs_name":      vs_group["name"],
+                "vs_url":       vs_group.get("web_url", ""),
+                "total_caps":   total_caps,
+                "total_direct": total_direct,
+                "at_risk":      vs_at_risk,
+                "blocked":      vs_blocked,
+                "pis":          pis_out,
+            })
+
+        return {
+            "report_date":   date.today().isoformat(),
+            "group":         {"name": group.name, "url": group.web_url},
+            "value_streams": value_streams,
+        }
+
     def write_report_json(self, data_dir):
         """Write all Quarto data-layer JSON files to data_dir."""
         data_dir = Path(data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
         for key, fn in (
-            ("health-dashboard",       self._data_portfolio_health),
-            ("orphan-epics",           self._data_orphan_epics),
-            ("orphan-issues",          self._data_orphan_issues),
-            ("premature-closures",     self._data_premature_closures),
-            ("unassigned-pi",          self._data_unassigned_pi),
-            ("risk-register",          self._data_risk_register),
-            ("wsjf",                   self._data_wsjf),
-            ("blocking",               self._data_blocking),
-            ("epic-lifecycle",         self._data_epic_lifecycle),
-            ("pi-predictability",      self._data_pi_predictability),
-            ("art-capacity-balance",   self._data_art_capacity_balance),
-            ("piid-project",           self._data_piid_project),
-            ("piid-project-detail",    self._data_piid_project_detail),
-            ("portfolio",              self._data_portfolio),
-            ("workload",               self._data_workload),
-            ("flow-metrics",           self._data_flow_metrics),
+            ("health-dashboard",         self._data_portfolio_health),
+            ("orphan-epics",             self._data_orphan_epics),
+            ("orphan-issues",            self._data_orphan_issues),
+            ("premature-closures",       self._data_premature_closures),
+            ("unassigned-pi",            self._data_unassigned_pi),
+            ("risk-register",            self._data_risk_register),
+            ("wsjf",                     self._data_wsjf),
+            ("blocking",                 self._data_blocking),
+            ("epic-lifecycle",           self._data_epic_lifecycle),
+            ("pi-predictability",        self._data_pi_predictability),
+            ("art-capacity-balance",     self._data_art_capacity_balance),
+            ("piid-project",             self._data_piid_project),
+            ("piid-project-detail",      self._data_piid_project_detail),
+            ("portfolio",                self._data_portfolio),
+            ("workload",                 self._data_workload),
+            ("flow-metrics",             self._data_flow_metrics),
+            ("art-feature-status",       self._data_art_feature_status),
+            ("team-backlog",             self._data_team_backlog),
+            ("vs-capability-dashboard",  self._data_vs_capability_dashboard),
         ):
             out = data_dir / f"{key}.json"
             out.write_text(json.dumps(fn(), indent=2, default=str), encoding="utf-8")
