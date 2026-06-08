@@ -147,6 +147,36 @@ p strong:first-child {
   border-radius: 4px;
 }
 
+/* ── Background photography ─────────────────────────────── */
+
+body {
+  background-color: #e6ecf5;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url('assets/hero-carrier.png');
+  background-size: cover;
+  background-position: center 35%;
+  background-attachment: fixed;
+  opacity: 0.07;
+  z-index: -1;
+  pointer-events: none;
+  filter: grayscale(60%) contrast(1.1);
+}
+
+/* Content column: raised white card so data stays crisp */
+.page-columns .column-body,
+.page-full .column-body,
+main.content {
+  background-color: rgba(255, 255, 255, 0.96);
+  border-radius: 4px;
+  box-shadow: 0 2px 16px rgba(10, 36, 71, 0.08);
+  padding: 1.2rem 1.6rem;
+}
+
 /* ── Footer ─────────────────────────────────────────────── */
 
 .nav-footer {
