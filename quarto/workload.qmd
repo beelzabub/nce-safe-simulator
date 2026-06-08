@@ -1,0 +1,105 @@
+---
+title: "ART-Team Workload"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+import re as _re
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("data/workload.json"), Path("../data/workload.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/workload.json not found. "
+        "Run: python NceGitLab.py --report workload"
+    )
+
+d     = json.loads(data_file.read_text())
+group = d["group"]
+pis   = d["pis"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+""")
+```
+
+```{python}
+def _abbrev_piid(p):
+    """PIID::2024Q1 → 2024 Q1"""
+    m = _re.match(r'PIID::(\d{4})Q(\d)', p)
+    return f"{m.group(1)} Q{m.group(2)}" if m else p
+
+PHASE_LABEL = {
+    "current": "🟢 Current PI",
+    "future":  "🔵 Future PI",
+    "past":    "⚫ Past PI",
+    "unknown": "",
+}
+
+if not pis:
+    display(HTML("<p><em>No PI-assigned epics found.</em></p>"))
+else:
+    html = ""
+    for pi in pis:
+        phase_lbl = PHASE_LABEL.get(pi["phase"], "")
+        if pi["phase"] == "current":
+            phase_lbl = f"🟢 Current PI — {pi['pct_pi']}% elapsed"
+        date_r = ""
+        if pi["start"] and pi["end"]:
+            date_r = f"<br><small style='font-weight:normal'>{pi['start']} – {pi['end']}</small>"
+        html += (
+            f"<h3>{_abbrev_piid(pi['piid'])} — {phase_lbl}{date_r}</h3>"
+            '<table class="table table-sm table-bordered" style="font-size:0.85em">'
+            "<thead><tr>"
+            "<th>Group</th><th>Epics</th><th>Planned</th>"
+            "<th>Actual</th><th>Δ</th><th>% Done</th><th>Status</th>"
+            "</tr></thead><tbody>"
+        )
+        for grp in pi["groups"]:
+            delta  = grp["delta"]
+            d_str  = f"▲{delta}" if delta > 0 else (f"▼{abs(delta)}" if delta < 0 else "=")
+            grp_lk = f'<a href="{grp["url"]}" target="_blank">{grp["name"]}</a>' if grp["url"] else grp["name"]
+            ep_lk  = (f'<a href="{grp["epics_url"]}" target="_blank">{grp["epic_count"]}</a>'
+                      if grp["epics_url"] else str(grp["epic_count"]))
+            html  += (
+                f"<tr>"
+                f"<td>{grp_lk}</td>"
+                f"<td>{ep_lk}</td>"
+                f"<td>{grp['planned']} pt</td>"
+                f"<td>{grp['actual']} pt</td>"
+                f"<td>{d_str}</td>"
+                f"<td>{grp['avg_pct']}%</td>"
+                f"<td>{grp['status']}</td>"
+                f"</tr>"
+            )
+        html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+- **Epics** — count of Epics, Capabilities, and Features assigned to this group for the PI
+- **Planned** — sum of planned weights committed for the PI
+- **Actual** — sum of story-point weights on all linked issues
+- **Δ** — ▲ actual exceeds planned · ▼ actual below planned · = matched
+- **% Done** — weighted average completion across epics (weighted by planned weight)
+- **✅ On Track** — Current PI: % Done ≥ % of PI quarter elapsed
+- **⚠️ At Risk** — Current PI: % Done < % of PI quarter elapsed
+- **✅ Complete** — Past PI: all committed work finished
+- **❌ Incomplete** — Past PI: PI ended with work remaining
+- **🔵 Planned** — Future PI: not yet started
+:::
