@@ -21,8 +21,14 @@ project:
     - quarto/premature-closures.qmd
 
 website:
-  title: "Portfolio Reports"
+  title: "PEO C4I Portfolio Reports"
+  favicon: quarto/assets/peo-c4i-seal.png
   navbar:
+    logo: quarto/assets/peo-c4i-seal.png
+    logo-alt: "PEO C4I"
+    logo-href: /
+    background: "#0a2447"
+    foreground: "#dce6f5"
     left:
       - text: "Executive"
         menu:
@@ -68,7 +74,9 @@ execute:
 
 format:
   html:
-    theme: cosmo
+    theme:
+      - cosmo
+      - quarto/assets/theme-peo-c4i.scss
     toc: true
     toc-depth: 2
     number-sections: false
