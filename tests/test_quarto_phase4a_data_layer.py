@@ -362,6 +362,16 @@ class TestDataFlowMetrics:
         d = _h()._data_flow_metrics()
         assert d["flow_time"]["has_closed_data"] is False
 
+    def test_current_piid_is_past_pi_when_no_active_pi(self):
+        # _PIID is 2025Q1 — fully elapsed; current_piid should be that last past PI
+        e = self._typed_epic(state="closed")
+        d = _h(epics=[e], piid_labels=[_PIID])._data_flow_metrics()
+        assert d["current_piid"] == _PIID
+
+    def test_current_piid_none_when_no_piids(self):
+        d = _h()._data_flow_metrics()
+        assert d["current_piid"] is None
+
     def test_json_serializable(self):
         e = self._typed_epic()
         json.dumps(_h(epics=[e], piid_labels=[_PIID])._data_flow_metrics())

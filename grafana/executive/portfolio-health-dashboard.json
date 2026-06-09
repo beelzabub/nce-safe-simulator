@@ -1,0 +1,184 @@
+{
+  "title": "NCE SAFe Portfolio Health",
+  "uid": "nce-safe-portfolio-health",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "tags": ["safe", "nce", "health"],
+  "time": { "from": "now-1y", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "refresh": "",
+  "links": [],
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Value Stream Health Overview",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 6 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "root_selector": "vs_rows",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "vs.name",     "text": "Value Stream", "type": "string" },
+            { "selector": "tl_sched",    "text": "Schedule",     "type": "string" },
+            { "selector": "tl_cap",      "text": "Capacity",     "type": "string" },
+            { "selector": "tl_risk",     "text": "Risk",         "type": "string" },
+            { "selector": "tl_block",    "text": "Blocking",     "type": "string" },
+            { "selector": "pi_epics",    "text": "PI Epics",     "type": "number" },
+            { "selector": "epics_total", "text": "Total Epics",  "type": "number" },
+            { "selector": "blocked",     "text": "Blocked",      "type": "number" },
+            { "selector": "unassigned",  "text": "Unassigned",   "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "center", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value Stream" },
+            "properties": [{ "id": "custom.align", "value": "left" }]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "md",
+        "footer": { "show": false },
+        "showHeader": true
+      }
+    },
+    {
+      "id": 2,
+      "title": "At-Risk Epics / Features",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 6, "w": 14, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "root_selector": "at_risk_epics",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "type",        "text": "Type",      "type": "string" },
+            { "selector": "title",       "text": "Title",     "type": "string" },
+            { "selector": "piid",        "text": "PI",        "type": "string" },
+            { "selector": "pct_done",    "text": "% Done",    "type": "number" },
+            { "selector": "pct_elapsed", "text": "% Elapsed", "type": "number" },
+            { "selector": "gap",         "text": "Gap",       "type": "number" },
+            { "selector": "weight_str",  "text": "Points",    "type": "string" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Gap" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green",  "value": null },
+                    { "color": "yellow", "value": 20   },
+                    { "color": "red",    "value": 40   }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "Gap" }]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Top Blocked Items",
+      "type": "table",
+      "gridPos": { "x": 14, "y": 6, "w": 10, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "root_selector": "top_blocked",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "type",       "text": "Type",     "type": "string" },
+            { "selector": "title",      "text": "Title",    "type": "string" },
+            { "selector": "piid",       "text": "PI",       "type": "string" },
+            { "selector": "n_blockers", "text": "Blockers", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Blockers" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "yellow", "value": null },
+                    { "color": "red",    "value": 2    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "Blockers" }]
+      }
+    }
+  ]
+}
