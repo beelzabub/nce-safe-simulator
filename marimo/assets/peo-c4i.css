@@ -1,15 +1,29 @@
 /* PEO C4I brand — injected into all Marimo WASM pages at export time */
 
 body {
-  background-color: #e8edf4;
+  background-color: #e6ecf5;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Same hero background as the Quarto static site */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url('/site_libs/bootstrap/assets/hero-carrier.png');
+  background-size: cover;
+  background-position: center 35%;
+  background-attachment: fixed;
+  opacity: 0.07;
+  z-index: -1;
+  pointer-events: none;
+  filter: grayscale(60%) contrast(1.1);
 }
 
 /* Push notebook content below the fixed nav bar */
 #root {
-  padding-top: 44px !important;
+  padding-top: 48px !important;
 }
 
-/* Brand colours for notebook-internal elements */
 a { color: #0a2447; }
 a:hover { color: #1a3a6b; }

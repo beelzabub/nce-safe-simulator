@@ -114,6 +114,7 @@ format:
     toc-depth: 2
     number-sections: false
     embed-resources: false
+    include-after-body: quarto/assets/interactive-toggle.html
     grid:
       sidebar-width: 0px
       body-width: 1200px
