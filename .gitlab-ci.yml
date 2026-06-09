@@ -33,7 +33,15 @@ pages:
   before_script:
     - pip install -r requirements.txt
   script:
-    - python NceGitLab.py --report health-dashboard
+    # Generate all report data
+    - python NceGitLab.py --report all
+    # Copy data to public/ so WASM notebooks can fetch it at runtime
+    - mkdir -p public/data
+    - cp data/*.json public/data/
+    # Export Marimo WASM notebooks (CDN-hosted Pyodide — see issue #47 for self-hosting investigation)
+    - mkdir -p public/interactive
+    - marimo export html-wasm marimo/health-dashboard.py -o public/interactive/health-dashboard/ -f
+    # Render static Quarto pages (fallback)
     - quarto render
   artifacts:
     paths:
