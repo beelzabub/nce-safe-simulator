@@ -2,51 +2,29 @@ image: python:latest
 
 stages:
   - build
-  - report
   - pages
 
-python-version-test:
+test:
   stage: build
   script:
     - pip install -r requirements.txt
     - python -m pytest tests/
 
-generate-reports:
-  stage: report
-  script:
-    - pip install -r requirements.txt
-    - python NceGitLab.py --report all
-    - zip -r reports.zip reports/
-  artifacts:
-    name: "reports-${CI_COMMIT_SHORT_SHA}"
-    paths:
-      - reports.zip
-    expire_in: 30 days
-  variables:
-    ACCESS_TOKEN: $ACCESS_TOKEN
-    GROUP_NAME: $GROUP_NAME
-  when: manual
-
 pages:
   stage: pages
   image: ghcr.io/quarto-dev/quarto:latest
   before_script:
-    - pip install -r requirements.txt
+    - apt-get update -qq && apt-get install -y python3-pip -qq
+    - pip3 install -r requirements.txt
   script:
-    # Generate all report data
-    - python NceGitLab.py --report all
-    # Render static Quarto pages first (quarto render wipes public/)
+    - python3 NceGitLab.py --report all
     - quarto render
-    # Restore data layer that quarto render wiped
     - mkdir -p public/data
     - cp data/*.json public/data/
-    # Export Marimo WASM notebooks into public/interactive/
-    - python build_interactive.py
+    - python3 build_interactive.py
   artifacts:
     paths:
       - public/
     expire_in: 7 days
-  variables:
-    ACCESS_TOKEN: $ACCESS_TOKEN
-    GROUP_NAME: $GROUP_NAME
-  when: manual
+  only:
+    - develop
