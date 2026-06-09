@@ -5,6 +5,8 @@ requests
 lorem
 plotly
 marimo
+jupyter
+nbformat
 
 pytest
 pytest-mock
