@@ -35,13 +35,13 @@ pages:
   script:
     # Generate all report data
     - python NceGitLab.py --report all
-    # Copy data to public/ so WASM notebooks can fetch it at runtime
+    # Render static Quarto pages first (quarto render wipes public/)
+    - quarto render
+    # Restore data layer that quarto render wiped
     - mkdir -p public/data
     - cp data/*.json public/data/
-    # Export Marimo WASM notebooks with shared asset directory
+    # Export Marimo WASM notebooks into public/interactive/
     - python build_interactive.py
-    # Render static Quarto pages (fallback)
-    - quarto render
   artifacts:
     paths:
       - public/
