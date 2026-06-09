@@ -1,0 +1,125 @@
+{
+  "title": "NCE SAFe Epic Lifecycle",
+  "uid": "nce-safe-epic-lifecycle",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "tags": ["safe", "nce", "epic", "program"],
+  "time": { "from": "now-1y", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "refresh": "",
+  "links": [],
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Epic Count by Lifecycle State",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/epic-lifecycle.json",
+          "root_selector": "states",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "label", "text": "State", "type": "string" },
+            { "selector": "count", "text": "Count", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "barRadius": 0.03,
+        "stacking": "none",
+        "showValue": "always",
+        "fullHighlight": false,
+        "legend": { "displayMode": "hidden", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      }
+    },
+    {
+      "id": 2,
+      "title": "Average Epic Age by State (days)",
+      "type": "barchart",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/epic-lifecycle.json",
+          "root_selector": "states",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "label",     "text": "State",   "type": "string" },
+            { "selector": "avg_age",   "text": "Avg Age", "type": "number" },
+            { "selector": "max_age",   "text": "Max Age", "type": "number" },
+            { "selector": "threshold", "text": "Target",  "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "barRadius": 0.03,
+        "stacking": "none",
+        "showValue": "auto",
+        "fullHighlight": false,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      }
+    }
+  ]
+}

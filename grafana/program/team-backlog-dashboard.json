@@ -1,0 +1,200 @@
+{
+  "title": "NCE SAFe Team Backlogs",
+  "uid": "nce-safe-team-backlog",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "tags": ["safe", "nce", "teams"],
+  "time": { "from": "now-1y", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "refresh": "",
+  "links": [],
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Team Backlog % Done",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "root_selector": "teams",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "team_name", "text": "Team",   "type": "string" },
+            { "selector": "pct_done",  "text": "% Done", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 50   },
+              { "color": "green",  "value": 80   }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "barRadius": 0.03,
+        "stacking": "none",
+        "showValue": "always",
+        "fullHighlight": false,
+        "legend": { "displayMode": "hidden", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      }
+    },
+    {
+      "id": 2,
+      "title": "Open vs Closed Issues by Team",
+      "type": "barchart",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "root_selector": "teams",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "team_name", "text": "Team",   "type": "string" },
+            { "selector": "open",      "text": "Open",   "type": "number" },
+            { "selector": "closed",    "text": "Closed", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "barRadius": 0.03,
+        "stacking": "none",
+        "showValue": "auto",
+        "fullHighlight": false,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      }
+    },
+    {
+      "id": 3,
+      "title": "Team Backlog Summary",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 8 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "root_selector": "teams",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "vs_name",       "text": "Value Stream", "type": "string" },
+            { "selector": "art_name",      "text": "ART",          "type": "string" },
+            { "selector": "team_name",     "text": "Team",         "type": "string" },
+            { "selector": "total",         "text": "Total",        "type": "number" },
+            { "selector": "open",          "text": "Open",         "type": "number" },
+            { "selector": "closed",        "text": "Closed",       "type": "number" },
+            { "selector": "total_weight",  "text": "Total Pts",    "type": "number" },
+            { "selector": "closed_weight", "text": "Done Pts",     "type": "number" },
+            { "selector": "pct_done",      "text": "% Done",       "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "% Done" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red",    "value": null },
+                    { "color": "yellow", "value": 50   },
+                    { "color": "green",  "value": 80   }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Value Stream" }]
+      }
+    }
+  ]
+}
