@@ -1,0 +1,199 @@
+{
+  "title": "NCE SAFe Flow Metrics",
+  "uid": "nce-safe-flow-metrics",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "tags": ["safe", "nce"],
+  "time": { "from": "now-1y", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "refresh": "",
+  "links": [],
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Velocity by PI — Features & Capabilities Delivered",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "root_selector": "velocity",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "piid",         "text": "PI",           "type": "string" },
+            { "selector": "features",     "text": "Features",     "type": "number" },
+            { "selector": "capabilities", "text": "Capabilities", "type": "number" },
+            { "selector": "total",        "text": "Total",        "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Total" },
+            "properties": [{ "id": "custom.hideFrom", "value": { "viz": true, "legend": true, "tooltip": false } }]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "barRadius": 0.05,
+        "stacking": "normal",
+        "showValue": "auto",
+        "fullHighlight": false,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0
+      }
+    },
+    {
+      "id": 2,
+      "title": "PI Predictability — Committed vs Delivered",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 9, "w": 14, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "root_selector": "predictability",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "piid",      "text": "PI",        "type": "string" },
+            { "selector": "committed", "text": "Committed", "type": "number" },
+            { "selector": "delivered", "text": "Delivered", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "barRadius": 0.05,
+        "stacking": "none",
+        "showValue": "auto",
+        "fullHighlight": false,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0
+      }
+    },
+    {
+      "id": 3,
+      "title": "Predictability % by PI",
+      "type": "barchart",
+      "gridPos": { "x": 14, "y": 9, "w": 10, "h": 9 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "root_selector": "predictability",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "piid", "text": "PI",  "type": "string" },
+            { "selector": "pct",  "text": "Pct", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "scaleDistribution": { "type": "linear" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 60   },
+              { "color": "green",  "value": 80   }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "barRadius": 0.05,
+        "stacking": "none",
+        "showValue": "always",
+        "fullHighlight": false,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0
+      }
+    }
+  ]
+}
