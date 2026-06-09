@@ -249,7 +249,8 @@ class TestDataWorkload:
         assert grp["epic_count"] == 1
 
     def test_phase_unknown_when_no_dates(self):
-        f = self._feature()
+        # Use a non-standard PIID format that the YYYYQn regex cannot parse
+        f = self._feature(piid="PIID::CUSTOM-FORMAT")
         d = self._wl_harness([f])._data_workload()
         assert d["pis"][0]["phase"] == "unknown"
 
@@ -261,7 +262,8 @@ class TestDataWorkload:
         assert set(piids) == {_PIID, _PIID2}
 
     def test_status_planned_for_unknown_phase(self):
-        f = self._feature()
+        # Non-parseable label → phase "unknown" → status "🔵 Planned"
+        f = self._feature(piid="PIID::CUSTOM-FORMAT")
         d = self._wl_harness([f])._data_workload()
         assert d["pis"][0]["groups"][0]["status"] == "🔵 Planned"
 
