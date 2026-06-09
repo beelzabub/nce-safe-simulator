@@ -4,6 +4,7 @@ python-dateutil
 requests
 lorem
 plotly
+marimo
 
 pytest
 pytest-mock
