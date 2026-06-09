@@ -121,16 +121,37 @@ class ServeMixin:
         print(f"\n  {'OK' if ok else f'FAILED (exit {rc})'}")
         return ok
 
-    def _site_build_all(self) -> Tuple[bool, bool]:
-        """Run static build first, then interactive. Returns (marimo_ok, quarto_ok).
+    def _restore_data_layer(self) -> int:
+        """Copy data/*.json → public/data/ after Quarto has cleaned public/.
+        Returns the number of files copied."""
+        src = Path("data")
+        dst = Path("public/data")
+        if not src.exists():
+            return 0
+        dst.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for f in src.glob("*.json"):
+            shutil.copy2(f, dst / f.name)
+            count += 1
+        return count
 
-        Quarto cleans public/ before rendering, so it must finish before Marimo
-        writes public/interactive/ — otherwise Quarto wipes the first notebook.
+    def _site_build_all(self) -> Tuple[bool, bool]:
+        """Run static, restore data layer, then interactive. Returns (marimo_ok, quarto_ok).
+
+        Quarto cleans all of public/ before rendering, which wipes both
+        public/interactive/ and public/data/.  Sequence:
+          1. quarto render  — cleans + builds public/
+          2. copy data/*.json → public/data/  (Quarto wiped it)
+          3. build_interactive.py  — writes public/interactive/
         """
-        print("\nBuilding all (static first, then interactive)...\n")
+        print("\nBuilding all (static → data → interactive)...\n")
         t0 = time.monotonic()
 
         quarto_ok = self._site_build_static()
+
+        n = self._restore_data_layer()
+        print(f"\n  Restored {n} JSON file(s) to public/data/")
+
         marimo_ok = self._site_build_interactive()
 
         elapsed = time.monotonic() - t0
@@ -195,7 +216,7 @@ class ServeMixin:
             print("  Build")
             print("  [1] interactive   Marimo WASM → public/interactive/")
             print("  [2] static        quarto render → public/")
-            print("  [3] all           static → interactive  (sequential)")
+            print("  [3] all           static → data → interactive")
             print()
             print("  Clean")
             print("  [4] interactive   Delete public/interactive/")
