@@ -1,5 +1,6 @@
 import re
 import sys
+import threading
 import time
 import requests
 from collections import defaultdict
@@ -54,19 +55,26 @@ def _pause():
 
 
 class _Tee:
-    """Writes to two streams simultaneously — terminal and a log file."""
+    """Writes to two streams simultaneously — terminal and a log file.
+
+    Thread-safe: a lock prevents interleaved writes when multiple threads
+    print concurrently (e.g. parallel build + wiki upload).
+    """
     def __init__(self, stream, logfile):
         self._stream  = stream
         self._logfile = logfile
+        self._lock    = threading.Lock()
 
     def write(self, data):
-        self._stream.write(data)
-        self._logfile.write(data)
+        with self._lock:
+            self._stream.write(data)
+            self._logfile.write(data)
         return len(data)
 
     def flush(self):
-        self._stream.flush()
-        self._logfile.flush()
+        with self._lock:
+            self._stream.flush()
+            self._logfile.flush()
 
     def __getattr__(self, name):
         return getattr(self._stream, name)

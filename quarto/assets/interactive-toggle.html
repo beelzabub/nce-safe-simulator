@@ -1,0 +1,31 @@
+<script>
+(function () {
+  var HAS_INTERACTIVE = {
+    'health-dashboard': true, 'pi-predictability': true,
+    'flow-metrics': true,     'art-capacity-balance': true,
+    'piid-project': true,     'piid-project-detail': true,
+    'workload': true,         'art-feature-status': true,
+    'vs-capability-dashboard': true, 'team-backlog': true,
+    'portfolio': true,
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var m = window.location.pathname.match(/\/quarto\/([^\/]+?)(?:\.html)?$/);
+    var slug = m ? m[1] : null;
+    if (!slug || !HAS_INTERACTIVE[slug]) return;
+
+    var btn = document.createElement('a');
+    btn.href = '/interactive/' + slug + '/';
+    btn.textContent = '⚡ Interactive';
+    btn.style.cssText =
+      'position:fixed;top:56px;right:16px;z-index:9999;' +
+      'background:rgba(10,36,71,.88);border:1px solid #c8a951;' +
+      'color:#c8a951;padding:5px 14px;border-radius:4px;' +
+      'font-size:12px;font-weight:600;text-decoration:none;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:nowrap;';
+    btn.onmouseover = function () { this.style.background = 'rgba(10,36,71,1)'; };
+    btn.onmouseout  = function () { this.style.background = 'rgba(10,36,71,.88)'; };
+    document.body.appendChild(btn);
+  });
+})();
+</script>
