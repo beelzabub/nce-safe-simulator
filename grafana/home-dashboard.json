@@ -25,10 +25,10 @@
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
-          "root_selector": "predictability",
+          "root_selector": "",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
-            { "selector": "piid", "text": "piid", "type": "string" }
+            { "selector": "current_piid", "text": "current_piid", "type": "string" }
           ],
           "filters": [],
           "global_query_id": ""
@@ -48,7 +48,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["last"], "fields": "/.*/" , "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" , "values": false },
         "textMode": "auto"
       }
     },
