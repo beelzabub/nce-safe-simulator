@@ -21,12 +21,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
-          "uql": "parse-json | scope \"pi\" | keep current",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "pi",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "current", "text": "current", "type": "string" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
@@ -56,12 +61,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
-          "uql": "parse-json | scope \"portfolio\" | keep pct_done",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "portfolio",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "pct_done", "text": "pct_done", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
@@ -101,12 +111,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/blocking.json",
-          "uql": "parse-json | scope \"summary\" | keep total_blocked",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "summary",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "total_blocked", "text": "total_blocked", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
@@ -143,12 +158,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/risk-register.json",
-          "uql": "parse-json | scope \"summary\" | scope \"alerts\" | keep behind_schedule",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "behind_schedule",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "title", "text": "title", "type": "string" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
@@ -172,7 +192,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["count"], "fields": "", "values": false },
         "textMode": "auto"
       }
     },
@@ -185,12 +205,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/wsjf.json",
-          "uql": "parse-json | scope \"summary\" | keep in_flight",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "summary",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "in_flight", "text": "in_flight", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
@@ -220,12 +245,17 @@
       "targets": [
         {
           "refId": "A",
-          "type": "uql",
+          "type": "json",
           "source": "url",
           "format": "table",
           "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
-          "uql": "parse-json | scope \"portfolio\" | keep epics_total",
-          "url_options": { "method": "GET", "data": "" }
+          "root_selector": "portfolio",
+          "url_options": { "method": "GET", "data": "" },
+          "columns": [
+            { "selector": "epics_total", "text": "epics_total", "type": "number" }
+          ],
+          "filters": [],
+          "global_query_id": ""
         }
       ],
       "fieldConfig": {
