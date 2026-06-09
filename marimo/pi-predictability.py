@@ -35,20 +35,6 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.Html("""
-    <p>
-      <a href="/quarto/pi-predictability.html"
-         style="display:inline-block;padding:4px 12px;background:#0a2447;color:#fff;
-                border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-        📊 Static Version
-      </a>
-    </p>
-    """)
-    return
-
-
-@app.cell
 def _(d, group, mo):
     mo.md(f"""
     **Report Date:** {d['report_date']} &nbsp;|&nbsp;

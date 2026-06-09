@@ -43,20 +43,6 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.Html("""
-    <p>
-      <a href="/quarto/health-dashboard.html"
-         style="display:inline-block;padding:4px 12px;background:#0a2447;color:#fff;
-                border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-        📊 Static Version
-      </a>
-    </p>
-    """)
-    return
-
-
-@app.cell
 def _(d, group, mo, pi):
     pi_label   = pi["current"] or "—"
     pi_elapsed = f"{pi['pct_elapsed']}% elapsed" if pi["pct_elapsed"] else "Not started"

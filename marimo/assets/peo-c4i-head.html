@@ -2,25 +2,26 @@
 /* ── PEO C4I nav bar ─────────────────────────────── */
 #pc4i-nav, #pc4i-nav * { box-sizing: border-box; margin: 0; padding: 0; }
 #pc4i-nav {
-  position: fixed; top: 0; left: 0; width: 100%; height: 48px;
+  position: fixed; top: 0; left: 0; width: 100%; height: 56px;
   background: #0a2447; border-bottom: 3px solid #c8a951;
-  display: flex; align-items: center; padding: 0 12px; gap: 8px;
+  display: flex; align-items: center; padding: 0 1rem; gap: 0.5rem;
   z-index: 10000;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px; color: #dce6f5;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 1rem; color: #dce6f5;
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
-#pc4i-nav img.pc4i-logo { height: 30px; flex-shrink: 0; }
+#pc4i-nav img.pc4i-logo { height: 40px; flex-shrink: 0; }
 #pc4i-nav .pc4i-brand {
-  font-weight: 600; color: #dce6f5; white-space: nowrap;
-  margin-right: 6px; text-decoration: none;
+  font-size: 1.05rem; font-weight: 700; letter-spacing: 0.04em;
+  color: #dce6f5; white-space: nowrap;
+  margin-right: 0.5rem; text-decoration: none;
 }
 #pc4i-nav .pc4i-menus { display: flex; align-items: stretch; flex: 1; }
 .pc4i-menu { position: relative; display: flex; align-items: stretch; }
 .pc4i-menu-trigger {
   display: flex; align-items: center; gap: 4px;
-  padding: 0 12px; cursor: default;
-  color: #b8ccdf; font-size: 13px; font-weight: 500;
+  padding: 0.5rem 1rem; cursor: pointer;
+  color: #b8ccdf; font-size: 1rem; font-weight: 500;
   white-space: nowrap; user-select: none;
   transition: color 0.15s;
 }
@@ -29,22 +30,17 @@
 .pc4i-dropdown {
   display: none; position: absolute; top: 100%; left: 0;
   min-width: 230px; background: #0f2e5a;
-  border: 1px solid #c8a951; border-radius: 4px;
-  z-index: 10001; box-shadow: 0 6px 16px rgba(0,0,0,.5);
+  border: 1px solid #c8a951; border-radius: 0.25rem;
+  padding: 0.5rem 0;
+  z-index: 10001; box-shadow: 0 0.5rem 1rem rgba(0,0,0,.5);
 }
 .pc4i-menu:hover .pc4i-dropdown { display: block; }
 .pc4i-dropdown a {
-  display: block; padding: 8px 16px;
-  color: #b8ccdf; text-decoration: none; font-size: 0.88rem; white-space: nowrap;
+  display: block; padding: 0.5rem 1.5rem;
+  color: #b8ccdf; text-decoration: none; font-size: 0.88rem;
+  line-height: 1.5; white-space: nowrap;
 }
 .pc4i-dropdown a:hover { background: #1a3a6b; color: #c8a951; }
-#pc4i-toggle {
-  margin-left: auto; flex-shrink: 0;
-  background: rgba(200,169,81,.12); border: 1px solid #c8a951;
-  color: #c8a951; padding: 5px 14px; border-radius: 4px;
-  text-decoration: none; font-size: 12px; font-weight: 600; white-space: nowrap;
-}
-#pc4i-toggle:hover { background: rgba(200,169,81,.28); }
 </style>
 <script>
 (function () {
@@ -107,12 +103,24 @@
     });
     h += '</div>';
 
-    if (staticHref) {
-      h += '<a id="pc4i-toggle" href="' + staticHref + '">📄 Static</a>';
-    }
-
     nav.innerHTML = h;
     document.body.insertBefore(nav, document.body.firstChild);
+
+    if (staticHref) {
+      var btn = document.createElement('a');
+      btn.id = 'pc4i-toggle';
+      btn.href = staticHref;
+      btn.textContent = '📄 Static';
+      btn.style.cssText =
+        'position:fixed;top:56px;right:16px;z-index:9999;' +
+        'background:rgba(10,36,71,.88);border:1px solid #c8a951;' +
+        'color:#c8a951;padding:5px 14px;border-radius:4px;' +
+        'font-size:12px;font-weight:600;text-decoration:none;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:nowrap;';
+      btn.onmouseover = function () { this.style.background = 'rgba(10,36,71,1)'; };
+      btn.onmouseout  = function () { this.style.background = 'rgba(10,36,71,.88)'; };
+      document.body.appendChild(btn);
+    }
   });
 })();
 </script>
