@@ -4712,12 +4712,24 @@ class ReportsMixin:
             icon      = "🟢" if pct >= 80 else ("🟡" if pct >= 60 else "🔴")
             predictability.append({"piid": pi, "committed": committed, "delivered": delivered, "pct": pct, "icon": icon})
 
+        # Current PI: the PI whose date range contains today; fall back to most recent past PI.
+        current_piid = None
+        for pi in piids:
+            pct_pi = self._pct_through_pi(pi)
+            if pct_pi is not None and 0 < pct_pi < 100:
+                current_piid = pi
+                break
+        if current_piid is None:
+            past = [pi for pi in piids if (self._pct_through_pi(pi) or 0) >= 100]
+            current_piid = past[-1] if past else (piids[-1] if piids else None)
+
         return {
-            "report_date": today.isoformat(),
-            "group":       {"name": group.name, "url": group.web_url},
-            "velocity":    velocity,
-            "load":        load,
-            "load_no_pi":  load_no_pi,
+            "report_date":  today.isoformat(),
+            "current_piid": current_piid,
+            "group":        {"name": group.name, "url": group.web_url},
+            "velocity":     velocity,
+            "load":         load,
+            "load_no_pi":   load_no_pi,
             "distribution": {
                 "total_epics":          total_epics,
                 "total_planned_weight": total_pw,
