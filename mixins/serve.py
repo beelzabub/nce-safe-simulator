@@ -1,14 +1,17 @@
 import os
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .utils import _clear, _pause
+from .utils import _clear, _fmt_duration, _pause
 
-_PID_FILE    = Path(".server.pid")
+_PID_FILE     = Path(".server.pid")
 _DEFAULT_PORT = 4645
 
 
@@ -26,19 +29,19 @@ def _local_ip() -> str:
 
 class ServeMixin:
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Server
     # ------------------------------------------------------------------
 
     def _serve_port(self) -> int:
         return getattr(self, "serve_port", _DEFAULT_PORT)
 
     def _serve_status(self) -> Tuple[bool, Optional[int]]:
-        """Return (is_running, pid). Removes stale PID file if process is dead."""
+        """Return (is_running, pid). Cleans up stale PID file if process is gone."""
         if not _PID_FILE.exists():
             return False, None
         try:
             pid = int(_PID_FILE.read_text().strip())
-            os.kill(pid, 0)   # signal 0 = check existence only
+            os.kill(pid, 0)   # signal 0 = existence check only
             return True, pid
         except (ValueError, ProcessLookupError, PermissionError):
             _PID_FILE.unlink(missing_ok=True)
@@ -49,9 +52,7 @@ class ServeMixin:
         port   = self._serve_port()
         public = Path("public")
         if not public.exists():
-            raise FileNotFoundError(
-                "public/ not found — run reports (which builds the site) first."
-            )
+            raise FileNotFoundError("public/ not found — build the site first.")
         proc = subprocess.Popen(
             [sys.executable, "-m", "http.server", str(port), "--directory", str(public)],
             stdout=subprocess.DEVNULL,
@@ -74,30 +75,157 @@ class ServeMixin:
         return True
 
     # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _stream_proc(proc, label: str) -> None:
+        for line in proc.stdout:
+            print(f"  [{label}] {line}", end="", flush=True)
+
+    def _site_build_interactive(self) -> bool:
+        """Export all Marimo WASM notebooks. Returns True on success."""
+        print("\nBuilding interactive (Marimo WASM)...\n")
+        proc = subprocess.Popen(
+            [sys.executable, "build_interactive.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            print(f"  {line}", end="", flush=True)
+        rc = proc.wait()
+        ok = rc == 0
+        print(f"\n  {'OK' if ok else f'FAILED (exit {rc})'}")
+        return ok
+
+    def _site_build_static(self) -> bool:
+        """Render the Quarto static site. Returns True on success."""
+        print("\nBuilding static (quarto render)...\n")
+        proc = subprocess.Popen(
+            ["quarto", "render"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            print(f"  {line}", end="", flush=True)
+        rc = proc.wait()
+        ok = rc == 0
+        print(f"\n  {'OK' if ok else f'FAILED (exit {rc})'}")
+        return ok
+
+    def _site_build_all(self) -> Tuple[bool, bool]:
+        """Run interactive + static builds in parallel. Returns (marimo_ok, quarto_ok)."""
+        print("\nBuilding all (interactive + static in parallel)...\n")
+        t0 = time.monotonic()
+
+        marimo_proc = subprocess.Popen(
+            [sys.executable, "build_interactive.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        quarto_proc = subprocess.Popen(
+            ["quarto", "render"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        t_marimo = threading.Thread(target=self._stream_proc, args=(marimo_proc, "marimo"), daemon=True)
+        t_quarto = threading.Thread(target=self._stream_proc, args=(quarto_proc, "quarto"), daemon=True)
+        t_marimo.start()
+        t_quarto.start()
+
+        marimo_rc = marimo_proc.wait()
+        quarto_rc = quarto_proc.wait()
+        t_marimo.join()
+        t_quarto.join()
+
+        marimo_ok = marimo_rc == 0
+        quarto_ok  = quarto_rc == 0
+        elapsed    = time.monotonic() - t0
+        print(f"\n  [marimo] {'OK' if marimo_ok else f'FAILED (exit {marimo_rc})'}")
+        print(f"  [quarto] {'OK' if quarto_ok  else f'FAILED (exit {quarto_rc})'}")
+        print(f"  total: {_fmt_duration(elapsed)}")
+        return marimo_ok, quarto_ok
+
+    # ------------------------------------------------------------------
+    # Clean
+    # ------------------------------------------------------------------
+
+    def _site_clean_interactive(self) -> bool:
+        """Delete public/interactive/. Returns True if it existed."""
+        target = Path("public/interactive")
+        if target.exists():
+            shutil.rmtree(target)
+            return True
+        return False
+
+    def _site_clean_static(self) -> int:
+        """Delete quarto output from public/, preserving interactive/ and data/.
+        Returns count of top-level items removed."""
+        public = Path("public")
+        if not public.exists():
+            return 0
+        keep  = {"interactive", "data"}
+        count = 0
+        for item in list(public.iterdir()):
+            if item.name not in keep:
+                shutil.rmtree(item) if item.is_dir() else item.unlink()
+                count += 1
+        return count
+
+    def _site_clean_all(self) -> bool:
+        """Delete public/ entirely. Returns True if it existed."""
+        target = Path("public")
+        if target.exists():
+            shutil.rmtree(target)
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Interactive menu
     # ------------------------------------------------------------------
 
-    def run_serve_menu(self):
-        """Interactive start / stop / restart menu for the site preview server."""
+    def run_site_menu(self):
+        """Site sub-menu: build, clean, and server controls in one place."""
         while True:
             _clear()
             running, pid = self._serve_status()
             port = self._serve_port()
             ip   = _local_ip()
 
-            print("Site Server")
+            print("Site")
             print("=" * 50)
             if running:
-                print(f"  Status : RUNNING  (pid {pid})")
-                print(f"  URL    : http://localhost:{port}")
+                print(f"  Server : RUNNING  (pid {pid})")
+                print(f"           http://localhost:{port}")
                 print(f"           http://{ip}:{port}")
-                print()
-                print("  [1] Stop server")
-                print("  [2] Restart server")
             else:
-                print(f"  Status : stopped")
-                print()
-                print(f"  [1] Start server  (port {port}, public/)")
+                print(f"  Server : stopped")
+            print()
+            print("  Build")
+            print("  [1] interactive   Marimo WASM → public/interactive/")
+            print("  [2] static        quarto render → public/")
+            print("  [3] all           interactive + static  (parallel)")
+            print()
+            print("  Clean")
+            print("  [4] interactive   Delete public/interactive/")
+            print("  [5] static        Delete quarto output  (keep interactive/ data/)")
+            print("  [6] all           Delete public/ entirely")
+            print()
+            print("  Server")
+            if running:
+                print("  [7] Stop server")
+                print("  [8] Restart server")
+            else:
+                print(f"  [7] Start server  (port {port})")
             print()
             print("  [b] back   [q] quit")
             print()
@@ -109,24 +237,32 @@ class ServeMixin:
             if raw in ("b", "back"):
                 return
 
-            if running:
-                if raw == "1":
+            if raw == "1":
+                self._site_build_interactive()
+                _pause()
+            elif raw == "2":
+                self._site_build_static()
+                _pause()
+            elif raw == "3":
+                self._site_build_all()
+                _pause()
+            elif raw == "4":
+                removed = self._site_clean_interactive()
+                print("  Deleted public/interactive/" if removed else "  public/interactive/ not found.")
+                _pause()
+            elif raw == "5":
+                n = self._site_clean_static()
+                print(f"  Removed {n} item(s) from public/  (kept interactive/ data/).")
+                _pause()
+            elif raw == "6":
+                removed = self._site_clean_all()
+                print("  Deleted public/." if removed else "  public/ not found.")
+                _pause()
+            elif raw == "7":
+                if running:
                     self._serve_stop()
                     print("  Server stopped.")
-                    _pause()
-                elif raw == "2":
-                    self._serve_stop()
-                    try:
-                        new_pid = self._serve_start()
-                        print(f"  Server restarted  (pid {new_pid})")
-                        print(f"  http://localhost:{port}")
-                        print(f"  http://{ip}:{port}")
-                    except FileNotFoundError as exc:
-                        print(f"  {exc}")
-                    _pause()
-                # loop → refresh status display
-            else:
-                if raw == "1":
+                else:
                     try:
                         new_pid = self._serve_start()
                         print(f"  Server started  (pid {new_pid})")
@@ -134,5 +270,19 @@ class ServeMixin:
                         print(f"  http://{ip}:{port}")
                     except FileNotFoundError as exc:
                         print(f"  {exc}")
-                    _pause()
-                # loop → refresh status display
+                _pause()
+            elif raw == "8" and running:
+                self._serve_stop()
+                try:
+                    new_pid = self._serve_start()
+                    print(f"  Server restarted  (pid {new_pid})")
+                    print(f"  http://localhost:{port}")
+                    print(f"  http://{ip}:{port}")
+                except FileNotFoundError as exc:
+                    print(f"  {exc}")
+                _pause()
+            # all actions loop → menu refreshes with current state
+
+    def run_serve_menu(self):
+        """Backwards-compatible alias for run_site_menu."""
+        self.run_site_menu()

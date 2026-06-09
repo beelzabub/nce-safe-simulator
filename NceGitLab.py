@@ -349,7 +349,7 @@ def _run_main_menu(gl):
         print("  [3] Scaffold     Create SAFe group/project structure")
         print("  [4] Create       Populate group with lorem SAFe data")
         print("  [5] Clean        Delete all group data")
-        print("  [6] Serve        Start / stop the site preview server")
+        print("  [6] Site         Build, clean, and serve the report site")
         print("  [q] quit")
         print()
 
@@ -372,7 +372,7 @@ def _run_main_menu(gl):
             _confirm_clean(gl)
             _pause()
         elif raw == "6":
-            gl.run_serve_menu()
+            gl.run_site_menu()
         else:
             print("  Please enter a number between 1 and 6.")
 
