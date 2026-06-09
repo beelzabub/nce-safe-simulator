@@ -6934,11 +6934,9 @@ class ReportsMixin:
 
         # Launch Quarto + Marimo in a background thread so they run in parallel
         # with the wiki uploads.
-        build_thread = None
-        if len(reports) == len(REPORTS):
-            build_thread = threading.Thread(target=self._build_site, name="site-build", daemon=True)
-            build_thread.start()
-            print("\n  [site] build started in background\n")
+        build_thread = threading.Thread(target=self._build_site, name="site-build", daemon=True)
+        build_thread.start()
+        print("\n  [site] build started in background\n")
 
         total  = len(reports)
         phases = []
@@ -6961,7 +6959,7 @@ class ReportsMixin:
 
         self._print_timing_table(phases, f"{total} report(s) completed")
 
-        if build_thread is not None and build_thread.is_alive():
+        if build_thread.is_alive():
             print("\n  [site] waiting for build to finish...")
             build_thread.join()
 
