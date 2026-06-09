@@ -4,7 +4,6 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -88,11 +87,6 @@ class ServeMixin:
     # Build
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _stream_proc(proc, label: str) -> None:
-        for line in proc.stdout:
-            print(f"  [{label}] {line}", end="", flush=True)
-
     def _site_build_interactive(self) -> bool:
         """Export all Marimo WASM notebooks. Returns True on success."""
         print("\nBuilding interactive (Marimo WASM)...\n")
@@ -128,40 +122,18 @@ class ServeMixin:
         return ok
 
     def _site_build_all(self) -> Tuple[bool, bool]:
-        """Run interactive + static builds in parallel. Returns (marimo_ok, quarto_ok)."""
-        print("\nBuilding all (interactive + static in parallel)...\n")
+        """Run static build first, then interactive. Returns (marimo_ok, quarto_ok).
+
+        Quarto cleans public/ before rendering, so it must finish before Marimo
+        writes public/interactive/ — otherwise Quarto wipes the first notebook.
+        """
+        print("\nBuilding all (static first, then interactive)...\n")
         t0 = time.monotonic()
 
-        marimo_proc = subprocess.Popen(
-            [sys.executable, "build_interactive.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        quarto_proc = subprocess.Popen(
-            ["quarto", "render"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        quarto_ok = self._site_build_static()
+        marimo_ok = self._site_build_interactive()
 
-        t_marimo = threading.Thread(target=self._stream_proc, args=(marimo_proc, "marimo"), daemon=True)
-        t_quarto = threading.Thread(target=self._stream_proc, args=(quarto_proc, "quarto"), daemon=True)
-        t_marimo.start()
-        t_quarto.start()
-
-        marimo_rc = marimo_proc.wait()
-        quarto_rc = quarto_proc.wait()
-        t_marimo.join()
-        t_quarto.join()
-
-        marimo_ok = marimo_rc == 0
-        quarto_ok  = quarto_rc == 0
-        elapsed    = time.monotonic() - t0
-        print(f"\n  [marimo] {'OK' if marimo_ok else f'FAILED (exit {marimo_rc})'}")
-        print(f"  [quarto] {'OK' if quarto_ok  else f'FAILED (exit {quarto_rc})'}")
+        elapsed = time.monotonic() - t0
         print(f"  total: {_fmt_duration(elapsed)}")
         return marimo_ok, quarto_ok
 
@@ -223,7 +195,7 @@ class ServeMixin:
             print("  Build")
             print("  [1] interactive   Marimo WASM → public/interactive/")
             print("  [2] static        quarto render → public/")
-            print("  [3] all           interactive + static  (parallel)")
+            print("  [3] all           static → interactive  (sequential)")
             print()
             print("  Clean")
             print("  [4] interactive   Delete public/interactive/")
