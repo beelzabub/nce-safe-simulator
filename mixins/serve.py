@@ -6,10 +6,20 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .utils import _clear, _fmt_duration, _pause
+from .utils import _clear, _fmt_duration, _pause, _tee_to_log
+
+
+def _site_log_path(label: str) -> Path:
+    now = datetime.now()
+    return (
+        Path("logs")
+        / now.strftime("%Y-%m-%d")
+        / f"{now.strftime('%H-%M-%S')}_site-{label}.log"
+    )
 
 _PID_FILE     = Path(".server.pid")
 _DEFAULT_PORT = 4645
@@ -238,13 +248,22 @@ class ServeMixin:
                 return
 
             if raw == "1":
-                self._site_build_interactive()
+                log = _site_log_path("build-interactive")
+                with _tee_to_log(log):
+                    print(f"  log → {log}\n")
+                    self._site_build_interactive()
                 _pause()
             elif raw == "2":
-                self._site_build_static()
+                log = _site_log_path("build-static")
+                with _tee_to_log(log):
+                    print(f"  log → {log}\n")
+                    self._site_build_static()
                 _pause()
             elif raw == "3":
-                self._site_build_all()
+                log = _site_log_path("build-all")
+                with _tee_to_log(log):
+                    print(f"  log → {log}\n")
+                    self._site_build_all()
                 _pause()
             elif raw == "4":
                 removed = self._site_clean_interactive()
