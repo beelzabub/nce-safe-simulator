@@ -48,7 +48,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["last"], "fields": "/.*/" , "values": false },
         "textMode": "auto"
       }
     },
