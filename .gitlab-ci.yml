@@ -18,7 +18,6 @@ pages:
     - pip3 install -r requirements.txt
   script:
     - python3 NceGitLab.py --report all
-    - quarto render
     - mkdir -p public/data
     - cp data/*.json public/data/
     - python3 build_interactive.py
