@@ -1,11 +1,18 @@
 /* PEO C4I brand — injected into all Marimo WASM pages at export time */
 
-body {
+html {
   background-color: #e6ecf5;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-/* Same hero background as the Quarto static site */
+/* Marimo sets --background: white on :root, then body { background-color: var(--background) }.
+   Clear it so body::before (the hero image) can show through. */
+body {
+  background: none !important;
+  position: relative;  /* anchor z-index: -1 to body, not the root stacking context */
+}
+
+/* Match the Quarto static site hero background exactly */
 body::before {
   content: '';
   position: fixed;
@@ -25,5 +32,5 @@ body::before {
   padding-top: 48px !important;
 }
 
-a { color: #0a2447; }
-a:hover { color: #1a3a6b; }
+a { color: #1a4a8a; }
+a:hover { color: #c8a951; text-decoration: underline; }

@@ -20,20 +20,22 @@
 .pc4i-menu-trigger {
   display: flex; align-items: center; gap: 4px;
   padding: 0 12px; cursor: default;
-  color: #dce6f5; font-size: 13px; white-space: nowrap; user-select: none;
+  color: #b8ccdf; font-size: 13px; font-weight: 500;
+  white-space: nowrap; user-select: none;
+  transition: color 0.15s;
 }
 .pc4i-menu-trigger::after { content: " \25be"; font-size: 10px; opacity: .7; }
 .pc4i-menu:hover .pc4i-menu-trigger { color: #c8a951; }
 .pc4i-dropdown {
   display: none; position: absolute; top: 100%; left: 0;
   min-width: 230px; background: #0f2e5a;
-  border: 1px solid rgba(200,169,81,.25); border-top: none;
+  border: 1px solid #c8a951; border-radius: 4px;
   z-index: 10001; box-shadow: 0 6px 16px rgba(0,0,0,.5);
 }
 .pc4i-menu:hover .pc4i-dropdown { display: block; }
 .pc4i-dropdown a {
   display: block; padding: 8px 16px;
-  color: #dce6f5; text-decoration: none; font-size: 13px; white-space: nowrap;
+  color: #b8ccdf; text-decoration: none; font-size: 0.88rem; white-space: nowrap;
 }
 .pc4i-dropdown a:hover { background: #1a3a6b; color: #c8a951; }
 #pc4i-toggle {
