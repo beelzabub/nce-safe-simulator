@@ -35,8 +35,6 @@ pages:
     - apt-get update -qq && apt-get install -y python3-pip -qq
     - pip3 install -r requirements.txt
   script:
-    # Diagnose token availability
-    - python3 -c "import json,os; cfg=json.load(open('config.json')); tok=os.getenv('ACCESS_TOKEN') or cfg.get('private_token',''); print('token prefix:', tok[:12], '| len:', len(tok))"
     # Generate all report data
     - python3 NceGitLab.py --report all
     # Render static Quarto pages first (quarto render wipes public/)
@@ -50,7 +48,4 @@ pages:
     paths:
       - public/
     expire_in: 7 days
-  variables:
-    ACCESS_TOKEN: $ACCESS_TOKEN
-    GROUP_NAME: $GROUP_NAME
   when: manual
