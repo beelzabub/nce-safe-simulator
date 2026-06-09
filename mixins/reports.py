@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import date, datetime
@@ -6925,6 +6926,20 @@ class ReportsMixin:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
+        # Write Quarto/Marimo JSON immediately — _data_* methods depend only on
+        # self._rd_* which is now fully populated, so the build can start while
+        # wiki uploads proceed below.
+        print("Writing Quarto data layer...")
+        self.write_report_json(Path("data"), Path("public/data"))
+
+        # Launch Quarto + Marimo in a background thread so they run in parallel
+        # with the wiki uploads.
+        build_thread = None
+        if len(reports) == len(REPORTS):
+            build_thread = threading.Thread(target=self._build_site, name="site-build", daemon=True)
+            build_thread.start()
+            print("\n  [site] build started in background\n")
+
         total  = len(reports)
         phases = []
 
@@ -6946,11 +6961,9 @@ class ReportsMixin:
 
         self._print_timing_table(phases, f"{total} report(s) completed")
 
-        print("Writing Quarto data layer...")
-        self.write_report_json(Path("data"), Path("public/data"))
-
-        if len(reports) == len(REPORTS):
-            self._build_site()
+        if build_thread is not None and build_thread.is_alive():
+            print("\n  [site] waiting for build to finish...")
+            build_thread.join()
 
         # expose aggregate for --all phase summary
         if phases:
