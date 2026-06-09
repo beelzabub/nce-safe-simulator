@@ -53,13 +53,7 @@ HTML(f"""
   <strong>PI Period:</strong> {pi_range} &nbsp;|&nbsp;
   <strong>PI Elapsed:</strong> {pi_elapsed}
 </p>
-<p>
-  <a href="/interactive/health-dashboard/index.html"
-     style="display:inline-block;padding:4px 12px;background:#c8a951;color:#0a2447;
-            border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-    ⚡ Interactive Version
-  </a>
-</p>
+
 """)
 ```
 
