@@ -1,9 +1,7 @@
 import json
 import sys
-import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -6927,28 +6925,13 @@ class ReportsMixin:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
-        # Write Quarto/Marimo JSON immediately — _data_* methods depend only on
-        # self._rd_* which is now fully populated, so the build can start while
-        # wiki uploads proceed below.
         print("Writing Quarto data layer...")
         self.write_report_json(Path("data"), Path("public/data"))
 
-        # Launch Quarto + Marimo in a background thread so they run in parallel
-        # with the wiki uploads.
-        build_thread = threading.Thread(target=self._build_site, name="site-build", daemon=True)
-        build_thread.start()
-        print("\n  [site] build started in background\n")
+        total  = len(reports)
+        phases = []
 
-        # Initialise the wiki cache lock so upload_to_wiki can protect the lazy
-        # cache load against concurrent access from multiple report threads.
-        self._wiki_cache_lock = threading.Lock()
-
-        total        = len(reports)
-        phases       = []
-        phases_lock  = threading.Lock()
-        workers      = getattr(self, 'report_workers', 4)
-
-        def _run_one(report):
+        for report in reports:
             key   = report['key']
             start = datetime.now()
             t0    = time.monotonic()
@@ -6962,20 +6945,12 @@ class ReportsMixin:
             elapsed = time.monotonic() - t0
             end     = datetime.now()
             self._current_op = None
-            with phases_lock:
-                phases.append((key, start, end, elapsed))
+            phases.append((key, start, end, elapsed))
             print(f"  [{key}] done  {_fmt_duration(elapsed)}")
 
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="report") as pool:
-            list(pool.map(_run_one, reports))
-
-        # Sort phases by start time so the timing table reads chronologically.
-        phases.sort(key=lambda p: p[1])
         self._print_timing_table(phases, f"{total} report(s) completed")
 
-        if build_thread.is_alive():
-            print("\n  [site] waiting for build to finish...")
-            build_thread.join()
+        self._build_site()
 
         # expose aggregate for --all phase summary
         if phases:
