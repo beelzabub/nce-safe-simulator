@@ -43,6 +43,20 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    mo.Html("""
+    <p>
+      <a href="/quarto/health-dashboard.html"
+         style="display:inline-block;padding:4px 12px;background:#0a2447;color:#fff;
+                border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
+        📊 Static Version
+      </a>
+    </p>
+    """)
+    return
+
+
+@app.cell
 def _(d, group, mo, pi):
     pi_label   = pi["current"] or "—"
     pi_elapsed = f"{pi['pct_elapsed']}% elapsed" if pi["pct_elapsed"] else "Not started"
@@ -103,6 +117,54 @@ def _(vs_rows, mo):
     )
     mo.vstack([mo.md("## Value Stream Status"), vs_selector])
     return (vs_names, vs_selector)
+
+
+@app.cell
+def _(vs_rows, vs_selector, mo):
+    _selected = set(vs_selector.value)
+    _filtered_vs = [r for r in vs_rows if r["vs"]["name"] in _selected]
+
+    _ICON_COLOR = {
+        "🟢": "#15803d", "✅": "#15803d",
+        "🟡": "#b45309", "⚠️": "#b45309",
+        "🔴": "#dc2626", "❌": "#dc2626",
+    }
+
+    if len(_filtered_vs) == 1:
+        _r = _filtered_vs[0]
+        def _kpi(label, icon, detail):
+            _color = _ICON_COLOR.get(icon, "#374151")
+            return (
+                f"<div style='flex:1;min-width:160px;border:1px solid #e5e7eb;"
+                f"border-radius:6px;padding:10px 14px'>"
+                f"<div style='font-size:11px;color:#6b7280;text-transform:uppercase;"
+                f"letter-spacing:.05em'>{label}</div>"
+                f"<div style='font-size:22px;margin:4px 0'>{icon}</div>"
+                f"<div style='font-size:12px;color:{_color}'>{detail}</div>"
+                f"</div>"
+            )
+        _boxes = (
+            _kpi("Schedule", _r["tl_sched"], _r["sched_detail"]) +
+            _kpi("Capacity", _r["tl_cap"],   _r["cap_detail"])   +
+            _kpi("Risk",     _r["tl_risk"],  _r["risk_detail"])  +
+            _kpi("Blocking", _r["tl_block"], _r["block_detail"]) +
+            _kpi("Epics in PI", _r["overall"], f"{_r['pi_epics']} in PI / {_r['epics_total']} total") +
+            _kpi("Unassigned", "—", str(_r["unassigned"]))
+        )
+        _kpi_section = mo.Html(
+            f"<h4 style='margin-bottom:8px'>{_r['vs']['name']} — KPIs</h4>"
+            f"<div style='display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px'>{_boxes}</div>"
+        )
+    elif len(_filtered_vs) > 1:
+        _kpi_section = mo.Html(
+            "<p style='color:#6b7280;font-size:13px'>"
+            "Select a single Value Stream to see KPI value boxes.</p>"
+        )
+    else:
+        _kpi_section = mo.md("_No Value Streams selected._")
+
+    _kpi_section
+    return
 
 
 @app.cell
