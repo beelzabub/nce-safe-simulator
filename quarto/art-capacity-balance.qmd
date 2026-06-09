@@ -12,6 +12,7 @@ execute:
 import json
 from pathlib import Path
 from IPython.display import HTML, display
+import plotly.graph_objects as go
 
 _candidates = [Path("data/art-capacity-balance.json"), Path("../data/art-capacity-balance.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -24,6 +25,14 @@ if data_file is None:
 d     = json.loads(data_file.read_text())
 group = d["group"]
 arts  = d["arts"]
+
+STATUS_COLORS = {
+    "🔴 Over":     "#ef4444",
+    "🟡 High":     "#f59e0b",
+    "✅ Balanced": "#22c55e",
+    "🔵 Under":    "#3b82f6",
+    "—":           "#9ca3af",
+}
 ```
 
 ```{python}
@@ -36,6 +45,157 @@ HTML(f"""
 Load% = Actual ÷ Planned × 100.</p>
 """)
 ```
+
+## 📊 Planned vs Actual Capacity
+
+Planned (gray) vs Actual (color-coded by Load% status) story points per team per PI.
+Hover for Load%, delta, and full team details.
+
+```{python}
+if not arts:
+    display(HTML("<p><em>No ART capacity data found.</em></p>"))
+else:
+    for art in arts:
+        # Build (pi_label / team_name) rows — PI order is chronological from data layer
+        rows_data = []
+        for pi in art["pis"]:
+            for t in pi["teams"]:
+                delta_str = f"+{t['delta']}" if t['delta'] > 0 else str(t['delta'])
+                rows_data.append({
+                    "label":   f"{pi['piid']}  /  {t['name']}",
+                    "planned": t["planned"],
+                    "actual":  t["actual"],
+                    "color":   STATUS_COLORS.get(t["status"], "#9ca3af"),
+                    "hover": (
+                        f"<b>{t['name']}</b><br>"
+                        f"PI: {pi['piid']}<br>"
+                        f"Planned: {t['planned']} pt<br>"
+                        f"Actual: {t['actual']} pt<br>"
+                        f"Δ: {delta_str} pt<br>"
+                        f"Load%: {t['load_pct']}%<br>"
+                        f"Status: {t['status']}"
+                    ),
+                })
+
+        if not rows_data:
+            continue
+
+        labels  = [r["label"]   for r in rows_data]
+        planned = [r["planned"] for r in rows_data]
+        actual  = [r["actual"]  for r in rows_data]
+        colors  = [r["color"]   for r in rows_data]
+        hovers  = [r["hover"]   for r in rows_data]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            name="Planned",
+            y=labels,
+            x=planned,
+            orientation="h",
+            marker_color="#d1d5db",
+            opacity=0.85,
+            hovertemplate="Planned: %{x} pt<extra></extra>",
+        ))
+        fig.add_trace(go.Bar(
+            name="Actual",
+            y=labels,
+            x=actual,
+            orientation="h",
+            marker=dict(color=colors),
+            opacity=0.9,
+            hovertext=hovers,
+            hoverinfo="text",
+        ))
+
+        fig.update_layout(
+            title=dict(text=f"🔷 {art['vs_name']}  ›  {art['art_name']}", font=dict(size=14)),
+            barmode="group",
+            height=max(320, len(rows_data) * 36 + 100),
+            margin=dict(l=280, r=40, t=60, b=50),
+            xaxis_title="Story Points",
+            yaxis=dict(autorange="reversed"),
+            plot_bgcolor="#f9fafb",
+            paper_bgcolor="white",
+            font=dict(size=12),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        fig.show()
+```
+
+## 📉 Load% by Team
+
+Load% bars color-coded by status. Reference lines: 80% (Under threshold), 100% (plan), 120% (Over threshold).
+
+```{python}
+if not arts:
+    display(HTML("<p><em>No ART capacity data found.</em></p>"))
+else:
+    for art in arts:
+        rows_data = []
+        for pi in art["pis"]:
+            for t in pi["teams"]:
+                delta_str = f"+{t['delta']}" if t['delta'] > 0 else str(t['delta'])
+                rows_data.append({
+                    "label":    f"{pi['piid']}  /  {t['name']}",
+                    "load_pct": t["load_pct"],
+                    "color":    STATUS_COLORS.get(t["status"], "#9ca3af"),
+                    "hover": (
+                        f"<b>{t['name']}</b><br>"
+                        f"PI: {pi['piid']}<br>"
+                        f"Load%: {t['load_pct']}%<br>"
+                        f"Status: {t['status']}<br>"
+                        f"Planned: {t['planned']} pt  ·  Actual: {t['actual']} pt  ·  Δ {delta_str} pt"
+                    ),
+                })
+
+        if not rows_data:
+            continue
+
+        labels   = [r["label"]    for r in rows_data]
+        load_pct = [r["load_pct"] for r in rows_data]
+        colors   = [r["color"]    for r in rows_data]
+        hovers   = [r["hover"]    for r in rows_data]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            y=labels,
+            x=load_pct,
+            orientation="h",
+            marker=dict(color=colors),
+            hovertext=hovers,
+            hoverinfo="text",
+            showlegend=False,
+        ))
+
+        x_max = max(max(load_pct, default=0) * 1.15, 130)
+        for val, label_text, color in [
+            (80,  "80% — Under",  "#3b82f6"),
+            (100, "100% — Plan",  "#6b7280"),
+            (120, "120% — Over",  "#ef4444"),
+        ]:
+            fig.add_vline(
+                x=val, line_dash="dot", line_color=color, line_width=1.5,
+                annotation_text=label_text,
+                annotation_position="top",
+                annotation_font_size=10,
+                annotation_font_color=color,
+            )
+
+        fig.update_layout(
+            title=dict(text=f"🔷 {art['vs_name']}  ›  {art['art_name']}  — Load%", font=dict(size=14)),
+            height=max(320, len(rows_data) * 36 + 100),
+            margin=dict(l=280, r=60, t=70, b=50),
+            xaxis_title="Load%",
+            xaxis=dict(range=[0, x_max]),
+            yaxis=dict(autorange="reversed"),
+            plot_bgcolor="#f9fafb",
+            paper_bgcolor="white",
+            font=dict(size=12),
+        )
+        fig.show()
+```
+
+## Detail Tables
 
 ```{python}
 if not arts:
