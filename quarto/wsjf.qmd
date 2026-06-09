@@ -12,6 +12,7 @@ execute:
 import json
 from pathlib import Path
 from IPython.display import HTML, display
+import plotly.graph_objects as go
 
 _candidates = [Path("data/wsjf.json"), Path("../data/wsjf.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -50,6 +51,117 @@ html += f"<tr><td>Portfolio Backlog (no PI)</td><td>{s['backlog']}</td></tr>"
 html += f"<tr><td>In-flight (PI assigned)</td><td>{s['in_flight']}</td></tr>"
 html += "</tbody></table>"
 HTML(html)
+```
+
+## 🫧 WSJF Bubble Chart
+
+Cost of Delay (x) vs. Job Size (y). Bubble size = WSJF score. Color = type.
+Items in the **top-left** quadrant have high CoD relative to their size — do these first.
+
+```{python}
+scored = [c for c in candidates if c["score"] is not None and c["size"] is not None]
+
+if not scored:
+    display(HTML("<p><em>No fully-scored candidates to plot.</em></p>"))
+else:
+    COLOR_MAP = {"Feature": "#3b82f6", "Capability": "#10b981", "Epic": "#f59e0b"}
+    type_order = ["Feature", "Capability", "Epic"]
+
+    fig = go.Figure()
+    for etype in type_order:
+        pts = [c for c in scored if c["type"] == etype]
+        if not pts:
+            continue
+        cod   = [(c["value"] or 0) + (c["urgency"] or 0) + (c["risk"] or 0) for c in pts]
+        sizes = [c["size"] for c in pts]
+        scores= [c["score"] for c in pts]
+        ranks = [c["rank"]  for c in pts]
+        texts = [
+            (f"<b>#{c['rank']} {c['title']}</b><br>"
+             f"Score: {c['score']}<br>"
+             f"CoD: BV={c['value'] or '—'} | Urgency={c['urgency'] or '—'} | Risk={c['risk'] or '—'}<br>"
+             f"Size: {c['size']}<br>"
+             f"PI: {c['piid'] or 'backlog'}")
+            for c in pts
+        ]
+        # Scale bubble size by score (8–40px range)
+        min_s, max_s = min(scores), max(scores)
+        rng = max_s - min_s or 1
+        bub = [8 + 32 * (s - min_s) / rng for s in scores]
+
+        fig.add_trace(go.Scatter(
+            x=cod, y=sizes,
+            mode="markers+text",
+            name=etype,
+            marker=dict(
+                size=bub,
+                color=COLOR_MAP.get(etype, "#6b7280"),
+                opacity=0.75,
+                line=dict(width=1, color="white"),
+                sizemode="diameter",
+            ),
+            text=[f"#{r}" for r in ranks],
+            textposition="middle center",
+            textfont=dict(color="white", size=10),
+            hovertext=texts,
+            hoverinfo="text",
+        ))
+
+    fig.update_layout(
+        xaxis_title="Cost of Delay  (BV + Urgency + Risk)",
+        yaxis_title="Job Size  (Planned Weight)",
+        legend_title="Type",
+        height=480,
+        margin=dict(l=60, r=30, t=30, b=50),
+        plot_bgcolor="#f9fafb",
+        paper_bgcolor="white",
+        font=dict(size=13),
+        hovermode="closest",
+    )
+    fig.add_annotation(
+        text="← Do first",
+        x=0, y=1, xref="paper", yref="paper",
+        showarrow=False, font=dict(size=11, color="#6b7280"),
+        xanchor="left", yanchor="top",
+    )
+    fig.show()
+```
+
+## 📊 WSJF Score Bar — Top 20
+
+```{python}
+top = sorted([c for c in candidates if c["score"] is not None], key=lambda x: x["rank"])[:20]
+
+if not top:
+    display(HTML("<p><em>No scored candidates.</em></p>"))
+else:
+    COLOR_MAP = {"Feature": "#3b82f6", "Capability": "#10b981", "Epic": "#f59e0b"}
+    labels  = [f"#{c['rank']} {c['title'][:35]}{'…' if len(c['title'])>35 else ''}" for c in top]
+    scores  = [c["score"] for c in top]
+    colors  = [COLOR_MAP.get(c["type"], "#6b7280") for c in top]
+    hovers  = [
+        f"<b>#{c['rank']} {c['title']}</b><br>WSJF: {c['score']}<br>Type: {c['type']}<br>PI: {c['piid'] or 'backlog'}"
+        for c in top
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=scores,
+        y=labels,
+        orientation="h",
+        marker_color=colors,
+        hovertext=hovers,
+        hoverinfo="text",
+    ))
+    fig.update_layout(
+        xaxis_title="WSJF Score",
+        height=max(300, len(top) * 28),
+        margin=dict(l=250, r=30, t=20, b=40),
+        plot_bgcolor="#f9fafb",
+        paper_bgcolor="white",
+        font=dict(size=12),
+        yaxis=dict(autorange="reversed"),
+    )
+    fig.show()
 ```
 
 ## Ranked Board

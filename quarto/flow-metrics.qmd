@@ -12,6 +12,7 @@ execute:
 import json
 from pathlib import Path
 from IPython.display import HTML, display
+import plotly.graph_objects as go
 
 _candidates = [Path("data/flow-metrics.json"), Path("../data/flow-metrics.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
@@ -42,11 +43,48 @@ Features and Capabilities closed per PI. Consistent delivery of committed items 
 
 ```{python}
 rows = d["velocity"]
-if not any(r["total"] > 0 for r in rows):
+has_data = any(r["total"] > 0 for r in rows)
+
+if not has_data:
     display(HTML(
         "<p><em>No closed epics found — velocity will populate as PIs complete.</em></p>"
     ))
 else:
+    piids = [r["piid"] for r in rows]
+    feats = [r["features"]     for r in rows]
+    caps  = [r["capabilities"] for r in rows]
+    hover_f = [f"PI: {r['piid']}<br>Features delivered: {r['features']}" for r in rows]
+    hover_c = [f"PI: {r['piid']}<br>Capabilities delivered: {r['capabilities']}" for r in rows]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Features",
+        x=piids, y=feats,
+        marker_color="#3b82f6",
+        hovertext=hover_f, hoverinfo="text",
+    ))
+    fig.add_trace(go.Bar(
+        name="Capabilities",
+        x=piids, y=caps,
+        marker_color="#10b981",
+        hovertext=hover_c, hoverinfo="text",
+    ))
+    fig.update_layout(
+        barmode="stack",
+        xaxis_title="Program Increment",
+        yaxis_title="Items Delivered",
+        height=350,
+        margin=dict(l=50, r=30, t=20, b=60),
+        plot_bgcolor="#f9fafb",
+        paper_bgcolor="white",
+        legend=dict(orientation="h", y=1.08),
+        font=dict(size=13),
+    )
+    fig.show()
+```
+
+```{python}
+if has_data:
     html = (
         '<table class="table table-sm table-bordered">'
         "<thead><tr><th>PI</th><th>Features</th><th>Capabilities</th><th>Total Delivered</th></tr></thead>"
@@ -65,14 +103,52 @@ else:
 Open epics by PI. High WIP signals overloaded PIs and increases the risk of context-switching and delayed delivery.
 
 ```{python}
-rows    = d["load"]
-no_pi   = d["load_no_pi"]
+load_rows = d["load"]
+no_pi     = d["load_no_pi"]
+
+piids_l = [r["piid"] for r in load_rows]
+feats_l = [r["features"]     for r in load_rows]
+caps_l  = [r["capabilities"] for r in load_rows]
+epics_l = [r["epics"]        for r in load_rows]
+
+if no_pi:
+    piids_l.append("(no PI)")
+    feats_l.append(no_pi["features"])
+    caps_l.append(no_pi["capabilities"])
+    epics_l.append(no_pi["epics"])
+
+hover_f2 = [f"PI: {p}<br>Open Features: {f}" for p, f in zip(piids_l, feats_l)]
+hover_c2 = [f"PI: {p}<br>Open Capabilities: {c}" for p, c in zip(piids_l, caps_l)]
+hover_e2 = [f"PI: {p}<br>Open Portfolio Epics: {e}" for p, e in zip(piids_l, epics_l)]
+
+fig = go.Figure()
+fig.add_trace(go.Bar(name="Features",     x=piids_l, y=feats_l, marker_color="#3b82f6",
+                      hovertext=hover_f2, hoverinfo="text"))
+fig.add_trace(go.Bar(name="Capabilities", x=piids_l, y=caps_l,  marker_color="#10b981",
+                      hovertext=hover_c2, hoverinfo="text"))
+fig.add_trace(go.Bar(name="Epics",        x=piids_l, y=epics_l, marker_color="#f59e0b",
+                      hovertext=hover_e2, hoverinfo="text"))
+fig.update_layout(
+    barmode="stack",
+    xaxis_title="Program Increment",
+    yaxis_title="Open Items (WIP)",
+    height=350,
+    margin=dict(l=50, r=30, t=20, b=60),
+    plot_bgcolor="#f9fafb",
+    paper_bgcolor="white",
+    legend=dict(orientation="h", y=1.08),
+    font=dict(size=13),
+)
+fig.show()
+```
+
+```{python}
 html = (
     '<table class="table table-sm table-bordered">'
     "<thead><tr><th>PI</th><th>Features</th><th>Capabilities</th><th>Epics</th><th>Total</th><th>Planned Weight</th></tr></thead>"
     "<tbody>"
 )
-for r in rows:
+for r in load_rows:
     html += (
         f'<tr><td><code>{r["piid"]}</code></td>'
         f'<td>{r["features"]}</td><td>{r["capabilities"]}</td>'
@@ -95,6 +171,34 @@ display(HTML(html))
 ## 🔀 Flow Distribution — Work Type Mix
 
 ### By SAFe Hierarchy Level
+
+```{python}
+types  = [r["type"]  for r in dist["by_type"]]
+counts = [r["count"] for r in dist["by_type"]]
+colors = {"Feature": "#3b82f6", "Capability": "#10b981", "Epic": "#f59e0b"}
+hovers = [
+    f"{r['type']}<br>Count: {r['count']}<br>% Items: {r['pct_items']}<br>Planned Wt: {r['planned_weight']:,}<br>% Weight: {r['pct_weight']}"
+    for r in dist["by_type"]
+]
+
+fig = go.Figure(go.Pie(
+    labels=types,
+    values=counts,
+    hole=0.45,
+    marker_colors=[colors.get(t, "#6b7280") for t in types],
+    hovertext=hovers,
+    hoverinfo="text+percent",
+    textinfo="label+value",
+))
+fig.update_layout(
+    height=320,
+    margin=dict(l=20, r=20, t=20, b=20),
+    paper_bgcolor="white",
+    showlegend=True,
+    font=dict(size=13),
+)
+fig.show()
+```
 
 ```{python}
 html = (
@@ -138,6 +242,44 @@ if not dist["has_work_type_labels"]:
         "</tbody></table>"
     ))
 else:
+    wt_labels  = [r["label"] for r in dist["by_work_type"]]
+    wt_counts  = [r["count"] for r in dist["by_work_type"]]
+    wt_targets = {"type::feature": 50, "type::enabler": 30, "type::infrastructure": 20, "type::defect": 0}
+    wt_hovers  = [
+        f"{r['label']}<br>Count: {r['count']}<br>% Labelled: {r['pct_labelled']}<br>SAFe Target: {r['safe_target']}"
+        for r in dist["by_work_type"]
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Actual",
+        x=wt_labels, y=wt_counts,
+        marker_color="#3b82f6",
+        hovertext=wt_hovers, hoverinfo="text",
+    ))
+    # SAFe target reference — use total labelled items as denominator
+    total_lab = sum(wt_counts)
+    if total_lab > 0:
+        target_vals = [round(wt_targets.get(l, 0) / 100 * total_lab) for l in wt_labels]
+        fig.add_trace(go.Scatter(
+            name="SAFe Target",
+            x=wt_labels, y=target_vals,
+            mode="markers",
+            marker=dict(symbol="line-ew", size=20, color="#ef4444",
+                        line=dict(width=3, color="#ef4444")),
+            hoverinfo="skip",
+        ))
+    fig.update_layout(
+        yaxis_title="Items",
+        height=320,
+        margin=dict(l=50, r=30, t=20, b=80),
+        plot_bgcolor="#f9fafb",
+        paper_bgcolor="white",
+        legend=dict(orientation="h", y=1.08),
+        font=dict(size=13),
+    )
+    fig.show()
+
     html = (
         '<table class="table table-sm table-bordered">'
         "<thead><tr><th>Work Type</th><th>Count</th><th>% of Labelled</th><th>SAFe Target</th></tr></thead>"
@@ -205,16 +347,53 @@ else:
 Percentage of PI objectives met as committed. SAFe guidance: 80–100% is the healthy range. Consistently at 100% may indicate sandbagging.
 
 ```{python}
-rows = d["predictability"]
-if not rows:
+pred_rows = d["predictability"]
+
+if not pred_rows:
     display(HTML("<p><em>No PI-committed Features or Capabilities found.</em></p>"))
 else:
+    piids_p  = [r["piid"] for r in pred_rows]
+    pcts     = [r["pct"]  for r in pred_rows]
+    bar_colors = [
+        "#22c55e" if p >= 80 else ("#f59e0b" if p >= 60 else "#ef4444")
+        for p in pcts
+    ]
+    hovers_p = [
+        f"PI: {r['piid']}<br>Committed: {r['committed']}<br>Delivered: {r['delivered']}<br>Predictability: {r['pct']}%"
+        for r in pred_rows
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=piids_p, y=pcts,
+        marker_color=bar_colors,
+        hovertext=hovers_p, hoverinfo="text",
+        name="Predictability %",
+    ))
+    # SAFe healthy range: 80% lower bound
+    fig.add_hline(y=80, line_dash="dash", line_color="#22c55e",
+                  annotation_text="80% target", annotation_position="top right")
+    fig.add_hline(y=60, line_dash="dot", line_color="#f59e0b",
+                  annotation_text="60% floor", annotation_position="bottom right")
+    fig.update_layout(
+        xaxis_title="Program Increment",
+        yaxis_title="Predictability %",
+        yaxis_range=[0, 110],
+        height=350,
+        margin=dict(l=50, r=30, t=20, b=60),
+        plot_bgcolor="#f9fafb",
+        paper_bgcolor="white",
+        showlegend=False,
+        font=dict(size=13),
+    )
+    fig.show()
+
     html = (
         '<table class="table table-sm table-bordered">'
         "<thead><tr><th>PI</th><th>Committed</th><th>Delivered</th><th>Predictability</th></tr></thead>"
         "<tbody>"
     )
-    for r in rows:
+    for r in pred_rows:
         html += (
             f'<tr><td><code>{r["piid"]}</code></td>'
             f'<td>{r["committed"]}</td><td>{r["delivered"]}</td>'
