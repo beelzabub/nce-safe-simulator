@@ -32,15 +32,7 @@ HTML(f"""
 <p>
   <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
   <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
-</p>
-<p>
-  <a href="/interactive/portfolio/index.html"
-     style="display:inline-block;padding:4px 12px;background:#c8a951;color:#0a2447;
-            border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-    ⚡ Interactive Version
-  </a>
-</p>
-""")
+</p>""")
 ```
 
 ## Portfolio Summary
