@@ -38,12 +38,8 @@ pages:
     # Copy data to public/ so WASM notebooks can fetch it at runtime
     - mkdir -p public/data
     - cp data/*.json public/data/
-    # Export Marimo WASM notebooks (CDN-hosted Pyodide — see issue #47 for self-hosting investigation)
-    - mkdir -p public/interactive
-    - |
-      for notebook in health-dashboard pi-predictability flow-metrics art-capacity-balance piid-project piid-project-detail workload art-feature-status vs-capability-dashboard team-backlog portfolio; do
-        marimo export html-wasm marimo/${notebook}.py -o public/interactive/${notebook}/ -f
-      done
+    # Export Marimo WASM notebooks with shared asset directory
+    - python build_interactive.py
     # Render static Quarto pages (fallback)
     - quarto render
   artifacts:

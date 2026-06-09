@@ -1,0 +1,15 @@
+/* PEO C4I brand — injected into all Marimo WASM pages at export time */
+
+body {
+  background-color: #e8edf4;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Push notebook content below the fixed nav bar */
+#root {
+  padding-top: 44px !important;
+}
+
+/* Brand colours for notebook-internal elements */
+a { color: #0a2447; }
+a:hover { color: #1a3a6b; }

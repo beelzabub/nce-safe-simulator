@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.17.6"
-app = marimo.App(width="full")
+app = marimo.App(width="full", css_file="assets/peo-c4i.css", html_head_file="assets/peo-c4i-head.html")
 
 
 @app.cell
