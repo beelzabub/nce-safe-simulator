@@ -253,7 +253,7 @@
       "gridPos": { "x": 0, "y": 4, "w": 8, "h": 8 },
       "options": {
         "mode": "markdown",
-        "content": "## Executive\n\n---\n\n### [Portfolio Health](/d/nce-safe-portfolio-health)\nValue stream health traffic lights, at-risk epics, and top blocked items.\n\n&nbsp;\n\n### [WSJF Priority Board](/d/nce-safe-wsjf)\nWeighted Shortest Job First scoring — ranked candidates and full scoring table.\n\n&nbsp;\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered."
+        "content": "## Executive\n\n---\n\n### [Portfolio Health](/d/nce-safe-portfolio-health)\nValue stream health traffic lights, at-risk epics, and top blocked items.\n\n&nbsp;\n\n### [WSJF Priority Board](/d/nce-safe-wsjf)\nWeighted Shortest Job First scoring — ranked candidates and full scoring table.\n\n&nbsp;\n\n### [Risk Register](/d/nce-safe-risk-register)\nROAM risk distribution and behind-schedule items.\n\n&nbsp;\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
@@ -264,7 +264,7 @@
       "gridPos": { "x": 8, "y": 4, "w": 8, "h": 8 },
       "options": {
         "mode": "markdown",
-        "content": "## Program\n\n---\n\n### [Team Backlogs](/d/nce-safe-team-backlog)\nPer-team % done, open/closed issue counts, and backlog summary.\n\n&nbsp;\n\n### [Epic Lifecycle & Risk](/d/nce-safe-epic-risk)\nEpic count and age by lifecycle state, ROAM risk distribution, behind-schedule items."
+        "content": "## Program\n\n---\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered.\n\n&nbsp;\n\n### [Team Backlogs](/d/nce-safe-team-backlog)\nPer-team % done, open/closed issue counts, and backlog summary.\n\n&nbsp;\n\n### [Epic Lifecycle](/d/nce-safe-epic-lifecycle)\nEpic count and age by lifecycle state."
       },
       "fieldConfig": { "defaults": {}, "overrides": [] }
     },
