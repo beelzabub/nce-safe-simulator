@@ -30,7 +30,8 @@ def _(mo):
         d = json.loads(_data_file.read_text())
     else:
         import urllib.request
-        d = json.loads(urllib.request.urlopen("../data/health-dashboard.json").read())
+        # Absolute path — resolves against origin regardless of worker script location.
+        d = json.loads(urllib.request.urlopen("/data/health-dashboard.json").read())
 
     group   = d["group"]
     pi      = d["pi"]
