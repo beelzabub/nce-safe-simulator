@@ -1,5 +1,7 @@
 import json
+import subprocess
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import date, datetime
@@ -6857,6 +6859,48 @@ class ReportsMixin:
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
         self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
+    def _build_site(self) -> bool:
+        """Run build_interactive.py and quarto render in parallel with prefixed output streaming."""
+        print("\n--- Site Build ---\n")
+        t0 = time.monotonic()
+
+        marimo_proc = subprocess.Popen(
+            [sys.executable, "build_interactive.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        quarto_proc = subprocess.Popen(
+            ["quarto", "render"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        def _stream(proc, label):
+            for line in proc.stdout:
+                print(f"  [{label}] {line}", end="", flush=True)
+
+        t_marimo = threading.Thread(target=_stream, args=(marimo_proc, "marimo"), daemon=True)
+        t_quarto = threading.Thread(target=_stream, args=(quarto_proc, "quarto"), daemon=True)
+        t_marimo.start()
+        t_quarto.start()
+
+        marimo_rc = marimo_proc.wait()
+        quarto_rc = quarto_proc.wait()
+        t_marimo.join()
+        t_quarto.join()
+
+        elapsed = time.monotonic() - t0
+        marimo_ok = marimo_rc == 0
+        quarto_ok  = quarto_rc == 0
+        print(f"\n  [marimo] {'OK' if marimo_ok else f'FAILED (exit {marimo_rc})'}")
+        print(f"  [quarto] {'OK' if quarto_ok  else f'FAILED (exit {quarto_rc})'}")
+        print(f"  site build total: {_fmt_duration(elapsed)}")
+        return marimo_ok and quarto_ok
+
     def _run_reports(self, reports, reuse_data=None):
         """Execute a list of report entries from the REPORTS registry.
 
@@ -6942,6 +6986,9 @@ class ReportsMixin:
 
         print("Writing Quarto data layer...")
         self.write_report_json(Path("data"), Path("public/data"))
+
+        if len(reports) == len(REPORTS):
+            self._build_site()
 
         # expose aggregate for --all phase summary
         if phases:
