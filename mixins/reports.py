@@ -6857,6 +6857,12 @@ class ReportsMixin:
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
         self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
+    def _build_site(self) -> bool:
+        """Run the full site build (delegates to ServeMixin._site_build_all)."""
+        print("\n--- Site Build ---")
+        marimo_ok, quarto_ok = self._site_build_all()
+        return marimo_ok and quarto_ok
+
     def _run_reports(self, reports, reuse_data=None):
         """Execute a list of report entries from the REPORTS registry.
 
@@ -6919,29 +6925,32 @@ class ReportsMixin:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
+        print("Writing Quarto data layer...")
+        self.write_report_json(Path("data"), Path("public/data"))
+
         total  = len(reports)
         phases = []
 
-        for i, report in enumerate(reports, 1):
-            print(f"[{i}/{total}] {report['description']}")
-            self._current_op = f"report: {report['key']}"
+        for report in reports:
+            key   = report['key']
             start = datetime.now()
             t0    = time.monotonic()
+            print(f"  [{key}] starting")
+            self._current_op = f"report: {key}"
             try:
                 method = getattr(self, report["method"])
                 method(group) if report["needs_group"] else method()
-            except Exception as e:
-                print(f"  ERROR running '{report['key']}': {e}")
+            except Exception as exc:
+                print(f"  [{key}] ERROR: {exc}")
             elapsed = time.monotonic() - t0
             end     = datetime.now()
             self._current_op = None
-            phases.append((report["key"], start, end, elapsed))
-            print(f"  ↳ {start.strftime('%H:%M:%S')} → {end.strftime('%H:%M:%S')}  {_fmt_duration(elapsed)}\n")
+            phases.append((key, start, end, elapsed))
+            print(f"  [{key}] done  {_fmt_duration(elapsed)}")
 
         self._print_timing_table(phases, f"{total} report(s) completed")
 
-        print("Writing Quarto data layer...")
-        self.write_report_json(Path("data"), Path("public/data"))
+        self._build_site()
 
         # expose aggregate for --all phase summary
         if phases:

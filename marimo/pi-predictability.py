@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.17.6"
-app = marimo.App(width="full")
+app = marimo.App(width="full", css_file="assets/peo-c4i.css", html_head_file="assets/peo-c4i-head.html")
 
 
 @app.cell
@@ -32,20 +32,6 @@ def _(mo):
     rows  = d["rows"]
     port  = d["portfolio_row"]
     return (Path, d, group, json, mo, pis, port, rows)
-
-
-@app.cell
-def _(mo):
-    mo.Html("""
-    <p>
-      <a href="/quarto/pi-predictability.html"
-         style="display:inline-block;padding:4px 12px;background:#0a2447;color:#fff;
-                border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-        📊 Static Version
-      </a>
-    </p>
-    """)
-    return
 
 
 @app.cell

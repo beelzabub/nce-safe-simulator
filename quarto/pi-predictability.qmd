@@ -37,15 +37,7 @@ HTML(f"""
 </p>
 <p>Percentage of committed Features and Capabilities delivered in each PI.
 Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a
-systemic problem.</p>
-<p>
-  <a href="/interactive/pi-predictability/index.html"
-     style="display:inline-block;padding:4px 12px;background:#c8a951;color:#0a2447;
-            border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-    ⚡ Interactive Version
-  </a>
-</p>
-""")
+systemic problem.</p>""")
 ```
 
 ## 🗺️ Predictability Heatmap

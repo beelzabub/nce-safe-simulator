@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.17.6"
-app = marimo.App(width="full")
+app = marimo.App(width="full", css_file="assets/peo-c4i.css", html_head_file="assets/peo-c4i-head.html")
 
 
 @app.cell
@@ -40,20 +40,6 @@ def _(mo):
     blocked = d["top_blocked"]
     at_risk = d["at_risk_epics"]
     return (at_risk, blocked, d, group, json, mo, pi, port, vs_rows)
-
-
-@app.cell
-def _(mo):
-    mo.Html("""
-    <p>
-      <a href="/quarto/health-dashboard.html"
-         style="display:inline-block;padding:4px 12px;background:#0a2447;color:#fff;
-                border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
-        📊 Static Version
-      </a>
-    </p>
-    """)
-    return
 
 
 @app.cell
