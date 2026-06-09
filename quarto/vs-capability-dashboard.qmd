@@ -32,6 +32,13 @@ HTML(f"""
   <li><strong>🧩 Capabilities</strong> — cross-ART/VS deliverables that may span multiple ARTs</li>
   <li><strong>🛠️ Direct Features</strong> — Features parented directly to an Epic (no Capability wrapper), owned by a single ART</li>
 </ul>
+<p>
+  <a href="/interactive/vs-capability-dashboard/index.html"
+     style="display:inline-block;padding:4px 12px;background:#c8a951;color:#0a2447;
+            border-radius:4px;font-weight:600;text-decoration:none;font-size:13px">
+    ⚡ Interactive Version
+  </a>
+</p>
 """)
 ```
 
