@@ -124,9 +124,9 @@ def _(value_streams, vs_selector, art_selector, pi_selector, mo):
                             f"</tr>"
                         )
                 if _tbody:
-                    _art_link = f'<a href="{_art["art_url"]}" target="_blank" style="color:#fff">{_art["art_name"]}</a>'
+                    _art_href = f'<a href="{_art["art_url"]}" target="_blank" style="font-size:12px;margin-left:8px">&#8599;</a>' if _art.get("art_url") else ""
                     _sections += f"""
-                    <h4 style="margin-top:20px">{_vs['vs_name']} — {_art_link}</h4>
+                    <h4 style="margin-top:20px;color:#0a2447">{_vs['vs_name']} — {_art['art_name']}{_art_href}</h4>
                     <table style="border-collapse:collapse;font-size:13px;width:100%;margin-bottom:12px">
                       <thead><tr>
                         <th style="{_th}">Feature</th>

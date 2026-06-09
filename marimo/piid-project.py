@@ -97,7 +97,7 @@ def _(cells, piid_labels, piid_meta, pi_selector, proj_selector, mo):
             _row_cells = ""
             for _piid in _sel_pis:
                 _key  = f"{_proj}|{_piid}"
-                _cell = cells.get(_key, {})
+                _cell = cells.get(_key) or {}
                 _stat = _cell.get("status", "—")
                 _tot  = _cell.get("total", 0)
                 _detail = f"{_cell.get('avg_pct','—')}% done" if _tot else "—"
