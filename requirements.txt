@@ -3,6 +3,7 @@ pandas
 python-dateutil
 requests
 lorem
+plotly
 
 pytest
 pytest-mock
