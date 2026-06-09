@@ -6772,10 +6772,11 @@ class ReportsMixin:
             "value_streams": value_streams,
         }
 
-    def write_report_json(self, data_dir):
-        """Write all Quarto data-layer JSON files to data_dir."""
-        data_dir = Path(data_dir)
-        data_dir.mkdir(parents=True, exist_ok=True)
+    def write_report_json(self, *data_dirs):
+        """Write all Quarto/Marimo data-layer JSON files to one or more directories."""
+        dirs = [Path(d) for d in data_dirs]
+        for d in dirs:
+            d.mkdir(parents=True, exist_ok=True)
         for key, fn in (
             ("health-dashboard",         self._data_portfolio_health),
             ("orphan-epics",             self._data_orphan_epics),
@@ -6797,9 +6798,11 @@ class ReportsMixin:
             ("team-backlog",             self._data_team_backlog),
             ("vs-capability-dashboard",  self._data_vs_capability_dashboard),
         ):
-            out = data_dir / f"{key}.json"
-            out.write_text(json.dumps(fn(), indent=2, default=str), encoding="utf-8")
-            print(f"  → {out}")
+            payload = json.dumps(fn(), indent=2, default=str)
+            for d in dirs:
+                out = d / f"{key}.json"
+                out.write_text(payload, encoding="utf-8")
+                print(f"  → {out}")
 
     def _load_report_data(self, data_dir):
         """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
@@ -6938,7 +6941,7 @@ class ReportsMixin:
         self._print_timing_table(phases, f"{total} report(s) completed")
 
         print("Writing Quarto data layer...")
-        self.write_report_json(Path("data"))
+        self.write_report_json(Path("data"), Path("public/data"))
 
         # expose aggregate for --all phase summary
         if phases:
