@@ -37,12 +37,22 @@ class WikiMixin:
             cache = getattr(self, '_wiki_page_cache', None)
             page  = None
             if cache is not None:
-                gid = group.id
+                gid   = group.id
+                _lock = getattr(self, '_wiki_cache_lock', None)
                 if gid not in cache:
+                    # Fetch outside the lock — API call can take seconds.
                     try:
-                        cache[gid] = {p.slug: p for p in group.wikis.list(all=True)}
+                        loaded = {p.slug: p for p in group.wikis.list(all=True)}
                     except Exception:
-                        cache[gid] = {}
+                        loaded = {}
+                    # Double-checked: only write if another thread hasn't already.
+                    if _lock:
+                        with _lock:
+                            if gid not in cache:
+                                cache[gid] = loaded
+                    else:
+                        if gid not in cache:
+                            cache[gid] = loaded
                 page = cache[gid].get(page_slug)
 
             if page is not None:

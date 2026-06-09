@@ -1,0 +1,46 @@
+/* PEO C4I brand — injected into all Marimo WASM pages at export time */
+
+:root {
+  /* Match Quarto/Bootstrap font stack */
+  --marimo-text-font: "Segoe UI", system-ui, sans-serif;
+  --marimo-heading-font: "Segoe UI", system-ui, sans-serif;
+  /* Semi-transparent backgrounds so hero image shows through, matching Quarto content column */
+  --background: rgba(255, 255, 255, 0.65) !important;
+  --card: rgba(255, 255, 255, 0.82) !important;
+}
+
+html {
+  background-color: #e6ecf5;
+  font-size: 16px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+/* Marimo sets body { background-color: var(--background) }.
+   Clear it so body::before (the hero image) can show through the children's rgba backgrounds. */
+body {
+  background: none !important;
+  position: relative;  /* anchor z-index: -1 to body, not the root stacking context */
+}
+
+/* Match the Quarto static site hero background exactly */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url('/site_libs/bootstrap/assets/hero-carrier.png');
+  background-size: cover;
+  background-position: center 35%;
+  background-attachment: fixed;
+  opacity: 0.07;
+  z-index: -1;
+  pointer-events: none;
+  filter: grayscale(60%) contrast(1.1);
+}
+
+/* Push notebook content below the fixed nav bar */
+#root {
+  padding-top: 56px !important;
+}
+
+a { color: #1a4a8a; }
+a:hover { color: #c8a951; text-decoration: underline; }

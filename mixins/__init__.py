@@ -10,6 +10,7 @@ from .reports import ReportsMixin
 from .bootstrap import BootstrapMixin
 from .tools import ToolsMixin
 from .importexport import ImportExportMixin
+from .serve import ServeMixin
 
 __all__ = [
     "UtilitiesMixin",
@@ -24,4 +25,5 @@ __all__ = [
     "BootstrapMixin",
     "ToolsMixin",
     "ImportExportMixin",
+    "ServeMixin",
 ]
