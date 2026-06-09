@@ -41,7 +41,7 @@ pages:
     # Export Marimo WASM notebooks (CDN-hosted Pyodide — see issue #47 for self-hosting investigation)
     - mkdir -p public/interactive
     - |
-      for notebook in health-dashboard pi-predictability flow-metrics art-capacity-balance; do
+      for notebook in health-dashboard pi-predictability flow-metrics art-capacity-balance piid-project piid-project-detail workload art-feature-status vs-capability-dashboard team-backlog portfolio; do
         marimo export html-wasm marimo/${notebook}.py -o public/interactive/${notebook}/ -f
       done
     # Render static Quarto pages (fallback)
