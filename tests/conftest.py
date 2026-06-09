@@ -160,7 +160,16 @@ class ReportsHarness(ReportsMixin):
         return getattr(self, "_mock_pct_pi", None)
 
     def _pi_dates_from_label(self, piid):
-        return None, None
+        import re
+        if not piid:
+            return None, None
+        m = re.match(r'PIID::(\d{4})Q([1-4])$', piid)
+        if not m:
+            return None, None
+        year, q = int(m.group(1)), int(m.group(2))
+        q_starts = {1: (1, 1),  2: (4, 1),  3: (7, 1),  4: (10, 1)}
+        q_ends   = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+        return date(year, *q_starts[q]), date(year, *q_ends[q])
 
 
 @pytest.fixture
