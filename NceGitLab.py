@@ -20,6 +20,7 @@ from mixins import (
     MilestonesMixin,
     ProjectsMixin,
     ReportsMixin,
+    ServeMixin,
     ToolsMixin,
     UtilitiesMixin,
     WikiMixin,
@@ -40,6 +41,7 @@ class NceGitLab(
     BootstrapMixin,
     ToolsMixin,
     ImportExportMixin,
+    ServeMixin,
 ):
     def __init__(self, config_file="config.json"):
         self.config_file = Path(config_file)
@@ -165,6 +167,9 @@ class NceGitLab(
         _rr = _td.get("roam_risk_relations", {})
         self.default_roam_risk_relations_min   = _rr.get("min", 1)
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
+
+        _sd = config.get("defaults", {}).get("serve", {})
+        self.serve_port = _sd.get("port", 4645)
 
         members_file = self.config_file.parent / "team_members.json"
         if members_file.exists():
@@ -334,16 +339,21 @@ def _run_main_menu(gl):
             if last_tool:
                 key, ts = last_tool
                 print(f"  Last tool   : {key}  ({ts})")
+        srv_running, _ = gl._serve_status()
+        srv_port       = gl._serve_port()
+        srv_label      = f"RUNNING  (port {srv_port})" if srv_running else "stopped"
+        print(f"  Server      : {srv_label}")
         print()
         print("  [1] Reports      Generate wiki reports")
         print("  [2] Utilities    Data management tools")
         print("  [3] Scaffold     Create SAFe group/project structure")
         print("  [4] Create       Populate group with lorem SAFe data")
         print("  [5] Clean        Delete all group data")
+        print("  [6] Serve        Start / stop the site preview server")
         print("  [q] quit")
         print()
 
-        raw = input("Select [1-5] or q: ").strip().lower()
+        raw = input("Select [1-6] or q: ").strip().lower()
 
         if raw in ("q", "quit", "exit"):
             return
@@ -361,8 +371,10 @@ def _run_main_menu(gl):
         elif raw == "5":
             _confirm_clean(gl)
             _pause()
+        elif raw == "6":
+            gl.run_serve_menu()
         else:
-            print("  Please enter a number between 1 and 5.")
+            print("  Please enter a number between 1 and 6.")
 
 
 def _last_data_dir():
