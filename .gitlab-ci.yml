@@ -40,7 +40,10 @@ pages:
     - cp data/*.json public/data/
     # Export Marimo WASM notebooks (CDN-hosted Pyodide — see issue #47 for self-hosting investigation)
     - mkdir -p public/interactive
-    - marimo export html-wasm marimo/health-dashboard.py -o public/interactive/health-dashboard/ -f
+    - |
+      for notebook in health-dashboard pi-predictability flow-metrics art-capacity-balance; do
+        marimo export html-wasm marimo/${notebook}.py -o public/interactive/${notebook}/ -f
+      done
     # Render static Quarto pages (fallback)
     - quarto render
   artifacts:
