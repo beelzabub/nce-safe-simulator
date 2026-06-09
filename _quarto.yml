@@ -77,6 +77,20 @@ website:
             text: "Flow Metrics (Live)"
           - href: interactive/art-capacity-balance/index.html
             text: "ART Capacity Balance (Live)"
+          - href: interactive/piid-project/index.html
+            text: "Program × PI Matrix (Live)"
+          - href: interactive/piid-project-detail/index.html
+            text: "Program PI Detail (Live)"
+          - href: interactive/workload/index.html
+            text: "ART-Team Workload (Live)"
+          - href: interactive/art-feature-status/index.html
+            text: "ART Feature Status (Live)"
+          - href: interactive/vs-capability-dashboard/index.html
+            text: "VS Capability Dashboard (Live)"
+          - href: interactive/team-backlog/index.html
+            text: "Team Backlogs (Live)"
+          - href: interactive/portfolio/index.html
+            text: "SAFe Portfolio (Live)"
       - text: "Data Quality"
         menu:
           - href: quarto/unassigned-pi.qmd
