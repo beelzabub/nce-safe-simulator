@@ -71,6 +71,12 @@ website:
         menu:
           - href: interactive/health-dashboard/index.html
             text: "Portfolio Health (Live)"
+          - href: interactive/pi-predictability/index.html
+            text: "PI Predictability (Live)"
+          - href: interactive/flow-metrics/index.html
+            text: "Flow Metrics (Live)"
+          - href: interactive/art-capacity-balance/index.html
+            text: "ART Capacity Balance (Live)"
       - text: "Data Quality"
         menu:
           - href: quarto/unassigned-pi.qmd
