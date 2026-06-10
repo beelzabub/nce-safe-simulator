@@ -101,7 +101,11 @@ class NceGitLab(
         self.report_workers  = config.get("report_workers",  4)
 
         _cfg_ssl_verify  = config.get("ssl_verify", True)
-        self.ssl_verify  = ssl_verify if ssl_verify is not None else _cfg_ssl_verify
+        _env_ssl_verify  = os.getenv("SSL_VERIFY")
+        if _env_ssl_verify is not None:
+            _env_ssl_verify = _env_ssl_verify.strip().lower() not in ("false", "0", "no")
+        self.ssl_verify  = ssl_verify if ssl_verify is not None else (
+                           _env_ssl_verify if _env_ssl_verify is not None else _cfg_ssl_verify)
         if not self.ssl_verify:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -434,8 +438,10 @@ def _parse_formats(raw_list):
         print(f"Unknown --formats value(s): {', '.join(sorted(invalid))}")
         print(f"Valid formats: {', '.join(sorted(_valid))}")
         sys.exit(1)
-    if not tokens or "all" in tokens:
+    if "all" in tokens:
         return set(_all)
+    if not tokens:
+        return {"markdown"}
     return tokens
 
 
@@ -472,7 +478,7 @@ def main():
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("--formats",                 nargs="+", metavar="FORMAT",
                         help="Output formats: all markdown plotly interactive grafana "
-                             "(space or comma-separated, default: all)")
+                             "(space or comma-separated, default: markdown)")
     parser.add_argument("--no-ssl-verify",           action="store_true",
                         help="Disable SSL certificate verification (Aisle 5 / corporate network)")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",

@@ -6874,7 +6874,7 @@ class ReportsMixin:
     def _build_site(self, formats=None) -> bool:
         """Run the site build for the requested output formats."""
         if formats is None:
-            formats = set(ALL_FORMATS)
+            formats = {"markdown"}
         build_plotly      = "plotly"      in formats
         build_interactive = "interactive" in formats
         build_grafana     = "grafana"     in formats
@@ -6930,7 +6930,7 @@ class ReportsMixin:
 
     def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data, formats=None):
         if formats is None:
-            formats = set(ALL_FORMATS)
+            formats = {"markdown"}
         do_markdown   = "markdown" in formats
         do_site_build = "plotly"   in formats or "interactive" in formats
 
