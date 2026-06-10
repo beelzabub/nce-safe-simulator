@@ -61,6 +61,8 @@ def rewrite_html(nb: str) -> None:
     html_file = OUT / nb / "index.html"
     content = html_file.read_text(encoding="utf-8")
     content = re.sub(r'="\.\/assets\/', f'="{ASSET_URL}/', content)
+    # appConfig JSON values reference css_file/html_head_file as bare "assets/..."
+    content = re.sub(r'(?<=": ")assets/', ASSET_URL, content)
     html_file.write_text(content, encoding="utf-8")
 
 
