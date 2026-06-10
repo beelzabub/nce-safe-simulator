@@ -425,8 +425,8 @@ def _parse_tool_args(extra):
 
 def _parse_formats(raw_list):
     """Resolve --formats tokens (space and/or comma-separated) to a set of format names."""
-    _valid = {"all", "markdown", "plotly", "interactive", "grafana"}
-    _all   = {"markdown", "plotly", "interactive", "grafana"}
+    _valid = {"all", "markdown", "plotly", "interactive"}
+    _all   = {"markdown", "plotly", "interactive"}
     tokens = set()
     for tok in (raw_list or []):
         for part in tok.split(","):
@@ -477,7 +477,7 @@ def main():
                         help="Reuse the most recently pulled data snapshot (no API fetch)")
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("--formats",                 nargs="+", metavar="FORMAT",
-                        help="Output formats: all markdown plotly interactive grafana "
+                        help="Output formats: all markdown plotly interactive "
                              "(space or comma-separated, default: markdown)")
     parser.add_argument("--no-ssl-verify",           action="store_true",
                         help="Disable SSL certificate verification (Aisle 5 / corporate network)")

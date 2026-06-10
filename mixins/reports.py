@@ -145,7 +145,7 @@ REPORTS = [
     },
 ]
 
-ALL_FORMATS = frozenset({"markdown", "plotly", "interactive", "grafana"})
+ALL_FORMATS = frozenset({"markdown", "plotly", "interactive"})
 
 # Wiki tier prefixes are set as instance attributes in _run_reports:
 #   self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
@@ -6877,9 +6877,8 @@ class ReportsMixin:
             formats = {"markdown"}
         build_plotly      = "plotly"      in formats
         build_interactive = "interactive" in formats
-        build_grafana     = "grafana"     in formats
 
-        if not build_plotly and not build_interactive and not build_grafana:
+        if not build_plotly and not build_interactive:
             return True
 
         print("\n--- Site Build ---")
@@ -6894,9 +6893,6 @@ class ReportsMixin:
             n = self._restore_data_layer()
             print(f"\n  Copied {n} JSON file(s) to public/data/")
             ok = self._site_build_interactive()
-
-        if build_grafana:
-            print("\n  [grafana] no provisioning step configured — skipping.")
 
         return ok
 
