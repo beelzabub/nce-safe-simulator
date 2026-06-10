@@ -20,6 +20,7 @@ html {
 body {
   background: none !important;
   position: relative;  /* anchor z-index: -1 to body, not the root stacking context */
+  padding-top: 64px !important;
 }
 
 /* Match the Quarto static site hero background exactly */
@@ -35,11 +36,6 @@ body::before {
   z-index: -1;
   pointer-events: none;
   filter: grayscale(60%) contrast(1.1);
-}
-
-/* Push notebook content below the fixed nav bar — 64px matches static Quarto nav offset */
-#root {
-  padding-top: 64px !important;
 }
 
 a { color: #1a4a8a; }
