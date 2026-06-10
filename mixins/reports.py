@@ -145,6 +145,8 @@ REPORTS = [
     },
 ]
 
+ALL_FORMATS = frozenset({"markdown", "plotly", "interactive", "grafana"})
+
 # Wiki tier prefixes are set as instance attributes in _run_reports:
 #   self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
 #   self._wiki_t2 = f"{gn} — Portfolio Home/01 Program Management"
@@ -6120,20 +6122,20 @@ class ReportsMixin:
         ]
         self.upload_to_wiki(group, self._wiki_t4, "\n".join(t4_md))
 
-    def generate_all_reports(self):
-        self._run_reports(REPORTS)
+    def generate_all_reports(self, formats=None):
+        self._run_reports(REPORTS, formats=formats)
 
-    def run_reports_menu(self, report_key=None, reuse_data=None):
+    def run_reports_menu(self, report_key=None, reuse_data=None, formats=None):
         """Show the reports selection menu or run a specific report by key."""
         if report_key:
             if report_key == "all":
-                self._run_reports(REPORTS, reuse_data=reuse_data)
+                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats)
                 return
             report = next((r for r in REPORTS if r["key"] == report_key), None)
             if report is None:
                 print(f"Unknown report '{report_key}'. Available: all, " + ", ".join(r['key'] for r in REPORTS))
                 sys.exit(1)
-            self._run_reports([report], reuse_data=reuse_data)
+            self._run_reports([report], reuse_data=reuse_data, formats=formats)
             return
 
         while True:
@@ -6155,7 +6157,7 @@ class ReportsMixin:
                 sys.exit(0)
 
             if not raw:
-                self._run_reports(REPORTS, reuse_data=reuse_data)
+                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats)
                 return True
 
             selected = []
@@ -6178,7 +6180,7 @@ class ReportsMixin:
             if not selected:
                 continue
 
-            self._run_reports(selected, reuse_data=reuse_data)
+            self._run_reports(selected, reuse_data=reuse_data, formats=formats)
             return True
 
     def _fetch_blocking_graph(self, group):
@@ -6869,17 +6871,41 @@ class ReportsMixin:
         self._rd_work_type_labels  = sorted({l for l in label_set if l.startswith("type::")})
         self._rd_lifecycle_labels  = sorted({l for l in label_set if l.startswith("lifecycle::")})
 
-    def _build_site(self) -> bool:
-        """Run the full site build (delegates to ServeMixin._site_build_all)."""
-        print("\n--- Site Build ---")
-        marimo_ok, quarto_ok = self._site_build_all()
-        return marimo_ok and quarto_ok
+    def _build_site(self, formats=None) -> bool:
+        """Run the site build for the requested output formats."""
+        if formats is None:
+            formats = set(ALL_FORMATS)
+        build_plotly      = "plotly"      in formats
+        build_interactive = "interactive" in formats
+        build_grafana     = "grafana"     in formats
 
-    def _run_reports(self, reports, reuse_data=None):
+        if not build_plotly and not build_interactive and not build_grafana:
+            return True
+
+        print("\n--- Site Build ---")
+        ok = True
+
+        if build_plotly and build_interactive:
+            marimo_ok, quarto_ok = self._site_build_all()
+            ok = marimo_ok and quarto_ok
+        elif build_plotly:
+            ok = self._site_build_static()
+        elif build_interactive:
+            n = self._restore_data_layer()
+            print(f"\n  Copied {n} JSON file(s) to public/data/")
+            ok = self._site_build_interactive()
+
+        if build_grafana:
+            print("\n  [grafana] no provisioning step configured — skipping.")
+
+        return ok
+
+    def _run_reports(self, reports, reuse_data=None, formats=None):
         """Execute a list of report entries from the REPORTS registry.
 
         reuse_data: Path to an existing data/ directory whose JSON files
         should be loaded instead of hitting the API again.
+        formats: set of output types to generate — markdown, plotly, interactive, grafana.
         """
         now      = datetime.now()
         run_dir  = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
@@ -6900,9 +6926,14 @@ class ReportsMixin:
 
         with _tee_to_log(log_path):
             print(f"  log → {log_path}\n")
-            self._run_reports_inner(reports, run_dir, data_dir, reuse_data)
+            self._run_reports_inner(reports, run_dir, data_dir, reuse_data, formats)
 
-    def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data):
+    def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data, formats=None):
+        if formats is None:
+            formats = set(ALL_FORMATS)
+        do_markdown   = "markdown" in formats
+        do_site_build = "plotly"   in formats or "interactive" in formats
+
         # Always start with a clean fetch — stale caches from a prior run in
         # the same session would silently re-publish old data to the wiki.
         for _cache_attr in ('_metrics_cache', '_issues_cache', '_all_epics_cache'):
@@ -6922,13 +6953,14 @@ class ReportsMixin:
         # calling wikis.get(slug), which URL-encodes slashes and returns 404 for
         # nested pages that actually exist.  Keyed by group_id so sub-group wikis
         # (e.g. each team's own wiki) are handled correctly via lazy loading.
-        try:
-            existing = group.wikis.list(all=True)
-            self._wiki_page_cache = {group.id: {p.slug: p for p in existing}}
-            print(f"  Loaded {len(existing)} existing wiki page(s) into cache.\n")
-        except Exception as e:
-            print(f"  Warning: could not preload wiki page cache: {e}")
-            self._wiki_page_cache = {}
+        if do_markdown:
+            try:
+                existing = group.wikis.list(all=True)
+                self._wiki_page_cache = {group.id: {p.slug: p for p in existing}}
+                print(f"  Loaded {len(existing)} existing wiki page(s) into cache.\n")
+            except Exception as e:
+                print(f"  Warning: could not preload wiki page cache: {e}")
+                self._wiki_page_cache = {}
 
         if reuse_data is not None:
             print(f"  Reusing data snapshot from: {reuse_data}\n")
@@ -6937,35 +6969,37 @@ class ReportsMixin:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
-        print("Writing Quarto data layer...")
-        self.write_report_json(Path("data"), Path("public/data"))
+        if do_site_build:
+            print("Writing Quarto data layer...")
+            self.write_report_json(Path("data"), Path("public/data"))
 
-        total  = len(reports)
         phases = []
 
-        for report in reports:
-            key   = report['key']
-            start = datetime.now()
-            t0    = time.monotonic()
-            print(f"  [{key}] starting")
-            self._current_op = f"report: {key}"
-            try:
-                method = getattr(self, report["method"])
-                method(group) if report["needs_group"] else method()
-            except Exception as exc:
-                print(f"  [{key}] ERROR: {exc}")
-            elapsed = time.monotonic() - t0
-            end     = datetime.now()
-            self._current_op = None
-            phases.append((key, start, end, elapsed))
-            print(f"  [{key}] done  {_fmt_duration(elapsed)}")
+        if do_markdown:
+            total = len(reports)
+            for report in reports:
+                key   = report['key']
+                start = datetime.now()
+                t0    = time.monotonic()
+                print(f"  [{key}] starting")
+                self._current_op = f"report: {key}"
+                try:
+                    method = getattr(self, report["method"])
+                    method(group) if report["needs_group"] else method()
+                except Exception as exc:
+                    print(f"  [{key}] ERROR: {exc}")
+                elapsed = time.monotonic() - t0
+                end     = datetime.now()
+                self._current_op = None
+                phases.append((key, start, end, elapsed))
+                print(f"  [{key}] done  {_fmt_duration(elapsed)}")
 
-        self._print_timing_table(phases, f"{total} report(s) completed")
+            self._print_timing_table(phases, f"{total} report(s) completed")
 
-        self._build_site()
+        self._build_site(formats=formats)
 
         # expose aggregate for --all phase summary
         if phases:
-            wall = (phases[-1][2] - phases[0][1]).total_seconds()
-            label = f"reports ({total})" if total > 1 else f"report: {phases[0][0]}"
+            wall  = (phases[-1][2] - phases[0][1]).total_seconds()
+            label = f"reports ({len(phases)})" if len(phases) > 1 else f"report: {phases[0][0]}"
             self._last_reports_phase = (label, phases[0][1], phases[-1][2], wall)
