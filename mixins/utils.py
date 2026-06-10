@@ -121,6 +121,7 @@ class UtilitiesMixin:
         """Return a requests.Session pre-configured with auth and the configured timeout."""
         sess = requests.Session()
         sess.headers["PRIVATE-TOKEN"] = self.private_token
+        sess.verify = getattr(self, "ssl_verify", True)
         adapter = _TimeoutAdapter(timeout=getattr(self, "api_timeout", 300))
         sess.mount("https://", adapter)
         sess.mount("http://",  adapter)
@@ -169,6 +170,7 @@ class UtilitiesMixin:
                 "Authorization": f"Bearer {self.private_token}",
                 "Content-Type": "application/json",
             },
+            verify=getattr(self, "ssl_verify", True),
         )
         response.raise_for_status()
         data = response.json()
@@ -414,6 +416,8 @@ class UtilitiesMixin:
         wi_children    = {}
         extra_raw      = {}   # id → REST dict for cross-group children
 
+        _bulk_timeout = (15, 60)   # (connect, read) for sequential per-epic requests
+
         total = len(epics)
         print(f"  Fetching direct issue weights (epics/issues) for {total} epics...")
         for epic in epics:
@@ -421,7 +425,7 @@ class UtilitiesMixin:
             issues = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     issues.extend(resp.json())
@@ -441,7 +445,7 @@ class UtilitiesMixin:
             children = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     children.extend(resp.json())
@@ -472,7 +476,7 @@ class UtilitiesMixin:
             issues = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     issues.extend(resp.json())
