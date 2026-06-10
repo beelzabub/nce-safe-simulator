@@ -76,6 +76,13 @@ def main() -> None:
             promote_assets(nb)
         rewrite_html(nb)
 
+    # Copy custom brand assets (peo-c4i.css, peo-c4i-head.html) into shared assets.
+    # Marimo does not bundle css_file/html_head_file — they must be served separately.
+    custom_assets = Path("marimo/assets")
+    if custom_assets.exists():
+        for f in custom_assets.iterdir():
+            shutil.copy2(f, SHARED_ASSETS / f.name)
+
     size_mb = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file()) / 1e6
     print(f"\nDone. {len(NOTEBOOKS)} notebooks, {size_mb:.0f} MB total.")
     print(f"Shared assets: {SHARED_ASSETS}")
