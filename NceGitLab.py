@@ -43,7 +43,7 @@ class NceGitLab(
     ImportExportMixin,
     ServeMixin,
 ):
-    def __init__(self, config_file="config.json"):
+    def __init__(self, config_file="config.json", ssl_verify=None):
         self.config_file = Path(config_file)
 
         if not self.config_file.exists():
@@ -99,6 +99,17 @@ class NceGitLab(
         self.api_timeout     = config.get("api_timeout",    300)
         self.delete_workers  = config.get("delete_workers",  5)
         self.report_workers  = config.get("report_workers",  4)
+
+        _cfg_ssl_verify  = config.get("ssl_verify", True)
+        _env_ssl_verify  = os.getenv("SSL_VERIFY")
+        if _env_ssl_verify is not None:
+            _env_ssl_verify = _env_ssl_verify.strip().lower() not in ("false", "0", "no")
+        self.ssl_verify  = ssl_verify if ssl_verify is not None else (
+                           _env_ssl_verify if _env_ssl_verify is not None else _cfg_ssl_verify)
+        if not self.ssl_verify:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            print("  Warning: SSL certificate verification is disabled.")
 
         fibonacci_weights_env = parse_fibonacci_env("FIBONACCI_WEIGHTS")
         self.fibonacci_weights = fibonacci_weights_env if fibonacci_weights_env else config.get("fibonacci_weights")
@@ -196,7 +207,7 @@ class NceGitLab(
             exit(1)
 
         try:
-            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token)
+            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token, ssl_verify=self.ssl_verify)
             self.gl.auth()
 
             version, _ = self.gl.version()
@@ -412,6 +423,28 @@ def _parse_tool_args(extra):
     return result
 
 
+def _parse_formats(raw_list):
+    """Resolve --formats tokens (space and/or comma-separated) to a set of format names."""
+    _valid = {"all", "markdown", "plotly", "interactive"}
+    _all   = {"markdown", "plotly", "interactive"}
+    tokens = set()
+    for tok in (raw_list or []):
+        for part in tok.split(","):
+            p = part.strip().lower()
+            if p:
+                tokens.add(p)
+    invalid = tokens - _valid
+    if invalid:
+        print(f"Unknown --formats value(s): {', '.join(sorted(invalid))}")
+        print(f"Valid formats: {', '.join(sorted(_valid))}")
+        sys.exit(1)
+    if "all" in tokens:
+        return set(_all)
+    if not tokens:
+        return {"markdown"}
+    return tokens
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
@@ -443,6 +476,11 @@ def main():
     parser.add_argument("--last",                    action="store_true",
                         help="Reuse the most recently pulled data snapshot (no API fetch)")
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
+    parser.add_argument("--formats",                 nargs="+", metavar="FORMAT",
+                        help="Output formats: all markdown plotly interactive "
+                             "(space or comma-separated, default: markdown)")
+    parser.add_argument("--no-ssl-verify",           action="store_true",
+                        help="Disable SSL certificate verification (Aisle 5 / corporate network)")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
@@ -454,8 +492,9 @@ def main():
         print()
         return
 
+    formats   = _parse_formats(args.formats)
     _phase[0] = "connecting to GitLab"
-    gl = NceGitLab()
+    gl = NceGitLab(ssl_verify=False if args.no_ssl_verify else None)
     _gl[0] = gl
 
     if not any(vars(args).values()):
@@ -506,7 +545,7 @@ def main():
 
     if args.all:
         _phase[0] = "reports"
-        gl.generate_all_reports()
+        gl.generate_all_reports(formats=formats)
         if hasattr(gl, '_last_reports_phase'):
             phases.append(gl._last_reports_phase)
         if len(phases) > 1:
@@ -522,7 +561,7 @@ def main():
                 reuse = str(last)
             else:
                 print("  --last: no previous snapshot found — fetching live data.\n")
-        gl.run_reports_menu(report_key, reuse_data=reuse)
+        gl.run_reports_menu(report_key, reuse_data=reuse, formats=formats)
 
     # single-phase timing summary (--clean or --create alone)
     if not args.all and phases:
