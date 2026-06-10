@@ -37,9 +37,9 @@ body::before {
   filter: grayscale(60%) contrast(1.1);
 }
 
-/* Push notebook content below the fixed nav bar */
+/* Push notebook content below the fixed nav bar — 64px matches static Quarto nav offset */
 #root {
-  padding-top: 56px !important;
+  padding-top: 64px !important;
 }
 
 a { color: #1a4a8a; }
