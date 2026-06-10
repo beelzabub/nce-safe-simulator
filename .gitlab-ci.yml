@@ -12,8 +12,15 @@ test:
 
 pages:
   stage: pages
+  image: ghcr.io/quarto-dev/quarto:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y python3-pip -qq
+    - pip3 install -r requirements.txt
   script:
-    - pip install -r requirements.txt
-    - python3 NceGitLab.py --report all --formats markdown --no-ssl-verify
+    - python3 NceGitLab.py --report all --formats all
+  artifacts:
+    paths:
+      - public/
+    expire_in: 7 days
   only:
     - develop
