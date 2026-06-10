@@ -416,6 +416,8 @@ class UtilitiesMixin:
         wi_children    = {}
         extra_raw      = {}   # id → REST dict for cross-group children
 
+        _bulk_timeout = (15, 60)   # (connect, read) for sequential per-epic requests
+
         total = len(epics)
         print(f"  Fetching direct issue weights (epics/issues) for {total} epics...")
         for epic in epics:
@@ -423,7 +425,7 @@ class UtilitiesMixin:
             issues = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     issues.extend(resp.json())
@@ -443,7 +445,7 @@ class UtilitiesMixin:
             children = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     children.extend(resp.json())
@@ -474,7 +476,7 @@ class UtilitiesMixin:
             issues = []
             while url:
                 try:
-                    resp = sess.get(url, params={"per_page": 100})
+                    resp = sess.get(url, params={"per_page": 100}, timeout=_bulk_timeout)
                     if not resp.ok:
                         break
                     issues.extend(resp.json())
