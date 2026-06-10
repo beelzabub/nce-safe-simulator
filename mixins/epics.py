@@ -263,6 +263,7 @@ class EpicsMixin:
             'Authorization': f'Bearer {self.private_token}',
             'Content-Type': 'application/json',
         })
+        session.verify = getattr(self, "ssl_verify", True)
 
         graphql_query = """
         query GetWorkItemWeight($id: ID!) {
