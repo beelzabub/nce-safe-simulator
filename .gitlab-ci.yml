@@ -24,4 +24,3 @@ pages:
     expire_in: 7 days
   only:
     - develop
-    - feature/60-restore-all-formats-ci
