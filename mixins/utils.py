@@ -121,6 +121,7 @@ class UtilitiesMixin:
         """Return a requests.Session pre-configured with auth and the configured timeout."""
         sess = requests.Session()
         sess.headers["PRIVATE-TOKEN"] = self.private_token
+        sess.verify = getattr(self, "ssl_verify", True)
         adapter = _TimeoutAdapter(timeout=getattr(self, "api_timeout", 300))
         sess.mount("https://", adapter)
         sess.mount("http://",  adapter)
@@ -169,6 +170,7 @@ class UtilitiesMixin:
                 "Authorization": f"Bearer {self.private_token}",
                 "Content-Type": "application/json",
             },
+            verify=getattr(self, "ssl_verify", True),
         )
         response.raise_for_status()
         data = response.json()
