@@ -4,6 +4,10 @@ Each notebook is exported normally, then per-notebook asset directories are
 consolidated into a single public/interactive/assets/ location and HTML
 references are rewritten to point there.  This reduces the public/interactive/
 footprint from ~400 MB (11 × 34 MB) to ~40 MB.
+
+Custom brand assets (peo-c4i.css, peo-c4i-head.html) are inlined directly
+into each notebook's HTML rather than relying on Marimo's runtime css_file/
+html_head_file loading, which does not bundle these files in WASM exports.
 """
 import re
 import shutil
@@ -28,6 +32,7 @@ NOTEBOOKS = [
 OUT = Path("public/interactive")
 SHARED_ASSETS = OUT / "assets"
 ASSET_URL = "/interactive/assets"
+CUSTOM_ASSETS = Path("marimo/assets")
 
 
 def export_notebook(nb: str) -> None:
@@ -52,36 +57,43 @@ def promote_assets(nb: str) -> None:
     shutil.copytree(per_nb_assets, SHARED_ASSETS)
 
 
-def rewrite_html(nb: str) -> None:
-    """Remove per-notebook assets dir and rewrite asset references."""
+def rewrite_html(nb: str, inline_css: str, inline_head: str) -> None:
+    """Remove per-notebook assets dir, rewrite asset references, and inline brand assets."""
     per_nb_assets = OUT / nb / "assets"
     if per_nb_assets.exists():
         shutil.rmtree(per_nb_assets)
 
     html_file = OUT / nb / "index.html"
     content = html_file.read_text(encoding="utf-8")
+
+    # Rewrite framework asset references to shared location
     content = re.sub(r'="\.\/assets\/', f'="{ASSET_URL}/', content)
-    # appConfig JSON values reference css_file/html_head_file as bare "assets/..."
-    content = re.sub(r'(?<=": ")assets/', f'{ASSET_URL}/', content)
+
+    # Inline brand CSS before </head>
+    if inline_css:
+        content = content.replace("</head>", f"<style>{inline_css}</style>\n</head>", 1)
+
+    # Inline nav/head HTML before </head>
+    if inline_head:
+        content = content.replace("</head>", f"{inline_head}\n</head>", 1)
+
     html_file.write_text(content, encoding="utf-8")
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
+    css_file = CUSTOM_ASSETS / "peo-c4i.css"
+    head_file = CUSTOM_ASSETS / "peo-c4i-head.html"
+    inline_css  = css_file.read_text(encoding="utf-8")  if css_file.exists()  else ""
+    inline_head = head_file.read_text(encoding="utf-8") if head_file.exists() else ""
+
     for i, nb in enumerate(NOTEBOOKS):
         print(f"  {nb}...")
         export_notebook(nb)
         if i == 0:
             promote_assets(nb)
-        rewrite_html(nb)
-
-    # Copy custom brand assets (peo-c4i.css, peo-c4i-head.html) into shared assets.
-    # Marimo does not bundle css_file/html_head_file — they must be served separately.
-    custom_assets = Path("marimo/assets")
-    if custom_assets.exists():
-        for f in custom_assets.iterdir():
-            shutil.copy2(f, SHARED_ASSETS / f.name)
+        rewrite_html(nb, inline_css, inline_head)
 
     size_mb = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file()) / 1e6
     print(f"\nDone. {len(NOTEBOOKS)} notebooks, {size_mb:.0f} MB total.")
