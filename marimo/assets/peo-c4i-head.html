@@ -1,6 +1,6 @@
 <style>
 /* ── PEO C4I nav bar ─────────────────────────────── */
-#pc4i-nav, #pc4i-nav * { box-sizing: border-box; margin: 0; padding: 0; }
+#pc4i-nav, #pc4i-nav * { box-sizing: border-box; }
 #pc4i-nav {
   position: fixed; top: 0; left: 0; width: 100%; height: 64px;
   background: #0a2447; border-bottom: 3px solid #c8a951;
@@ -80,6 +80,7 @@
   ];
 
   document.addEventListener('DOMContentLoaded', function () {
+    if (document.getElementById('pc4i-nav')) return;
     var m = window.location.pathname.match(/\/interactive\/([^\/]+)/);
     var slug = m ? m[1] : null;
     var staticHref = (slug && HAS_INTERACTIVE.indexOf(slug) >= 0)
