@@ -69,6 +69,12 @@ def rewrite_html(nb: str, inline_css: str, inline_head: str) -> None:
     # Rewrite framework asset references to shared location
     content = re.sub(r'="\.\/assets\/', f'="{ASSET_URL}/', content)
 
+    # Null out css_file/html_head_file in the WASM mount config so Marimo's
+    # runtime doesn't try to fetch them (paths were removed when we consolidated
+    # assets; the CSS and head HTML are already inlined below).
+    content = re.sub(r'"css_file"\s*:\s*"[^"]*"', '"css_file": null', content)
+    content = re.sub(r'"html_head_file"\s*:\s*"[^"]*"', '"html_head_file": null', content)
+
     # Inline brand CSS before </head>
     if inline_css:
         content = content.replace("</head>", f"<style>{inline_css}</style>\n</head>", 1)
