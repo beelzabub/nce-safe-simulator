@@ -20,6 +20,16 @@ html {
 body {
   background: none !important;
   position: relative;  /* anchor z-index: -1 to body, not the root stacking context */
+  padding-top: 64px !important;
+}
+
+/* Marimo's outermost layout div uses position:absolute; inset:0, so it anchors to the nearest
+   positioned ancestor. Without this, it anchors to body's padding-box (y=0), ignoring
+   body { padding-top: 64px } and rendering content behind the fixed nav.
+   Making #root position:relative makes it the containing block, so the absolute div
+   anchors to #root (which starts at y=64), placing content correctly below the nav. */
+#root {
+  position: relative !important;
 }
 
 /* Match the Quarto static site hero background exactly */
@@ -35,11 +45,6 @@ body::before {
   z-index: -1;
   pointer-events: none;
   filter: grayscale(60%) contrast(1.1);
-}
-
-/* Push notebook content below the fixed nav bar */
-#root {
-  padding-top: 56px !important;
 }
 
 a { color: #1a4a8a; }

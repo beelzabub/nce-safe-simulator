@@ -129,6 +129,7 @@ class NceGitLab(
 
         epic_labels_env = parse_label_env("EPIC_TYPE_LABELS")
         self.EPIC_TYPE_LABELS = epic_labels_env if epic_labels_env else config.get("epic_type_labels", [])
+        self.EPIC_TYPE_DISPLAY_NAMES = [t.split("::")[-1].capitalize() for t in self.EPIC_TYPE_LABELS]
 
         risk_labels_env = parse_label_env("RISK_LABELS")
         self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
@@ -190,14 +191,14 @@ class NceGitLab(
         else:
             self.team_members = []
 
+        # project_labels and piid_labels are optional — used only for simulation/bootstrap.
+        # Reports and tools discover these dynamically from live epic labels.
         missing_fields = [
             field for field, val in [
                 ("url",              self.url),
                 ("parent_group",     self.parent_group),
                 ("private_token",    self.private_token),
                 ("fibonacci_weights", self.fibonacci_weights),
-                ("project_labels",   self.PROJECT_LABELS),
-                ("piid_labels",      self.PIID_LABELS),
                 ("epic_labels",      self.EPIC_TYPE_LABELS),
             ] if not val
         ]
