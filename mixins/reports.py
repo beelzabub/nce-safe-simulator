@@ -5251,7 +5251,7 @@ class ReportsMixin:
             cells = " | ".join(str(counts[t]) for t in _dn[1:])
             md.append(f"| `{pi}` | {cells} | **{sum(counts.values())}** |")
 
-        total_delivered = sum(r[3] for r in vel_rows)
+        total_delivered = sum(sum(counts.values()) for _, counts in vel_rows)
         if total_delivered == 0:
             md.append("")
             md.append(
