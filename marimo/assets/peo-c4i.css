@@ -23,6 +23,15 @@ body {
   padding-top: 64px !important;
 }
 
+/* Marimo's outermost layout div uses position:absolute; inset:0, so it anchors to the nearest
+   positioned ancestor. Without this, it anchors to body's padding-box (y=0), ignoring
+   body { padding-top: 64px } and rendering content behind the fixed nav.
+   Making #root position:relative makes it the containing block, so the absolute div
+   anchors to #root (which starts at y=64), placing content correctly below the nav. */
+#root {
+  position: relative !important;
+}
+
 /* Match the Quarto static site hero background exactly */
 body::before {
   content: '';
