@@ -4,7 +4,7 @@ import pytest
 from collections import defaultdict
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.utils import UtilitiesMixin
 
@@ -29,6 +29,9 @@ def _make_epic_obj(id, iid, labels, work_item_id, state="opened"):
 
 
 class ConcreteUtils(UtilitiesMixin):
+    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+
     def __init__(self, epics, roam_by_epic=None):
         self.gl               = MagicMock()
         self.url              = "https://gitlab.com"

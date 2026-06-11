@@ -2,7 +2,7 @@
 import sys
 from unittest.mock import MagicMock
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from tests.conftest import ReportsHarness, make_epic
 
