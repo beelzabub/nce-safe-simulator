@@ -98,6 +98,14 @@ def _tee_to_log(log_path):
 
 class UtilitiesMixin:
 
+    def _epic_type_display(self, labels: list) -> str:
+        """Return the display name for the epic tier present in labels, or 'Unknown'.
+
+        Works with both scoped labels ('epic::epic' → 'Epic') and plain labels ('Epic' → 'Epic').
+        """
+        match = next((lbl for lbl in self.EPIC_TYPE_LABELS if lbl in labels), None)
+        return match.split("::")[-1].capitalize() if match else "Unknown"
+
     def _parallel_delete(self, items, fn, workers=None):
         """Run fn(item) for each item in parallel. Returns (done, errors) counts.
 
@@ -439,8 +447,8 @@ class UtilitiesMixin:
 
         print(f"  Checking for cross-group child epics (epics/epics)...")
         for epic in epics:
-            if "Feature" in set(epic.labels):
-                continue   # Features are leaves; no child epics
+            if self.EPIC_TYPE_LABELS[-1] in set(epic.labels):
+                continue   # Leaf-tier epics have no child epics
             url      = f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}/epics"
             children = []
             while url:
@@ -467,7 +475,7 @@ class UtilitiesMixin:
             giid = child_dict["iid"]
             grp  = child_dict.get("group_id")
             labels = child_dict.get("labels", [])
-            etype  = next((t for t in ["Epic", "Capability", "Feature"] if t in labels), None)
+            etype  = self._epic_type_display(labels) if any(t in labels for t in self.EPIC_TYPE_LABELS) else None
             if not etype:
                 continue
 
@@ -612,7 +620,7 @@ class UtilitiesMixin:
         all_epics    = group.epics.list(all=True)
         epic_weights = self._fetch_epic_weights(all_epics)
         bv_values    = self._fetch_epic_business_values(all_epics)
-        metrics      = {"Epic": [], "Capability": [], "Feature": []}
+        metrics      = {n: [] for n in self.EPIC_TYPE_DISPLAY_NAMES}
         all_epics_raw = []
 
         print(f"  Processing {len(all_epics)} epics...")
@@ -658,13 +666,8 @@ class UtilitiesMixin:
                 "roam_risks":       [],
             }
 
-            if "Epic" in epic.labels:
-                epic_type = "Epic"
-            elif "Capability" in epic.labels:
-                epic_type = "Capability"
-            elif "Feature" in epic.labels:
-                epic_type = "Feature"
-            else:
+            epic_type = self._epic_type_display(epic.labels)
+            if epic_type == "Unknown":
                 print(f"Skipping epic '{epic.title}' — no matching type label.")
                 all_epics_raw.append(associated_data)
                 continue
@@ -724,12 +727,10 @@ class UtilitiesMixin:
             children = hierarchy.get(e["id"], [])
             return e["actual_weight"] + sum(rollup_actual(c) for c in children)
 
-        for cap in metrics["Capability"]:
-            cap["pct_complete"]  = rollup_pct(cap)
-            cap["actual_weight"] = rollup_actual(cap)
-        for ep in metrics["Epic"]:
-            ep["pct_complete"]  = rollup_pct(ep)
-            ep["actual_weight"] = rollup_actual(ep)
+        for t in self.EPIC_TYPE_DISPLAY_NAMES[:-1]:  # all tiers except the leaf
+            for e in metrics.get(t, []):
+                e["pct_complete"]  = rollup_pct(e)
+                e["actual_weight"] = rollup_actual(e)
 
         # Attach ROAM risk issues to each epic (Refs #10)
         roam_by_epic = self._fetch_roam_risks(group, all_epics_raw)

@@ -3,7 +3,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.utils import UtilitiesMixin
 from conftest import make_epic, make_mock_group
@@ -14,6 +14,9 @@ _FAKE_PROJECT_PATH = "test/team-backlog"
 def _make_utils(graphql_issues, roam_labels=None):
     """Build a ConcreteUtils whose group has one project returning the given issues."""
     class ConcreteUtils(UtilitiesMixin):
+        EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+        EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+
         def __init__(self):
             self.ROAM_LABELS   = roam_labels or [
                 "roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"

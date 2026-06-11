@@ -3,7 +3,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.bootstrap import _link_to_parents
 

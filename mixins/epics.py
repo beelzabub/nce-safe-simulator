@@ -191,30 +191,36 @@ class EpicsMixin:
             for epic, label in epics:
                 epic_dict[label].append(epic)
 
-            for epic in epic_dict.get("Epic", []):
+            t0 = self.EPIC_TYPE_LABELS[0]
+            t1 = self.EPIC_TYPE_LABELS[1] if len(self.EPIC_TYPE_LABELS) > 1 else t0
+            t2 = self.EPIC_TYPE_LABELS[-1]
+            d0 = self.EPIC_TYPE_DISPLAY_NAMES[0]
+            d1 = self.EPIC_TYPE_DISPLAY_NAMES[1] if len(self.EPIC_TYPE_DISPLAY_NAMES) > 1 else d0
+            d2 = self.EPIC_TYPE_DISPLAY_NAMES[-1]
+            for epic in epic_dict.get(t0, []):
                 capabilities = random.sample(
-                    epic_dict.get("Capability", []),
-                    k=min(len(epic_dict.get("Capability", [])), 2)
+                    epic_dict.get(t1, []),
+                    k=min(len(epic_dict.get(t1, [])), 2)
                 )
                 for capability in capabilities:
                     try:
                         capability.parent_id = epic.id
                         capability.save()
-                        print(f"Linked Capability '{capability.title}' as child of Epic '{epic.title}'")
+                        print(f"Linked {d1} '{capability.title}' as child of {d0} '{epic.title}'")
                     except Exception as e:
-                        print(f"Failed to link Capability '{capability.title}' to Epic '{epic.title}': {e}")
+                        print(f"Failed to link {d1} '{capability.title}' to {d0} '{epic.title}': {e}")
 
                     features = random.sample(
-                        epic_dict.get("Feature", []),
-                        k=min(len(epic_dict.get("Feature", [])), 3)
+                        epic_dict.get(t2, []),
+                        k=min(len(epic_dict.get(t2, [])), 3)
                     )
                     for feature in features:
                         try:
                             feature.parent_id = capability.id
                             feature.save()
-                            print(f"Linked Feature '{feature.title}' as child of Capability '{capability.title}'")
+                            print(f"Linked {d2} '{feature.title}' as child of {d1} '{capability.title}'")
                         except Exception as e:
-                            print(f"Failed to link Feature '{feature.title}' to Capability '{capability.title}': {e}")
+                            print(f"Failed to link {d2} '{feature.title}' to {d1} '{capability.title}': {e}")
 
         except Exception as e:
             print(f"Error building epic hierarchy: {e}")
