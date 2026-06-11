@@ -126,7 +126,7 @@ Copy and edit `config.json`:
 | `gitlab_namespace` | Parent namespace for root group creation |
 | `project_labels` | Labels representing programs or workstreams (`project::*`) |
 | `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
-| `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
+| `epic_type_labels` | SAFe hierarchy tier labels — scoped (`epic::epic`, `epic::capability`, `epic::feature`) or plain (`Epic`, `Capability`, `Feature`). Display names are derived by stripping the scope prefix and capitalizing. All mixins, reports, and Marimo pages resolve tier names from this list; changing it reconfigures the entire application. |
 | `risk_labels` | `risk::*` labels used by the Risk Register report and `set-risk-labels` tool |
 | `work_type_labels` | `type::*` labels classifying epics by SAFe work type (feature, enabler, infrastructure, defect) |
 | `lifecycle_labels` | `lifecycle::*` labels representing SAFe Portfolio Kanban states (funnel → done) |
