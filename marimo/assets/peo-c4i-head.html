@@ -25,8 +25,8 @@
   white-space: nowrap; user-select: none;
   transition: color 0.15s;
 }
-.pc4i-menu-trigger::after { content: " \25be"; font-size: 10px; opacity: .7; }
 .pc4i-menu:hover .pc4i-menu-trigger { color: #c8a951; }
+.pc4i-caret { font-size: 0.65em; line-height: 1; display: inline-block; margin-left: 2px; }
 .pc4i-dropdown {
   display: none; position: absolute; top: 100%; left: 0;
   min-width: 230px; background: #0f2e5a;
@@ -95,7 +95,7 @@
 
     NAV.forEach(function (g) {
       h += '<div class="pc4i-menu">'
-         +   '<span class="pc4i-menu-trigger">' + g.label + '</span>'
+         +   '<span class="pc4i-menu-trigger">' + g.label + ' <span class="pc4i-caret" aria-hidden="true">&#x25BE;</span></span>'
          +   '<div class="pc4i-dropdown">';
       g.items.forEach(function (it) {
         h += '<a href="' + it[1] + '">' + it[0] + '</a>';
@@ -106,6 +106,10 @@
 
     nav.innerHTML = h;
     document.body.insertBefore(nav, document.body.firstChild);
+
+    // Belt-and-suspenders: enforce nav offset via inline style so it
+    // survives any CSS load-order race with Marimo's dynamically-injected sheets.
+    document.body.style.setProperty('padding-top', '64px', 'important');
 
     if (staticHref) {
       var btn = document.createElement('a');
