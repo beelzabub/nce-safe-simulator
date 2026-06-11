@@ -5,15 +5,18 @@ from collections import defaultdict
 from datetime import date
 from unittest.mock import MagicMock, patch, create_autospec
 
+from pathlib import Path
+
 import pytest
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mixins.reports import ReportsMixin, _item_risk_reasons
 from mixins.tools import ToolsMixin
 from mixins.labels import LabelsMixin
 from mixins.wiki import WikiMixin
 from mixins.utils import UtilitiesMixin
+from mixins.bootstrap import BootstrapMixin
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +108,12 @@ def make_risk(
 # Testable ReportsMixin harness
 # ---------------------------------------------------------------------------
 
-class ReportsHarness(ReportsMixin):
+class ReportsHarness(ReportsMixin, UtilitiesMixin):
     """Concrete subclass of ReportsMixin with all _rd_ state pre-wired for tests."""
 
-    EPIC_TYPE_ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_ICONS         = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
 
     def __init__(
         self,
@@ -211,7 +216,9 @@ def _make_issue_mock(id=200, iid=1, title="Test Issue", epic_id=None):
 class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
     """Concrete subclass of ToolsMixin with all external calls pre-wired for tests."""
 
-    EPIC_TYPE_ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_ICONS         = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
     ROAM_LABELS = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]
     EPIC_TYPE_PLANNED_WEIGHTS = {
         "Epic": [100, 150, 200],

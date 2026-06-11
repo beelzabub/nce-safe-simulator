@@ -201,13 +201,11 @@ def _(vs_rows, vs_selector, mo):
 
 @app.cell
 def _(blocked, at_risk, mo):
-    ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
-
     # Blocked epics
     if blocked:
         _rows_html = ""
         for _item in blocked:
-            _icon = ICONS.get(_item["type"], "🏆")
+            _icon = _item.get("icon", "❓")
             _link = (
                 f'<a href="{_item["url"]}" target="_blank">{_icon} {_item["title"]}</a>'
                 if _item["url"] else f'{_icon} {_item["title"]}'
@@ -238,7 +236,7 @@ def _(blocked, at_risk, mo):
     if at_risk:
         _rows_html = ""
         for _item in at_risk:
-            _icon = ICONS.get(_item["type"], "🏆")
+            _icon = _item.get("icon", "❓")
             _link = (
                 f'<a href="{_item["url"]}" target="_blank">{_icon} {_item["title"]}</a>'
                 if _item["url"] else f'{_icon} {_item["title"]}'

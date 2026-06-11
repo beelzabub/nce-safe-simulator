@@ -3,7 +3,7 @@ import sys
 import pytest
 from datetime import date
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from conftest import ReportsHarness, make_epic, make_risk
 

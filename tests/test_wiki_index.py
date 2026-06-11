@@ -1,7 +1,7 @@
 """Tests for generate_wiki_index (Refs #24)."""
 import sys
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from tests.conftest import ReportsHarness
 
