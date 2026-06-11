@@ -767,7 +767,7 @@ class ReportsMixin:
             markdown_report.append(summary)
             markdown_report.extend(["", "", "", "## Initiative Hierarchy", ""])
 
-            all_epics     = metrics["Epic"] + metrics["Capability"] + metrics["Feature"]
+            all_epics     = [e for t in self.EPIC_TYPE_DISPLAY_NAMES for e in metrics.get(t, [])]
             epic_hierarchy = defaultdict(list)
             for epic in all_epics:
                 if epic.get("parent_id") is not None:
@@ -776,7 +776,7 @@ class ReportsMixin:
             def render_epic_details(epic, indent_level=0):
                 nonlocal markdown_report
 
-                epic_type = next((t for t in ["Epic", "Capability", "Feature"] if t in epic.get("labels", [])), "Epic")
+                epic_type = self._epic_type_display(epic.get("labels", []))
                 icon      = self.EPIC_TYPE_ICONS.get(epic_type, "🏆")
                 children  = epic_hierarchy.get(epic['id'], [])
 
@@ -814,7 +814,7 @@ class ReportsMixin:
                     markdown_report.append("</details>")
                     markdown_report.append("")
 
-            for epic in metrics["Epic"]:
+            for epic in metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[0], []):
                 render_epic_details(epic)
 
             markdown_report.extend(["", "", ""] + _LEGEND_OPEN + [
@@ -881,7 +881,7 @@ class ReportsMixin:
         print("  Generating ART/Team Workload Report...")
 
         metrics   = self._rd_metrics
-        all_epics = metrics.get("Epic", []) + metrics.get("Capability", []) + metrics.get("Feature", [])
+        all_epics = [e for t in self.EPIC_TYPE_DISPLAY_NAMES for e in metrics.get(t, [])]
         if not all_epics:
             print("No epics found — skipping workload report.")
             return
@@ -1047,10 +1047,7 @@ class ReportsMixin:
 
         def epic_type(node):
             label_titles = {l["title"] for l in node.get("labels", {}).get("nodes", [])}
-            for t in ("Epic", "Capability", "Feature"):
-                if t in label_titles:
-                    return t
-            return "Epic"
+            return self._epic_type_display(list(label_titles))
 
         data = self.graphql_query(query, variables={"fullPath": full_path})
         if data is None:
@@ -1243,7 +1240,7 @@ class ReportsMixin:
             md.append("")
             for rel in rels:
                 epic           = rel["blocked_epic"]
-                etype          = epic.get("type", "Epic")
+                etype          = epic.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                 icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
                 state          = epic.get("state", "").capitalize()
                 blocked_by_cnt = len(rel.get("blocked_by", []))
@@ -1257,7 +1254,7 @@ class ReportsMixin:
                 md.append("")
 
                 for blocker in rel.get("blocked_by", []):
-                    btype = blocker.get("type", "Epic")
+                    btype = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                     bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
                     md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}**")
                     md.append("")
@@ -1267,7 +1264,7 @@ class ReportsMixin:
                     md.append("**Risk propagates up to:**")
                     md.append("")
                     for ancestor in ancestors:
-                        atype = ancestor.get("type", "Epic")
+                        atype = ancestor.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                         aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
                         md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}**")
                         md.append("")
@@ -1277,7 +1274,7 @@ class ReportsMixin:
 
         md.extend(_LEGEND_OPEN + [
             _side_by_side(
-                ("Epic Type Icons",  [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("Epic Type Icons",  [(self.EPIC_TYPE_ICONS.get(t, "?"), t) for t in self.EPIC_TYPE_DISPLAY_NAMES]),
                 ("Blocking Status",  [("⛔", "Blocked — has at least one active blocker"),
                                       ("🔒", "Blocker — directly blocking one or more epics"),
                                       ("⬆️", "Risk propagation — blocked descendant risk bubbles up"),
@@ -1325,7 +1322,7 @@ class ReportsMixin:
             md.append("| Title | State |")
             md.append("|-------|-------|")
             for epic in orphans:
-                etype      = next((t for t in ("Epic", "Capability", "Feature") if t in epic["labels"]), "Unknown")
+                etype      = self._epic_type_display(epic["labels"])
                 icon       = self.EPIC_TYPE_ICONS.get(etype, "❓")
                 title_link = f"[{epic['title']}]({epic['web_url']})"
                 md.append(f"| {icon} {title_link} | {epic['state']} |")
@@ -1392,7 +1389,7 @@ class ReportsMixin:
 
         # Find closed Epics and Capabilities with open direct children or open linked issues
         findings = []   # list of dicts
-        for etype in ("Epic", "Capability"):
+        for etype in self.EPIC_TYPE_DISPLAY_NAMES[:2]:
             for epic in self._rd_epics_all:
                 if epic.get("type") != etype:
                     continue
@@ -1416,10 +1413,7 @@ class ReportsMixin:
                         "open_issues":   open_issues,
                     })
 
-        by_type = {
-            "Epic":       [f for f in findings if f["etype"] == "Epic"],
-            "Capability": [f for f in findings if f["etype"] == "Capability"],
-        }
+        by_type = {t: [f for f in findings if f["etype"] == t] for t in self.EPIC_TYPE_DISPLAY_NAMES[:2]}
         total = len(findings)
 
         md = []
@@ -1444,13 +1438,13 @@ class ReportsMixin:
         md.append(f"**{total} closed epic(s) with open work remaining.**")
         md.append("")
 
-        for etype, icon in (("Epic", "🏆"), ("Capability", "🧩")):
-            rows = by_type[etype]
+        for etype in self.EPIC_TYPE_DISPLAY_NAMES[:2]:
+            rows = by_type.get(etype, [])
             if not rows:
                 continue
+            icon = self.EPIC_TYPE_ICONS.get(etype, "?")
             md.append("---")
-            plural = "Epics" if etype == "Epic" else "Capabilities"
-            md.append(f"## {icon} Closed {plural} with Open Work ({len(rows)})")
+            md.append(f"## {icon} Closed {etype}s with Open Work ({len(rows)})")
             md.append("")
 
             for f in sorted(rows, key=lambda x: x["epic"]["title"]):
@@ -1471,10 +1465,7 @@ class ReportsMixin:
                     md.append("| Title | PI |")
                     md.append("|-------|----|")
                     for child in sorted(open_children, key=lambda c: c["title"]):
-                        ctype = next(
-                            (t for t in ("Capability", "Feature") if t in child.get("labels", [])),
-                            "Unknown"
-                        )
+                        ctype = self._epic_type_display(child.get("labels", []))
                         cicon     = self.EPIC_TYPE_ICONS.get(ctype, "❓")
                         clink     = f"[{child['title']}]({child['web_url']})"
                         piid      = next((l for l in child.get("labels", []) if l.startswith("PIID::")), "—")
@@ -1504,9 +1495,9 @@ class ReportsMixin:
 
         unassigned = [e for e in all_epics if not any(l.startswith("PIID::") for l in e["labels"])]
 
-        by_type: dict = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
+        by_type: dict = {t: [] for t in [*self.EPIC_TYPE_DISPLAY_NAMES, "Unknown"]}
         for e in unassigned:
-            etype = next((t for t in ("Epic", "Capability", "Feature") if t in e["labels"]), "Unknown")
+            etype = self._epic_type_display(e["labels"])
             by_type[etype].append(e)
 
         md = []
@@ -1518,7 +1509,7 @@ class ReportsMixin:
         md.append(f"**Total unassigned: {len(unassigned)}**")
         md.append("")
 
-        for etype in ("Epic", "Capability", "Feature", "Unknown"):
+        for etype in [*self.EPIC_TYPE_DISPLAY_NAMES, "Unknown"]:
             items = by_type[etype]
             if not items:
                 continue
@@ -1654,7 +1645,7 @@ class ReportsMixin:
 
         open_epics_caps = [
             e for e in self._rd_epics_all
-            if e.get("type") in ("Epic", "Capability", "Feature")
+            if e.get("type") in self.EPIC_TYPE_DISPLAY_NAMES
             and (e.get("state") or "").lower() != "closed"
         ]
 
@@ -1668,7 +1659,7 @@ class ReportsMixin:
         ]
         past_due_bucket = [
             e for e in open_epics_caps
-            if e.get("type") in ("Epic", "Capability")
+            if e.get("type") in self.EPIC_TYPE_DISPLAY_NAMES[:2]
             and _is_past_due(e.get("due_date"))
         ]
         behind_schedule_bucket = [
@@ -1777,8 +1768,7 @@ class ReportsMixin:
             return (piid, e["title"])
 
         def _epic_meta(epic):
-            etype = next((t for t in ("Epic", "Capability", "Feature")
-                          if t in epic.get("labels", [])), "Unknown")
+            etype = self._epic_type_display(epic.get("labels", []))
             eicon = self.EPIC_TYPE_ICONS.get(etype, "❓")
             pi    = next((l for l in epic.get("labels", []) if l.startswith("PIID::")), "—")
             path  = _group_path(epic.get("group_id"))
@@ -1874,7 +1864,7 @@ class ReportsMixin:
 
         md.extend(_LEGEND_OPEN + [
             _side_by_side(
-                ("Epic Type Icons",   [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("Epic Type Icons",   [(self.EPIC_TYPE_ICONS.get(t, "?"), t) for t in self.EPIC_TYPE_DISPLAY_NAMES]),
                 ("ROAM Dispositions", [("⚠️ Owned",    "Someone owns this risk and is actively managing it"),
                                        ("✋ Accepted",  "Risk acknowledged; no action planned"),
                                        ("🛡️ Mitigated", "Steps taken to reduce probability or impact"),
@@ -1913,10 +1903,10 @@ class ReportsMixin:
             art_group_ids[art_group["id"]] = ids
 
         # Bucket: art_id → piid → [epic, ...]  (Features + Capabilities as commitment units)
-        commitment_epics = (
-            self._rd_metrics.get("Feature", []) +
-            self._rd_metrics.get("Capability", [])
-        )
+        commitment_epics = [
+            e for t in self.EPIC_TYPE_DISPLAY_NAMES[1:]
+            for e in self._rd_metrics.get(t, [])
+        ]
         art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
         for epic in commitment_epics:
             gid  = epic.get("group_id")
@@ -2188,7 +2178,7 @@ class ReportsMixin:
         root_group = self._rd_root_obj
         print(f"Generating ART Feature Status Reports under: {root_group.full_path}")
 
-        features = self._rd_metrics.get("Feature", [])
+        features = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         team_hierarchy = {}
         for vs_group, art_group, team_group in self._iter_team_groups():
@@ -2352,7 +2342,7 @@ class ReportsMixin:
         root_group = self._rd_root_obj
         print(f"Generating ART Capacity Balance Reports under: {root_group.full_path}")
 
-        features = self._rd_metrics.get("Feature", [])
+        features = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         team_hierarchy = {}
         for vs_group, art_group, team_group in self._iter_team_groups():
@@ -2539,8 +2529,8 @@ class ReportsMixin:
         root_group = self._rd_root_obj
         print(f"Generating VS Capability Dashboard Reports under: {root_group.full_path}")
 
-        capabilities = self._rd_metrics.get("Capability", [])
-        features     = self._rd_metrics.get("Feature", [])
+        capabilities = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[1], [])
+        features     = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         art_hierarchy: dict  = {}
         team_hierarchy: dict = {}
@@ -2568,7 +2558,7 @@ class ReportsMixin:
         epic_type_by_id = {e["id"]: t for t, tier in self._rd_metrics.items() for e in tier}
         direct_features = [
             f for f in features
-            if epic_type_by_id.get(f.get("parent_id")) != "Capability"
+            if epic_type_by_id.get(f.get("parent_id")) != self.EPIC_TYPE_DISPLAY_NAMES[1]
         ]
 
         vs_direct_buckets: defaultdict = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
@@ -2974,8 +2964,8 @@ class ReportsMixin:
                 piid        = dep["blocked_piid"] or "—"
                 sev_label, sev_sort = severity(dep["blocked_piid"])
 
-                b_type  = blocked.get("type", "Epic")
-                bl_type = blocker.get("type", "Epic")
+                b_type  = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
+                bl_type = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                 b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
                 bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
 
@@ -3236,10 +3226,12 @@ class ReportsMixin:
             e_meta = self._rd_epics_by_id.get(
                 epic.get("id_int") or epic.get("id"), {}
             )
+            _etype = epic.get("type", "—")
             top_blocked.append({
                 "title":     epic.get("title", "—"),
                 "url":       epic.get("web_url"),
-                "type":      epic.get("type", "—"),
+                "type":      _etype,
+                "icon":      self.EPIC_TYPE_ICONS.get(_etype, "❓"),
                 "n_blockers": len(rel.get("blocked_by", [])),
                 "piid":      e_meta.get("piid") or "—",
             })
@@ -3260,10 +3252,12 @@ class ReportsMixin:
                 wt_str = f"{aw}pt (issues)"
             else:
                 wt_str = "—"
+            _etype = e.get("type", "—")
             at_risk_epics.append({
                 "title":      e.get("title", "—"),
                 "url":        e.get("web_url"),
-                "type":       e.get("type", "—"),
+                "type":       _etype,
+                "icon":       self.EPIC_TYPE_ICONS.get(_etype, "❓"),
                 "pct_done":   e.get("pct_complete", 0),
                 "pct_elapsed": pct_pi,
                 "gap":        pct_pi - e.get("pct_complete", 0),
@@ -3315,10 +3309,7 @@ class ReportsMixin:
         ]
         rows = []
         for e in orphans:
-            etype = next(
-                (t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])),
-                "Unknown",
-            )
+            etype = self._epic_type_display(e.get("labels", []))
             rows.append({
                 "title": e["title"],
                 "url":   e.get("web_url", ""),
@@ -3380,7 +3371,7 @@ class ReportsMixin:
                 children_by_parent[pid].append(e)
 
         findings = []
-        for etype in ("Epic", "Capability"):
+        for etype in self.EPIC_TYPE_DISPLAY_NAMES[:2]:
             for epic in self._rd_epics_all:
                 if epic.get("type") != etype:
                     continue
@@ -3405,15 +3396,9 @@ class ReportsMixin:
                         {
                             "title": c["title"],
                             "url":   c.get("web_url", ""),
-                            "type":  next(
-                                (t for t in ("Capability", "Feature") if t in c.get("labels", [])),
-                                "Unknown",
-                            ),
+                            "type":  self._epic_type_display(c.get("labels", [])),
                             "icon":  self.EPIC_TYPE_ICONS.get(
-                                next(
-                                    (t for t in ("Capability", "Feature") if t in c.get("labels", [])),
-                                    "Unknown",
-                                ),
+                                self._epic_type_display(c.get("labels", [])),
                                 "❓",
                             ),
                             "piid": next(
@@ -3447,12 +3432,9 @@ class ReportsMixin:
             e for e in all_epics
             if not any(l.startswith("PIID::") for l in e.get("labels", []))
         ]
-        by_type: dict = {"Epic": [], "Capability": [], "Feature": [], "Unknown": []}
+        by_type: dict = {t: [] for t in [*self.EPIC_TYPE_DISPLAY_NAMES, "Unknown"]}
         for e in unassigned:
-            etype = next(
-                (t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])),
-                "Unknown",
-            )
+            etype = self._epic_type_display(e.get("labels", []))
             parent_id = e.get("parent_id")
             by_type[etype].append({
                 "title":  e["title"],
@@ -3569,7 +3551,7 @@ class ReportsMixin:
 
         open_all = [
             e for e in self._rd_epics_all
-            if e.get("type") in ("Epic", "Capability", "Feature")
+            if e.get("type") in self.EPIC_TYPE_DISPLAY_NAMES
             and (e.get("state") or "").lower() != "closed"
         ]
 
@@ -3580,10 +3562,7 @@ class ReportsMixin:
             return (piid, e["title"])
 
         def _epic_row(epic):
-            etype = next(
-                (t for t in ("Epic", "Capability", "Feature") if t in epic.get("labels", [])),
-                "Unknown",
-            )
+            etype = self._epic_type_display(epic.get("labels", []))
             return {
                 "title":   epic["title"],
                 "url":     epic.get("web_url", ""),
@@ -3605,7 +3584,7 @@ class ReportsMixin:
         )
         past_due_list  = sorted(
             [e for e in open_all
-             if e.get("type") in ("Epic", "Capability") and _is_past_due(e.get("due_date"))],
+             if e.get("type") in self.EPIC_TYPE_DISPLAY_NAMES[:2] and _is_past_due(e.get("due_date"))],
             key=_pi_sort,
         )
         behind_list    = sorted(
@@ -3739,9 +3718,9 @@ class ReportsMixin:
             blockers = rel.get("blocked_by", [])
             ancs     = rel.get("at_risk_portfolio_epics", [])
             pe_candidates = (
-                ([blocked] + ancs) if blocked.get("type") == "Epic" else (ancs or [blocked])
+                ([blocked] + ancs) if blocked.get("type") == self.EPIC_TYPE_DISPLAY_NAMES[0] else (ancs or [blocked])
             )
-            b_type = blocked.get("type", "Epic")
+            b_type = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
             for pe in pe_candidates:
                 pe_id  = pe.get("id") or pe.get("id_int")
                 pe_bv  = bv_by_id.get(pe_id)
@@ -3871,8 +3850,8 @@ class ReportsMixin:
                     {
                         "title": d["title"],
                         "url":   d.get("web_url", ""),
-                        "type":  d.get("type", "Epic"),
-                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", "Epic"), "🏆"),
+                        "type":  d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]),
+                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]), "🏆"),
                     }
                     for d in descendants
                 ],
@@ -3883,9 +3862,10 @@ class ReportsMixin:
         ]
 
         blocked_items = []
+        t0 = self.EPIC_TYPE_DISPLAY_NAMES[0]
         for rel in rels:
             epic  = rel["blocked_epic"]
-            etype = epic.get("type", "Epic")
+            etype = epic.get("type", t0)
             blocked_items.append({
                 "title":  epic["title"],
                 "url":    epic.get("web_url", ""),
@@ -3896,8 +3876,8 @@ class ReportsMixin:
                     {
                         "title": b["title"],
                         "url":   b.get("web_url", ""),
-                        "type":  b.get("type", "Epic"),
-                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", "Epic"), "🏆"),
+                        "type":  b.get("type", t0),
+                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", t0), "🏆"),
                     }
                     for b in rel.get("blocked_by", [])
                 ],
@@ -3905,8 +3885,8 @@ class ReportsMixin:
                     {
                         "title": a["title"],
                         "url":   a.get("web_url", ""),
-                        "type":  a.get("type", "Epic"),
-                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", "Epic"), "🏆"),
+                        "type":  a.get("type", t0),
+                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", t0), "🏆"),
                     }
                     for a in rel.get("at_risk_portfolio_epics", [])
                 ],
@@ -4052,10 +4032,10 @@ class ReportsMixin:
                 ids.add(team["id"])
             art_group_ids[art_group["id"]] = ids
 
-        commitment_epics = (
-            self._rd_metrics.get("Feature", []) +
-            self._rd_metrics.get("Capability", [])
-        )
+        commitment_epics = [
+            e for t in self.EPIC_TYPE_DISPLAY_NAMES[1:]
+            for e in self._rd_metrics.get(t, [])
+        ]
         art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
         for epic in commitment_epics:
             gid  = epic.get("group_id")
@@ -4126,7 +4106,7 @@ class ReportsMixin:
     def _data_art_capacity_balance(self) -> dict:
         group = self._rd_root_obj
 
-        features = self._rd_metrics.get("Feature", [])
+        features = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         team_hierarchy: dict = {}
         for vs_group, art_group, team_group in self._iter_team_groups():
@@ -4406,7 +4386,7 @@ class ReportsMixin:
         base    = f"{group.web_url}/-/epics"
 
         summary = []
-        for metric_type in ("Epic", "Capability", "Feature"):
+        for metric_type in self.EPIC_TYPE_DISPLAY_NAMES:
             data_list = metrics.get(metric_type, [])
             if not data_list:
                 continue
@@ -4434,15 +4414,14 @@ class ReportsMixin:
                 "url_closed": f"{base}?label_name[]={metric_type}&state=closed",
             })
 
-        all_epics = (metrics.get("Epic", []) + metrics.get("Capability", []) +
-                     metrics.get("Feature", []))
+        all_epics = [e for t in self.EPIC_TYPE_DISPLAY_NAMES for e in metrics.get(t, [])]
         by_parent: defaultdict = defaultdict(list)
         for e in all_epics:
             if e.get("parent_id") is not None:
                 by_parent[e["parent_id"]].append(e)
 
         def _node(epic):
-            etype    = epic.get("type", "Epic")
+            etype    = epic.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
             pw       = epic.get("planned_weight", 0) or 0
             aw       = epic.get("actual_weight",  0) or 0
             pct_done = epic.get("pct_complete", 0)
@@ -4474,7 +4453,7 @@ class ReportsMixin:
             "report_date": date.today().isoformat(),
             "group":       {"name": group.name, "url": group.web_url},
             "summary":     summary,
-            "hierarchy":   [_node(e) for e in metrics.get("Epic", [])],
+            "hierarchy":   [_node(e) for e in metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[0], [])],
         }
 
     def _data_workload(self) -> dict:
@@ -4583,7 +4562,7 @@ class ReportsMixin:
         today     = date.today()
         all_typed = [e for bucket in self._rd_metrics.values() for e in bucket]
         piids     = self._rd_piid_labels
-        feat_types = {"Feature", "Capability"}
+        feat_types = set(self.EPIC_TYPE_DISPLAY_NAMES[1:])
 
         def _parse_dt(s):
             if not s:
@@ -4616,26 +4595,27 @@ class ReportsMixin:
         velocity = []
         for pi in piids:
             pi_closed = [e for e in closed_epics if e.get("piid") == pi and e.get("type") in feat_types]
-            feat_c = sum(1 for e in pi_closed if e["type"] == "Feature")
-            cap_c  = sum(1 for e in pi_closed if e["type"] == "Capability")
+            feat_c = sum(1 for e in pi_closed if e["type"] == self.EPIC_TYPE_DISPLAY_NAMES[-1])
+            cap_c  = sum(1 for e in pi_closed if e["type"] == self.EPIC_TYPE_DISPLAY_NAMES[1])
             velocity.append({"piid": pi, "features": feat_c, "capabilities": cap_c, "total": feat_c + cap_c})
 
         # Section 2: load (WIP)
+        _t0, _t1, _t2 = self.EPIC_TYPE_DISPLAY_NAMES[0], self.EPIC_TYPE_DISPLAY_NAMES[1], self.EPIC_TYPE_DISPLAY_NAMES[-1]
         load = []
         for pi in piids:
             pi_open = [e for e in open_epics if e.get("piid") == pi]
-            f  = sum(1 for e in pi_open if e["type"] == "Feature")
-            c  = sum(1 for e in pi_open if e["type"] == "Capability")
-            ep = sum(1 for e in pi_open if e["type"] == "Epic")
+            f  = sum(1 for e in pi_open if e["type"] == _t2)
+            c  = sum(1 for e in pi_open if e["type"] == _t1)
+            ep = sum(1 for e in pi_open if e["type"] == _t0)
             pw = sum(e.get("planned_weight") or 0 for e in pi_open)
             load.append({"piid": pi, "features": f, "capabilities": c, "epics": ep, "total": f + c + ep, "planned_weight": pw})
 
         no_pi_open = [e for e in open_epics if not e.get("piid")]
         load_no_pi = None
         if no_pi_open:
-            f  = sum(1 for e in no_pi_open if e["type"] == "Feature")
-            c  = sum(1 for e in no_pi_open if e["type"] == "Capability")
-            ep = sum(1 for e in no_pi_open if e["type"] == "Epic")
+            f  = sum(1 for e in no_pi_open if e["type"] == _t2)
+            c  = sum(1 for e in no_pi_open if e["type"] == _t1)
+            ep = sum(1 for e in no_pi_open if e["type"] == _t0)
             pw = sum(e.get("planned_weight") or 0 for e in no_pi_open)
             load_no_pi = {"features": f, "capabilities": c, "epics": ep, "total": f + c + ep, "planned_weight": pw}
 
@@ -4643,7 +4623,7 @@ class ReportsMixin:
         total_epics = len(all_typed)
         total_pw    = sum(e.get("planned_weight") or 0 for e in all_typed)
         by_type = []
-        for t in ("Feature", "Capability", "Epic"):
+        for t in reversed(self.EPIC_TYPE_DISPLAY_NAMES):
             bucket = self._rd_metrics.get(t, [])
             pw     = sum(e.get("planned_weight") or 0 for e in bucket)
             by_type.append({
@@ -4679,7 +4659,7 @@ class ReportsMixin:
 
         # Section 4: flow time
         open_ages = []
-        for t in ("Feature", "Capability", "Epic"):
+        for t in reversed(self.EPIC_TYPE_DISPLAY_NAMES):
             bucket = [e for e in open_epics if e.get("type") == t]
             ages   = [a for a in (_age(e) for e in bucket) if a is not None]
             open_ages.append({
@@ -4691,7 +4671,7 @@ class ReportsMixin:
             })
 
         closed_cycles = []
-        for t in ("Feature", "Capability", "Epic"):
+        for t in reversed(self.EPIC_TYPE_DISPLAY_NAMES):
             bucket = [e for e in closed_epics if e.get("type") == t]
             times  = [a for a in (_age(e) for e in bucket) if a is not None]
             closed_cycles.append({
@@ -4894,7 +4874,7 @@ class ReportsMixin:
 
         md.extend(_LEGEND_OPEN + [
             _side_by_side(
-                ("Epic Type Icons", [("🏆", "Epic"), ("🧩", "Capability"), ("🛠️", "Feature")]),
+                ("Epic Type Icons", [(self.EPIC_TYPE_ICONS.get(t, "?"), t) for t in self.EPIC_TYPE_DISPLAY_NAMES]),
                 ("Status Icons",    [("🟢", "On track — within threshold"),
                                      ("🟡", "Watch — approaching threshold"),
                                      ("🔴", "At risk — threshold exceeded"),
@@ -5254,21 +5234,22 @@ class ReportsMixin:
         )
         md.append("")
 
-        feat_types = {"Feature", "Capability"}
+        feat_types = set(self.EPIC_TYPE_DISPLAY_NAMES[1:])
+        _dn = self.EPIC_TYPE_DISPLAY_NAMES
         vel_rows = []
         for pi in piids:
             pi_closed = [
                 e for e in closed_epics
                 if e.get("piid") == pi and e.get("type") in feat_types
             ]
-            feat_c = sum(1 for e in pi_closed if e["type"] == "Feature")
-            cap_c  = sum(1 for e in pi_closed if e["type"] == "Capability")
-            vel_rows.append((pi, feat_c, cap_c, feat_c + cap_c))
+            counts = {t: sum(1 for e in pi_closed if e["type"] == t) for t in _dn[1:]}
+            vel_rows.append((pi, counts))
 
-        md.append("| PI | Features | Capabilities | Total Delivered |")
-        md.append("|----|----------|--------------|-----------------|")
-        for pi, f, c, t in vel_rows:
-            md.append(f"| `{pi}` | {f} | {c} | **{t}** |")
+        md.append("| PI | " + " | ".join(f"{t}s" for t in _dn[1:]) + " | Total Delivered |")
+        md.append("|----|" + "----------|" * len(_dn[1:]) + "-----------------|")
+        for pi, counts in vel_rows:
+            cells = " | ".join(str(counts[t]) for t in _dn[1:])
+            md.append(f"| `{pi}` | {cells} | **{sum(counts.values())}** |")
 
         total_delivered = sum(r[3] for r in vel_rows)
         if total_delivered == 0:
@@ -5289,22 +5270,20 @@ class ReportsMixin:
         )
         md.append("")
 
-        md.append("| PI | Features | Capabilities | Epics | Total | Planned Weight |")
-        md.append("|----|----------|--------------|-------|-------|----------------|")
+        md.append("| PI | " + " | ".join(_dn) + " | Total | Planned Weight |")
+        md.append("|----|" + "----------|" * len(_dn) + "-------|----------------|")
         no_pi_open = [e for e in open_epics if not e.get("piid")]
         for pi in piids:
             pi_open = [e for e in open_epics if e.get("piid") == pi]
-            f   = sum(1 for e in pi_open if e["type"] == "Feature")
-            c   = sum(1 for e in pi_open if e["type"] == "Capability")
-            ep  = sum(1 for e in pi_open if e["type"] == "Epic")
+            counts = {t: sum(1 for e in pi_open if e["type"] == t) for t in _dn}
             pw  = sum(e.get("planned_weight") or 0 for e in pi_open)
-            md.append(f"| `{pi}` | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+            cells = " | ".join(str(counts[t]) for t in _dn)
+            md.append(f"| `{pi}` | {cells} | **{sum(counts.values())}** | {pw:,} |")
         if no_pi_open:
-            f   = sum(1 for e in no_pi_open if e["type"] == "Feature")
-            c   = sum(1 for e in no_pi_open if e["type"] == "Capability")
-            ep  = sum(1 for e in no_pi_open if e["type"] == "Epic")
+            counts = {t: sum(1 for e in no_pi_open if e["type"] == t) for t in _dn}
             pw  = sum(e.get("planned_weight") or 0 for e in no_pi_open)
-            md.append(f"| _(no PI)_ | {f} | {c} | {ep} | **{f+c+ep}** | {pw:,} |")
+            cells = " | ".join(str(counts[t]) for t in _dn)
+            md.append(f"| _(no PI)_ | {cells} | **{sum(counts.values())}** | {pw:,} |")
         md.append("")
         md.append("---")
 
@@ -5319,7 +5298,7 @@ class ReportsMixin:
         total_pw    = sum(e.get("planned_weight") or 0 for e in all_typed)
         md.append("| Type | Count | % Items | Planned Weight | % Weight |")
         md.append("|------|-------|---------|----------------|----------|")
-        for t in ("Feature", "Capability", "Epic"):
+        for t in reversed(_dn):
             bucket = self._rd_metrics.get(t, [])
             pw     = sum(e.get("planned_weight") or 0 for e in bucket)
             md.append(
@@ -5387,7 +5366,7 @@ class ReportsMixin:
         md.append("| Type | Count | Avg Age | Min | Max |")
         md.append("|------|-------|---------|-----|-----|")
         has_open_data = False
-        for t in ("Feature", "Capability", "Epic"):
+        for t in reversed(_dn):
             bucket = [e for e in open_epics if e.get("type") == t]
             ages   = [_age(e) for e in bucket]
             ages   = [a for a in ages if a is not None]
@@ -5411,7 +5390,7 @@ class ReportsMixin:
             md.append("")
             md.append("| Type | Count | Avg Cycle Time | Min | Max |")
             md.append("|------|-------|----------------|-----|-----|")
-            for t in ("Feature", "Capability", "Epic"):
+            for t in reversed(_dn):
                 bucket = [e for e in closed_epics if e.get("type") == t]
                 times  = [_age(e) for e in bucket]
                 times  = [a for a in times if a is not None]
@@ -5617,13 +5596,14 @@ class ReportsMixin:
             ancs     = rel.get("at_risk_portfolio_epics", [])
 
             # If the blocked item is itself a Portfolio Epic, treat it as its own ancestor
-            pe_candidates = ([blocked] + ancs) if blocked.get("type") == "Epic" else (ancs or [blocked])
+            _t0 = self.EPIC_TYPE_DISPLAY_NAMES[0]
+            pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else (ancs or [blocked])
 
             blocker_str  = ", ".join(
                 f"[{b['title']}]({b['web_url']})" if b.get("web_url") else b["title"]
                 for b in blockers
             )
-            b_type  = blocked.get("type", "Epic")
+            b_type  = blocked.get("type", _t0)
             b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
             bl_link = (f"[{blocked['title']}]({blocked['web_url']})"
                        if blocked.get("web_url") else blocked["title"])
@@ -5633,7 +5613,7 @@ class ReportsMixin:
                 pe_bv   = bv_by_id.get(pe_id)
                 pe_url  = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
                 pe_link = f"[{pe['title']}]({pe_url})" if pe_url else pe["title"]
-                pe_type = pe.get("type", "Epic")
+                pe_type = pe.get("type", _t0)
                 bv_rows.append((pe_id, pe_link, pe_bv, bl_link, f"{b_icon} {b_type}", blocker_str))
                 if pe_id not in seen_pe_bv:
                     seen_pe_bv[pe_id]   = pe_bv
@@ -6201,7 +6181,7 @@ class ReportsMixin:
         parent_of  = {e["id"]: e["parent_id"] for e in all_epics_raw if e.get("parent_id")}
 
         def _etype(labels):
-            for t in ("Epic", "Capability", "Feature"):
+            for t in self.EPIC_TYPE_DISPLAY_NAMES:
                 if t in labels:
                     return t
             return "Unknown"
@@ -6214,7 +6194,7 @@ class ReportsMixin:
                     break
                 seen.add(cur)
                 node = epic_by_id.get(cur)
-                if node and _etype(node.get("labels", [])) == "Epic":
+                if node and _etype(node.get("labels", [])) == self.EPIC_TYPE_DISPLAY_NAMES[0]:
                     result.append(node)
             return result
 
@@ -6358,12 +6338,14 @@ class ReportsMixin:
         typed_epics = [e for bucket in metrics.values() for e in bucket]
         all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, typed_epics)
         epics_payload = {
-            "generated_at":   ts,
-            "group":          self.parent_group,
-            "total":          len(typed_epics),
-            "total_raw":      len(all_epics_raw),
-            "epics":          typed_epics,
-            "all_epics_raw":  all_epics_raw,
+            "generated_at":          ts,
+            "group":                 self.parent_group,
+            "total":                 len(typed_epics),
+            "total_raw":             len(all_epics_raw),
+            "epics":                 typed_epics,
+            "all_epics_raw":         all_epics_raw,
+            "epic_type_labels":      self.EPIC_TYPE_LABELS,
+            "epic_type_display_names": self.EPIC_TYPE_DISPLAY_NAMES,
         }
         (data_dir / "epics.json").write_text(
             json.dumps(epics_payload, indent=2, default=str), encoding="utf-8"
@@ -6423,7 +6405,7 @@ class ReportsMixin:
     def _data_art_feature_status(self) -> dict:
         """ART Feature Status: VS → ART → team → feature list."""
         group    = self._rd_root_obj
-        features = self._rd_metrics.get("Feature", [])
+        features = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         team_hierarchy: dict = {}
         for vs_group, art_group, team_group in self._iter_team_groups():
@@ -6616,8 +6598,8 @@ class ReportsMixin:
     def _data_vs_capability_dashboard(self) -> dict:
         """VS Capability Dashboard: VS → PI → ART capabilities + direct features."""
         group        = self._rd_root_obj
-        capabilities = self._rd_metrics.get("Capability", [])
-        features     = self._rd_metrics.get("Feature", [])
+        capabilities = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[1], [])
+        features     = self._rd_metrics.get(self.EPIC_TYPE_DISPLAY_NAMES[-1], [])
 
         art_hierarchy: dict  = {}
         team_hierarchy: dict = {}
@@ -6654,7 +6636,7 @@ class ReportsMixin:
         }
         direct_features = [
             f for f in features
-            if epic_type_by_id.get(f.get("parent_id")) != "Capability"
+            if epic_type_by_id.get(f.get("parent_id")) != self.EPIC_TYPE_DISPLAY_NAMES[1]
         ]
 
         vs_direct_buckets: defaultdict = defaultdict(
@@ -6843,9 +6825,8 @@ class ReportsMixin:
         # Epics
         self._rd_epics_all: list = epics_data.get("all_epics_raw", epics_data["epics"])
         self._rd_metrics: dict = {
-            "Epic":       [e for e in epics_data["epics"] if e.get("type") == "Epic"],
-            "Capability": [e for e in epics_data["epics"] if e.get("type") == "Capability"],
-            "Feature":    [e for e in epics_data["epics"] if e.get("type") == "Feature"],
+            t: [e for e in epics_data["epics"] if e.get("type") == t]
+            for t in self.EPIC_TYPE_DISPLAY_NAMES
         }
         self._rd_epics_by_id: dict = {e["id"]: e for e in epics_data["epics"]}
 
