@@ -126,7 +126,7 @@ Copy and edit `config.json`:
 | `gitlab_namespace` | Parent namespace for root group creation |
 | `project_labels` | Labels representing programs or workstreams (`project::*`) |
 | `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
-| `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
+| `epic_type_labels` | SAFe hierarchy tier labels — scoped (`epic::epic`, `epic::capability`, `epic::feature`) or plain (`Epic`, `Capability`, `Feature`). Display names are derived by stripping the scope prefix and capitalizing. All mixins, reports, and Marimo pages resolve tier names from this list; changing it reconfigures the entire application. |
 | `risk_labels` | `risk::*` labels used by the Risk Register report and `set-risk-labels` tool |
 | `work_type_labels` | `type::*` labels classifying epics by SAFe work type (feature, enabler, infrastructure, defect) |
 | `lifecycle_labels` | `lifecycle::*` labels representing SAFe Portfolio Kanban states (funnel → done) |
@@ -404,9 +404,49 @@ Data snapshot → reports/20260525/143022/
 
 **`projects.json` fields:** `id`, `name`, `path`, `path_with_namespace`, `name_with_namespace`, `namespace_id`, `web_url`, `issues_enabled`
 
-#### CI
+#### Output formats
 
-`.gitlab-ci.yml` runs `pytest tests/` on every push (`python-version-test` job, `build` stage). A manual `generate-reports` job exists in the `report` stage but is not currently in active use.
+The `--formats` flag controls which output types are produced. Combine multiple:
+
+```bash
+python3 NceGitLab.py --report all --formats markdown          # Wiki only (default)
+python3 NceGitLab.py --report all --formats plotly            # Quarto HTML only
+python3 NceGitLab.py --report all --formats interactive       # Marimo WASM only
+python3 NceGitLab.py --report all --formats all               # All formats
+```
+
+| Format | Output | Description |
+|---|---|---|
+| `markdown` | GitLab Wiki | Default; publishes wiki pages to the root group wiki |
+| `plotly` | `public/quarto/` | Static HTML reports (Quarto + Plotly); full site in CI |
+| `interactive` | `public/interactive/` | Marimo WASM interactive pages (filter/drill-down); see below |
+
+When `--formats` is omitted, `markdown` is assumed. Pass `--no-ssl-verify` to disable TLS certificate verification for corporate proxy environments (also configurable via `SSL_VERIFY=false` env var or `"ssl_verify": false` in `config.json`).
+
+#### Interactive pages
+
+`build_interactive.py` exports a subset of reports as Marimo WASM notebooks — self-contained HTML files that run Python in the browser via WebAssembly. No server required; pages work from GitLab Pages or any static host.
+
+```bash
+python3 build_interactive.py    # exports all 11 notebooks → public/interactive/
+```
+
+Interactive pages share a single `public/interactive/assets/` directory (~34 MB total vs ~400 MB if each notebook kept its own copy).
+
+Available interactive reports: health-dashboard, pi-predictability, flow-metrics, art-capacity-balance, piid-project, piid-project-detail, workload, art-feature-status, vs-capability-dashboard, team-backlog, portfolio.
+
+#### CI and GitLab Pages
+
+`.gitlab-ci.yml` has two jobs:
+
+| Job | Stage | Trigger | What it does |
+|---|---|---|---|
+| `test` | build | every push | `pip install -r requirements.txt && pytest tests/` |
+| `pages` | pages | `develop` branch only | Builds the full site → `public/` and publishes to GitLab Pages |
+
+The `pages` job runs `python3 NceGitLab.py --report all --formats all` (Quarto + Marimo) then publishes the resulting `public/` directory. It uses the `ghcr.io/quarto-dev/quarto:latest` image which includes Python, Quarto, and the Marimo CLI.
+
+The deployed site is published at the project's GitLab Pages URL and mirrors the wiki structure as navigable HTML with interactive drill-down on supported reports. Each static report page links to its interactive counterpart via a **📄 Static** toggle button, and vice versa.
 
 ### Report Index
 
@@ -553,7 +593,7 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ## Contributing
 
-Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/saic-study-group/beelzabub-project/-/issues](https://gitlab.com/saic-study-group/beelzabub-project/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
+Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/saic-study-group/nce-safe-simulator/-/issues](https://gitlab.com/saic-study-group/nce-safe-simulator/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
 
 ---
 

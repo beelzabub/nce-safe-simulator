@@ -307,8 +307,7 @@ class ImportExportMixin:
         for gpath in sorted(by_group):
             print(f"  {gpath}")
             for epic in by_group[gpath]:
-                etype = next((l for l in (epic.labels or [])
-                              if l in ("Epic", "Capability", "Feature")), "—")
+                etype = self._epic_type_display(epic.labels or [])
                 choices.append((epic.id, epic.title))
                 idx = len(choices)
                 print(f"    [{idx:>3}] [{etype:<11}] {epic.title[:55]}  (#{epic.iid})")

@@ -4,13 +4,16 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import sys
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.utils import UtilitiesMixin
 
 
 class ConcreteUtils(UtilitiesMixin):
     """Minimal concrete subclass to access UtilsMixin methods."""
+    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+
     def __init__(self):
         self.gl = MagicMock()
         self.url = "https://gitlab.com"

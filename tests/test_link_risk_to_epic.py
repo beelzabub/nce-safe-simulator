@@ -3,12 +3,15 @@ import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.bootstrap import BootstrapMixin
 
 
 class ConcreteBootstrap(BootstrapMixin):
+    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+
     def __init__(self, graphql_result=None):
         self.gl            = MagicMock()
         self.url           = "https://gitlab.com"
