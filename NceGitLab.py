@@ -191,14 +191,14 @@ class NceGitLab(
         else:
             self.team_members = []
 
+        # project_labels and piid_labels are optional — used only for simulation/bootstrap.
+        # Reports and tools discover these dynamically from live epic labels.
         missing_fields = [
             field for field, val in [
                 ("url",              self.url),
                 ("parent_group",     self.parent_group),
                 ("private_token",    self.private_token),
                 ("fibonacci_weights", self.fibonacci_weights),
-                ("project_labels",   self.PROJECT_LABELS),
-                ("piid_labels",      self.PIID_LABELS),
                 ("epic_labels",      self.EPIC_TYPE_LABELS),
             ] if not val
         ]

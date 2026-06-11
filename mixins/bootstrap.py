@@ -389,6 +389,10 @@ class BootstrapMixin:
         print(f"  Direct feature %   : {int(direct_feature_ratio * 100)}%")
         print()
 
+        if not self.PROJECT_LABELS or not self.PIID_LABELS:
+            print("ERROR: project_labels and piid_labels must be defined in config.json for simulation.")
+            return
+
         root_group = self._get_or_create_root_group()
         if root_group is None:
             return
