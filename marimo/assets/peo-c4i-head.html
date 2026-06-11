@@ -26,7 +26,11 @@
   transition: color 0.15s;
 }
 .pc4i-menu:hover .pc4i-menu-trigger { color: #c8a951; }
-.pc4i-caret { font-size: 0.65em; line-height: 1; display: inline-block; margin-left: 2px; }
+.pc4i-caret {
+  display: inline-block; width: 0; height: 0; margin-left: 5px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid currentColor; vertical-align: middle; opacity: .8;
+}
 .pc4i-dropdown {
   display: none; position: absolute; top: 100%; left: 0;
   min-width: 230px; background: #0f2e5a;
@@ -95,7 +99,7 @@
 
     NAV.forEach(function (g) {
       h += '<div class="pc4i-menu">'
-         +   '<span class="pc4i-menu-trigger">' + g.label + ' <span class="pc4i-caret" aria-hidden="true">&#x25BE;</span></span>'
+         +   '<span class="pc4i-menu-trigger">' + g.label + '<span class="pc4i-caret" aria-hidden="true"></span></span>'
          +   '<div class="pc4i-dropdown">';
       g.items.forEach(function (it) {
         h += '<a href="' + it[1] + '">' + it[0] + '</a>';
