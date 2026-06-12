@@ -15,17 +15,18 @@ defineProps({
 
 <style scoped>
 .conflict-banner {
-  background: #fef9c3;
-  border: 1px solid #ca8a04;
+  background: var(--conflict-bg);
+  border: 1px solid var(--conflict-border);
   border-radius: 4px;
-  padding: 8px 12px;
-  color: #713f12;
-  font-size: 0.9rem;
+  padding: 6px 10px;
+  color: var(--conflict-text);
+  font-size: 0.82rem;
+  margin-bottom: 0.4rem;
 }
 code {
-  background: #fde68a;
+  background: var(--conflict-code-bg);
   border-radius: 3px;
   padding: 1px 4px;
-  font-size: 0.85em;
+  font-size: 0.8em;
 }
 </style>
