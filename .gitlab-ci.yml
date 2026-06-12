@@ -17,11 +17,10 @@ pages:
     - apt-get update -qq && apt-get install -y python3-pip -qq
     - pip3 install -r requirements.txt
   script:
-    - python3 NceGitLab.py --report all --formats all
+    - python3 NceGitLab.py --report all --formats markdown
   artifacts:
     paths:
       - public/
     expire_in: 7 days
   only:
     - develop
-    - feature/60-restore-all-formats-ci
