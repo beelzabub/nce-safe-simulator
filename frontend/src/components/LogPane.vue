@@ -1,7 +1,7 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-else class="log-content">{{ lines.join('\n') }}</pre>
+    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
   </div>
 </template>
 
@@ -27,6 +27,22 @@ watch(() => props.lines.length, async () => {
   const div = el.value
   if (div) div.scrollTop = div.scrollHeight
 })
+
+const URL_RE = /https?:\/\/\S+/g
+
+function parseLine(line) {
+  const parts = []
+  let last = 0
+  URL_RE.lastIndex = 0
+  let m
+  while ((m = URL_RE.exec(line)) !== null) {
+    if (m.index > last) parts.push({ type: 'text', value: line.slice(last, m.index) })
+    parts.push({ type: 'url', value: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < line.length) parts.push({ type: 'text', value: line.slice(last) })
+  return parts.length ? parts : [{ type: 'text', value: line }]
+}
 </script>
 
 <style scoped>
@@ -48,5 +64,13 @@ watch(() => props.lines.length, async () => {
   white-space: pre-wrap;
   word-break: break-all;
   line-height: 1.5;
+}
+.log-link {
+  color: var(--action, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.log-link:hover {
+  color: var(--action-hover, #3b82f6);
 }
 </style>
