@@ -1,7 +1,7 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
+    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
   </div>
 </template>
 
@@ -30,6 +30,13 @@ watch(() => props.lines.length, async () => {
 
 const URL_RE = /https?:\/\/\S+/g
 
+const LINE_HINTS = [
+  {
+    pattern: /429|Too many requests/i,
+    hint: ' — GitLab rate limit; retrying automatically (up to 5×, ~30 s backoff)',
+  },
+]
+
 function parseLine(line) {
   const parts = []
   let last = 0
@@ -41,7 +48,15 @@ function parseLine(line) {
     last = m.index + m[0].length
   }
   if (last < line.length) parts.push({ type: 'text', value: line.slice(last) })
-  return parts.length ? parts : [{ type: 'text', value: line }]
+  if (!parts.length) parts.push({ type: 'text', value: line })
+
+  for (const { pattern, hint } of LINE_HINTS) {
+    if (pattern.test(line)) {
+      parts.push({ type: 'hint', value: hint })
+      break
+    }
+  }
+  return parts
 }
 </script>
 
@@ -72,5 +87,9 @@ function parseLine(line) {
 }
 .log-link:hover {
   color: var(--action-hover, #3b82f6);
+}
+.log-hint {
+  color: var(--text-3, #6e7681);
+  font-style: italic;
 }
 </style>
