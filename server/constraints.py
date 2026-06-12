@@ -14,6 +14,7 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "set-piid-labels",
         "strip-piid-labels",
         "set-project-labels",
+        "strip-project-labels",
         "set-risk-labels",
         "set-wsjf-labels",
         "strip-wsjf-labels",
