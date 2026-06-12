@@ -14,8 +14,12 @@ export function useJobs() {
     const id = _nextId++
     jobs.value.push({ id, key: job.key, status: 'running', lines: [], collapsed: false })
 
+    const payload = job.isReport
+      ? { report: job.key, formats: ['markdown', 'plotly', 'interactive'] }
+      : { tool: job.key, params }
+
     runJob(
-      { tool: job.key, params },
+      payload,
       {
         onLog: text => {
           const j = jobs.value.find(e => e.id === id)
