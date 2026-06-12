@@ -12,6 +12,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': 'http://localhost:4645',
+      '^/(?!app)': 'http://localhost:4645',
     },
   },
 })
