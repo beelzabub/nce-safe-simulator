@@ -8,9 +8,7 @@
           <JobPicker :running-jobs="runningJobs" @launch="onLaunch" />
         </div>
         <div class="sidebar-footer">
-          <!-- /interactive/ is the Marimo reports directory.
-               Update this href if a dedicated reports index page is added. -->
-          <a href="/interactive/" target="_blank" rel="noopener" class="reports-link">
+          <a href="/" target="_blank" rel="noopener" class="reports-link">
             Reports&thinsp;↗
           </a>
         </div>

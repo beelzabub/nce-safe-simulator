@@ -3,12 +3,20 @@
 
     <!-- Filter bar -->
     <div class="picker-filter">
-      <input
-        v-model="filter"
-        class="filter-input"
-        placeholder="Filter jobs…"
-        spellcheck="false"
-      />
+      <div class="filter-wrap">
+        <input
+          v-model="filter"
+          class="filter-input"
+          placeholder="Filter jobs…"
+          spellcheck="false"
+        />
+        <button
+          v-if="filter"
+          class="filter-clear"
+          @click="filter = ''"
+          aria-label="Clear filter"
+        >×</button>
+      </div>
       <span v-if="!loading && !error" class="filter-count">
         {{ filteredCount }}&thinsp;/&thinsp;{{ tools.length }}
       </span>
@@ -104,9 +112,7 @@ const loading   = ref(true)
 const error     = ref(null)
 const filter    = ref('')
 
-// Groups that start collapsed — less-frequently used categories.
-const DEFAULT_COLLAPSED = ['risk-writers', 'setup', 'wiki-writers']
-const collapsed = ref([...DEFAULT_COLLAPSED])
+const expanded = ref([])
 
 onMounted(async () => {
   try {
@@ -174,13 +180,13 @@ const filteredCount = computed(() =>
 
 function isOpen(group) {
   if (filter.value.trim()) return true
-  return !collapsed.value.includes(group)
+  return expanded.value.includes(group)
 }
 
 function toggleSection(group) {
-  const i = collapsed.value.indexOf(group)
-  if (i >= 0) collapsed.value.splice(i, 1)
-  else collapsed.value.push(group)
+  const i = expanded.value.indexOf(group)
+  if (i >= 0) expanded.value.splice(i, 1)
+  else expanded.value.push(group)
 }
 
 // ── Click handling ─────────────────────────────────────────────────────────
@@ -236,19 +242,38 @@ function onDialogLaunch(tool, params) {
   padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--border);
 }
+.filter-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
 .filter-input {
   flex: 1;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-1);
-  padding: 5px 9px;
+  padding: 5px 28px 5px 9px;
   font-size: 0.85rem;
   outline: none;
   transition: border-color 0.15s;
+  width: 100%;
 }
 .filter-input:focus        { border-color: var(--action); }
 .filter-input::placeholder { color: var(--text-3); }
+.filter-clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.filter-clear:hover { color: var(--text-1); }
 .filter-count { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
 
 /* ── Scrollable body ── */
