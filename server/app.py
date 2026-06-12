@@ -1,18 +1,25 @@
+import asyncio
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
-from server.constraints import READONLY_TOOLS, _TOOL_GROUP
+from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.runner import install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
+
+# Registry of currently-running job keys and its guard lock.
+_running_jobs: set = set()
+_running_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +90,117 @@ def fetch_report_data(request: Request):
         _report_data_lock.release()
 
     return {"status": "ok", "data_dir": str(data_dir)}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket job runner
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/run")
+async def ws_run(websocket: WebSocket):
+    """Stream a tool or report job over WebSocket.
+
+    Client sends:  {"tool": "<key>"}  or  {"report": "<key>"}
+                   optional: {"params": {...}}  for tools
+                   optional: {"formats": ["markdown"]}  for reports
+
+    Server sends:
+      {"type": "log",      "text": "..."}   — captured stdout line
+      {"type": "done"}                       — job completed normally
+      {"type": "error",    "message": "..."}  — job failed or invalid request
+      {"type": "conflict", "blocking": [...]} — job conflicts with a running job
+    """
+    await websocket.accept()
+
+    try:
+        data = await websocket.receive_json()
+    except Exception:
+        await websocket.close(1003)
+        return
+
+    job_key: Optional[str] = data.get("tool") or data.get("report")
+    if not job_key:
+        await websocket.send_json({"type": "error", "message": "Message must include 'tool' or 'report'"})
+        await websocket.close()
+        return
+
+    gl = getattr(websocket.app.state, "gl", None)
+    if gl is None:
+        await websocket.send_json({"type": "error", "message": "GitLab client not initialised"})
+        await websocket.close()
+        return
+
+    # Conflict check and registration are atomic — happens before building the
+    # callable so a conflict response is sent even if the method lookup would fail.
+    with _running_lock:
+        blocking = check_conflict(list(_running_jobs), job_key)
+        if blocking:
+            await websocket.send_json({"type": "conflict", "blocking": blocking})
+            await websocket.close()
+            return
+        _running_jobs.add(job_key)
+
+    try:
+        fn = _build_job_fn(gl, data)
+    except ValueError as exc:
+        with _running_lock:
+            _running_jobs.discard(job_key)
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.close()
+        return
+
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+
+    def on_output(text: str) -> None:
+        loop.call_soon_threadsafe(q.put_nowait, ("log", text))
+
+    def on_done() -> None:
+        loop.call_soon_threadsafe(q.put_nowait, ("done", None))
+
+    def on_error(exc: Exception) -> None:
+        loop.call_soon_threadsafe(q.put_nowait, ("error", str(exc)))
+
+    install_writer()
+    run_job(fn, on_output, on_done=on_done, on_error=on_error)
+
+    try:
+        while True:
+            kind, payload = await q.get()
+            if kind == "log":
+                await websocket.send_json({"type": "log", "text": payload})
+            elif kind == "done":
+                await websocket.send_json({"type": "done"})
+                break
+            elif kind == "error":
+                await websocket.send_json({"type": "error", "message": payload})
+                break
+    finally:
+        with _running_lock:
+            _running_jobs.discard(job_key)
+        await websocket.close()
+
+
+def _build_job_fn(gl: object, data: dict):
+    """Return a zero-argument callable for the tool or report described by *data*."""
+    if "tool" in data:
+        key  = data["tool"]
+        tool = next((t for t in TOOLS if t["key"] == key), None)
+        if tool is None:
+            raise ValueError(f"Unknown tool: {key!r}")
+        method = getattr(gl, tool["method"])
+        params = data.get("params") or {}
+        return lambda: method(**params)
+
+    if "report" in data:
+        key    = data["report"]
+        report = next((r for r in REPORTS if r["key"] == key), None)
+        if report is None:
+            raise ValueError(f"Unknown report: {key!r}")
+        formats = set(data.get("formats") or ["markdown"])
+        return lambda: gl._run_reports([report], formats=formats)
+
+    raise ValueError("Message must include 'tool' or 'report'")
 
 
 # ---------------------------------------------------------------------------

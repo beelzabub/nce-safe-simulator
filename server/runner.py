@@ -46,16 +46,30 @@ def install_writer() -> None:
         sys.stdout = _writer
 
 
-def run_job(fn: Callable[[], None], on_output: Callable[[str], None]) -> threading.Thread:
+def run_job(
+    fn: Callable[[], None],
+    on_output: Callable[[str], None],
+    on_done: Optional[Callable[[], None]] = None,
+    on_error: Optional[Callable[[Exception], None]] = None,
+) -> threading.Thread:
     """Run *fn* in a daemon thread, routing all print() output to *on_output*.
 
-    Returns the Thread immediately; the caller is responsible for tracking
-    completion (issue C wires this to a WebSocket connection).
+    on_done  — called (in the worker thread) when fn() returns normally.
+    on_error — called (in the worker thread) when fn() raises; if omitted,
+               on_done is called instead so the caller always gets a terminal
+               signal.
     """
     def _target():
         _thread_local.write_callback = on_output
         try:
             fn()
+            if on_done is not None:
+                on_done()
+        except Exception as exc:
+            if on_error is not None:
+                on_error(exc)
+            elif on_done is not None:
+                on_done()
         finally:
             _thread_local.write_callback = None
 
