@@ -1,10 +1,8 @@
 <template>
   <div class="runner">
 
-    <!-- Carrier silhouette — decorative background, same treatment as NavBar -->
-    <div class="runner-hero" aria-hidden="true">
-      <img :src="heroSrc" alt="" class="runner-hero-img" />
-    </div>
+    <!-- Carrier silhouette — fixed to viewport, lines up with NavBar -->
+    <div class="runner-hero" :style="{ backgroundImage: `url(${heroSrc})` }" aria-hidden="true" />
 
     <div v-if="jobs.length === 0" class="placeholder">
       <span class="placeholder-icon">⚙</span>
@@ -84,20 +82,17 @@ function formatKey(key) {
   overflow: hidden;
 }
 
-/* ── Carrier background ── */
+/* ── Carrier background — same fixed position as NavBar so images align ── */
 .runner-hero {
   position: absolute;
   inset: 0;
+  background-size: cover;
+  background-position: 65% 30%;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  opacity: 0.12;
   pointer-events: none;
   z-index: 0;
-}
-.runner-hero-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 65% 30%;
-  opacity: 0.12;
-  /* radial vignette — brighter at center, fades to transparent at edges */
   -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 45%, black 20%, transparent 75%);
   mask-image:         radial-gradient(ellipse 80% 70% at 60% 45%, black 20%, transparent 75%);
 }

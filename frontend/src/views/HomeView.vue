@@ -80,10 +80,12 @@ function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
   align-items: center;
   gap: 0.25rem;
   font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--action);
+  font-weight: 400;
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s;
 }
-.reports-link:hover { color: var(--action-hover); }
+.reports-link:hover { color: var(--text-1); }
 
 /* ── Main pane ── */
 .main-pane {
