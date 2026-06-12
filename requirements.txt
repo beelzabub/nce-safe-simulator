@@ -7,6 +7,9 @@ plotly
 marimo
 jupyter
 nbformat
+fastapi
+uvicorn[standard]
+httpx
 
 pytest
 pytest-mock
