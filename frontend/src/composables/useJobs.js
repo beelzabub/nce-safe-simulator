@@ -21,7 +21,14 @@ function _makeCallbacks(id) {
     },
     onConflict: blocking => {
       const j = jobs.value.find(e => e.id === id)
-      if (j) { j.status = 'error'; j._cancel = null; j.lines.push(`Conflict — blocked by: ${blocking.join(', ')}`) }
+      if (j) {
+        j.status = 'error'
+        j._cancel = null
+        j.lines.push(
+          `Can't launch — ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} already running.` +
+          ` These tools share a write group and can't run at the same time.`
+        )
+      }
     },
   }
 }
