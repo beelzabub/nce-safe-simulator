@@ -1,0 +1,346 @@
+<template>
+  <Teleport to="body">
+    <div v-if="tool" class="overlay" @click.self="$emit('cancel')">
+      <div class="dialog" role="dialog" :aria-label="formatKey(tool.key)">
+
+        <div class="dialog-header">
+          <div class="dialog-title-block">
+            <span class="dialog-name">{{ formatKey(tool.key) }}</span>
+            <code class="dialog-key">{{ tool.key }}</code>
+          </div>
+          <button class="close-btn" @click="$emit('cancel')" title="Cancel">✕</button>
+        </div>
+
+        <p class="dialog-desc">{{ tool.description }}</p>
+
+        <div v-if="tool.params.length" class="params">
+          <div
+            v-for="param in tool.params"
+            :key="param.name"
+            class="param-row"
+            :class="{ 'param-dryrun': param.name === 'dry_run' }"
+          >
+            <!-- bool → toggle -->
+            <template v-if="param.type === 'bool'">
+              <label class="toggle-label">
+                <input type="checkbox" class="toggle-input" v-model="values[param.name]" />
+                <span class="toggle-track"><span class="toggle-thumb" /></span>
+                <span class="toggle-text">{{ param.prompt }}</span>
+              </label>
+            </template>
+
+            <!-- int / float → number -->
+            <template v-else-if="param.type === 'int' || param.type === 'float'">
+              <label class="field-label">
+                {{ param.prompt }}
+                <span v-if="!param.optional" class="required-mark">*</span>
+                <span v-else class="optional-tag">optional</span>
+              </label>
+              <input
+                type="number"
+                class="field-input"
+                :step="param.type === 'float' ? 1 : 1"
+                :placeholder="param.optional ? 'leave blank to skip' : String(param.default ?? '')"
+                v-model.number="values[param.name]"
+              />
+            </template>
+
+            <!-- str → text -->
+            <template v-else>
+              <label class="field-label">
+                {{ param.prompt }}
+                <span v-if="!param.optional" class="required-mark">*</span>
+                <span v-else class="optional-tag">optional</span>
+              </label>
+              <input
+                type="text"
+                class="field-input"
+                :placeholder="param.optional ? 'leave blank to skip' : (param.default ?? '')"
+                v-model="values[param.name]"
+              />
+            </template>
+          </div>
+        </div>
+
+        <div v-else class="no-params">
+          No parameters required — ready to launch.
+        </div>
+
+        <div class="dialog-footer">
+          <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
+          <button class="btn-launch" :disabled="!isValid" @click="submit">
+            Launch {{ formatKey(tool.key) }}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<script setup>
+import { ref, watch, computed } from 'vue'
+
+const props = defineProps({
+  tool: { type: Object, default: null },
+})
+const emit = defineEmits(['launch', 'cancel'])
+
+const values = ref({})
+
+// Re-initialise values whenever the tool changes.
+watch(() => props.tool, tool => {
+  if (!tool) { values.value = {}; return }
+  const init = {}
+  for (const p of tool.params) {
+    if (p.type === 'bool') {
+      init[p.name] = p.default ?? false
+    } else if (p.optional) {
+      init[p.name] = null
+    } else if (p.default !== null && p.default !== undefined) {
+      init[p.name] = p.default
+    } else {
+      init[p.name] = ''
+    }
+  }
+  values.value = init
+}, { immediate: true })
+
+const isValid = computed(() => {
+  if (!props.tool) return false
+  for (const p of props.tool.params) {
+    if (p.optional || p.type === 'bool') continue
+    const v = values.value[p.name]
+    if (v === '' || v === null || v === undefined) return false
+  }
+  return true
+})
+
+function formatKey(key) {
+  const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+  return key.split('-').map(w =>
+    ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
+  ).join(' ')
+}
+
+function submit() {
+  if (!isValid.value) return
+  // Strip null optional values; keep everything else as-is.
+  const params = {}
+  for (const p of props.tool.params) {
+    const v = values.value[p.name]
+    if (p.optional && (v === null || v === '')) continue
+    params[p.name] = v
+  }
+  emit('launch', props.tool, params)
+}
+</script>
+
+<style scoped>
+/* ── Overlay ── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+/* ── Dialog card ── */
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Header ── */
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dialog-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dialog-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.dialog-key {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  background: var(--surface-alt);
+  border-radius: 3px;
+  padding: 1px 5px;
+  width: fit-content;
+}
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.close-btn:hover { color: var(--text-1); }
+
+/* ── Description ── */
+.dialog-desc {
+  margin: 0;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ── Params ── */
+.params {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Dry run gets a subtle amber tint to signal it's a safety toggle */
+.param-dryrun {
+  background: color-mix(in srgb, var(--conflict-bg) 40%, transparent);
+  border: 1px solid var(--conflict-border);
+  border-radius: 5px;
+  padding: 0.5rem 0.75rem;
+}
+
+/* ── Toggle (bool) ── */
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-input { display: none; }
+
+.toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.toggle-input:checked + .toggle-track { background: var(--action); }
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: left 0.2s;
+}
+.toggle-input:checked + .toggle-track .toggle-thumb { left: 19px; }
+
+.toggle-text { font-size: 0.85rem; color: var(--text-1); }
+
+/* ── Text / number fields ── */
+.field-label {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.required-mark { color: #f87171; font-weight: 700; }
+.optional-tag  { color: var(--text-3); font-size: 0.72rem; }
+
+.field-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-1);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.field-input:focus        { border-color: var(--action); }
+.field-input::placeholder { color: var(--text-3); }
+
+/* ── No-params message ── */
+.no-params {
+  padding: 1.25rem;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+/* ── Footer ── */
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 6px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn-cancel:hover { border-color: var(--text-2); color: var(--text-1); }
+
+.btn-launch {
+  background: var(--action);
+  border: none;
+  color: #fff;
+  padding: 6px 18px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.btn-launch:hover:not(:disabled) { background: var(--action-hover); }
+.btn-launch:disabled {
+  background: var(--action-off);
+  color: var(--action-off-text);
+  cursor: not-allowed;
+}
+</style>

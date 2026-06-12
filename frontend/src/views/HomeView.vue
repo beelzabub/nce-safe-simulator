@@ -37,8 +37,8 @@ import JobPicker from '../components/JobPicker.vue'
 // Populated by WebSocket job events — wired in E3.
 const runningJobs = ref([])
 
-function onLaunch(job) {
-  console.log('launch', job.key)
+function onLaunch(job, params) {
+  console.log('launch', job.key, params)
 }
 </script>
 
