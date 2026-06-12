@@ -10,6 +10,7 @@ nbformat
 fastapi
 uvicorn[standard]
 httpx
+websockets
 
 pytest
 pytest-mock
