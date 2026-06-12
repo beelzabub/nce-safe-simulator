@@ -1,6 +1,11 @@
 <template>
   <div class="runner">
 
+    <!-- Carrier silhouette — decorative background, same treatment as NavBar -->
+    <div class="runner-hero" aria-hidden="true">
+      <img :src="heroSrc" alt="" class="runner-hero-img" />
+    </div>
+
     <div v-if="jobs.length === 0" class="placeholder">
       <span class="placeholder-icon">⚙</span>
       <p>Select a job and click Launch to run it.</p>
@@ -36,10 +41,17 @@
             @click.stop="closeJob(job.id)"
             aria-label="Close tab"
           >×</button>
+
+          <!-- Countdown bar: drains left→right over closeDuration; only for auto-closing statuses -->
+          <div
+            v-if="job.closeDuration > 0"
+            class="countdown-bar"
+            :style="`--dur: ${job.closeDuration / 1000}s`"
+          />
         </div>
 
         <!-- Log pane -->
-        <div v-if="!job.collapsed" class="tab-body">
+        <div v-if="!job.collapsed" class="tab-body" :class="{ 'tab-body--resizable': job.status !== 'running' }">
           <LogPane :lines="job.lines" />
         </div>
       </div>
@@ -51,6 +63,7 @@
 <script setup>
 import LogPane from '../components/LogPane.vue'
 import { useJobs } from '../composables/useJobs.js'
+import heroSrc from '../assets/hero-carrier.png'
 
 const { jobs, cancelJob, closeJob, toggleCollapse } = useJobs()
 
@@ -64,14 +77,35 @@ function formatKey(key) {
 
 <style scoped>
 .runner {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
 
+/* ── Carrier background ── */
+.runner-hero {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.runner-hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 65% 30%;
+  opacity: 0.12;
+  /* radial vignette — brighter at center, fades to transparent at edges */
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 45%, black 20%, transparent 75%);
+  mask-image:         radial-gradient(ellipse 80% 70% at 60% 45%, black 20%, transparent 75%);
+}
+
 /* ── Placeholder ── */
 .placeholder {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -84,6 +118,8 @@ function formatKey(key) {
 
 /* ── Tab container ── */
 .tabs-container {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -100,8 +136,14 @@ function formatKey(key) {
 }
 .tab--running { flex: 1; }
 
+/* Subtle red tint on the header row for error tabs */
+.tab--error > .tab-header {
+  background: rgba(248, 81, 73, 0.08);
+}
+
 /* ── Tab header ── */
 .tab-header {
+  position: relative;       /* anchor for countdown-bar */
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -110,6 +152,7 @@ function formatKey(key) {
   cursor: pointer;
   user-select: none;
   flex-shrink: 0;
+  overflow: hidden;         /* clip the countdown bar */
 }
 .tab-header:hover { filter: brightness(1.15); }
 
@@ -159,14 +202,55 @@ function formatKey(key) {
 }
 .tab-close:hover { color: var(--text-1, #e6edf3); }
 
+/* ── Countdown bar ── */
+.countdown-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--action, #2563eb);
+  transform-origin: left center;
+  animation: drain var(--dur) linear forwards;
+  pointer-events: none;
+}
+@keyframes drain {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 /* ── Log body ── */
 .tab-body {
   height: 300px;
   overflow: hidden;
 }
+.tab-body--resizable {
+  position: relative;
+  resize: vertical;
+  min-height: 80px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+/* Drag bar — always visible, accent-highlighted on hover */
+.tab-body--resizable::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--border);
+  transition: height 0.15s, background 0.15s;
+  pointer-events: none;
+}
+.tab-body--resizable:hover::after {
+  height: 5px;
+  background: var(--accent);
+}
 .tab--running .tab-body {
   flex: 1;
   height: auto;
   min-height: 0;
+  resize: none;
 }
 </style>
