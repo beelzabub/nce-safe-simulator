@@ -20,14 +20,23 @@ class ThreadLocalWriter(io.TextIOBase):
     def write(self, text: str) -> int:
         cb = getattr(_thread_local, "write_callback", None)
         if cb is not None:
-            cb(text)
+            buf = getattr(_thread_local, "write_buffer", "") + text
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                cb(line)
+            _thread_local.write_buffer = buf
         else:
             self._original.write(text)
         return len(text)
 
     def flush(self) -> None:
         cb = getattr(_thread_local, "write_callback", None)
-        if cb is None:
+        if cb is not None:
+            buf = getattr(_thread_local, "write_buffer", "")
+            if buf:
+                cb(buf)
+                _thread_local.write_buffer = ""
+        else:
             self._original.flush()
 
     @property
@@ -61,17 +70,21 @@ def run_job(
     """
     def _target():
         _thread_local.write_callback = on_output
+        _thread_local.write_buffer   = ""
         try:
             fn()
+            sys.stdout.flush()
             if on_done is not None:
                 on_done()
         except Exception as exc:
+            sys.stdout.flush()
             if on_error is not None:
                 on_error(exc)
             elif on_done is not None:
                 on_done()
         finally:
             _thread_local.write_callback = None
+            _thread_local.write_buffer   = ""
 
     t = threading.Thread(target=_target, daemon=True)
     t.start()
