@@ -1,102 +1,165 @@
 <template>
-  <div class="job-picker">
-    <div v-if="error" class="load-error">{{ error }}</div>
-    <div v-else-if="loading">Loading jobs…</div>
+  <div class="picker">
 
-    <template v-else>
-      <!-- Reports -->
-      <section>
-        <h3>Reports</h3>
-        <ul>
-          <li
-            v-for="r in reports"
-            :key="r.key"
-            :class="{ selected: selected?.key === r.key }"
-            @click="select(r)"
-          >
-            {{ r.key }}
-          </li>
-        </ul>
-      </section>
+    <!-- Filter bar -->
+    <div class="picker-filter">
+      <input
+        v-model="filter"
+        class="filter-input"
+        placeholder="Filter jobs…"
+        spellcheck="false"
+      />
+      <span v-if="!loading && !error" class="filter-count">
+        {{ filteredCount }}&thinsp;/&thinsp;{{ tools.length }}
+      </span>
+    </div>
 
-      <!-- Tools grouped by parallelism_group; read-only tools collected at end -->
-      <section v-for="[group, items] in groupedTools" :key="group">
-        <h3>{{ group }}</h3>
-        <ul>
+    <!-- States -->
+    <div v-if="loading" class="state-msg">Loading…</div>
+    <div v-else-if="error" class="state-msg state-error">{{ error }}</div>
+
+    <!-- Groups -->
+    <div v-else class="picker-body">
+      <section
+        v-for="[group, items] in visibleGroups"
+        :key="group"
+        class="group"
+      >
+        <button class="group-header" @click="toggleSection(group)">
+          <span class="chevron">{{ isOpen(group) ? '▼' : '▶' }}</span>
+          <span class="group-name">{{ formatGroup(group) }}</span>
+          <span class="group-count">{{ items.length }}</span>
+        </button>
+
+        <ul v-if="isOpen(group)" class="group-items">
           <li
             v-for="t in items"
             :key="t.key"
-            :class="{ selected: selected?.key === t.key }"
+            class="job-item"
+            :class="{
+              selected: selected?.key === t.key,
+              running:  isRunning(t.key),
+            }"
             @click="select(t)"
           >
-            {{ t.key }}
-            <span v-if="t.readonly" class="badge">read-only</span>
+            <div class="item-top">
+              <span class="item-key">{{ t.key }}</span>
+              <span v-if="isRunning(t.key)" class="badge badge-run">● running</span>
+              <span v-else-if="t.readonly" class="badge badge-ro">read-only</span>
+            </div>
+            <div class="item-desc">{{ t.description }}</div>
           </li>
         </ul>
       </section>
 
-      <!-- Conflict warning -->
-      <ConflictBanner :blockers="blockers" />
+      <div v-if="visibleGroups.size === 0 && filter" class="state-msg">
+        No jobs match "{{ filter }}"
+      </div>
+    </div>
 
-      <!-- Launch -->
-      <button
-        class="launch-btn"
-        :disabled="!selected || blockers.length > 0"
-        @click="launch"
-      >
-        Launch{{ selected ? ': ' + selected.key : '' }}
-      </button>
-    </template>
+    <!-- Launch area — pinned to bottom of picker -->
+    <div class="launch-area">
+      <ConflictBanner :blockers="blockers" />
+      <div class="launch-row">
+        <span class="launch-selection" :class="{ dim: !selected }">
+          {{ selected ? selected.key : 'Nothing selected' }}
+        </span>
+        <button
+          class="launch-btn"
+          :disabled="!selected || blockers.length > 0"
+          @click="launch"
+        >
+          Launch
+        </button>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getTools, getReports } from '../api.js'
+import { getTools } from '../api.js'
 import ConflictBanner from './ConflictBanner.vue'
 
 const props = defineProps({
-  // Keys of jobs currently running — provided by parent via WebSocket (wired in E3).
   runningJobs: { type: Array, default: () => [] },
 })
-
 const emit = defineEmits(['launch'])
 
-const tools   = ref([])
-const reports = ref([])
+const tools    = ref([])
 const selected = ref(null)
 const loading  = ref(true)
 const error    = ref(null)
+const filter   = ref('')
+const collapsed = ref([])  // group keys the user has manually closed
 
 onMounted(async () => {
   try {
-    ;[tools.value, reports.value] = await Promise.all([getTools(), getReports()])
+    tools.value = await getTools()
   } catch (e) {
-    error.value = `Failed to load jobs: ${e.message}`
+    error.value = `Failed to load: ${e.message}`
   } finally {
     loading.value = false
   }
 })
 
-// Group tools: writers by parallelism_group, then a single "Read-only" bucket.
+// ── Grouping ──────────────────────────────────────────────────────────────
+
+function formatGroup(g) {
+  if (g === 'read-only') return 'Read-only Tools'
+  return g.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+}
+
 const groupedTools = computed(() => {
   const groups = new Map()
   for (const t of tools.value) {
-    const key = t.parallelism_group ?? 'read-only'
+    const key = t.readonly ? 'read-only' : (t.parallelism_group ?? 'other')
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(t)
   }
-  // Put read-only last
-  const sorted = new Map(
+  // Writer groups alphabetically; read-only always last.
+  return new Map(
     [...groups.entries()].sort(([a], [b]) =>
       a === 'read-only' ? 1 : b === 'read-only' ? -1 : a.localeCompare(b)
     )
   )
-  return sorted
 })
 
-// Conflict check: read-only jobs never conflict; writers conflict when a running
-// job shares the same parallelism_group.
+const visibleGroups = computed(() => {
+  const q = filter.value.toLowerCase().trim()
+  if (!q) return groupedTools.value
+  const result = new Map()
+  for (const [group, items] of groupedTools.value) {
+    const matching = items.filter(
+      t => t.key.includes(q) || t.description?.toLowerCase().includes(q)
+    )
+    if (matching.length) result.set(group, matching)
+  }
+  return result
+})
+
+const filteredCount = computed(() =>
+  [...visibleGroups.value.values()].reduce((n, items) => n + items.length, 0)
+)
+
+// ── Section collapse ───────────────────────────────────────────────────────
+
+function isOpen(group) {
+  if (filter.value.trim()) return true   // always expand matching sections
+  return !collapsed.value.includes(group)
+}
+
+function toggleSection(group) {
+  const i = collapsed.value.indexOf(group)
+  if (i >= 0) collapsed.value.splice(i, 1)
+  else collapsed.value.push(group)
+}
+
+// ── Selection & conflict ───────────────────────────────────────────────────
+
+const isRunning = key => props.runningJobs.includes(key)
+
 const blockers = computed(() => {
   if (!selected.value || selected.value.readonly) return []
   const group = selected.value.parallelism_group
@@ -107,9 +170,7 @@ const blockers = computed(() => {
   })
 })
 
-function select(item) {
-  selected.value = item
-}
+function select(item) { selected.value = item }
 
 function launch() {
   if (!selected.value || blockers.value.length) return
@@ -118,66 +179,168 @@ function launch() {
 </script>
 
 <style scoped>
-.job-picker {
+.picker {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 640px;
+  height: 100%;
+  overflow: hidden;
 }
-section {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
-}
-h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
-}
-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-li {
-  padding: 5px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
+
+/* ── Filter ── */
+.picker-filter {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
 }
-li:hover    { background: #f3f4f6; }
-li.selected { background: #dbeafe; }
-.badge {
+.filter-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-1);
+  padding: 5px 9px;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.filter-input:focus    { border-color: var(--action); }
+.filter-input::placeholder { color: var(--text-3); }
+.filter-count { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
+
+/* ── Scrollable body ── */
+.picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+}
+
+/* ── Group ── */
+.group { border-bottom: 1px solid var(--border); }
+
+.group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  background: var(--surface-alt);
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: left;
+  transition: background 0.12s;
+}
+.group-header:hover { background: var(--border); }
+.chevron { font-size: 0.6rem; color: var(--text-3); }
+.group-name { flex: 1; }
+.group-count {
   font-size: 0.7rem;
-  background: #e0f2fe;
-  color: #0369a1;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 6px;
+}
+
+/* ── Items ── */
+.group-items {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+}
+.job-item {
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.job-item:hover    { background: var(--surface-alt); }
+.job-item.selected { background: color-mix(in srgb, var(--action) 15%, transparent); }
+.job-item.running  { border-left: 2px solid var(--badge-run-text); padding-left: calc(1rem - 2px); }
+
+.item-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1px;
+}
+.item-key {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.item-desc {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  line-height: 1.3;
+}
+
+/* ── Badges ── */
+.badge {
+  font-size: 0.68rem;
   border-radius: 3px;
   padding: 1px 5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
+.badge-ro  { background: var(--badge-ro-bg);  color: var(--badge-ro-text); }
+.badge-run { background: var(--badge-run-bg); color: var(--badge-run-text); }
+
+/* ── State messages ── */
+.state-msg {
+  padding: 1.5rem 1rem;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  text-align: center;
+}
+.state-error { color: #f87171; }
+
+/* ── Launch area ── */
+.launch-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.65rem 1rem;
+  background: var(--surface);
+}
+.launch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+}
+.launch-selection {
+  flex: 1;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launch-selection.dim { color: var(--text-3); font-family: inherit; }
 .launch-btn {
-  align-self: flex-start;
-  padding: 8px 20px;
-  background: #2563eb;
+  flex-shrink: 0;
+  padding: 6px 18px;
+  background: var(--action);
   color: #fff;
   border: none;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background 0.15s;
 }
+.launch-btn:hover:not(:disabled) { background: var(--action-hover); }
 .launch-btn:disabled {
-  background: #93c5fd;
+  background: var(--action-off);
+  color: var(--action-off-text);
   cursor: not-allowed;
-}
-.load-error {
-  color: #b91c1c;
-  font-size: 0.9rem;
 }
 </style>
