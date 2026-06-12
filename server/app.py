@@ -33,6 +33,16 @@ def _tool_payload(tool: dict) -> dict:
         "description":       tool["description"],
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
+        "params": [
+            {
+                "name":     p["name"],
+                "prompt":   p["prompt"],
+                "type":     p["type"].__name__,
+                "default":  p.get("default"),
+                "optional": p.get("optional", False),
+            }
+            for p in tool.get("params", [])
+        ],
     }
 
 
