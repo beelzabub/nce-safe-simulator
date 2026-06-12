@@ -57,13 +57,11 @@ class ServeMixin:
             return False, None
 
     def _serve_start(self) -> int:
-        """Start HTTP server in a detached background process. Returns PID."""
-        port   = self._serve_port()
-        public = Path("public")
-        if not public.exists():
-            raise FileNotFoundError("public/ not found — build the site first.")
+        """Start the uvicorn server in a detached background process. Returns PID."""
+        port = self._serve_port()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "http.server", str(port), "--directory", str(public)],
+            [sys.executable, "-m", "uvicorn", "server.app:app",
+             "--port", str(port), "--host", "0.0.0.0"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,   # detach: survives NceGitLab exit
@@ -86,6 +84,27 @@ class ServeMixin:
     # ------------------------------------------------------------------
     # Build
     # ------------------------------------------------------------------
+
+    def _serve_build_frontend(self) -> bool:
+        """Run `npm run build` in frontend/. Returns True on success, False if skipped."""
+        frontend = Path("frontend")
+        if not frontend.exists():
+            return False
+        print("\nBuilding frontend (npm run build)...\n")
+        proc = subprocess.Popen(
+            ["npm", "run", "build"],
+            cwd=str(frontend),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            print(f"  {line}", end="", flush=True)
+        rc = proc.wait()
+        ok = rc == 0
+        print(f"\n  {'OK' if ok else f'FAILED (exit {rc})'}")
+        return ok
 
     def _site_build_interactive(self) -> bool:
         """Export all Marimo WASM notebooks. Returns True on success."""
