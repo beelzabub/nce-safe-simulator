@@ -520,8 +520,6 @@ def main():
         return
 
     if args.serve:
-        import threading
-        import webbrowser
         import uvicorn
         from server.app import app as _fastapi_app
 
@@ -529,11 +527,6 @@ def main():
         port = gl._serve_port()
         _fastapi_app.state.gl = gl
         gl._serve_build_frontend()
-
-        def _open_browser():
-            time.sleep(1.5)
-            webbrowser.open(f"http://localhost:{port}/app/")
-        threading.Thread(target=_open_browser, daemon=True).start()
 
         uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
