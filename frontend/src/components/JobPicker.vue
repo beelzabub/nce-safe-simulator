@@ -69,7 +69,7 @@
 
     <!-- Launch area — pinned to bottom; only for no-param tools -->
     <div class="launch-area">
-      <ConflictBanner :blockers="blockers" />
+      <ConflictBanner :blockers="blockers" :group="selected?.parallelism_group" />
       <div class="launch-row">
         <span class="launch-selection" :class="{ dim: !selected }">
           {{ selected ? formatKey(selected.key) : 'Nothing selected' }}
@@ -94,6 +94,8 @@
   <!-- Parameter dialog -->
   <ToolParamDialog
     :tool="dialogTool"
+    :blockers="dialogBlockers"
+    :group="dialogTool?.parallelism_group"
     @launch="onDialogLaunch"
     @cancel="dialogTool = null"
   />
@@ -219,15 +221,18 @@ function handleClick(tool) {
 
 const isRunning = key => props.runningJobs.includes(key)
 
-const blockers = computed(() => {
-  if (!selected.value || selected.value.readonly) return []
-  const group = selected.value.parallelism_group
+function _blockersFor(tool) {
+  if (!tool || tool.readonly) return []
+  const group = tool.parallelism_group
   if (!group) return []
   return props.runningJobs.filter(runningKey => {
     const t = tools.value.find(x => x.key === runningKey)
     return t && t.parallelism_group === group
   })
-})
+}
+
+const blockers       = computed(() => _blockersFor(selected.value))
+const dialogBlockers = computed(() => _blockersFor(dialogTool.value))
 
 function launch() {
   if (!selected.value || blockers.value.length) return
