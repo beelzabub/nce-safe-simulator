@@ -125,6 +125,13 @@ class ServeMixin:
 
     def _site_build_static(self) -> bool:
         """Render the Quarto static site. Returns True on success."""
+        data_files = list(Path("data").glob("*.json")) if Path("data").exists() else []
+        if not data_files:
+            print("\n  Cannot build: data/*.json not found.")
+            print("  Run reports first to generate the data layer:")
+            print("    python NceGitLab.py --report all")
+            return False
+
         print("\nBuilding static (quarto render)...\n")
         proc = subprocess.Popen(
             ["quarto", "render"],
@@ -234,8 +241,8 @@ class ServeMixin:
             print()
             print("  Build")
             print("  [1] interactive   Marimo WASM → public/interactive/")
-            print("  [2] static        quarto render → public/")
-            print("  [3] all           static → data → interactive")
+            print("  [2] static        quarto render → public/  (requires data/ from a report run)")
+            print("  [3] all           quarto → restore data → interactive  (requires data/)")
             print()
             print("  Clean")
             print("  [4] interactive   Delete public/interactive/")
