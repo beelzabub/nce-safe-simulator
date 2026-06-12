@@ -1,5 +1,10 @@
 <template>
   <header class="nav-bar">
+    <!-- Carrier silhouette — decorative background strip -->
+    <div class="nav-hero" aria-hidden="true">
+      <img :src="heroSrc" alt="" class="nav-hero-img" />
+    </div>
+
     <div class="brand">
       <span class="brand-tag">PMW 120</span>
       <span class="brand-divider">|</span>
@@ -19,24 +24,65 @@
 
 <script setup>
 import { useTheme } from '../composables/useTheme.js'
+import heroSrc from '../assets/hero-carrier.png'
+
 const { theme, toggle } = useTheme()
 defineProps({ runningCount: { type: Number, default: 0 } })
 defineEmits(['toggle-status'])
 </script>
 
 <style scoped>
-/* Nav is always dark regardless of page theme. */
 .nav-bar {
-  height: 48px;
+  position: relative;
+  height: 52px;
   flex-shrink: 0;
-  background: #161b22;
+  background: #0d1117;
   border-bottom: 2px solid var(--accent);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 1.25rem;
   gap: 1rem;
+  overflow: hidden;
 }
+
+/* ── Hero image strip ── */
+.nav-hero {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.nav-hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* position to catch the carrier superstructure silhouette */
+  object-position: 65% 22%;
+  opacity: 0.18;
+  /* fade hard at both edges so brand/buttons read cleanly */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+}
+
+/* ── Brand + actions float above the image ── */
+.brand, .nav-actions {
+  position: relative;
+  z-index: 1;
+}
+
 .nav-actions {
   display: flex;
   align-items: center;
@@ -54,12 +100,14 @@ defineEmits(['toggle-status'])
   font-size: 0.8rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.9);
 }
 .brand-divider { color: #6e7681; }
 .brand-name {
   color: #e6edf3;
   font-weight: 500;
   font-size: 0.95rem;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.9);
 }
 
 .theme-btn {

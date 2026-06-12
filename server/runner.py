@@ -1,9 +1,16 @@
+import ctypes
 import io
+import re
 import sys
 import threading
 from typing import Callable, Optional
 
 _thread_local = threading.local()
+
+# Matches ANSI/VT100 escape sequences (CSI sequences and lone ESC codes).
+# These are meaningful in a terminal but meaningless — and visually broken —
+# in a browser <pre> block, so we strip them before buffering.
+_ANSI_ESC = re.compile(r'\x1b(?:\[[0-9;]*[A-Za-z]|[^\[])')
 
 
 class ThreadLocalWriter(io.TextIOBase):
@@ -20,6 +27,9 @@ class ThreadLocalWriter(io.TextIOBase):
     def write(self, text: str) -> int:
         cb = getattr(_thread_local, "write_callback", None)
         if cb is not None:
+            # Strip terminal control codes; treat bare \r as line separator
+            # so carriage-return-overwrite patterns don't corrupt the next line.
+            text = _ANSI_ESC.sub("", text).replace("\r\n", "\n").replace("\r", "\n")
             buf = getattr(_thread_local, "write_buffer", "") + text
             while "\n" in buf:
                 line, buf = buf.split("\n", 1)
@@ -45,6 +55,21 @@ class ThreadLocalWriter(io.TextIOBase):
 
 
 _writer: Optional[ThreadLocalWriter] = None
+
+
+def cancel_thread(thread: threading.Thread) -> None:
+    """Raise KeyboardInterrupt inside a running thread (best-effort).
+
+    Works at Python bytecode boundaries; won't interrupt a blocking C-level
+    call (e.g. mid-flight requests.get), but the exception fires as soon as
+    control returns to Python — typically within the next API call's response
+    handling.  Safe to call on an already-finished thread (no-op).
+    """
+    if thread.is_alive():
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(thread.ident),
+            ctypes.py_object(KeyboardInterrupt),
+        )
 
 
 def install_writer() -> None:

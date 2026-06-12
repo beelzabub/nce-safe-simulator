@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
-from server.runner import install_writer, run_job
+from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
 
@@ -186,7 +186,7 @@ async def ws_run(websocket: WebSocket):
         loop.call_soon_threadsafe(q.put_nowait, ("error", str(exc)))
 
     install_writer()
-    run_job(fn, on_output, on_done=on_done, on_error=on_error)
+    thread = run_job(fn, on_output, on_done=on_done, on_error=on_error)
 
     try:
         while True:
@@ -200,6 +200,7 @@ async def ws_run(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": payload})
                 break
     finally:
+        cancel_thread(thread)
         with _running_lock:
             _running_jobs.pop(job_key, None)
         await websocket.close()
