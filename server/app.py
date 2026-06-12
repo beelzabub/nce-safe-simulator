@@ -118,9 +118,12 @@ async def ws_run(websocket: WebSocket):
         await websocket.close(1003)
         return
 
-    job_key: Optional[str] = data.get("tool") or data.get("report")
+    job_key: Optional[str] = (
+        data.get("tool") or data.get("report")
+        or ("reports" if data.get("reports") else None)
+    )
     if not job_key:
-        await websocket.send_json({"type": "error", "message": "Message must include 'tool' or 'report'"})
+        await websocket.send_json({"type": "error", "message": "Message must include 'tool', 'report', or 'reports'"})
         await websocket.close()
         return
 
@@ -200,7 +203,16 @@ def _build_job_fn(gl: object, data: dict):
         formats = set(data.get("formats") or ["markdown"])
         return lambda: gl._run_reports([report], formats=formats)
 
-    raise ValueError("Message must include 'tool' or 'report'")
+    if "reports" in data:
+        keys    = data["reports"]
+        reports = [next((r for r in REPORTS if r["key"] == k), None) for k in keys]
+        missing = [k for k, r in zip(keys, reports) if r is None]
+        if missing:
+            raise ValueError(f"Unknown report key(s): {missing}")
+        formats = set(data.get("formats") or ["markdown"])
+        return lambda: gl._run_reports([r for r in reports if r], formats=formats)
+
+    raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
 
 # ---------------------------------------------------------------------------

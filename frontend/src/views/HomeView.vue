@@ -7,7 +7,7 @@
 
       <aside class="sidebar">
         <div class="sidebar-picker">
-          <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" />
+          <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
         </div>
         <div class="sidebar-footer">
           <a href="/" target="_blank" rel="noopener" class="reports-link">
@@ -29,10 +29,14 @@ import JobPicker  from '../components/JobPicker.vue'
 import JobRunner  from './JobRunner.vue'
 import { useJobs } from '../composables/useJobs.js'
 
-const { runningJobKeys, launch } = useJobs()
+const { runningJobKeys, launch, launchReports } = useJobs()
 
 function onLaunch(job, params) {
   launch(job, params)
+}
+
+function onLaunchReports(reports, formats) {
+  launchReports(reports, formats)
 }
 </script>
 
