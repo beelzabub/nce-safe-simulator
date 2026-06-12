@@ -8,4 +8,10 @@ export default defineConfig({
     outDir: '../public/app',
     emptyOutDir: true,
   },
+  server: {
+    host: true,
+    proxy: {
+      '/api': 'http://localhost:4645',
+    },
+  },
 })
