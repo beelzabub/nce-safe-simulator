@@ -18,6 +18,7 @@ from server.runner import ThreadLocalWriter, install_writer, run_job
 
 @pytest.fixture()
 def client():
+    app.state.gl = None
     return TestClient(app)
 
 
