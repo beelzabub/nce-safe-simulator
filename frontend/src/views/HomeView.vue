@@ -1,8 +1,6 @@
 <template>
   <div class="app-shell">
-    <nav class="nav-bar">
-      <span class="nav-brand">NCE Safe Simulator</span>
-    </nav>
+    <NavBar />
     <div class="workspace">
 
       <aside class="sidebar">
@@ -25,19 +23,15 @@
 </template>
 
 <script setup>
-import JobPicker  from '../components/JobPicker.vue'
-import JobRunner  from './JobRunner.vue'
+import NavBar    from '../components/NavBar.vue'
+import JobPicker from '../components/JobPicker.vue'
+import JobRunner from './JobRunner.vue'
 import { useJobs } from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports } = useJobs()
 
-function onLaunch(job, params) {
-  launch(job, params)
-}
-
-function onLaunchReports(reports, formats) {
-  launchReports(reports, formats)
-}
+function onLaunch(job, params)          { launch(job, params) }
+function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
 </script>
 
 <style scoped>
@@ -45,23 +39,6 @@ function onLaunchReports(reports, formats) {
   display: flex;
   flex-direction: column;
   height: 100vh;
-}
-
-/* ── Nav bar ── */
-.nav-bar {
-  flex-shrink: 0;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  padding: 0 1rem;
-  background: #161b22;
-  border-bottom: 2px solid #fc6d26;
-}
-.nav-brand {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #e6edf3;
-  letter-spacing: 0.02em;
 }
 
 /* ── Two-column workspace ── */
@@ -77,17 +54,19 @@ function onLaunchReports(reports, formats) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #161b22;
-  border-right: 1px solid #30363d;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   overflow: hidden;
 }
+
 .sidebar-picker {
   flex: 1;
-  overflow: hidden;
+  overflow: hidden;   /* JobPicker manages its own internal scroll */
 }
+
 .sidebar-footer {
   flex-shrink: 0;
-  border-top: 1px solid #30363d;
+  border-top: 1px solid var(--border);
   padding: 0.6rem 1rem;
 }
 .reports-link {
@@ -96,10 +75,9 @@ function onLaunchReports(reports, formats) {
   gap: 0.25rem;
   font-size: 0.82rem;
   font-weight: 500;
-  color: #2563eb;
-  text-decoration: none;
+  color: var(--action);
 }
-.reports-link:hover { color: #3b82f6; }
+.reports-link:hover { color: var(--action-hover); }
 
 /* ── Main pane ── */
 .main-pane {
@@ -107,6 +85,6 @@ function onLaunchReports(reports, formats) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: #0d1117;
+  background: var(--bg);
 }
 </style>
