@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -66,6 +66,12 @@ const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedForm
 function toggleAll() {
   selectedKeys.value = allSelected.value ? [] : props.reports.map(r => r.key)
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape') emit('close')
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 function launch() {
   const selected = props.reports.filter(r => selectedKeys.value.includes(r.key))

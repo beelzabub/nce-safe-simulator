@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 
 const props = defineProps({
@@ -132,6 +132,12 @@ function formatKey(key) {
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
   ).join(' ')
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape' && props.tool) emit('cancel')
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 function submit() {
   if (!isValid.value) return
