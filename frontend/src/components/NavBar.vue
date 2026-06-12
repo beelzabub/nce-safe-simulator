@@ -5,15 +5,23 @@
       <span class="brand-divider">|</span>
       <span class="brand-name">NCE Safe Simulator</span>
     </div>
-    <button class="theme-btn" @click="toggle">
-      {{ theme === 'dark' ? '☀ Light' : '☾ Dark' }}
-    </button>
+    <div class="nav-actions">
+      <button class="status-btn" :class="{ active: runningCount > 0 }" @click="$emit('toggle-status')">
+        <span v-if="runningCount > 0" class="status-dot" />
+        {{ runningCount > 0 ? `${runningCount} running` : 'Status' }}
+      </button>
+      <button class="theme-btn" @click="toggle">
+        {{ theme === 'dark' ? '☀ Light' : '☾ Dark' }}
+      </button>
+    </div>
   </header>
 </template>
 
 <script setup>
 import { useTheme } from '../composables/useTheme.js'
 const { theme, toggle } = useTheme()
+defineProps({ runningCount: { type: Number, default: 0 } })
+defineEmits(['toggle-status'])
 </script>
 
 <style scoped>
@@ -28,6 +36,11 @@ const { theme, toggle } = useTheme()
   justify-content: space-between;
   padding: 0 1.25rem;
   gap: 1rem;
+}
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .brand {
@@ -61,4 +74,33 @@ const { theme, toggle } = useTheme()
   transition: background 0.15s;
 }
 .theme-btn:hover { background: #30363d; }
+
+.status-btn {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.status-btn:hover { background: #30363d; color: #e6edf3; }
+.status-btn.active { border-color: #3fb950; color: #3fb950; }
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3fb950;
+  animation: pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
 </style>
