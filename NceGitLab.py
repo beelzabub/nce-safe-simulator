@@ -486,6 +486,8 @@ def main():
                         help="Run a utility tool interactively (omit TOOL to show menu)")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
+    parser.add_argument("-w", "--serve",             action="store_true",
+                        help="Start the uvicorn server and open the browser")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -515,6 +517,18 @@ def main():
         _phase[0] = "scaffold"
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
+        return
+
+    if args.serve:
+        import uvicorn
+        from server.app import app as _fastapi_app
+
+        _phase[0] = "serve"
+        port = gl._serve_port()
+        _fastapi_app.state.gl = gl
+        gl._serve_build_frontend()
+
+        uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
 
     phases = []
