@@ -37,15 +37,17 @@
             :key="t.key"
             class="job-item"
             :class="{
-              selected: selected?.key === t.key,
-              running:  isRunning(t.key),
+              selected:    selected?.key === t.key && !t.params?.length,
+              running:     isRunning(t.key),
+              configurable: t.params?.length > 0,
             }"
-            @click="select(t)"
+            @click="handleClick(t)"
           >
             <div class="item-top">
-              <span class="item-key">{{ t.key }}</span>
+              <span class="item-name">{{ formatKey(t.key) }}</span>
               <span v-if="isRunning(t.key)" class="badge badge-run">● running</span>
               <span v-else-if="t.readonly" class="badge badge-ro">read-only</span>
+              <span v-else-if="t.params?.length" class="badge badge-cfg">configure ›</span>
             </div>
             <div class="item-desc">{{ t.description }}</div>
           </li>
@@ -57,12 +59,12 @@
       </div>
     </div>
 
-    <!-- Launch area — pinned to bottom of picker -->
+    <!-- Launch area — pinned to bottom; only for no-param tools -->
     <div class="launch-area">
       <ConflictBanner :blockers="blockers" />
       <div class="launch-row">
         <span class="launch-selection" :class="{ dim: !selected }">
-          {{ selected ? selected.key : 'Nothing selected' }}
+          {{ selected ? formatKey(selected.key) : 'Nothing selected' }}
         </span>
         <button
           class="launch-btn"
@@ -75,24 +77,36 @@
     </div>
 
   </div>
+
+  <!-- Parameter dialog -->
+  <ToolParamDialog
+    :tool="dialogTool"
+    @launch="onDialogLaunch"
+    @cancel="dialogTool = null"
+  />
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getTools } from '../api.js'
 import ConflictBanner from './ConflictBanner.vue'
+import ToolParamDialog from './ToolParamDialog.vue'
 
 const props = defineProps({
   runningJobs: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['launch'])
 
-const tools    = ref([])
-const selected = ref(null)
-const loading  = ref(true)
-const error    = ref(null)
-const filter   = ref('')
-const collapsed = ref([])  // group keys the user has manually closed
+const tools     = ref([])
+const selected  = ref(null)   // only set for no-param tools
+const dialogTool = ref(null)  // tool whose param dialog is open
+const loading   = ref(true)
+const error     = ref(null)
+const filter    = ref('')
+
+// Groups that start collapsed — less-frequently used categories.
+const DEFAULT_COLLAPSED = ['risk-writers', 'setup', 'wiki-writers']
+const collapsed = ref([...DEFAULT_COLLAPSED])
 
 onMounted(async () => {
   try {
@@ -104,12 +118,24 @@ onMounted(async () => {
   }
 })
 
-// ── Grouping ──────────────────────────────────────────────────────────────
+// ── Display helpers ───────────────────────────────────────────────────────
+
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+
+function formatKey(key) {
+  return key.split('-').map(w =>
+    ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
+  ).join(' ')
+}
 
 function formatGroup(g) {
   if (g === 'read-only') return 'Read-only Tools'
-  return g.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+  return g.split('-').map(w =>
+    ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
+  ).join(' ')
 }
+
+// ── Grouping ──────────────────────────────────────────────────────────────
 
 const groupedTools = computed(() => {
   const groups = new Map()
@@ -118,7 +144,6 @@ const groupedTools = computed(() => {
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(t)
   }
-  // Writer groups alphabetically; read-only always last.
   return new Map(
     [...groups.entries()].sort(([a], [b]) =>
       a === 'read-only' ? 1 : b === 'read-only' ? -1 : a.localeCompare(b)
@@ -132,7 +157,9 @@ const visibleGroups = computed(() => {
   const result = new Map()
   for (const [group, items] of groupedTools.value) {
     const matching = items.filter(
-      t => t.key.includes(q) || t.description?.toLowerCase().includes(q)
+      t => t.key.includes(q)
+        || formatKey(t.key).toLowerCase().includes(q)
+        || t.description?.toLowerCase().includes(q)
     )
     if (matching.length) result.set(group, matching)
   }
@@ -146,7 +173,7 @@ const filteredCount = computed(() =>
 // ── Section collapse ───────────────────────────────────────────────────────
 
 function isOpen(group) {
-  if (filter.value.trim()) return true   // always expand matching sections
+  if (filter.value.trim()) return true
   return !collapsed.value.includes(group)
 }
 
@@ -156,7 +183,18 @@ function toggleSection(group) {
   else collapsed.value.push(group)
 }
 
-// ── Selection & conflict ───────────────────────────────────────────────────
+// ── Click handling ─────────────────────────────────────────────────────────
+
+function handleClick(tool) {
+  if (tool.params?.length) {
+    dialogTool.value = tool
+    selected.value = null
+  } else {
+    selected.value = tool
+  }
+}
+
+// ── Selection & conflict (for no-param tools) ──────────────────────────────
 
 const isRunning = key => props.runningJobs.includes(key)
 
@@ -170,11 +208,14 @@ const blockers = computed(() => {
   })
 })
 
-function select(item) { selected.value = item }
-
 function launch() {
   if (!selected.value || blockers.value.length) return
-  emit('launch', selected.value)
+  emit('launch', selected.value, {})
+}
+
+function onDialogLaunch(tool, params) {
+  dialogTool.value = null
+  emit('launch', tool, params)
 }
 </script>
 
@@ -206,7 +247,7 @@ function launch() {
   outline: none;
   transition: border-color 0.15s;
 }
-.filter-input:focus    { border-color: var(--action); }
+.filter-input:focus        { border-color: var(--action); }
 .filter-input::placeholder { color: var(--text-3); }
 .filter-count { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
 
@@ -238,7 +279,7 @@ function launch() {
   transition: background 0.12s;
 }
 .group-header:hover { background: var(--border); }
-.chevron { font-size: 0.6rem; color: var(--text-3); }
+.chevron    { font-size: 0.6rem; color: var(--text-3); }
 .group-name { flex: 1; }
 .group-count {
   font-size: 0.7rem;
@@ -259,27 +300,29 @@ function launch() {
   padding: 0.45rem 1rem;
   cursor: pointer;
   transition: background 0.1s;
+  border-left: 2px solid transparent;
 }
-.job-item:hover    { background: var(--surface-alt); }
-.job-item.selected { background: color-mix(in srgb, var(--action) 15%, transparent); }
-.job-item.running  { border-left: 2px solid var(--badge-run-text); padding-left: calc(1rem - 2px); }
+.job-item:hover       { background: var(--surface-alt); }
+.job-item.selected    { background: color-mix(in srgb, var(--action) 12%, transparent); border-left-color: var(--action); }
+.job-item.running     { border-left-color: var(--badge-run-text); }
+.job-item.configurable:hover { border-left-color: var(--accent); }
 
 .item-top {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
 }
-.item-key {
-  font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.82rem;
+.item-name {
+  font-size: 0.85rem;
   color: var(--text-1);
   font-weight: 500;
+  flex: 1;
 }
 .item-desc {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: var(--text-2);
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 /* ── Badges ── */
@@ -289,17 +332,14 @@ function launch() {
   padding: 1px 5px;
   font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .badge-ro  { background: var(--badge-ro-bg);  color: var(--badge-ro-text); }
 .badge-run { background: var(--badge-run-bg); color: var(--badge-run-text); }
+.badge-cfg { background: var(--surface-alt); color: var(--accent); border: 1px solid var(--accent); }
 
 /* ── State messages ── */
-.state-msg {
-  padding: 1.5rem 1rem;
-  color: var(--text-2);
-  font-size: 0.85rem;
-  text-align: center;
-}
+.state-msg   { padding: 1.5rem 1rem; color: var(--text-2); font-size: 0.85rem; text-align: center; }
 .state-error { color: #f87171; }
 
 /* ── Launch area ── */
@@ -317,14 +357,14 @@ function launch() {
 }
 .launch-selection {
   flex: 1;
-  font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--text-1);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.launch-selection.dim { color: var(--text-3); font-family: inherit; }
+.launch-selection.dim { color: var(--text-3); font-weight: 400; }
 .launch-btn {
   flex-shrink: 0;
   padding: 6px 18px;
