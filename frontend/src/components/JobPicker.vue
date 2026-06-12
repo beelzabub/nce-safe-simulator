@@ -4,21 +4,6 @@
     <div v-else-if="loading">Loading jobs…</div>
 
     <template v-else>
-      <!-- Reports -->
-      <section>
-        <h3>Reports</h3>
-        <ul>
-          <li
-            v-for="r in reports"
-            :key="r.key"
-            :class="{ selected: selected?.key === r.key }"
-            @click="select(r)"
-          >
-            {{ r.key }}
-          </li>
-        </ul>
-      </section>
-
       <!-- Tools grouped by parallelism_group; read-only tools collected at end -->
       <section v-for="[group, items] in groupedTools" :key="group">
         <h3>{{ group }}</h3>
@@ -46,6 +31,18 @@
       >
         Launch{{ selected ? ': ' + selected.key : '' }}
       </button>
+
+      <!-- Reports -->
+      <button class="reports-btn" @click="showReportDialog = true">
+        Run Reports…
+      </button>
+
+      <ReportPickerDialog
+        v-if="showReportDialog"
+        :reports="reports"
+        @launch="onReportLaunch"
+        @close="showReportDialog = false"
+      />
     </template>
   </div>
 </template>
@@ -54,25 +51,24 @@
 import { ref, computed, onMounted } from 'vue'
 import { getTools, getReports } from '../api.js'
 import ConflictBanner from './ConflictBanner.vue'
+import ReportPickerDialog from './ReportPickerDialog.vue'
 
 const props = defineProps({
-  // Keys of jobs currently running — provided by parent via WebSocket (wired in E3).
   runningJobs: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['launch'])
+const emit = defineEmits(['launch', 'launch-reports'])
 
-const tools   = ref([])
-const reports = ref([])
-const selected = ref(null)
-const loading  = ref(true)
-const error    = ref(null)
+const tools          = ref([])
+const reports        = ref([])
+const selected       = ref(null)
+const loading        = ref(true)
+const error          = ref(null)
+const showReportDialog = ref(false)
 
 onMounted(async () => {
   try {
-    const [toolsData, reportsData] = await Promise.all([getTools(), getReports()])
-    tools.value   = toolsData
-    reports.value = reportsData.map(r => ({ ...r, isReport: true }))
+    ;[tools.value, reports.value] = await Promise.all([getTools(), getReports()])
   } catch (e) {
     error.value = `Failed to load jobs: ${e.message}`
   } finally {
@@ -116,6 +112,11 @@ function select(item) {
 function launch() {
   if (!selected.value || blockers.value.length) return
   emit('launch', selected.value)
+}
+
+function onReportLaunch(selectedReports, formats) {
+  showReportDialog.value = false
+  emit('launch-reports', selectedReports, formats)
 }
 </script>
 
@@ -178,6 +179,17 @@ li.selected { background: #dbeafe; }
   background: #93c5fd;
   cursor: not-allowed;
 }
+.reports-btn {
+  align-self: flex-start;
+  padding: 8px 20px;
+  background: transparent;
+  color: #2563eb;
+  border: 1px solid #2563eb;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.reports-btn:hover { background: #eff6ff; }
 .load-error {
   color: #b91c1c;
   font-size: 0.9rem;
