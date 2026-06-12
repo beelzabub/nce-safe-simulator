@@ -70,7 +70,9 @@ const error    = ref(null)
 
 onMounted(async () => {
   try {
-    ;[tools.value, reports.value] = await Promise.all([getTools(), getReports()])
+    const [toolsData, reportsData] = await Promise.all([getTools(), getReports()])
+    tools.value   = toolsData
+    reports.value = reportsData.map(r => ({ ...r, isReport: true }))
   } catch (e) {
     error.value = `Failed to load jobs: ${e.message}`
   } finally {
