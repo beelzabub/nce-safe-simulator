@@ -1,7 +1,7 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-for="(line, i) in lines" :key="i" class="log-line">{{ line }}</pre>
+    <pre v-else class="log-content">{{ lines.join('\n') }}</pre>
   </div>
 </template>
 
@@ -43,7 +43,7 @@ watch(() => props.lines.length, async () => {
   color: var(--text-3, #6e7681);
   font-style: italic;
 }
-.log-line {
+.log-content {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
