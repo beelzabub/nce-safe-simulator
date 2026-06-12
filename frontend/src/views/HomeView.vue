@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell">
-    <NavBar />
+    <NavBar :running-count="runningJobKeys.length" @toggle-status="showStatus = !showStatus" />
     <div class="workspace">
 
       <aside class="sidebar">
@@ -18,17 +18,23 @@
         <JobRunner />
       </main>
 
+      <StatusSidebar :open="showStatus" @close="showStatus = false" />
+
     </div>
   </div>
 </template>
 
 <script setup>
-import NavBar    from '../components/NavBar.vue'
-import JobPicker from '../components/JobPicker.vue'
-import JobRunner from './JobRunner.vue'
+import { ref } from 'vue'
+import NavBar       from '../components/NavBar.vue'
+import JobPicker    from '../components/JobPicker.vue'
+import JobRunner    from './JobRunner.vue'
+import StatusSidebar from '../components/StatusSidebar.vue'
 import { useJobs } from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports } = useJobs()
+
+const showStatus = ref(false)
 
 function onLaunch(job, params)          { launch(job, params) }
 function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
