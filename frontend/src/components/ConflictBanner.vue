@@ -51,6 +51,6 @@ code {
   background: var(--conflict-code-bg);
   border-radius: 3px;
   padding: 1px 4px;
-  font-size: 0.85em;
+  font-size: 0.8em;
 }
 </style>

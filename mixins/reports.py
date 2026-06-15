@@ -6431,6 +6431,8 @@ class ReportsMixin:
 
     def run_reports_menu(self, report_key=None, reuse_data=None, formats=None):
         """Show the reports selection menu or run a specific report by key."""
+        if formats is None:
+            formats = {"markdown", "plotly", "interactive"}
         if report_key:
             if report_key == "all":
                 self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats)
