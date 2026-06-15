@@ -41,6 +41,20 @@ function resumeClose(id) {
   j._closeTimer = setTimeout(() => _closeJob(id), remaining)
 }
 
+// Click handler on the countdown bar: pin (freeze) or unpin the countdown.
+// When pinned, hover enter/leave has no effect — the tab stays open until
+// the user clicks again or closes it manually.
+function toggleClosePin(id) {
+  const j = jobs.value.find(e => e.id === id)
+  if (!j) return
+  j._closePinned = !j._closePinned
+  if (j._closePinned) {
+    pauseClose(id)
+  } else {
+    resumeClose(id)
+  }
+}
+
 function _makeCallbacks(id) {
   return {
     onLog: text => {
@@ -79,7 +93,7 @@ export function useJobs() {
 
   function launch(job, params = {}) {
     const id = _nextId++
-    jobs.value.push({ id, key: job.key, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, closeDuration: 0, closeAt: 0 })
+    jobs.value.push({ id, key: job.key, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, _closePinned: false, closeDuration: 0, closeAt: 0 })
     const { cancel } = runJob({ tool: job.key, params }, _makeCallbacks(id))
     const j = jobs.value.find(e => e.id === id)
     if (j) j._cancel = cancel
@@ -88,7 +102,7 @@ export function useJobs() {
   function launchReports(reports, formats) {
     const label = reports.length === 1 ? reports[0].key : `reports (${reports.length})`
     const id = _nextId++
-    jobs.value.push({ id, key: label, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, closeDuration: 0, closeAt: 0 })
+    jobs.value.push({ id, key: label, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, _closePinned: false, closeDuration: 0, closeAt: 0 })
     const { cancel } = runJob({ reports: reports.map(r => r.key), formats }, _makeCallbacks(id))
     const j = jobs.value.find(e => e.id === id)
     if (j) j._cancel = cancel
@@ -111,5 +125,5 @@ export function useJobs() {
     if (j) j.collapsed = !j.collapsed
   }
 
-  return { jobs, runningJobKeys, launch, launchReports, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose }
+  return { jobs, runningJobKeys, launch, launchReports, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose, toggleClosePin }
 }

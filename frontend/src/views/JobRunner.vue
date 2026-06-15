@@ -20,8 +20,8 @@
         <div
           class="tab-header"
           @click="toggleCollapse(job.id)"
-          @mouseenter="pauseClose(job.id)"
-          @mouseleave="resumeClose(job.id)"
+          @mouseenter="!job._closePinned && pauseClose(job.id)"
+          @mouseleave="!job._closePinned && resumeClose(job.id)"
         >
           <span class="tab-status">
             <span v-if="job.status === 'running'"    class="spinner" />
@@ -45,11 +45,14 @@
             aria-label="Close tab"
           >×</button>
 
-          <!-- Countdown bar: drains left→right over closeDuration; only for auto-closing statuses -->
+          <!-- Countdown bar: drains left→right over closeDuration; click to pin/unpin -->
           <div
             v-if="job.closeDuration > 0"
             class="countdown-bar"
+            :class="{ 'countdown-bar--pinned': job._closePinned }"
             :style="`--dur: ${job.closeDuration / 1000}s`"
+            :title="job._closePinned ? 'Click to restart countdown' : 'Click to freeze countdown'"
+            @click.stop="toggleClosePin(job.id)"
           />
         </div>
 
@@ -68,7 +71,7 @@ import LogPane from '../components/LogPane.vue'
 import { useJobs } from '../composables/useJobs.js'
 import heroSrc from '../assets/hero-carrier.png'
 
-const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose } = useJobs()
+const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose, toggleClosePin } = useJobs()
 
 const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
 function formatKey(key) {
@@ -155,7 +158,6 @@ function formatKey(key) {
   overflow: hidden;         /* clip the countdown bar */
 }
 .tab-header:hover { filter: brightness(1.15); }
-.tab-header:hover .countdown-bar { animation-play-state: paused; }
 
 /* ── Status indicators ── */
 .tab-status { display: flex; align-items: center; width: 16px; }
@@ -209,11 +211,18 @@ function formatKey(key) {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: var(--action, #2563eb);
   transform-origin: left center;
   animation: drain var(--dur) linear forwards;
-  pointer-events: none;
+  cursor: pointer;
+}
+.countdown-bar--pinned {
+  background: var(--text-3, #6e7681);
+  animation-play-state: paused;
+}
+.tab-header:hover .countdown-bar:not(.countdown-bar--pinned) {
+  animation-play-state: paused;
 }
 @keyframes drain {
   from { transform: scaleX(1); }
