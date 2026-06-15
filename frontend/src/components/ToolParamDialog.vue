@@ -66,9 +66,16 @@
           No parameters required — ready to launch.
         </div>
 
+        <ConflictBanner
+          v-if="blockers.length"
+          :blockers="blockers"
+          :group="group"
+          class="dialog-conflict"
+        />
+
         <div class="dialog-footer">
           <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
-          <button class="btn-launch" :disabled="!isValid" @click="submit">
+          <button class="btn-launch" :disabled="!isValid || blockers.length > 0" @click="submit">
             Launch {{ formatKey(tool.key) }}
           </button>
         </div>
@@ -79,10 +86,13 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import ConflictBanner from './ConflictBanner.vue'
 
 const props = defineProps({
-  tool: { type: Object, default: null },
+  tool:     { type: Object, default: null },
+  blockers: { type: Array,  default: () => [] },
+  group:    { type: String, default: null },
 })
 const emit = defineEmits(['launch', 'cancel'])
 
@@ -122,6 +132,12 @@ function formatKey(key) {
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
   ).join(' ')
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape' && props.tool) emit('cancel')
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 function submit() {
   if (!isValid.value) return
@@ -306,6 +322,7 @@ function submit() {
 }
 
 /* ── Footer ── */
+.dialog-conflict { margin: 0 1.25rem 0.5rem; }
 .dialog-footer {
   display: flex;
   justify-content: flex-end;

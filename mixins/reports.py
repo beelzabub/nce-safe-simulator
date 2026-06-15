@@ -5685,6 +5685,328 @@ class ReportsMixin:
         print(f"  → Wiki: {self._wiki_t2}/WSJF Priority Board")
 
     # ------------------------------------------------------------------
+    # Environment & API Diagnostics
+    # ------------------------------------------------------------------
+
+    def _generate_diagnostics_section(self, for_wiki=True) -> list:
+        """Return lines for the environment & API diagnostics output.
+
+        for_wiki=True  — markdown in a <details> block; also saves data/diagnostics.json.
+        for_wiki=False — plain text formatted for terminal / log-pane reading (no markdown).
+        """
+        from importlib.metadata import version as _pkg_ver, PackageNotFoundError
+
+        def _pkg(name):
+            try:
+                return _pkg_ver(name)
+            except PackageNotFoundError:
+                return "not installed"
+
+        # ── 1. Collect all data (mode-independent) ─────────────────────
+
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        try:
+            gl_version, _ = self.gl.version()
+        except Exception as e:
+            gl_version = f"error: {e}"
+        try:
+            _ns_list = self.gl.namespaces.list(search=self.parent_group)
+            if _ns_list:
+                _ns    = self.gl.namespaces.get(_ns_list[0].id)
+                _plan  = getattr(_ns, "plan",  None) or "unknown"
+                _trial = getattr(_ns, "trial", False)
+                gl_tier = _plan.capitalize() + (" (trial)" if _trial else "")
+            else:
+                gl_tier = "unknown (namespace not found)"
+        except Exception as e:
+            gl_tier = f"error: {e}"
+
+        version_rows = [
+            ("Python",          py_ver),
+            ("python-gitlab",   _pkg("python-gitlab")),
+            ("requests",        _pkg("requests")),
+            ("pandas",          _pkg("pandas")),
+            ("python-dateutil", _pkg("python-dateutil")),
+            ("plotly",          _pkg("plotly")),
+            ("marimo",          _pkg("marimo")),
+            ("jupyter",         _pkg("jupyter")),
+            ("nbformat",        _pkg("nbformat")),
+            ("GitLab Server",   gl_version),
+            ("GitLab Tier",     gl_tier),
+        ]
+
+        config_rows = [
+            ("GitLab URL",       self.url),
+            ("Parent Group",     self.parent_group),
+            ("Epic Type Labels", ", ".join(self.EPIC_TYPE_LABELS) or "none configured"),
+            ("PIID Labels",      ", ".join(self.PIID_LABELS)      or "none configured"),
+            ("Project Labels",   ", ".join(self.PROJECT_LABELS)   or "none configured"),
+            ("Risk Labels",      ", ".join(self.RISK_LABELS)      or "none configured"),
+            ("Lifecycle Labels", ", ".join(self.LIFECYCLE_LABELS) or "none configured"),
+        ]
+
+        group = getattr(self, "_rd_root_obj", None) or self.get_group_by_name(self.parent_group)
+
+        def _rest_probe(label, fn, endpoint):
+            try:
+                fn()
+                return (True, label, endpoint, "")
+            except Exception as e:
+                code   = getattr(e, "response_code", None) or ""
+                detail = f"HTTP {code}: {e}" if code else str(e)[:120]
+                return (False, label, endpoint, detail)
+
+        r_epics      = _rest_probe("Group Epics",      lambda: group.epics.list(per_page=1, get_all=False),      "GET /groups/:id/epics")
+        r_wiki       = _rest_probe("Group Wiki",       lambda: group.wikis.list(per_page=1, get_all=False),      "GET /groups/:id/wikis")
+        r_labels     = _rest_probe("Group Labels",     lambda: group.labels.list(per_page=1, get_all=False),     "GET /groups/:id/labels")
+        r_milestones = _rest_probe("Group Milestones", lambda: group.milestones.list(per_page=1, get_all=False), "GET /groups/:id/milestones")
+        if r_epics[0]:
+            try:
+                _s = group.epics.list(per_page=1, get_all=False)
+                if _s:
+                    _s[0].issues.list(per_page=1, get_all=False)
+                r_epic_issues = (True, "Epic Issues", "GET /groups/:id/epics/:iid/issues", "")
+            except Exception as e:
+                r_epic_issues = (False, "Epic Issues", "GET /groups/:id/epics/:iid/issues", str(e)[:120])
+        else:
+            r_epic_issues = (None, "Epic Issues", "GET /groups/:id/epics/:iid/issues", "skipped — group epics unavailable")
+        rest_rows = [r_epics, r_wiki, r_labels, r_milestones, r_epic_issues]
+
+        p = group.full_path
+
+        def _gql_ok(query, variables=None, expect_key=None):
+            try:
+                r = self.graphql_query(query, variables=variables)
+                if r is None:
+                    return False
+                return expect_key is None or expect_key in r
+            except Exception:
+                return False
+
+        _blocking_fields_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){epics(first:1){nodes{blocked blockedByCount blockingCount}}}}",
+            {"p": p}, "group",
+        )
+        _blocked_by_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){epics(first:1){nodes{blockedByEpics{edges{node{title}}}}}}}",
+            {"p": p}, "group",
+        )
+        _weight_ok = None
+        try:
+            _sample = group.epics.list(per_page=1, get_all=False)
+            _wid    = getattr(_sample[0], "work_item_id", None) if _sample else None
+            if _wid:
+                _weight_ok = _gql_ok(
+                    "query D($id:WorkItemID!){workItem(id:$id){widgets{...on WorkItemWidgetWeight{weight}}}}",
+                    {"id": f"gid://gitlab/WorkItem/{_wid}"}, "workItem",
+                )
+        except Exception:
+            pass
+        _custom_fields_ok = _gql_ok(
+            "query D($p:ID!){namespace(fullPath:$p){customFields{nodes{id}}}}",
+            {"p": p}, "namespace",
+        )
+        _linked_wi_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){issues(first:1){nodes{linkedWorkItems(first:1){nodes{workItem{id}}}}}}}",
+            {"p": p}, "group",
+        )
+        _wi_types_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){workItemTypes{nodes{id name}}}}",
+            {"p": p}, "group",
+        )
+
+        gql_rows = [
+            (_blocking_fields_ok, "Epic blocking fields",   "Epic.blocked / blockedByCount / blockingCount — Blocking & Cross-ART Risk (Ultimate)"),
+            (_blocked_by_ok,      "Epic.blockedByEpics",    "Full blocked-by list — Blocking & Cross-ART Risk (Ultimate)"),
+            (_weight_ok,          "WorkItemWidgetWeight",   "Epic/issue weight via workItem GraphQL — WSJF, Capacity, PI Matrix"),
+            (_custom_fields_ok,   "Namespace.customFields", "Custom field definitions — Business Value (Ultimate + GitLab 17+)"),
+            (_linked_wi_ok,       "Issue.linkedWorkItems",  "Linked work items on issues — ROAM risk linking"),
+            (_wi_types_ok,        "Group.workItemTypes",    "Work item type GIDs — required for weight/BV write mutations"),
+        ]
+
+        all_configured = sorted(set(
+            self.EPIC_TYPE_LABELS + self.PIID_LABELS + self.PROJECT_LABELS + self.RISK_LABELS
+        ))
+        label_rows = None
+        if all_configured:
+            try:
+                _existing = {lbl.name for lbl in group.labels.list(get_all=True)}
+                label_rows = [(lbl, lbl in _existing) for lbl in all_configured]
+            except Exception as e:
+                label_rows = [(f"error fetching labels: {e}", None)]
+
+        epics_ok    = r_epics[0]
+        wiki_ok     = r_wiki[0]
+        blocking_ok = _blocking_fields_ok and _blocked_by_ok
+
+        assess_rows = [
+            (epics_ok,          "All reports (read epics)",         "Group Epics REST API — requires Premium/Ultimate"),
+            (wiki_ok,           "Wiki publishing",                  "Group Wiki REST API — requires Premium/Ultimate"),
+            (_weight_ok,        "Weights (WSJF, Capacity, Matrix)", "WorkItemWidgetWeight via workItem GraphQL"),
+            (blocking_ok,       "Blocking & Cross-ART Risk",        "Epic blocking fields + blockedByEpics — requires Ultimate"),
+            (_custom_fields_ok, "Business Value / Custom Fields",   "Namespace.customFields — requires Ultimate + GitLab 17+"),
+            (_linked_wi_ok,     "ROAM Risk issue linking",          "Issue.linkedWorkItems GraphQL field"),
+            (_wi_types_ok,      "Weight / BV write mutations",      "Group.workItemTypes — required to resolve work item type GIDs"),
+        ]
+
+        critical = epics_ok and wiki_ok
+        full     = critical and bool(_weight_ok) and bool(blocking_ok) and bool(_custom_fields_ok)
+        if full:
+            verdict_plain = "✅ Full compatibility — all API features detected. Reports should generate correctly."
+            verdict_md    = "**✅ Full compatibility** — all API features detected. Reports should generate correctly."
+        elif critical:
+            verdict_plain = ("⚠️  Partial compatibility — core reports will upload, but some sections may be "
+                             "empty (blocking, custom fields, or ROAM risk features not available at this GitLab tier).")
+            verdict_md    = ("**⚠️ Partial compatibility** — core reports will upload, but some sections may be "
+                             "empty (blocking, custom fields, or ROAM risk features not available at this GitLab tier).")
+        elif epics_ok:
+            verdict_plain = ("⚠️  Limited compatibility — epics are accessible but wiki publishing failed. "
+                             "Check GitLab Premium/Ultimate license and group wiki settings.")
+            verdict_md    = ("**⚠️ Limited compatibility** — epics are accessible but wiki publishing failed. "
+                             "Check GitLab Premium/Ultimate license and group wiki settings.")
+        else:
+            verdict_plain = ("❌ Incompatible — the Group Epics API is not accessible. All reports will fail "
+                             "or produce empty output. GitLab Premium or Ultimate is required.")
+            verdict_md    = ("**❌ Incompatible** — the Group Epics API is not accessible. All reports will fail "
+                             "or produce empty output. GitLab Premium or Ultimate is required.")
+
+        # ── 2. Render ──────────────────────────────────────────────────
+
+        def _icon(ok):
+            if ok is True:  return "✅"
+            if ok is False: return "❌"
+            return "⚠️"
+
+        if not for_wiki:
+            # Plain text — no markdown syntax, aligned for terminal / log-pane reading
+            W   = 64
+            out = ["", "🔧  Environment & API Diagnostics", "═" * W, ""]
+
+            # Software versions — two-column aligned
+            out += ["Software Versions", "─" * 17]
+            kw   = max(len(k) for k, _ in version_rows)
+            out += [f"  {k:<{kw}}  {v}" for k, v in version_rows]
+            out.append("")
+
+            # Configuration — two-column aligned
+            out += ["Configuration", "─" * 13]
+            kw   = max(len(k) for k, _ in config_rows)
+            out += [f"  {k:<{kw}}  {v}" for k, v in config_rows]
+            out.append("")
+
+            # REST probes — icon + name + endpoint [+ detail]
+            out += ["REST API Capabilities", "─" * 21]
+            nw   = max(len(r[1]) for r in rest_rows)
+            for ok, name, endpoint, detail in rest_rows:
+                suffix = f"  {detail}" if detail else ""
+                out.append(f"  {_icon(ok)}  {name:<{nw}}  {endpoint}{suffix}")
+            out.append("")
+
+            # GraphQL probes — icon + name + description
+            out += ["GraphQL API Capabilities", "─" * 24]
+            nw   = max(len(r[1]) for r in gql_rows)
+            for ok, name, desc in gql_rows:
+                out.append(f"  {_icon(ok)}  {name:<{nw}}  {desc}")
+            out.append("")
+
+            # Label validation — icon + label name
+            if label_rows:
+                out += ["Key Label Validation", "─" * 20]
+                for lbl, present in label_rows:
+                    out.append(f"  {_icon(present)}  {lbl}")
+                out.append("")
+
+            # Compatibility assessment — icon + feature + requirement
+            out += ["Report Compatibility Assessment", "─" * 31]
+            fw   = max(len(r[1]) for r in assess_rows)
+            for ok, feature, req in assess_rows:
+                out.append(f"  {_icon(ok)}  {feature:<{fw}}  {req}")
+            out.append("")
+
+            out += ["═" * W, verdict_plain, "═" * W, ""]
+            return out
+
+        # ── Markdown for wiki ──────────────────────────────────────────
+
+        def _ok_md(val):
+            if val is True:  return "✅"
+            if val is False: return "❌"
+            return "⚠️"
+
+        def _compat_md(val):
+            if val is True:  return "✅ Yes"
+            if val is False: return "❌ No"
+            return "⚠️ Unknown"
+
+        def _lbl_md(labels):
+            return ", ".join(f"`{l}`" for l in labels) if labels else "_none configured_"
+
+        body = []
+        body += ["### Software Versions", "", "| Component | Version |", "|-----------|---------|"]
+        for k, v in version_rows:
+            body.append(f"| {k} | `{v}` |")
+        body.append("")
+
+        body += ["### Configuration", "", "| Setting | Value |", "|---------|-------|",
+                 f"| GitLab URL | `{self.url}` |",
+                 f"| Parent Group | `{self.parent_group}` |",
+                 f"| Epic Type Labels | {_lbl_md(self.EPIC_TYPE_LABELS)} |",
+                 f"| PIID Labels | {_lbl_md(self.PIID_LABELS)} |",
+                 f"| Project Labels | {_lbl_md(self.PROJECT_LABELS)} |",
+                 f"| Risk Labels | {_lbl_md(self.RISK_LABELS)} |",
+                 f"| Lifecycle Labels | {_lbl_md(self.LIFECYCLE_LABELS)} |",
+                 ""]
+
+        body += ["### REST API Capabilities", "", "| Endpoint | Status | Notes |", "|----------|--------|-------|"]
+        for ok, name, endpoint, detail in rest_rows:
+            note = f"`{endpoint}`" + (f" — {detail}" if detail else "")
+            body.append(f"| {name} | {_ok_md(ok)} | {note} |")
+        body.append("")
+
+        body += ["### GraphQL API Capabilities", "", "| Feature | Available | Purpose |", "|---------|-----------|---------|"]
+        for ok, name, desc in gql_rows:
+            body.append(f"| {name} | {_ok_md(ok)} | {desc} |")
+        body.append("")
+
+        if label_rows:
+            body += [
+                "### Key Label Validation (Group-Level)", "",
+                "Labels that exist in the group match epics during report generation. "
+                "Missing labels mean the corresponding epics are invisible to reports — "
+                "a common cause of empty report cells.", "",
+                "| Label | Present in Group |", "|-------|-----------------|",
+            ]
+            for lbl, present in label_rows:
+                body.append(f"| `{lbl}` | {_ok_md(present)} |")
+            body.append("")
+
+        body += ["### Report Compatibility Assessment", "",
+                 "| Feature / Report Area | Expected to Work | Requirement |",
+                 "|----------------------|-----------------|-------------|"]
+        for ok, feature, req in assess_rows:
+            body.append(f"| {feature} | {_compat_md(ok)} | {req} |")
+        body.append("")
+
+        # Save JSON for Marimo/Quarto while we have the rendered markdown body
+        try:
+            _data_dir = Path("data")
+            _data_dir.mkdir(parents=True, exist_ok=True)
+            (_data_dir / "diagnostics.json").write_text(
+                json.dumps({
+                    "report_date": date.today().strftime("%Y-%m-%d"),
+                    "group": {"name": group.name, "url": group.web_url},
+                    "content": "\n".join(body),
+                    "verdict_md": verdict_md,
+                }, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+        return ["---", "<details>", "<summary>🔧 Environment &amp; API Diagnostics</summary>", "",
+                *body, f"> {verdict_md}", "", "</details>"]
+
+    # ------------------------------------------------------------------
     # Wiki Index
     # ------------------------------------------------------------------
 
@@ -5818,6 +6140,8 @@ class ReportsMixin:
             f"| Closed Epics or Capabilities that still have open child epics or open linked issues |"
         )
         md.append("")
+
+        md.extend(self._generate_diagnostics_section())
 
         self.upload_to_wiki(group, "home", "\n".join(md))
         print(f"  ↳ Wiki home page updated for {gn}")

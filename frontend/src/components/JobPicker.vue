@@ -45,8 +45,7 @@
             :key="t.key"
             class="job-item"
             :class="{
-              selected:    selected?.key === t.key && !t.params?.length,
-              running:     isRunning(t.key),
+              running:      isRunning(t.key),
               configurable: t.params?.length > 0,
             }"
             @click="handleClick(t)"
@@ -54,8 +53,8 @@
             <div class="item-top">
               <span class="item-name">{{ formatKey(t.key) }}</span>
               <span v-if="isRunning(t.key)" class="badge badge-run">● running</span>
-              <span v-else-if="t.readonly" class="badge badge-ro">read-only</span>
-              <span v-else-if="t.params?.length" class="badge badge-cfg">configure ›</span>
+              <span v-else-if="t.readonly" class="ro-hint">read-only</span>
+              <span v-else-if="t.params?.length" class="cfg-hint">⚙</span>
             </div>
             <div class="item-desc">{{ t.description }}</div>
           </li>
@@ -67,21 +66,11 @@
       </div>
     </div>
 
-    <!-- Launch area — pinned to bottom; only for no-param tools -->
-    <div class="launch-area">
-      <ConflictBanner :blockers="blockers" />
-      <div class="launch-row">
-        <span class="launch-selection" :class="{ dim: !selected }">
-          {{ selected ? formatKey(selected.key) : 'Nothing selected' }}
-        </span>
-        <button
-          class="launch-btn"
-          :disabled="!selected || blockers.length > 0"
-          @click="launch"
-        >
-          Launch
-        </button>
-      </div>
+    <!-- Reports button — pinned to bottom -->
+    <div class="reports-area">
+      <button class="reports-btn" @click="showReportDialog = true">
+        Run Reports…
+      </button>
     </div>
 
   </div>
@@ -89,34 +78,45 @@
   <!-- Parameter dialog -->
   <ToolParamDialog
     :tool="dialogTool"
+    :blockers="dialogBlockers"
+    :group="dialogTool?.parallelism_group"
     @launch="onDialogLaunch"
     @cancel="dialogTool = null"
+  />
+
+  <!-- Report picker dialog -->
+  <ReportPickerDialog
+    v-if="showReportDialog"
+    :reports="reports"
+    @launch="onReportLaunch"
+    @close="showReportDialog = false"
   />
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getTools } from '../api.js'
-import ConflictBanner from './ConflictBanner.vue'
+import { getTools, getReports } from '../api.js'
 import ToolParamDialog from './ToolParamDialog.vue'
+import ReportPickerDialog from './ReportPickerDialog.vue'
 
 const props = defineProps({
   runningJobs: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['launch'])
+const emit = defineEmits(['launch', 'launch-reports'])
 
-const tools     = ref([])
-const selected  = ref(null)   // only set for no-param tools
-const dialogTool = ref(null)  // tool whose param dialog is open
-const loading   = ref(true)
-const error     = ref(null)
-const filter    = ref('')
-
-const expanded = ref([])
+const tools          = ref([])
+const reports        = ref([])
+const dialogTool     = ref(null)
+const loading        = ref(true)
+const error          = ref(null)
+const filter         = ref('')
+const expanded       = ref([])
+const showReportDialog = ref(false)
 
 onMounted(async () => {
   try {
     tools.value = await getTools()
+    reports.value = await getReports()
   } catch (e) {
     error.value = `Failed to load: ${e.message}`
   } finally {
@@ -134,8 +134,20 @@ function formatKey(key) {
   ).join(' ')
 }
 
+const GROUP_LABELS = {
+  'label-writers':         'Label Management',
+  'weight-writers':        'Weights & Scoring',
+  'issue-state-writers':   'State & Progress',
+  'epic-structure-writers':'Scaffolding',
+  'risk-writers':          'ROAM Risk',
+  'wiki-writers':          'Wiki Management',
+  'import-export':         'Import / Export',
+  'setup':                 'Initial Setup',
+  'read-only':             'Audit & Validation',
+}
+
 function formatGroup(g) {
-  if (g === 'read-only') return 'Read-only Tools'
+  if (GROUP_LABELS[g]) return GROUP_LABELS[g]
   return g.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
   ).join(' ')
@@ -194,34 +206,35 @@ function toggleSection(group) {
 function handleClick(tool) {
   if (tool.params?.length) {
     dialogTool.value = tool
-    selected.value = null
   } else {
-    selected.value = tool
+    emit('launch', tool, {})
   }
 }
 
-// ── Selection & conflict (for no-param tools) ──────────────────────────────
+// ── Conflict detection ─────────────────────────────────────────────────────
 
 const isRunning = key => props.runningJobs.includes(key)
 
-const blockers = computed(() => {
-  if (!selected.value || selected.value.readonly) return []
-  const group = selected.value.parallelism_group
+function _blockersFor(tool) {
+  if (!tool || tool.readonly) return []
+  const group = tool.parallelism_group
   if (!group) return []
   return props.runningJobs.filter(runningKey => {
     const t = tools.value.find(x => x.key === runningKey)
     return t && t.parallelism_group === group
   })
-})
-
-function launch() {
-  if (!selected.value || blockers.value.length) return
-  emit('launch', selected.value, {})
 }
+
+const dialogBlockers = computed(() => _blockersFor(dialogTool.value))
 
 function onDialogLaunch(tool, params) {
   dialogTool.value = null
   emit('launch', tool, params)
+}
+
+function onReportLaunch(selectedReports, formats) {
+  showReportDialog.value = false
+  emit('launch-reports', selectedReports, formats)
 }
 </script>
 
@@ -327,9 +340,8 @@ function onDialogLaunch(tool, params) {
   transition: background 0.1s;
   border-left: 2px solid transparent;
 }
-.job-item:hover       { background: var(--surface-alt); }
-.job-item.selected    { background: color-mix(in srgb, var(--action) 12%, transparent); border-left-color: var(--action); }
-.job-item.running     { border-left-color: var(--badge-run-text); }
+.job-item:hover   { background: var(--surface-alt); }
+.job-item.running { border-left-color: var(--badge-run-text); }
 .job-item.configurable:hover { border-left-color: var(--accent); }
 
 .item-top {
@@ -350,7 +362,7 @@ function onDialogLaunch(tool, params) {
   line-height: 1.35;
 }
 
-/* ── Badges ── */
+/* ── Badges & hints ── */
 .badge {
   font-size: 0.68rem;
   border-radius: 3px;
@@ -359,53 +371,34 @@ function onDialogLaunch(tool, params) {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.badge-ro  { background: var(--badge-ro-bg);  color: var(--badge-ro-text); }
+.ro-hint   { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
 .badge-run { background: var(--badge-run-bg); color: var(--badge-run-text); }
-.badge-cfg { background: var(--surface-alt); color: var(--accent); border: 1px solid var(--accent); }
+.cfg-hint  { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
 
 /* ── State messages ── */
 .state-msg   { padding: 1.5rem 1rem; color: var(--text-2); font-size: 0.85rem; text-align: center; }
 .state-error { color: #f87171; }
 
-/* ── Launch area ── */
-.launch-area {
+/* ── Reports area ── */
+.reports-area {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   padding: 0.65rem 1rem;
   background: var(--surface);
 }
-.launch-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.4rem;
-}
-.launch-selection {
-  flex: 1;
-  font-size: 0.85rem;
-  color: var(--text-1);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.launch-selection.dim { color: var(--text-3); font-weight: 400; }
-.launch-btn {
-  flex-shrink: 0;
-  padding: 6px 18px;
-  background: var(--action);
-  color: #fff;
-  border: none;
+.reports-btn {
+  width: 100%;
+  padding: 7px 0;
+  background: transparent;
+  border: 1px solid var(--border);
   border-radius: 5px;
+  color: var(--text-2);
+  font-size: 0.82rem;
   cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 500;
-  transition: background 0.15s;
+  transition: border-color 0.15s, color 0.15s;
 }
-.launch-btn:hover:not(:disabled) { background: var(--action-hover); }
-.launch-btn:disabled {
-  background: var(--action-off);
-  color: var(--action-off-text);
-  cursor: not-allowed;
+.reports-btn:hover {
+  border-color: var(--action);
+  color: var(--action);
 }
 </style>

@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -10,15 +11,15 @@ from fastapi.staticfiles import StaticFiles
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
-from server.runner import install_writer, run_job
+from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
 
-# Registry of currently-running job keys and its guard lock.
-_running_jobs: set = set()
+# Registry of currently-running job keys → start timestamp.
+_running_jobs: dict = {}
 _running_lock = threading.Lock()
 
 
@@ -67,6 +68,16 @@ def list_tools():
 @app.get("/api/reports")
 def list_reports():
     return [_report_payload(r) for r in REPORTS]
+
+
+@app.get("/api/running")
+def list_running():
+    now = time.time()
+    with _running_lock:
+        return [
+            {"key": k, "elapsed_seconds": round(now - started, 1)}
+            for k, started in _running_jobs.items()
+        ]
 
 
 @app.post("/api/reports/fetch-data", status_code=200)
@@ -128,9 +139,12 @@ async def ws_run(websocket: WebSocket):
         await websocket.close(1003)
         return
 
-    job_key: Optional[str] = data.get("tool") or data.get("report")
+    job_key: Optional[str] = (
+        data.get("tool") or data.get("report")
+        or ("reports" if data.get("reports") else None)
+    )
     if not job_key:
-        await websocket.send_json({"type": "error", "message": "Message must include 'tool' or 'report'"})
+        await websocket.send_json({"type": "error", "message": "Message must include 'tool', 'report', or 'reports'"})
         await websocket.close()
         return
 
@@ -148,13 +162,13 @@ async def ws_run(websocket: WebSocket):
             await websocket.send_json({"type": "conflict", "blocking": blocking})
             await websocket.close()
             return
-        _running_jobs.add(job_key)
+        _running_jobs[job_key] = time.time()
 
     try:
         fn = _build_job_fn(gl, data)
     except ValueError as exc:
         with _running_lock:
-            _running_jobs.discard(job_key)
+            _running_jobs.pop(job_key, None)
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close()
         return
@@ -172,7 +186,7 @@ async def ws_run(websocket: WebSocket):
         loop.call_soon_threadsafe(q.put_nowait, ("error", str(exc)))
 
     install_writer()
-    run_job(fn, on_output, on_done=on_done, on_error=on_error)
+    thread = run_job(fn, on_output, on_done=on_done, on_error=on_error)
 
     try:
         while True:
@@ -186,8 +200,9 @@ async def ws_run(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": payload})
                 break
     finally:
+        cancel_thread(thread)
         with _running_lock:
-            _running_jobs.discard(job_key)
+            _running_jobs.pop(job_key, None)
         await websocket.close()
 
 
@@ -210,7 +225,16 @@ def _build_job_fn(gl: object, data: dict):
         formats = set(data.get("formats") or ["markdown"])
         return lambda: gl._run_reports([report], formats=formats)
 
-    raise ValueError("Message must include 'tool' or 'report'")
+    if "reports" in data:
+        keys    = data["reports"]
+        reports = [next((r for r in REPORTS if r["key"] == k), None) for k in keys]
+        missing = [k for k, r in zip(keys, reports) if r is None]
+        if missing:
+            raise ValueError(f"Unknown report key(s): {missing}")
+        formats = set(data.get("formats") or ["markdown"])
+        return lambda: gl._run_reports([r for r in reports if r], formats=formats)
+
+    raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,12 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "diagnose",
+        "description": "Print software versions, API capabilities, label validation, and compatibility assessment",
+        "method":      "_tool_diagnose",
+        "params":      [],
+    },
+    {
         "key":         "clean-wikis",
         "description": "Delete all wiki pages from: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
         "method":      "_tool_clean_wikis",
@@ -276,6 +282,15 @@ TOOLS = [
         ],
     },
     {
+        "key":         "strip-project-labels",
+        "description": "Remove all project:: labels from every epic (clean slate for re-assignment)",
+        "method":      "_tool_strip_project_labels",
+        "params": [
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                              "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "set-risk-labels",
         "description": "Randomly assign risk::high/medium/low labels to open epics that have none",
         "method":      "_tool_set_risk_labels",
@@ -413,6 +428,11 @@ TOOLS = [
 
 TOOL_CATEGORIES = [
     {
+        "name":        "Diagnose",
+        "description": "Environment, API compatibility, and label validation",
+        "tools": ["diagnose"],
+    },
+    {
         "name":        "Setup",
         "description": "Initialize structure and custom fields",
         "tools": ["scaffold", "setup-bv-field"],
@@ -431,7 +451,7 @@ TOOL_CATEGORIES = [
         "description": "Assign or strip epic label sets",
         "tools": [
             "set-lifecycle-labels", "strip-lifecycle-labels",
-            "set-piid-labels", "set-project-labels", "set-risk-labels",
+            "set-piid-labels", "set-project-labels", "strip-project-labels", "set-risk-labels",
             "set-work-type-labels", "strip-work-type-labels",
             "set-business-value", "strip-business-value",
             "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
@@ -1606,6 +1626,49 @@ class ToolsMixin:
                     errors += 1
 
         print(f"\nDone.  Updated: {updated}  Skipped (already set or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
+    def _tool_strip_project_labels(self, epic_type=None, dry_run=False):
+        """Remove all project:: labels from every epic (clean slate for re-assignment)."""
+        group    = self.get_group_by_name(self.parent_group)
+        proj_set = set(self._discover_labels(group, "project::"))
+
+        if not proj_set:
+            print("No project:: labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(proj_set)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        print("\nWalking epics...")
+        for epic in group.epics.list(all=True):
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            existing = set(epic.labels) & proj_set
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in proj_set]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                stripped += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no project:: or filtered): {skipped}  Errors: {errors}")
         if dry_run:
             print("(dry-run — no changes saved)")
 
@@ -3368,3 +3431,8 @@ class ToolsMixin:
         else:
             print(f"  Done — removed {len(to_delete)} {label}(s), "
                   f"freed {freed // 1024} KB.")
+
+    def _tool_diagnose(self):
+        """Print software versions, API capabilities, label validation, and compatibility assessment."""
+        lines = self._generate_diagnostics_section(for_wiki=False)
+        print("\n".join(lines))
