@@ -193,6 +193,14 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "create-lorem-data",
+        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "method":      "create_all_lorem_objects",
+        "params": [
+            {"name": "dry_run", "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+        ],
+    },
+    {
         "key":         "setup-bv-field",
         "description": "Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21, applies to Epic / Capability / Feature)",
         "method":      "_tool_setup_bv_field",
