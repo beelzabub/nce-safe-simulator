@@ -18,8 +18,10 @@ app = FastAPI(title="NCE Safe Simulator")
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
 
-# Registry of currently-running job keys → start timestamp.
-_running_jobs: dict = {}
+# Set of currently-running job keys (used for conflict checking).
+_running_jobs: set = set()
+# Separate timestamps dict for the /api/running status endpoint.
+_running_started: dict = {}
 _running_lock = threading.Lock()
 
 
@@ -75,8 +77,8 @@ def list_running():
     now = time.time()
     with _running_lock:
         return [
-            {"key": k, "elapsed_seconds": round(now - started, 1)}
-            for k, started in _running_jobs.items()
+            {"key": k, "elapsed_seconds": round(now - _running_started.get(k, now), 1)}
+            for k in _running_jobs
         ]
 
 
@@ -162,13 +164,15 @@ async def ws_run(websocket: WebSocket):
             await websocket.send_json({"type": "conflict", "blocking": blocking})
             await websocket.close()
             return
-        _running_jobs[job_key] = time.time()
+        _running_jobs.add(job_key)
+        _running_started[job_key] = time.time()
 
     try:
         fn = _build_job_fn(gl, data)
     except ValueError as exc:
         with _running_lock:
-            _running_jobs.pop(job_key, None)
+            _running_jobs.discard(job_key)
+            _running_started.pop(job_key, None)
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close()
         return
@@ -202,7 +206,8 @@ async def ws_run(websocket: WebSocket):
     finally:
         cancel_thread(thread)
         with _running_lock:
-            _running_jobs.pop(job_key, None)
+            _running_jobs.discard(job_key)
+            _running_started.pop(job_key, None)
         await websocket.close()
 
 
