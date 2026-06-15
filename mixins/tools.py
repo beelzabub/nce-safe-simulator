@@ -197,8 +197,16 @@ TOOLS = [
         "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
         "method":      "create_all_lorem_objects",
         "params": [
-            {"name": "target_group", "prompt": "Target group", "type": str, "widget": "group", "optional": True},
-            {"name": "dry_run",      "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+            {"name": "target_group",        "prompt": "Target group",            "type": str,   "widget": "group", "optional": True},
+            {"name": "num_value_streams",   "prompt": "Value Streams",           "type": int,   "optional": True, "gl_default": "default_num_value_streams",   "section": "SAFe Structure"},
+            {"name": "num_arts",            "prompt": "ARTs per Value Stream",   "type": int,   "optional": True, "gl_default": "default_num_arts"},
+            {"name": "num_teams",           "prompt": "Teams per ART",           "type": int,   "optional": True, "gl_default": "default_num_teams"},
+            {"name": "portfolio_epics",     "prompt": "Portfolio Epics",         "type": int,   "optional": True, "gl_default": "default_portfolio_epics",   "section": "Content Counts"},
+            {"name": "vs_epics",            "prompt": "VS Capabilities / VS",   "type": int,   "optional": True, "gl_default": "default_vs_caps_per_vs"},
+            {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
+            {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
+            {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
         ],
     },
     {
