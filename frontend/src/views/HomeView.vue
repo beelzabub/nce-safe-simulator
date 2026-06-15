@@ -1,11 +1,11 @@
 <template>
   <div class="app-shell">
-    <NavBar />
+    <NavBar :running-count="runningJobKeys.length" @toggle-status="showStatus = !showStatus" />
     <div class="workspace">
 
       <aside class="sidebar">
         <div class="sidebar-picker">
-          <JobPicker :running-jobs="runningJobs" @launch="onLaunch" />
+          <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
         </div>
         <div class="sidebar-footer">
           <a href="/" target="_blank" rel="noopener" class="reports-link">
@@ -15,13 +15,10 @@
       </aside>
 
       <main class="main-pane">
-        <!-- E3: JobRunner tabs + streaming log pane goes here -->
-        <div class="placeholder">
-          <span class="placeholder-icon">⚙</span>
-          <p>Select a job and click Launch to run it.</p>
-          <p class="placeholder-sub">Job runner and log pane coming in E3.</p>
-        </div>
+        <JobRunner />
       </main>
+
+      <StatusSidebar :open="showStatus" @close="showStatus = false" />
 
     </div>
   </div>
@@ -29,15 +26,18 @@
 
 <script setup>
 import { ref } from 'vue'
-import NavBar  from '../components/NavBar.vue'
-import JobPicker from '../components/JobPicker.vue'
+import NavBar        from '../components/NavBar.vue'
+import JobPicker     from '../components/JobPicker.vue'
+import JobRunner     from './JobRunner.vue'
+import StatusSidebar from '../components/StatusSidebar.vue'
+import { useJobs }   from '../composables/useJobs.js'
 
-// Populated by WebSocket job events — wired in E3.
-const runningJobs = ref([])
+const { runningJobKeys, launch, launchReports } = useJobs()
 
-function onLaunch(job, params) {
-  console.log('launch', job.key, params)
-}
+const showStatus = ref(false)
+
+function onLaunch(job, params)          { launch(job, params) }
+function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
 </script>
 
 <style scoped>
@@ -80,31 +80,19 @@ function onLaunch(job, params) {
   align-items: center;
   gap: 0.25rem;
   font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--action);
+  font-weight: 400;
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s;
 }
-.reports-link:hover { color: var(--action-hover); }
+.reports-link:hover { color: var(--text-1); }
 
 /* ── Main pane ── */
 .main-pane {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   background: var(--bg);
 }
-
-.placeholder {
-  text-align: center;
-  color: var(--text-2);
-}
-.placeholder-icon {
-  font-size: 2rem;
-  display: block;
-  margin-bottom: 0.5rem;
-  opacity: 0.4;
-}
-.placeholder p { margin: 0.2rem 0; font-size: 0.9rem; }
-.placeholder-sub { font-size: 0.78rem; color: var(--text-3); }
 </style>

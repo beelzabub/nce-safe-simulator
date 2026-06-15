@@ -1,0 +1,44 @@
+---
+title: "Environment & API Diagnostics"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, Markdown, display
+
+_candidates = [Path("data/diagnostics.json"), Path("../data/diagnostics.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "data/diagnostics.json not found. "
+        "Run: python NceGitLab.py --all-reports"
+    )
+
+d = json.loads(data_file.read_text())
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{d['group']['url']}" target="_blank">{d['group']['name']}</a>
+</p>
+<p>Environment and API compatibility check — software versions, REST/GraphQL capabilities,
+label validation, and overall report compatibility assessment.</p>
+""")
+```
+
+```{python}
+display(Markdown(d["content"]))
+```
+
+```{python}
+display(Markdown(f"> {d['verdict_md']}"))
+```

@@ -233,6 +233,9 @@ python3 NceGitLab.py -ut                  # Interactive utility tool menu
 python3 NceGitLab.py -ut audit-labels     # Run a single tool by key
 python3 NceGitLab.py -ut set-wsjf-labels --open_only  # Pass tool params as flags
 
+# Diagnostics
+python3 NceGitLab.py -D  / --diagnose     # Print environment, API, and label diagnostics to stdout
+
 # Scaffold
 python3 NceGitLab.py -s                   # Create SAFe group/project structure (prompted)
 python3 NceGitLab.py -s my/group          # Create structure under a specific group
@@ -544,6 +547,29 @@ Reports flag items as **At Risk** (⚠️) when `% done < % elapsed through PI`.
 
 Run interactively with `-ut` (category → tool menu) or pass a key directly (e.g. `-ut audit-labels`). Tool params can be passed as flags (e.g. `-ut set-wsjf-labels --open_only`).
 
+### Diagnose
+
+| Key | Description |
+|---|---|
+| `diagnose` | Print software versions, REST and GraphQL API capability probes, label validation, and a per-report compatibility assessment to stdout |
+
+The `diagnose` tool is also available as a top-level CLI flag (`-D` / `--diagnose`) for quick checks without entering the interactive menu:
+
+```bash
+python3 NceGitLab.py --diagnose
+```
+
+The same diagnostic output is automatically appended as a collapsible **🔧 Environment & API Diagnostics** section at the bottom of the Portfolio Home wiki page (`/wikis/home`) every time reports are published. It covers:
+
+| Section | What it checks |
+|---|---|
+| **Software Versions** | Python, python-gitlab, requests, pandas, plotly, marimo, jupyter, nbformat, GitLab server version, and GitLab tier (Free / Premium / Ultimate) |
+| **Configuration** | Active label sets from `config.json` — Epic Type, PIID, Project, Risk, Lifecycle |
+| **REST API Capabilities** | Live probes of Group Epics, Group Wiki, Labels, Milestones, and Epic Issues endpoints with HTTP error detail on failure |
+| **GraphQL API Capabilities** | Functional probes (not schema introspection) for Epic blocking fields, `Epic.blockedByEpics`, `WorkItemWidgetWeight`, `Namespace.customFields`, `Issue.linkedWorkItems`, and `Group.workItemTypes` |
+| **Label Validation** | Checks every configured Epic Type, PIID, Project, and Risk label against what exists in the target group — missing labels are the most common cause of empty report cells |
+| **Compatibility Assessment** | Traffic-light (✅ / ❌ / ⚠️) verdict per report area with an overall summary sentence |
+
 ### Setup
 
 | Key | Description |
@@ -610,6 +636,8 @@ Run interactively with `-ut` (category → tool menu) or pass a key directly (e.
 | `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
 | `list-wikis` | List all wiki pages for a specified scope (portfolio / teams / all / group-path) |
+
+> `diagnose` is listed under the **Diagnose** category (first entry in the utilities menu) and via `-D` / `--diagnose` — see [Diagnose](#diagnose) above.
 
 ### Import / Export
 

@@ -11,8 +11,8 @@ export default defineConfig({
   server: {
     host: true,
     proxy: {
-      '/api': 'http://localhost:4645',
-      '^/(?!app)': 'http://localhost:4645',
+      '/api':         'http://localhost:80',
+      '/interactive': 'http://localhost:80',
     },
   },
 })

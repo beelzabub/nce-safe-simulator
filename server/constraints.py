@@ -14,6 +14,7 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "set-piid-labels",
         "strip-piid-labels",
         "set-project-labels",
+        "strip-project-labels",
         "set-risk-labels",
         "set-wsjf-labels",
         "strip-wsjf-labels",
@@ -87,6 +88,9 @@ def check_conflict(running: list[str], new_job: str) -> list[str]:
     with 'report:'; any unrecognised key not in READONLY_TOOLS and not in any
     writer group is treated as a writer with no defined group (no conflict).
     """
+    if new_job in running:
+        return [new_job]
+
     if new_job in READONLY_TOOLS:
         return []
 

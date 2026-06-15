@@ -27,6 +27,7 @@ NOTEBOOKS = [
     "vs-capability-dashboard",
     "team-backlog",
     "portfolio",
+    "diagnostics",
 ]
 
 OUT = Path("public/interactive")
