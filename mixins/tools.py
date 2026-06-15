@@ -419,6 +419,11 @@ TOOLS = [
 
 TOOL_CATEGORIES = [
     {
+        "name":        "Diagnose",
+        "description": "Environment, API compatibility, and label validation",
+        "tools": ["diagnose"],
+    },
+    {
         "name":        "Setup",
         "description": "Initialize structure and custom fields",
         "tools": ["scaffold", "setup-bv-field"],
@@ -459,7 +464,7 @@ TOOL_CATEGORIES = [
     {
         "name":        "Audit",
         "description": "Inspect data quality, labels, and hierarchy",
-        "tools": ["audit-hierarchy", "audit-labels", "diagnose", "list-wikis"],
+        "tools": ["audit-hierarchy", "audit-labels", "list-wikis"],
     },
     {
         "name":        "Import / Export",
