@@ -5688,12 +5688,13 @@ class ReportsMixin:
     # Environment & API Diagnostics
     # ------------------------------------------------------------------
 
-    def _generate_diagnostics_section(self) -> list:
-        """Return markdown lines for the diagnostics <details> block on Portfolio Home.
+    def _generate_diagnostics_section(self, for_wiki=True) -> list:
+        """Return markdown lines for the environment & API diagnostics output.
 
-        Probes software versions, REST API capabilities, GraphQL schema availability,
-        label presence, and produces a compatibility assessment table.  Every probe is
-        wrapped in try/except so a single failing API call never crashes report generation.
+        for_wiki=True  (default) — wraps content in a <details> block for Portfolio Home.
+        for_wiki=False           — plain header, no HTML, suitable for stdout printing.
+
+        Every probe is wrapped in try/except so a failing check never crashes the caller.
         """
         from importlib.metadata import version as _pkg_ver, PackageNotFoundError
 
@@ -5737,11 +5738,12 @@ class ReportsMixin:
         except Exception as e:
             gl_tier = f"error: {e}"
 
+        if for_wiki:
+            md.extend(["---", "<details>", "<summary>🔧 Environment &amp; API Diagnostics</summary>", ""])
+        else:
+            md.extend(["🔧 Environment & API Diagnostics", "=" * 40, ""])
+
         md.extend([
-            "---",
-            "<details>",
-            "<summary>🔧 Environment &amp; API Diagnostics</summary>",
-            "",
             "### Software Versions",
             "",
             "| Component | Version |",
@@ -5780,7 +5782,7 @@ class ReportsMixin:
         ])
 
         # ── 3. REST API capability probes ───────────────────────────────
-        group = self._rd_root_obj
+        group = getattr(self, "_rd_root_obj", None) or self.get_group_by_name(self.parent_group)
 
         def _rest_probe(label, fn, endpoint):
             try:
@@ -5941,7 +5943,10 @@ class ReportsMixin:
             verdict = ("**❌ Incompatible** — the Group Epics API is not accessible. All reports will fail "
                        "or produce empty output. GitLab Premium or Ultimate is required.")
 
-        md.extend([f"> {verdict}", "", "</details>"])
+        if for_wiki:
+            md.extend([f"> {verdict}", "", "</details>"])
+        else:
+            md.extend([verdict, ""])
         return md
 
     # ------------------------------------------------------------------
