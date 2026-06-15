@@ -182,7 +182,7 @@ class NceGitLab(
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         _sd = config.get("defaults", {}).get("serve", {})
-        self.serve_port = _sd.get("port", 4645)
+        self.serve_port = _sd.get("port", 80)
 
         members_file = self.config_file.parent / "team_members.json"
         if members_file.exists():
@@ -484,6 +484,8 @@ def main():
                         help="Disable SSL certificate verification (Aisle 5 / corporate network)")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
+    parser.add_argument("-D", "--diagnose",          action="store_true",
+                        help="Print environment, software versions, API capabilities, and label validation to stdout")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
     args, extra = parser.parse_known_args()
@@ -509,6 +511,11 @@ def main():
         if args.all:
             prefills.setdefault("all", True)
         gl.run_tools_menu(tool_key, prefills=prefills)
+        return
+
+    if args.diagnose:
+        _phase[0] = "diagnose"
+        gl._tool_diagnose()
         return
 
     if args.scaffold is not None:
