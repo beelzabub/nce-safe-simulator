@@ -195,6 +195,7 @@ TOOLS = [
     {
         "key":         "create-lorem-data",
         "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "confirm":     True,
         "method":      "create_all_lorem_objects",
         "params": [
             {"name": "target_group",        "prompt": "Target group",            "type": str,   "widget": "group", "optional": True},
