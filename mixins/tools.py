@@ -37,6 +37,12 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "diagnose",
+        "description": "Print software versions, API capabilities, label validation, and compatibility assessment",
+        "method":      "_tool_diagnose",
+        "params":      [],
+    },
+    {
         "key":         "clean-wikis",
         "description": "Delete all wiki pages from: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
         "method":      "_tool_clean_wikis",
@@ -412,6 +418,11 @@ TOOLS = [
 
 
 TOOL_CATEGORIES = [
+    {
+        "name":        "Diagnose",
+        "description": "Environment, API compatibility, and label validation",
+        "tools": ["diagnose"],
+    },
     {
         "name":        "Setup",
         "description": "Initialize structure and custom fields",
@@ -3368,3 +3379,8 @@ class ToolsMixin:
         else:
             print(f"  Done — removed {len(to_delete)} {label}(s), "
                   f"freed {freed // 1024} KB.")
+
+    def _tool_diagnose(self):
+        """Print software versions, API capabilities, label validation, and compatibility assessment."""
+        lines = self._generate_diagnostics_section(for_wiki=False)
+        print("\n".join(lines))
