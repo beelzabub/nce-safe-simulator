@@ -277,17 +277,17 @@ function formatKey(key) {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 14px;
-  height: 14px;
+  width: 28px;
+  height: 28px;
   cursor: ns-resize;
   z-index: 2;
   opacity: 0.35;
   transition: opacity 0.15s;
-  background-image:
-    radial-gradient(circle, var(--text-1, #e6edf3) 1.5px, transparent 1.5px);
-  background-size: 5px 5px;
-  background-position: 2px 2px;
-  background-repeat: repeat;
+  background-image: linear-gradient(
+    135deg,
+    transparent 50%,
+    var(--text-1, #e6edf3) 50%
+  );
 }
 .resize-handle:hover,
 .tab-body--resizable:active .resize-handle {
