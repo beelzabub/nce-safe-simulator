@@ -5725,6 +5725,18 @@ class ReportsMixin:
         except Exception as e:
             gl_version = f"error: {e}"
 
+        try:
+            _ns_list = self.gl.namespaces.list(search=self.parent_group)
+            if _ns_list:
+                _ns    = self.gl.namespaces.get(_ns_list[0].id)
+                _plan  = getattr(_ns, "plan",  None) or "unknown"
+                _trial = getattr(_ns, "trial", False)
+                gl_tier = _plan.capitalize() + (" (trial)" if _trial else "")
+            else:
+                gl_tier = "unknown (namespace not found)"
+        except Exception as e:
+            gl_tier = f"error: {e}"
+
         md.extend([
             "---",
             "<details>",
@@ -5737,7 +5749,14 @@ class ReportsMixin:
             f"| Python | `{py_ver}` |",
             f"| python-gitlab | `{pg_ver}` |",
             f"| requests | `{req_ver}` |",
+            f"| pandas | `{_pkg('pandas')}` |",
+            f"| python-dateutil | `{_pkg('python-dateutil')}` |",
+            f"| plotly | `{_pkg('plotly')}` |",
+            f"| marimo | `{_pkg('marimo')}` |",
+            f"| jupyter | `{_pkg('jupyter')}` |",
+            f"| nbformat | `{_pkg('nbformat')}` |",
             f"| GitLab Server | `{gl_version}` |",
+            f"| GitLab Tier | {gl_tier} |",
             "",
         ])
 
