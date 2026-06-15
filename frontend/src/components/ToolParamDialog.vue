@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="tool" class="overlay" @click.self="$emit('cancel')">
+    <div v-if="tool" class="overlay" @mousedown.self="overlayDown = true" @mouseup.self="overlayDown && $emit('cancel'); overlayDown = false" @mouseleave="overlayDown = false">
       <div class="dialog" role="dialog" :aria-label="formatKey(tool.key)">
 
         <div class="dialog-header">
@@ -128,8 +128,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['launch', 'cancel'])
 
-const values     = ref({})
+const values      = ref({})
 const groupLocked = ref(true)
+const overlayDown = ref(false)
 
 // Re-initialise values whenever the tool changes.
 watch(() => props.tool, tool => {
