@@ -5691,7 +5691,8 @@ class ReportsMixin:
     def _generate_diagnostics_section(self, for_wiki=True) -> list:
         """Return markdown lines for the environment & API diagnostics output.
 
-        for_wiki=True  (default) — wraps content in a <details> block for Portfolio Home.
+        for_wiki=True  (default) — wraps content in a <details> block for Portfolio Home
+                                   and saves data/diagnostics.json for Marimo/Quarto.
         for_wiki=False           — plain header, no HTML, suitable for stdout printing.
 
         Every probe is wrapped in try/except so a failing check never crashes the caller.
@@ -5713,8 +5714,6 @@ class ReportsMixin:
             if val is True:  return "✅ Yes"
             if val is False: return "❌ No"
             return "⚠️ Unknown"
-
-        md = []
 
         # ── 1. Software versions ────────────────────────────────────────
         py_ver  = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
@@ -5738,12 +5737,10 @@ class ReportsMixin:
         except Exception as e:
             gl_tier = f"error: {e}"
 
-        if for_wiki:
-            md.extend(["---", "<details>", "<summary>🔧 Environment &amp; API Diagnostics</summary>", ""])
-        else:
-            md.extend(["🔧 Environment & API Diagnostics", "=" * 40, ""])
+        # body = pure markdown content (no wrapper); used for both output modes and JSON
+        body = []
 
-        md.extend([
+        body.extend([
             "### Software Versions",
             "",
             "| Component | Version |",
@@ -5766,7 +5763,7 @@ class ReportsMixin:
         def _label_list(labels):
             return ", ".join(f"`{l}`" for l in labels) if labels else "_none configured_"
 
-        md.extend([
+        body.extend([
             "### Configuration",
             "",
             "| Setting | Value |",
@@ -5811,11 +5808,11 @@ class ReportsMixin:
 
         rest_rows = [r_epics, r_wiki, r_labels, r_milestones, r_epic_issues]
 
-        md.extend(["### REST API Capabilities", "", "| Endpoint | Status | Notes |", "|----------|--------|-------|"])
+        body.extend(["### REST API Capabilities", "", "| Endpoint | Status | Notes |", "|----------|--------|-------|"])
         for ok, name, endpoint, detail in rest_rows:
             note = f"`{endpoint}`" + (f" — {detail}" if detail else "")
-            md.append(f"| {name} | {_ok(ok)} | {note} |")
-        md.append("")
+            body.append(f"| {name} | {_ok(ok)} | {note} |")
+        body.append("")
 
         # ── 4. GraphQL capability probes (functional queries, not introspection) ──
         # GitLab intercepts __type/__schema introspection and returns the full schema
@@ -5882,17 +5879,17 @@ class ReportsMixin:
             (_wi_types_ok,        "Group.workItemTypes",     "Work item type GIDs — required for weight/BV write mutations"),
         ]
 
-        md.extend(["### GraphQL API Capabilities", "", "| Feature | Available | Purpose |", "|---------|-----------|---------|"])
+        body.extend(["### GraphQL API Capabilities", "", "| Feature | Available | Purpose |", "|---------|-----------|---------|"])
         for ok, name, desc in gql_rows:
-            md.append(f"| {name} | {_ok(ok)} | {desc} |")
-        md.append("")
+            body.append(f"| {name} | {_ok(ok)} | {desc} |")
+        body.append("")
 
         # ── 5. Label validation ─────────────────────────────────────────
         all_configured = sorted(set(
             self.EPIC_TYPE_LABELS + self.PIID_LABELS + self.PROJECT_LABELS + self.RISK_LABELS
         ))
         if all_configured:
-            md.extend([
+            body.extend([
                 "### Key Label Validation (Group-Level)",
                 "",
                 "Labels that exist in the group match epics during report generation. "
@@ -5905,10 +5902,10 @@ class ReportsMixin:
             try:
                 existing_labels = {lbl.name for lbl in group.labels.list(get_all=True)}
                 for lbl in all_configured:
-                    md.append(f"| `{lbl}` | {_ok(lbl in existing_labels)} |")
+                    body.append(f"| `{lbl}` | {_ok(lbl in existing_labels)} |")
             except Exception as e:
-                md.append(f"| _(error fetching labels: {e})_ | ⚠️ |")
-            md.append("")
+                body.append(f"| _(error fetching labels: {e})_ | ⚠️ |")
+            body.append("")
 
         # ── 6. Compatibility assessment ─────────────────────────────────
         epics_ok    = r_epics[0]
@@ -5925,15 +5922,15 @@ class ReportsMixin:
             (_wi_types_ok,       "Weight / BV write mutations",       "Group.workItemTypes — required to resolve work item type GIDs"),
         ]
 
-        md.extend([
+        body.extend([
             "### Report Compatibility Assessment",
             "",
             "| Feature / Report Area | Expected to Work | Requirement |",
             "|----------------------|-----------------|-------------|",
         ])
         for ok, feature, req in assess_rows:
-            md.append(f"| {feature} | {_compat(ok)} | {req} |")
-        md.append("")
+            body.append(f"| {feature} | {_compat(ok)} | {req} |")
+        body.append("")
 
         critical = epics_ok and wiki_ok
         full     = critical and bool(_weight_ok) and bool(blocking_ok) and bool(_custom_fields_ok)
@@ -5949,9 +5946,32 @@ class ReportsMixin:
             verdict = ("**❌ Incompatible** — the Group Epics API is not accessible. All reports will fail "
                        "or produce empty output. GitLab Premium or Ultimate is required.")
 
+        # Save JSON for Marimo/Quarto when called from the full report pipeline
         if for_wiki:
+            try:
+                _data_dir = Path("data")
+                _data_dir.mkdir(parents=True, exist_ok=True)
+                _payload = {
+                    "report_date": date.today().strftime("%Y-%m-%d"),
+                    "group": {"name": group.name, "url": group.web_url},
+                    "content": "\n".join(body),
+                    "verdict_md": verdict,
+                }
+                (_data_dir / "diagnostics.json").write_text(
+                    json.dumps(_payload, indent=2), encoding="utf-8"
+                )
+            except Exception:
+                pass
+
+        # Assemble final output with appropriate wrapper
+        md = []
+        if for_wiki:
+            md.extend(["---", "<details>", "<summary>🔧 Environment &amp; API Diagnostics</summary>", ""])
+            md.extend(body)
             md.extend([f"> {verdict}", "", "</details>"])
         else:
+            md.extend(["🔧 Environment & API Diagnostics", "=" * 40, ""])
+            md.extend(body)
             md.extend([verdict, ""])
         return md
 

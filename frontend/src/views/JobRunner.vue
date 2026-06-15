@@ -17,7 +17,12 @@
         :class="`tab--${job.status}`"
       >
         <!-- Header row — click to collapse/expand -->
-        <div class="tab-header" @click="toggleCollapse(job.id)">
+        <div
+          class="tab-header"
+          @click="toggleCollapse(job.id)"
+          @mouseenter="pauseClose(job.id)"
+          @mouseleave="resumeClose(job.id)"
+        >
           <span class="tab-status">
             <span v-if="job.status === 'running'"    class="spinner" />
             <span v-else-if="job.status === 'done'"      class="badge badge--done">✓</span>
@@ -63,7 +68,7 @@ import LogPane from '../components/LogPane.vue'
 import { useJobs } from '../composables/useJobs.js'
 import heroSrc from '../assets/hero-carrier.png'
 
-const { jobs, cancelJob, closeJob, toggleCollapse } = useJobs()
+const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose } = useJobs()
 
 const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
 function formatKey(key) {
@@ -150,6 +155,7 @@ function formatKey(key) {
   overflow: hidden;         /* clip the countdown bar */
 }
 .tab-header:hover { filter: brightness(1.15); }
+.tab-header:hover .countdown-bar { animation-play-state: paused; }
 
 /* ── Status indicators ── */
 .tab-status { display: flex; align-items: center; width: 16px; }
