@@ -72,6 +72,7 @@ def _tool_payload(tool: dict, gl=None) -> dict:
     return {
         "key":               key,
         "description":       tool["description"],
+        "confirm":           tool.get("confirm", False),
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
         "params":            params,

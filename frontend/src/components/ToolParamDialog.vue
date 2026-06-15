@@ -5,112 +5,136 @@
 
         <div class="dialog-header">
           <div class="dialog-title-block">
-            <span class="dialog-name">{{ formatKey(tool.key) }}</span>
+            <span class="dialog-name">{{ confirming ? 'Confirm: ' : '' }}{{ formatKey(tool.key) }}</span>
             <code class="dialog-key">{{ tool.key }}</code>
           </div>
           <button class="close-btn" @click="$emit('cancel')" title="Cancel">✕</button>
         </div>
 
-        <p class="dialog-desc">{{ tool.description }}</p>
+        <!-- ── Configure view ── -->
+        <template v-if="!confirming">
+          <p class="dialog-desc">{{ tool.description }}</p>
 
-        <div v-if="tool.params.length" class="params">
-          <template v-for="(param, idx) in tool.params" :key="param.name">
-          <div
-            v-if="param.section && (idx === 0 || tool.params[idx-1].section !== param.section)"
-            class="param-section-label"
-          >{{ param.section }}</div>
-          <div
-            class="param-row"
-            :class="{ 'param-dryrun': param.name === 'dry_run' }"
-          >
-            <!-- group widget → locked display with Edit button -->
-            <template v-if="param.widget === 'group'">
-              <div class="field-label">
-                {{ param.prompt }}
-                <span class="optional-tag">from config</span>
-              </div>
-              <div class="group-field">
+          <div v-if="tool.params.length" class="params">
+            <template v-for="(param, idx) in tool.params" :key="param.name">
+            <div
+              v-if="param.section && (idx === 0 || tool.params[idx-1].section !== param.section)"
+              class="param-section-label"
+            >{{ param.section }}</div>
+            <div
+              class="param-row"
+              :class="{ 'param-dryrun': param.name === 'dry_run' }"
+            >
+              <!-- group widget → locked display with Edit button -->
+              <template v-if="param.widget === 'group'">
+                <div class="field-label">
+                  {{ param.prompt }}
+                  <span class="optional-tag">from config</span>
+                </div>
+                <div class="group-field">
+                  <input
+                    type="text"
+                    class="field-input group-input"
+                    :class="{ 'group-input--locked': groupLocked }"
+                    :readonly="groupLocked"
+                    v-model="values[param.name]"
+                    :title="groupLocked ? 'Click Edit to override' : ''"
+                  />
+                  <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
+                    Edit
+                  </button>
+                  <button v-else class="group-reset-btn" type="button" @click="resetGroup(param)">
+                    Reset
+                  </button>
+                </div>
+              </template>
+
+              <!-- bool → toggle -->
+              <template v-else-if="param.type === 'bool'">
+                <label class="toggle-label">
+                  <input type="checkbox" class="toggle-input" v-model="values[param.name]" />
+                  <span class="toggle-track"><span class="toggle-thumb" /></span>
+                  <span class="toggle-text">{{ param.prompt }}</span>
+                </label>
+              </template>
+
+              <!-- int / float → number -->
+              <template v-else-if="param.type === 'int' || param.type === 'float'">
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span v-if="!param.optional" class="required-mark">*</span>
+                  <span v-else class="optional-tag">optional</span>
+                </label>
+                <input
+                  type="number"
+                  class="field-input"
+                  :step="param.type === 'float' ? 0.01 : 1"
+                  :min="param.type === 'float' ? 0 : undefined"
+                  :max="param.type === 'float' ? 1 : undefined"
+                  :placeholder="param.optional ? 'leave blank for config default' : String(param.default ?? '')"
+                  v-model.number="values[param.name]"
+                />
+                <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
+              </template>
+
+              <!-- str → text -->
+              <template v-else>
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span v-if="!param.optional" class="required-mark">*</span>
+                  <span v-else class="optional-tag">optional</span>
+                </label>
                 <input
                   type="text"
-                  class="field-input group-input"
-                  :class="{ 'group-input--locked': groupLocked }"
-                  :readonly="groupLocked"
+                  class="field-input"
+                  :placeholder="param.optional ? 'leave blank to skip' : (param.default ?? '')"
                   v-model="values[param.name]"
-                  :title="groupLocked ? 'Click Edit to override' : ''"
                 />
-                <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
-                  Edit
-                </button>
-                <button v-else class="group-reset-btn" type="button" @click="resetGroup(param)">
-                  Reset
-                </button>
-              </div>
-            </template>
-
-            <!-- bool → toggle -->
-            <template v-else-if="param.type === 'bool'">
-              <label class="toggle-label">
-                <input type="checkbox" class="toggle-input" v-model="values[param.name]" />
-                <span class="toggle-track"><span class="toggle-thumb" /></span>
-                <span class="toggle-text">{{ param.prompt }}</span>
-              </label>
-            </template>
-
-            <!-- int / float → number -->
-            <template v-else-if="param.type === 'int' || param.type === 'float'">
-              <label class="field-label">
-                {{ param.prompt }}
-                <span v-if="!param.optional" class="required-mark">*</span>
-                <span v-else class="optional-tag">optional</span>
-              </label>
-              <input
-                type="number"
-                class="field-input"
-                :step="param.type === 'float' ? 0.01 : 1"
-                :min="param.type === 'float' ? 0 : undefined"
-                :max="param.type === 'float' ? 1 : undefined"
-                :placeholder="param.optional ? 'leave blank for config default' : String(param.default ?? '')"
-                v-model.number="values[param.name]"
-              />
-              <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
-            </template>
-
-            <!-- str → text -->
-            <template v-else>
-              <label class="field-label">
-                {{ param.prompt }}
-                <span v-if="!param.optional" class="required-mark">*</span>
-                <span v-else class="optional-tag">optional</span>
-              </label>
-              <input
-                type="text"
-                class="field-input"
-                :placeholder="param.optional ? 'leave blank to skip' : (param.default ?? '')"
-                v-model="values[param.name]"
-              />
-              <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
+                <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
+              </template>
+            </div>
             </template>
           </div>
-          </template>
-        </div>
 
-        <div v-else class="no-params">
-          No parameters required — ready to launch.
-        </div>
+          <div v-else class="no-params">
+            No parameters required — ready to launch.
+          </div>
 
-        <ConflictBanner
-          v-if="blockers.length"
-          :blockers="blockers"
-          :group="group"
-          class="dialog-conflict"
-        />
+          <ConflictBanner
+            v-if="blockers.length"
+            :blockers="blockers"
+            :group="group"
+            class="dialog-conflict"
+          />
 
-        <div class="dialog-footer">
-          <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
-          <button class="btn-launch" :disabled="!isValid || blockers.length > 0" @click="submit">
-            Launch {{ formatKey(tool.key) }}
-          </button>
-        </div>
+          <div class="dialog-footer">
+            <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
+            <button class="btn-launch" :disabled="!isValid || blockers.length > 0" @click="submit">
+              Launch {{ formatKey(tool.key) }}
+            </button>
+          </div>
+        </template>
+
+        <!-- ── Confirmation view ── -->
+        <template v-else>
+          <p class="dialog-desc confirm-intro">
+            Review the settings below, then confirm to start the job.
+          </p>
+
+          <div class="confirm-table">
+            <div v-for="row in confirmRows" :key="row.label" class="confirm-row">
+              <span class="confirm-label">{{ row.label }}</span>
+              <span class="confirm-value" :class="row.cls">{{ row.display }}</span>
+            </div>
+          </div>
+
+          <div class="dialog-footer">
+            <button class="btn-cancel" @click="confirming = false">← Back</button>
+            <button class="btn-launch btn-launch--confirm" @click="doLaunch">
+              Confirm &amp; Launch
+            </button>
+          </div>
+        </template>
 
       </div>
     </div>
@@ -131,10 +155,12 @@ const emit = defineEmits(['launch', 'cancel'])
 const values      = ref({})
 const groupLocked = ref(true)
 const overlayDown = ref(false)
+const confirming  = ref(false)
 
 // Re-initialise values whenever the tool changes.
 watch(() => props.tool, tool => {
   groupLocked.value = true
+  confirming.value  = false
   if (!tool) { values.value = {}; return }
   const init = {}
   for (const p of tool.params) {
@@ -175,15 +201,8 @@ function formatKey(key) {
   ).join(' ')
 }
 
-function onKeydown(e) {
-  if (e.key === 'Escape' && props.tool) emit('cancel')
-}
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
-
-function submit() {
-  if (!isValid.value) return
-  // Strip null optional values; keep everything else as-is.
+// Build the params object that will be sent on launch.
+function _buildParams() {
   const params = {}
   for (const p of props.tool.params) {
     const v = values.value[p.name]
@@ -191,7 +210,54 @@ function submit() {
     if (p.widget === 'group' && (v === null || v === '')) continue
     params[p.name] = v
   }
-  emit('launch', props.tool, params)
+  return params
+}
+
+// Confirmation summary rows.
+const confirmRows = computed(() => {
+  if (!props.tool) return []
+  const rows = []
+  for (const p of props.tool.params) {
+    const v = values.value[p.name]
+    let display, cls = ''
+    if (p.type === 'bool') {
+      if (p.name === 'dry_run') {
+        display = v ? 'Yes — preview only, no changes' : 'No — will create objects in GitLab'
+        cls = v ? 'confirm-value--warn' : 'confirm-value--danger'
+      } else {
+        display = v ? 'Yes' : 'No'
+      }
+    } else if (p.type === 'float' && v != null && v <= 1) {
+      display = `${Math.round(v * 100)}%`
+    } else if (v === null || v === undefined || v === '') {
+      display = '— config default'
+      cls = 'confirm-value--dim'
+    } else {
+      display = String(v)
+    }
+    rows.push({ label: p.prompt, display, cls })
+  }
+  return rows
+})
+
+function onKeydown(e) {
+  if (e.key === 'Escape' && props.tool) {
+    if (confirming.value) confirming.value = false
+    else emit('cancel')
+  }
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+
+// First click: show confirmation step (if tool.confirm); second click: launch.
+function submit() {
+  if (!isValid.value) return
+  if (props.tool.confirm) { confirming.value = true; return }
+  doLaunch()
+}
+
+function doLaunch() {
+  emit('launch', props.tool, _buildParams())
 }
 </script>
 
@@ -405,6 +471,41 @@ function submit() {
   font-size: 0.85rem;
   text-align: center;
 }
+
+/* ── Confirmation view ── */
+.confirm-intro {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.confirm-table {
+  padding: 0.5rem 1.25rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.confirm-row {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.confirm-row:last-child { border-bottom: none; }
+.confirm-label {
+  color: var(--text-2);
+  font-size: 0.78rem;
+}
+.confirm-value        { color: var(--text-1); font-weight: 500; }
+.confirm-value--dim   { color: var(--text-3); font-weight: 400; font-style: italic; }
+.confirm-value--warn  { color: #d97706; }
+.confirm-value--danger{ color: #ef4444; }
+
+.btn-launch--confirm { background: #16a34a; }
+.btn-launch--confirm:hover:not(:disabled) { background: #15803d; }
 
 /* ── Footer ── */
 .dialog-conflict { margin: 0 1.25rem 0.5rem; }
