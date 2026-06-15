@@ -39,10 +39,8 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "generate-epic-blocks",
         "clean-epic-blocks",
         "orphan-epics",
-    ],
-    "issue-structure-writers": [
-        "generate-issues",
         "orphan-issues",
+        "generate-issues",
     ],
     "risk-writers": [
         "generate-roam-risks",
