@@ -133,8 +133,20 @@ function formatKey(key) {
   ).join(' ')
 }
 
+const GROUP_LABELS = {
+  'label-writers':         'Label Management',
+  'weight-writers':        'Weights & Scoring',
+  'issue-state-writers':   'State & Progress',
+  'epic-structure-writers':'Scaffolding',
+  'risk-writers':          'ROAM Risk',
+  'wiki-writers':          'Wiki Management',
+  'import-export':         'Import / Export',
+  'setup':                 'Initial Setup',
+  'read-only':             'Audit & Validation',
+}
+
 function formatGroup(g) {
-  if (g === 'read-only') return 'Read-only Tools'
+  if (GROUP_LABELS[g]) return GROUP_LABELS[g]
   return g.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
   ).join(' ')
