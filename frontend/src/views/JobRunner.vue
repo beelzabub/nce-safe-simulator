@@ -277,16 +277,16 @@ function formatKey(key) {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 28px;
-  height: 28px;
+  width: 14px;
+  height: 14px;
   cursor: ns-resize;
   z-index: 2;
   opacity: 0.35;
   transition: opacity 0.15s;
   background-image:
     radial-gradient(circle, var(--text-1, #e6edf3) 1.5px, transparent 1.5px);
-  background-size: 6px 6px;
-  background-position: 4px 4px;
+  background-size: 5px 5px;
+  background-position: 2px 2px;
   background-repeat: repeat;
 }
 .resize-handle:hover,
