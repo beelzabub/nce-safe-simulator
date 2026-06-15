@@ -14,9 +14,12 @@
         <p class="dialog-desc">{{ tool.description }}</p>
 
         <div v-if="tool.params.length" class="params">
+          <template v-for="(param, idx) in tool.params" :key="param.name">
           <div
-            v-for="param in tool.params"
-            :key="param.name"
+            v-if="param.section && (idx === 0 || tool.params[idx-1].section !== param.section)"
+            class="param-section-label"
+          >{{ param.section }}</div>
+          <div
             class="param-row"
             :class="{ 'param-dryrun': param.name === 'dry_run' }"
           >
@@ -63,10 +66,13 @@
               <input
                 type="number"
                 class="field-input"
-                :step="param.type === 'float' ? 1 : 1"
-                :placeholder="param.optional ? 'leave blank to skip' : String(param.default ?? '')"
+                :step="param.type === 'float' ? 0.01 : 1"
+                :min="param.type === 'float' ? 0 : undefined"
+                :max="param.type === 'float' ? 1 : undefined"
+                :placeholder="param.optional ? 'leave blank for config default' : String(param.default ?? '')"
                 v-model.number="values[param.name]"
               />
+              <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
             </template>
 
             <!-- str → text -->
@@ -82,8 +88,10 @@
                 :placeholder="param.optional ? 'leave blank to skip' : (param.default ?? '')"
                 v-model="values[param.name]"
               />
+              <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
             </template>
           </div>
+          </template>
         </div>
 
         <div v-else class="no-params">
@@ -129,20 +137,20 @@ watch(() => props.tool, tool => {
   if (!tool) { values.value = {}; return }
   const init = {}
   for (const p of tool.params) {
-    if (p.widget === 'group') {
-      init[p.name] = p.default ?? ''
-    } else if (p.type === 'bool') {
-      init[p.name] = p.default ?? false
-    } else if (p.optional) {
-      init[p.name] = null
-    } else if (p.default !== null && p.default !== undefined) {
-      init[p.name] = p.default
-    } else {
-      init[p.name] = ''
-    }
+    init[p.name] = _initValue(p)
   }
   values.value = init
 }, { immediate: true })
+
+// Pre-fill logic: optional params with a server-resolved default are pre-filled
+// so the dialog shows exactly what the config contains.
+function _initValue(p) {
+  if (p.widget === 'group')                        return p.default ?? ''
+  if (p.type === 'bool')                           return p.default ?? false
+  if (p.default !== null && p.default !== undefined) return p.default
+  if (p.optional)                                  return null
+  return ''
+}
 
 function resetGroup(param) {
   values.value[param.name] = param.default ?? ''
@@ -273,6 +281,17 @@ function submit() {
   gap: 0.75rem;
 }
 
+.param-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0.35rem 0 0.1rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+}
+
 .param-row {
   display: flex;
   flex-direction: column;
@@ -362,6 +381,7 @@ function submit() {
 }
 .required-mark { color: #f87171; font-weight: 700; }
 .optional-tag  { color: var(--text-3); font-size: 0.72rem; }
+.field-hint    { font-size: 0.72rem; color: var(--text-3); margin-top: 2px; }
 
 .field-input {
   width: 100%;

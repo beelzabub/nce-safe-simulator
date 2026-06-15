@@ -34,15 +34,38 @@ def _tool_payload(tool: dict, gl=None) -> dict:
     params = []
     for p in tool.get("params", []):
         default = p.get("default")
+        hint    = None
+
         if p.get("widget") == "group" and gl is not None:
             ns  = getattr(gl, "gitlab_namespace", None)
             grp = getattr(gl, "parent_group", "")
             default = f"{ns}/{grp}" if ns else grp
+
+        elif p.get("gl_default") and gl is not None:
+            raw = getattr(gl, p["gl_default"], None)
+            if isinstance(raw, dict):
+                desired = raw.get("desired")
+                lo, hi  = raw.get("min"), raw.get("max")
+                if desired is not None:
+                    default = int(desired)
+                    hint    = f"range {lo}–{hi} · leave blank to randomise"
+                elif lo is not None:
+                    default = None
+                    hint    = f"random {lo}–{hi} · enter a value to pin it"
+            elif raw is not None:
+                if p["type"] is float:
+                    default = raw
+                    hint    = f"= {int(raw * 100)}% · enter as decimal (e.g. 0.85)"
+                else:
+                    default = int(raw)
+
         params.append({
             "name":     p["name"],
             "prompt":   p["prompt"],
             "type":     p["type"].__name__,
             "widget":   p.get("widget"),
+            "section":  p.get("section"),
+            "hint":     hint,
             "default":  default,
             "optional": p.get("optional", False),
         })

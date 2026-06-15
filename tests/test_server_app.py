@@ -117,7 +117,7 @@ def test_thread_local_writer_routes_to_callback():
     t = threading.Thread(target=_run)
     t.start()
     t.join()
-    assert captured == ["hello\n"]
+    assert captured == ["hello"]
 
 
 def test_thread_local_writer_main_thread_falls_back(capsys):
