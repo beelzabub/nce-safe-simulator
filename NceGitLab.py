@@ -184,13 +184,6 @@ class NceGitLab(
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
 
-        members_file = self.config_file.parent / "team_members.json"
-        if members_file.exists():
-            with open(members_file, "r", encoding="utf-8") as f:
-                self.team_members = json.load(f).get("members", [])
-        else:
-            self.team_members = []
-
         # project_labels and piid_labels are optional — used only for simulation/bootstrap.
         # Reports and tools discover these dynamically from live epic labels.
         missing_fields = [

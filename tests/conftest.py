@@ -246,7 +246,6 @@ class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
         self._lifecycle_labels = lifecycle_labels or []
         self._piid_labels      = piid_labels or []
         self._metrics          = metrics or {}
-        self.team_members      = []
 
     def get_group_by_name(self, name):
         return self._root_group
