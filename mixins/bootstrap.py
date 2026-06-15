@@ -361,6 +361,38 @@ class BootstrapMixin:
                                   art_epics=None,
                                   team_features=None,
                                   direct_feature_ratio=None,
+                                  target_group=None,
+                                  dry_run=False):
+        # Allow caller to override the target group (namespace/group_name).
+        # Restores instance state afterwards so other tools are unaffected.
+        _orig_ns  = self.gitlab_namespace
+        _orig_grp = self.parent_group
+        if target_group and target_group.strip():
+            parts = target_group.strip().rsplit("/", 1)
+            if len(parts) == 2:
+                self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+            else:
+                self.parent_group = parts[0]
+
+        try:
+            return self._create_all_lorem_objects_impl(
+                num_value_streams=num_value_streams, num_arts=num_arts,
+                num_teams=num_teams, portfolio_epics=portfolio_epics,
+                vs_epics=vs_epics, art_epics=art_epics,
+                team_features=team_features, direct_feature_ratio=direct_feature_ratio,
+                dry_run=dry_run,
+            )
+        finally:
+            self.gitlab_namespace = _orig_ns
+            self.parent_group     = _orig_grp
+
+    def _create_all_lorem_objects_impl(self,
+                                  num_value_streams=None, num_arts=None, num_teams=None,
+                                  portfolio_epics=None,
+                                  vs_epics=None,
+                                  art_epics=None,
+                                  team_features=None,
+                                  direct_feature_ratio=None,
                                   dry_run=False):
         _cfg_vs    = num_value_streams if num_value_streams is not None else self.default_num_value_streams
         _cfg_arts  = num_arts          if num_arts          is not None else self.default_num_arts

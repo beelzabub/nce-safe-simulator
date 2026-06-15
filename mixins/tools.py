@@ -197,7 +197,8 @@ TOOLS = [
         "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
         "method":      "create_all_lorem_objects",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+            {"name": "target_group", "prompt": "Target group", "type": str, "widget": "group", "optional": True},
+            {"name": "dry_run",      "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
         ],
     },
     {

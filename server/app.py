@@ -29,23 +29,29 @@ _running_lock = threading.Lock()
 # Payload helpers
 # ---------------------------------------------------------------------------
 
-def _tool_payload(tool: dict) -> dict:
+def _tool_payload(tool: dict, gl=None) -> dict:
     key = tool["key"]
+    params = []
+    for p in tool.get("params", []):
+        default = p.get("default")
+        if p.get("widget") == "group" and gl is not None:
+            ns  = getattr(gl, "gitlab_namespace", None)
+            grp = getattr(gl, "parent_group", "")
+            default = f"{ns}/{grp}" if ns else grp
+        params.append({
+            "name":     p["name"],
+            "prompt":   p["prompt"],
+            "type":     p["type"].__name__,
+            "widget":   p.get("widget"),
+            "default":  default,
+            "optional": p.get("optional", False),
+        })
     return {
         "key":               key,
         "description":       tool["description"],
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
-        "params": [
-            {
-                "name":     p["name"],
-                "prompt":   p["prompt"],
-                "type":     p["type"].__name__,
-                "default":  p.get("default"),
-                "optional": p.get("optional", False),
-            }
-            for p in tool.get("params", [])
-        ],
+        "params":            params,
     }
 
 
@@ -63,8 +69,19 @@ def _report_payload(report: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/tools")
-def list_tools():
-    return [_tool_payload(t) for t in TOOLS]
+def list_tools(request: Request):
+    gl = getattr(request.app.state, "gl", None)
+    return [_tool_payload(t, gl) for t in TOOLS]
+
+
+@app.get("/api/config")
+def get_config(request: Request):
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        return {"target_group": ""}
+    ns  = getattr(gl, "gitlab_namespace", None)
+    grp = getattr(gl, "parent_group", "")
+    return {"target_group": f"{ns}/{grp}" if ns else grp}
 
 
 @app.get("/api/reports")

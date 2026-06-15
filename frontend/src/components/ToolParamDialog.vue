@@ -20,8 +20,32 @@
             class="param-row"
             :class="{ 'param-dryrun': param.name === 'dry_run' }"
           >
+            <!-- group widget → locked display with Edit button -->
+            <template v-if="param.widget === 'group'">
+              <div class="field-label">
+                {{ param.prompt }}
+                <span class="optional-tag">from config</span>
+              </div>
+              <div class="group-field">
+                <input
+                  type="text"
+                  class="field-input group-input"
+                  :class="{ 'group-input--locked': groupLocked }"
+                  :readonly="groupLocked"
+                  v-model="values[param.name]"
+                  :title="groupLocked ? 'Click Edit to override' : ''"
+                />
+                <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
+                  Edit
+                </button>
+                <button v-else class="group-reset-btn" type="button" @click="resetGroup(param)">
+                  Reset
+                </button>
+              </div>
+            </template>
+
             <!-- bool → toggle -->
-            <template v-if="param.type === 'bool'">
+            <template v-else-if="param.type === 'bool'">
               <label class="toggle-label">
                 <input type="checkbox" class="toggle-input" v-model="values[param.name]" />
                 <span class="toggle-track"><span class="toggle-thumb" /></span>
@@ -96,14 +120,18 @@ const props = defineProps({
 })
 const emit = defineEmits(['launch', 'cancel'])
 
-const values = ref({})
+const values     = ref({})
+const groupLocked = ref(true)
 
 // Re-initialise values whenever the tool changes.
 watch(() => props.tool, tool => {
+  groupLocked.value = true
   if (!tool) { values.value = {}; return }
   const init = {}
   for (const p of tool.params) {
-    if (p.type === 'bool') {
+    if (p.widget === 'group') {
+      init[p.name] = p.default ?? ''
+    } else if (p.type === 'bool') {
       init[p.name] = p.default ?? false
     } else if (p.optional) {
       init[p.name] = null
@@ -116,10 +144,15 @@ watch(() => props.tool, tool => {
   values.value = init
 }, { immediate: true })
 
+function resetGroup(param) {
+  values.value[param.name] = param.default ?? ''
+  groupLocked.value = true
+}
+
 const isValid = computed(() => {
   if (!props.tool) return false
   for (const p of props.tool.params) {
-    if (p.optional || p.type === 'bool') continue
+    if (p.optional || p.type === 'bool' || p.widget === 'group') continue
     const v = values.value[p.name]
     if (v === '' || v === null || v === undefined) return false
   }
@@ -146,6 +179,7 @@ function submit() {
   for (const p of props.tool.params) {
     const v = values.value[p.name]
     if (p.optional && (v === null || v === '')) continue
+    if (p.widget === 'group' && (v === null || v === '')) continue
     params[p.name] = v
   }
   emit('launch', props.tool, params)
@@ -252,6 +286,36 @@ function submit() {
   border-radius: 5px;
   padding: 0.5rem 0.75rem;
 }
+
+/* ── Group widget ── */
+.group-field {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.group-input {
+  flex: 1;
+}
+.group-input--locked {
+  color: var(--text-2);
+  background: var(--surface-alt);
+  cursor: default;
+}
+.group-edit-btn,
+.group-reset-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.group-edit-btn:hover  { border-color: var(--action); color: var(--action); }
+.group-reset-btn:hover { border-color: var(--text-2); color: var(--text-1); }
 
 /* ── Toggle (bool) ── */
 .toggle-label {
