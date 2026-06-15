@@ -1752,11 +1752,6 @@ class ToolsMixin:
                                 "weight":   w,
                                 "epic_id":  feat.id,
                             }
-                            if self.team_members:
-                                member = random.choice(self.team_members)
-                                uid = self._resolve_member_id(member)
-                                if uid:
-                                    issue_data["assignee_ids"] = [uid]
                             issue = proj.issues.create(issue_data)
                             proj.issues.update(issue.iid, {"title": f"{issue.iid} - {title}"})
                             print(f"  CREATED #{issue.iid} '{issue.iid} - {title[:45]}' → Feature '{feat.title[:40]}' ({w} pt)")

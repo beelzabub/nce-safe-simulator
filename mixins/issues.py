@@ -90,16 +90,6 @@ class IssuesMixin:
         except Exception as e:
             print(f"Failed to export issues: {e}")
 
-    def _resolve_member_id(self, member):
-        """Return the GitLab user ID for a team member, looking up by username if no id stored."""
-        if "id" in member:
-            return member["id"]
-        try:
-            users = self.gl.users.list(username=member["username"])
-            return users[0].id if users else None
-        except Exception:
-            return None
-
     def create_issues_lorem(self, project_name, num_issues=5):
         try:
             project       = self.get_project_by_name(project_name)
@@ -115,12 +105,6 @@ class IssuesMixin:
                     'description': description,
                     'weight':      weight,
                 }
-
-                if self.team_members:
-                    member = random.choice(self.team_members)
-                    uid = self._resolve_member_id(member)
-                    if uid:
-                        issue_data['assignee_ids'] = [uid]
 
                 issue = project.issues.create(issue_data)
 
