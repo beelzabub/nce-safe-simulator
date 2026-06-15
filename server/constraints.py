@@ -54,6 +54,7 @@ WRITER_GROUPS: dict[str, list[str]] = {
     "setup": [
         "scaffold",
         "setup-bv-field",
+        "create-lorem-data",
     ],
     "import-export": [
         "export-epics",
