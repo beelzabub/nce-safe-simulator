@@ -5817,64 +5817,74 @@ class ReportsMixin:
             md.append(f"| {name} | {_ok(ok)} | {note} |")
         md.append("")
 
-        # ── 4. GraphQL schema probes (introspection, no real data touched) ──
+        # ── 4. GraphQL capability probes (functional queries, not introspection) ──
+        # GitLab intercepts __type/__schema introspection and returns the full schema
+        # dump regardless of aliases, making introspection results unreliable.  We
+        # instead probe each capability with the exact lightweight query that reports
+        # use, checking that the response carries the expected data key.
+        p = group.full_path
+
+        def _gql_ok(query, variables=None, expect_key=None):
+            """Return True if query succeeds and expect_key is present, False on error."""
+            try:
+                r = self.graphql_query(query, variables=variables)
+                if r is None:
+                    return False
+                return expect_key is None or expect_key in r
+            except Exception:
+                return False
+
+        # Epic blocking fields (blocked, blockedByCount, blockingCount)
+        _blocking_fields_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){epics(first:1){nodes{blocked blockedByCount blockingCount}}}}",
+            {"p": p}, "group",
+        )
+        # Epic.blockedByEpics (Ultimate — blocking relationship list)
+        _blocked_by_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){epics(first:1){nodes{blockedByEpics{edges{node{title}}}}}}}",
+            {"p": p}, "group",
+        )
+        # WorkItemWidgetWeight — try with the first available epic's work_item_id
+        _weight_ok = None
         try:
-            tr = self.graphql_query("""
-                query DiagTypes {
-                  t_weight:        __type(name: "WorkItemWidgetWeight")         { name }
-                  t_custom_fields: __type(name: "WorkItemWidgetCustomFields")   { name }
-                  t_blocking:      __type(name: "WorkItemWidgetBlockingIssues") { name }
-                  t_iteration:     __type(name: "WorkItemWidgetIteration")      { name }
-                }
-            """) or {}
+            _sample = group.epics.list(per_page=1, get_all=False)
+            _wid = getattr(_sample[0], "work_item_id", None) if _sample else None
+            if _wid:
+                _weight_ok = _gql_ok(
+                    "query D($id:WorkItemID!){workItem(id:$id){widgets{...on WorkItemWidgetWeight{weight}}}}",
+                    {"id": f"gid://gitlab/WorkItem/{_wid}"},
+                    "workItem",
+                )
         except Exception:
-            tr = {}
+            pass
+        # Namespace.customFields (Business Value, Ultimate + GitLab 17+)
+        _custom_fields_ok = _gql_ok(
+            "query D($p:ID!){namespace(fullPath:$p){customFields{nodes{id}}}}",
+            {"p": p}, "namespace",
+        )
+        # Issue.linkedWorkItems (ROAM risk linking)
+        _linked_wi_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){issues(first:1){nodes{linkedWorkItems(first:1){nodes{workItem{id}}}}}}}",
+            {"p": p}, "group",
+        )
+        # Group.workItemTypes (needed to resolve type GIDs for weight/BV mutations)
+        _wi_types_ok = _gql_ok(
+            "query D($p:ID!){group(fullPath:$p){workItemTypes{nodes{id name}}}}",
+            {"p": p}, "group",
+        )
 
-        try:
-            fr = self.graphql_query("""
-                query DiagFields {
-                  epicType:  __type(name: "Epic")      { fields { name } }
-                  issueType: __type(name: "Issue")     { fields { name } }
-                  nsType:    __type(name: "Namespace") { fields { name } }
-                  grpType:   __type(name: "Group")     { fields { name } }
-                }
-            """) or {}
-        except Exception:
-            fr = {}
-
-        def _type_ok(key):
-            return tr.get(key) is not None if tr else None
-
-        def _field_ok(type_key, field):
-            t = fr.get(type_key)
-            if t is None:
-                return None
-            return any(f["name"] == field for f in (t.get("fields") or []))
-
-        gql_type_rows = [
-            (_type_ok("t_weight"),        "WorkItemWidgetWeight",         "Epic/issue weight via GraphQL (WSJF, capacity)"),
-            (_type_ok("t_custom_fields"), "WorkItemWidgetCustomFields",   "Custom fields on work items — requires GitLab 17+, Ultimate"),
-            (_type_ok("t_blocking"),      "WorkItemWidgetBlockingIssues", "Blocking issues widget"),
-            (_type_ok("t_iteration"),     "WorkItemWidgetIteration",      "Iteration (sprint) assignment on work items"),
+        gql_rows = [
+            (_blocking_fields_ok, "Epic blocking fields",    "Epic.blocked / blockedByCount / blockingCount — Blocking & Cross-ART Risk report (Ultimate)"),
+            (_blocked_by_ok,      "Epic.blockedByEpics",     "Full blocked-by list — Blocking & Cross-ART Risk report (Ultimate)"),
+            (_weight_ok,          "WorkItemWidgetWeight",    "Epic/issue weight via workItem GraphQL — WSJF, Capacity, PI Matrix"),
+            (_custom_fields_ok,   "Namespace.customFields",  "Custom field definitions — Business Value (Ultimate + GitLab 17+)"),
+            (_linked_wi_ok,       "Issue.linkedWorkItems",   "Linked work items on issues — ROAM risk linking"),
+            (_wi_types_ok,        "Group.workItemTypes",     "Work item type GIDs — required for weight/BV write mutations"),
         ]
 
-        gql_field_rows = [
-            (_field_ok("epicType",  "blocked"),        "Epic.blocked",           "Whether an epic is currently blocked"),
-            (_field_ok("epicType",  "blockedByCount"),  "Epic.blockedByCount",    "Count of active blockers on an epic"),
-            (_field_ok("epicType",  "blockingCount"),   "Epic.blockingCount",     "Count of epics this epic is blocking"),
-            (_field_ok("epicType",  "blockedByEpics"),  "Epic.blockedByEpics",    "Full list of blocking epics — requires Ultimate"),
-            (_field_ok("issueType", "linkedWorkItems"), "Issue.linkedWorkItems",  "Work items linked to an issue (ROAM risk linking)"),
-            (_field_ok("nsType",    "customFields"),    "Namespace.customFields", "Custom field definitions (Business Value setup)"),
-            (_field_ok("grpType",   "workItemTypes"),   "Group.workItemTypes",    "Work item type IDs required for weight/BV mutations"),
-        ]
-
-        md.extend(["### GraphQL Schema Availability", "", "**Types**", "", "| Type | Available | Purpose |", "|------|-----------|---------|"])
-        for ok, name, desc in gql_type_rows:
-            md.append(f"| `{name}` | {_ok(ok)} | {desc} |")
-
-        md.extend(["", "**Fields on key types**", "", "| Field | Available | Purpose |", "|-------|-----------|---------|"])
-        for ok, name, desc in gql_field_rows:
-            md.append(f"| `{name}` | {_ok(ok)} | {desc} |")
+        md.extend(["### GraphQL API Capabilities", "", "| Feature | Available | Purpose |", "|---------|-----------|---------|"])
+        for ok, name, desc in gql_rows:
+            md.append(f"| {name} | {_ok(ok)} | {desc} |")
         md.append("")
 
         # ── 5. Label validation ─────────────────────────────────────────
@@ -5903,20 +5913,16 @@ class ReportsMixin:
         # ── 6. Compatibility assessment ─────────────────────────────────
         epics_ok    = r_epics[0]
         wiki_ok     = r_wiki[0]
-        weight_ok   = _type_ok("t_weight")
-        blocking_ok = _field_ok("epicType", "blocked") and _field_ok("epicType", "blockedByEpics")
-        custom_ok   = _type_ok("t_custom_fields") and _field_ok("nsType", "customFields")
-        roam_ok     = _field_ok("issueType", "linkedWorkItems")
-        wi_types_ok = _field_ok("grpType", "workItemTypes")
+        blocking_ok = _blocking_fields_ok and _blocked_by_ok
 
         assess_rows = [
-            (epics_ok,    "All reports (read epics)",          "Group Epics REST API — requires Premium/Ultimate"),
-            (wiki_ok,     "Wiki publishing",                   "Group Wiki REST API — requires Premium/Ultimate"),
-            (weight_ok,   "Weights (WSJF, Capacity, Matrix)",  "WorkItemWidgetWeight GraphQL type"),
-            (blocking_ok, "Blocking & Cross-ART Risk report",  "Epic.blocked + Epic.blockedByEpics — requires Ultimate"),
-            (custom_ok,   "Business Value / Custom Fields",    "WorkItemWidgetCustomFields + Namespace.customFields — Ultimate + GitLab 17+"),
-            (roam_ok,     "ROAM Risk issue linking",           "Issue.linkedWorkItems GraphQL field"),
-            (wi_types_ok, "Weight / BV write mutations",       "Group.workItemTypes — required to resolve work item type GIDs"),
+            (epics_ok,           "All reports (read epics)",          "Group Epics REST API — requires Premium/Ultimate"),
+            (wiki_ok,            "Wiki publishing",                   "Group Wiki REST API — requires Premium/Ultimate"),
+            (_weight_ok,         "Weights (WSJF, Capacity, Matrix)",  "WorkItemWidgetWeight via workItem GraphQL"),
+            (blocking_ok,        "Blocking & Cross-ART Risk report",  "Epic blocking fields + Epic.blockedByEpics — requires Ultimate"),
+            (_custom_fields_ok,  "Business Value / Custom Fields",    "Namespace.customFields — requires Ultimate + GitLab 17+"),
+            (_linked_wi_ok,      "ROAM Risk issue linking",           "Issue.linkedWorkItems GraphQL field"),
+            (_wi_types_ok,       "Weight / BV write mutations",       "Group.workItemTypes — required to resolve work item type GIDs"),
         ]
 
         md.extend([
@@ -5930,7 +5936,7 @@ class ReportsMixin:
         md.append("")
 
         critical = epics_ok and wiki_ok
-        full     = critical and bool(weight_ok) and bool(blocking_ok) and bool(custom_ok)
+        full     = critical and bool(_weight_ok) and bool(blocking_ok) and bool(_custom_fields_ok)
         if full:
             verdict = "**✅ Full compatibility** — all API features detected. Reports should generate correctly."
         elif critical:
