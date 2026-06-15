@@ -20,7 +20,25 @@ function _scheduleClose(id, ms) {
   const j = jobs.value.find(e => e.id === id)
   if (!j) return
   j.closeDuration = ms
+  j.closeAt = Date.now() + ms
   j._closeTimer = setTimeout(() => _closeJob(id), ms)
+}
+
+function pauseClose(id) {
+  const j = jobs.value.find(e => e.id === id)
+  if (!j || !j._closeTimer) return
+  clearTimeout(j._closeTimer)
+  j._closeTimer = null
+  j._closeRemaining = Math.max(0, j.closeAt - Date.now())
+}
+
+function resumeClose(id) {
+  const j = jobs.value.find(e => e.id === id)
+  if (!j || j._closeTimer || !j._closeRemaining) return
+  const remaining = j._closeRemaining
+  j._closeRemaining = 0
+  j.closeAt = Date.now() + remaining
+  j._closeTimer = setTimeout(() => _closeJob(id), remaining)
 }
 
 function _makeCallbacks(id) {
@@ -61,7 +79,7 @@ export function useJobs() {
 
   function launch(job, params = {}) {
     const id = _nextId++
-    jobs.value.push({ id, key: job.key, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, closeDuration: 0 })
+    jobs.value.push({ id, key: job.key, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, closeDuration: 0, closeAt: 0 })
     const { cancel } = runJob({ tool: job.key, params }, _makeCallbacks(id))
     const j = jobs.value.find(e => e.id === id)
     if (j) j._cancel = cancel
@@ -70,7 +88,7 @@ export function useJobs() {
   function launchReports(reports, formats) {
     const label = reports.length === 1 ? reports[0].key : `reports (${reports.length})`
     const id = _nextId++
-    jobs.value.push({ id, key: label, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, closeDuration: 0 })
+    jobs.value.push({ id, key: label, status: 'running', lines: [], collapsed: false, _cancel: null, _closeTimer: null, _closeRemaining: 0, closeDuration: 0, closeAt: 0 })
     const { cancel } = runJob({ reports: reports.map(r => r.key), formats }, _makeCallbacks(id))
     const j = jobs.value.find(e => e.id === id)
     if (j) j._cancel = cancel
@@ -93,5 +111,5 @@ export function useJobs() {
     if (j) j.collapsed = !j.collapsed
   }
 
-  return { jobs, runningJobKeys, launch, launchReports, cancelJob, closeJob, toggleCollapse }
+  return { jobs, runningJobKeys, launch, launchReports, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose }
 }
