@@ -59,6 +59,7 @@
         <!-- Log pane -->
         <div v-if="!job.collapsed" class="tab-body" :class="{ 'tab-body--resizable': job.status !== 'running' }">
           <LogPane :lines="job.lines" />
+          <div v-if="job.status !== 'running'" class="resize-handle" @mousedown.prevent.stop="startResize" title="Drag to resize" />
         </div>
       </div>
     </div>
@@ -72,6 +73,22 @@ import { useJobs } from '../composables/useJobs.js'
 import heroSrc from '../assets/hero-carrier.png'
 
 const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose, toggleClosePin } = useJobs()
+
+function startResize(e) {
+  const body = e.currentTarget.parentElement
+  const startY = e.clientY
+  const startH = body.getBoundingClientRect().height
+  function onMove(ev) {
+    const h = Math.max(80, Math.min(window.innerHeight * 0.8, startH + ev.clientY - startY))
+    body.style.height = h + 'px'
+  }
+  function onUp() {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
 const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
 function formatKey(key) {
@@ -211,7 +228,7 @@ function formatKey(key) {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 5px;
   background: var(--action, #2563eb);
   transform-origin: left center;
   animation: drain var(--dur) linear forwards;
@@ -236,31 +253,49 @@ function formatKey(key) {
 }
 .tab-body--resizable {
   position: relative;
-  resize: vertical;
   min-height: 80px;
   max-height: 80vh;
   overflow: hidden;
 }
-/* Drag bar — always visible, accent-highlighted on hover */
+/* Full-width bottom bar — visual resize indicator */
 .tab-body--resizable::after {
   content: '';
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 4px;
   background: var(--border);
-  transition: height 0.15s, background 0.15s;
+  transition: background 0.15s;
   pointer-events: none;
 }
 .tab-body--resizable:hover::after {
-  height: 5px;
   background: var(--accent);
+}
+/* Custom resize grip — bottom-right corner, easy to grab */
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  cursor: ns-resize;
+  z-index: 2;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  background-image:
+    radial-gradient(circle, var(--text-1, #e6edf3) 1.5px, transparent 1.5px);
+  background-size: 6px 6px;
+  background-position: 4px 4px;
+  background-repeat: repeat;
+}
+.resize-handle:hover,
+.tab-body--resizable:active .resize-handle {
+  opacity: 0.9;
 }
 .tab--running .tab-body {
   flex: 1;
   height: auto;
   min-height: 0;
-  resize: none;
 }
 </style>
