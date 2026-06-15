@@ -5793,16 +5793,16 @@ class ReportsMixin:
                 detail = f"HTTP {code}: {e}" if code else str(e)[:120]
                 return (False, label, endpoint, detail)
 
-        r_epics      = _rest_probe("Group Epics",      lambda: group.epics.list(per_page=1),      "GET /groups/:id/epics")
-        r_wiki       = _rest_probe("Group Wiki",       lambda: group.wikis.list(per_page=1),      "GET /groups/:id/wikis")
-        r_labels     = _rest_probe("Group Labels",     lambda: group.labels.list(per_page=1),     "GET /groups/:id/labels")
-        r_milestones = _rest_probe("Group Milestones", lambda: group.milestones.list(per_page=1), "GET /groups/:id/milestones")
+        r_epics      = _rest_probe("Group Epics",      lambda: group.epics.list(per_page=1, get_all=False),      "GET /groups/:id/epics")
+        r_wiki       = _rest_probe("Group Wiki",       lambda: group.wikis.list(per_page=1, get_all=False),      "GET /groups/:id/wikis")
+        r_labels     = _rest_probe("Group Labels",     lambda: group.labels.list(per_page=1, get_all=False),     "GET /groups/:id/labels")
+        r_milestones = _rest_probe("Group Milestones", lambda: group.milestones.list(per_page=1, get_all=False), "GET /groups/:id/milestones")
 
         if r_epics[0]:
             try:
-                sample = group.epics.list(per_page=1)
+                sample = group.epics.list(per_page=1, get_all=False)
                 if sample:
-                    sample[0].issues.list(per_page=1)
+                    sample[0].issues.list(per_page=1, get_all=False)
                 r_epic_issues = (True, "Epic Issues", "GET /groups/:id/epics/:iid/issues", "")
             except Exception as e:
                 r_epic_issues = (False, "Epic Issues", "GET /groups/:id/epics/:iid/issues", str(e)[:120])
