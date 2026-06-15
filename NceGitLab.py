@@ -442,7 +442,7 @@ def _parse_formats(raw_list):
     if "all" in tokens:
         return set(_all)
     if not tokens:
-        return {"markdown"}
+        return set(_all)
     return tokens
 
 

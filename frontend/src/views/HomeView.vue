@@ -26,11 +26,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import NavBar       from '../components/NavBar.vue'
-import JobPicker    from '../components/JobPicker.vue'
-import JobRunner    from './JobRunner.vue'
+import NavBar        from '../components/NavBar.vue'
+import JobPicker     from '../components/JobPicker.vue'
+import JobRunner     from './JobRunner.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
-import { useJobs } from '../composables/useJobs.js'
+import { useJobs }   from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports } = useJobs()
 

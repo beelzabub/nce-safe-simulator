@@ -115,7 +115,8 @@ const showReportDialog = ref(false)
 
 onMounted(async () => {
   try {
-    ;[tools.value, reports.value] = await Promise.all([getTools(), getReports()])
+    tools.value = await getTools()
+    reports.value = await getReports()
   } catch (e) {
     error.value = `Failed to load: ${e.message}`
   } finally {
@@ -210,7 +211,7 @@ function handleClick(tool) {
   }
 }
 
-// ── Selection & conflict (for no-param tools) ──────────────────────────────
+// ── Conflict detection ─────────────────────────────────────────────────────
 
 const isRunning = key => props.runningJobs.includes(key)
 
@@ -361,7 +362,7 @@ function onReportLaunch(selectedReports, formats) {
   line-height: 1.35;
 }
 
-/* ── Badges ── */
+/* ── Badges & hints ── */
 .badge {
   font-size: 0.68rem;
   border-radius: 3px;
