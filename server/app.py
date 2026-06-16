@@ -220,7 +220,11 @@ def list_history():
 
 @app.get("/api/runs")
 def list_runs():
-    """List report run directories, newest first."""
+    """List report run directories, newest first.
+
+    Each entry has: date, time, path, has_log, has_data.
+    Used by the Session Jobs tab to link log and data files.
+    """
     reports_dir = Path("reports")
     if not reports_dir.is_dir():
         return []
@@ -250,8 +254,8 @@ def browse_run_data(date: str, time: str):
     if not data_dir.is_dir():
         raise HTTPException(status_code=404, detail="Data directory not found")
     files = sorted(f for f in data_dir.iterdir() if f.is_file())
-    t_fmt = f"{time[:2]}:{time[2:4]}:{time[4:6]}"
-    d_fmt = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    t = f"{time[:2]}:{time[2:4]}:{time[4:6]}"
+    d = f"{date[:4]}-{date[4:6]}-{date[6:]}"
     items = "\n".join(
         f'<li><a href="/reports/{date}/{time}/data/{f.name}" target="_blank">'
         f'{f.name}</a> <span class="sz">{f.stat().st_size // 1024} KB</span></li>'
@@ -261,19 +265,26 @@ def browse_run_data(date: str, time: str):
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Data — {d_fmt} {t_fmt}</title>
+  <title>Data — {d} {t}</title>
   <style>
-    body {{ font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #e6edf3; padding: 2rem; margin: 0; }}
+    body {{
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      padding: 2rem; margin: 0;
+    }}
     h1 {{ font-size: 1rem; color: #8b949e; margin: 0 0 1.2rem; font-weight: 500; }}
     ul {{ list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }}
     li {{ display: flex; align-items: baseline; gap: 0.75rem; }}
-    a {{ color: #60a5fa; text-decoration: none; font-family: ui-monospace, monospace; font-size: 0.88rem; }}
+    a {{
+      color: #60a5fa; text-decoration: none;
+      font-family: ui-monospace, monospace; font-size: 0.88rem;
+    }}
     a:hover {{ text-decoration: underline; }}
     .sz {{ color: #6e7681; font-size: 0.78rem; }}
   </style>
 </head>
 <body>
-  <h1>Data snapshot &mdash; {d_fmt} &nbsp; {t_fmt}</h1>
+  <h1>Data snapshot &mdash; {d} &nbsp; {t}</h1>
   <ul>{items}</ul>
 </body>
 </html>"""
@@ -295,7 +306,7 @@ def clear_runs():
             shutil.rmtree(time_dir)
             deleted += 1
         try:
-            date_dir.rmdir()
+            date_dir.rmdir()   # succeeds only if now empty
         except OSError:
             pass
     return {"deleted": deleted}
@@ -396,6 +407,8 @@ async def ws_run(websocket: WebSocket):
         _running_jobs.add(job_key)
         _running_started[job_key] = time.time()
 
+    gl.reload_config()
+
     try:
         fn = _build_job_fn(gl, data)
     except ValueError as exc:
@@ -406,14 +419,14 @@ async def ws_run(websocket: WebSocket):
         await websocket.close()
         return
 
-    # Open a log file for tool runs — report runs are logged internally by _run_reports.
     log_fh = None
     if "tool" in data:
-        now     = datetime.now()
+        now = datetime.now()
         log_dir = Path("logs") / now.strftime("%Y%m%d")
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{now.strftime('%H%M%S')}_{job_key}.log"
-        log_fh   = log_path.open("w", encoding="utf-8")
+        log_fh = log_path.open("w", encoding="utf-8")
+        await websocket.send_json({"type": "log_path", "path": str(log_path)})
 
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
@@ -427,10 +440,6 @@ async def ws_run(websocket: WebSocket):
         if log_fh is not None:
             log_fh.write(text + "\n")
             log_fh.flush()
-
-    # Send the tool log path before the job starts so the UI links it immediately.
-    if log_fh is not None:
-        await websocket.send_json({"type": "log_path", "path": str(log_path)})
 
     def on_done() -> None:
         loop.call_soon_threadsafe(q.put_nowait, ("done", None))
@@ -467,6 +476,25 @@ async def ws_run(websocket: WebSocket):
         await websocket.close()
 
 
+def _resolve_reuse_data(value) -> "Path | None":
+    """Resolve the reuse_data WebSocket field to a concrete data/ Path or None.
+
+    Accepts:
+      "last"  — find the most recent reports/YYYYMMDD/HHMMSS/data/ directory
+      None    — fetch fresh data (default)
+    """
+    if not value:
+        return None
+    if value == "last":
+        reports_dir = Path("reports")
+        candidates = sorted(
+            (d / "data" for d in reports_dir.glob("*/*/") if (d / "data").is_dir()),
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+    return Path(value)
+
+
 def _build_job_fn(gl: object, data: dict):
     """Return a zero-argument callable for the tool or report described by *data*."""
     if "tool" in data:
@@ -483,8 +511,9 @@ def _build_job_fn(gl: object, data: dict):
         report = next((r for r in REPORTS if r["key"] == key), None)
         if report is None:
             raise ValueError(f"Unknown report: {key!r}")
-        formats = set(data.get("formats") or ["markdown"])
-        return lambda: gl._run_reports([report], formats=formats)
+        formats    = set(data.get("formats") or ["markdown"])
+        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
+        return lambda: gl._run_reports([report], formats=formats, reuse_data=reuse_data)
 
     if "reports" in data:
         keys    = data["reports"]
@@ -492,8 +521,9 @@ def _build_job_fn(gl: object, data: dict):
         missing = [k for k, r in zip(keys, reports) if r is None]
         if missing:
             raise ValueError(f"Unknown report key(s): {missing}")
-        formats = set(data.get("formats") or ["markdown"])
-        return lambda: gl._run_reports([r for r in reports if r], formats=formats)
+        formats    = set(data.get("formats") or ["markdown"])
+        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
+        return lambda: gl._run_reports([r for r in reports if r], formats=formats, reuse_data=reuse_data)
 
     raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
@@ -506,6 +536,10 @@ def _build_job_fn(gl: object, data: dict):
 _reports_dir = Path("reports")
 _reports_dir.mkdir(exist_ok=True)
 app.mount("/reports", StaticFiles(directory=str(_reports_dir)), name="reports")
+
+_logs_dir = Path("logs")
+_logs_dir.mkdir(exist_ok=True)   # ensure mount is always registered
+app.mount("/logs", StaticFiles(directory=str(_logs_dir)), name="logs-files")
 
 _public = Path("public")
 if _public.is_dir():
