@@ -70,9 +70,46 @@ class NceGitLab(
             "Feature":    "🛠️",
         }
 
-        with open(self.config_file, "r", encoding="utf-8") as config_file:
-            config = json.load(config_file)
+        self._ssl_verify_override = ssl_verify
+        self.reload_config()
 
+        # project_labels and piid_labels are optional — used only for simulation/bootstrap.
+        # Reports and tools discover these dynamically from live epic labels.
+        missing_fields = [
+            field for field, val in [
+                ("url",              self.url),
+                ("parent_group",     self.parent_group),
+                ("private_token",    self.private_token),
+                ("fibonacci_weights", self.fibonacci_weights),
+                ("epic_labels",      self.EPIC_TYPE_LABELS),
+            ] if not val
+        ]
+
+        if missing_fields:
+            print(f"ERROR: Missing required fields in config.json: {', '.join(missing_fields)}")
+            exit(1)
+
+        try:
+            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token, ssl_verify=self.ssl_verify)
+            self.gl.auth()
+
+            version, _ = self.gl.version()
+            print(f"GitLab server : {self.gl.api_url}  (v{version})")
+            print(f"python-gitlab : v{pkg_version('python-gitlab')}")
+            print(f"Python        : {sys.version}")
+        except gitlab.GitlabAuthenticationError:
+            print("Authentication failed. Please check your private token.")
+            exit(1)
+        except gitlab.GitlabGetError as e:
+            print(f"Failed to fetch group '{self.parent_group}': {e}")
+            exit(1)
+
+    def reload_config(self):
+        """Re-read config.json and refresh all config-derived instance attributes.
+
+        Safe to call at any time after __init__. Does NOT re-initialise the
+        GitLab API connection — only config-file-derived state is updated.
+        """
         def parse_label_env(env_var):
             env_val = os.getenv(env_var)
             return [item.strip() for item in env_val.split(",") if item.strip()] if env_val else None
@@ -85,6 +122,9 @@ class NceGitLab(
                 except ValueError:
                     return None
             return None
+
+        with open(self.config_file, "r", encoding="utf-8") as f:
+            config = json.load(f)
 
         self.url              = config.get("url", "")
         self.parent_group     = os.getenv("GROUP_NAME") or config.get("parent_group", "")
@@ -100,16 +140,16 @@ class NceGitLab(
         self.delete_workers  = config.get("delete_workers",  5)
         self.report_workers  = config.get("report_workers",  4)
 
-        _cfg_ssl_verify  = config.get("ssl_verify", True)
-        _env_ssl_verify  = os.getenv("SSL_VERIFY")
+        _cfg_ssl_verify = config.get("ssl_verify", True)
+        _env_ssl_verify = os.getenv("SSL_VERIFY")
         if _env_ssl_verify is not None:
             _env_ssl_verify = _env_ssl_verify.strip().lower() not in ("false", "0", "no")
-        self.ssl_verify  = ssl_verify if ssl_verify is not None else (
-                           _env_ssl_verify if _env_ssl_verify is not None else _cfg_ssl_verify)
+        ssl_override = getattr(self, "_ssl_verify_override", None)
+        self.ssl_verify = ssl_override if ssl_override is not None else (
+                          _env_ssl_verify if _env_ssl_verify is not None else _cfg_ssl_verify)
         if not self.ssl_verify:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            print("  Warning: SSL certificate verification is disabled.")
 
         fibonacci_weights_env = parse_fibonacci_env("FIBONACCI_WEIGHTS")
         self.fibonacci_weights = fibonacci_weights_env if fibonacci_weights_env else config.get("fibonacci_weights")
@@ -129,7 +169,12 @@ class NceGitLab(
 
         epic_labels_env = parse_label_env("EPIC_TYPE_LABELS")
         self.EPIC_TYPE_LABELS = epic_labels_env if epic_labels_env else config.get("epic_type_labels", [])
-        self.EPIC_TYPE_DISPLAY_NAMES = [t.split("::")[-1].capitalize() for t in self.EPIC_TYPE_LABELS]
+        self.EPIC_TYPE_DISPLAY_NAMES = [
+            t.split("::")[-1].capitalize() if "::" in t
+            else t.split(":")[-1].capitalize() if ":" in t
+            else t.capitalize()
+            for t in self.EPIC_TYPE_LABELS
+        ]
 
         risk_labels_env = parse_label_env("RISK_LABELS")
         self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
@@ -183,37 +228,6 @@ class NceGitLab(
 
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
-
-        # project_labels and piid_labels are optional — used only for simulation/bootstrap.
-        # Reports and tools discover these dynamically from live epic labels.
-        missing_fields = [
-            field for field, val in [
-                ("url",              self.url),
-                ("parent_group",     self.parent_group),
-                ("private_token",    self.private_token),
-                ("fibonacci_weights", self.fibonacci_weights),
-                ("epic_labels",      self.EPIC_TYPE_LABELS),
-            ] if not val
-        ]
-
-        if missing_fields:
-            print(f"ERROR: Missing required fields in config.json: {', '.join(missing_fields)}")
-            exit(1)
-
-        try:
-            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token, ssl_verify=self.ssl_verify)
-            self.gl.auth()
-
-            version, _ = self.gl.version()
-            print(f"GitLab server : {self.gl.api_url}  (v{version})")
-            print(f"python-gitlab : v{pkg_version('python-gitlab')}")
-            print(f"Python        : {sys.version}")
-        except gitlab.GitlabAuthenticationError:
-            print("Authentication failed. Please check your private token.")
-            exit(1)
-        except gitlab.GitlabGetError as e:
-            print(f"Failed to fetch group '{self.parent_group}': {e}")
-            exit(1)
 
 
 def _confirm_create(gl):

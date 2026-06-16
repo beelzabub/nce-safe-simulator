@@ -232,9 +232,9 @@ function onDialogLaunch(tool, params) {
   emit('launch', tool, params)
 }
 
-function onReportLaunch(selectedReports, formats) {
+function onReportLaunch(selectedReports, formats, useLast) {
   showReportDialog.value = false
-  emit('launch-reports', selectedReports, formats)
+  emit('launch-reports', selectedReports, formats, useLast)
 }
 </script>
 

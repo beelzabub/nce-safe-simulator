@@ -13,6 +13,8 @@
         <span v-if="runningCount > 0" class="status-dot" />
         {{ runningCount > 0 ? `${runningCount} running` : 'Status' }}
       </button>
+      <button class="config-btn" @click="$emit('toggle-config')" title="Edit config.json">⚙</button>
+      <button class="help-btn" @click="$emit('toggle-help')">? Help</button>
       <button class="theme-btn" @click="toggle">
         {{ theme === 'dark' ? '☀ Light' : '☾ Dark' }}
       </button>
@@ -26,7 +28,7 @@ import heroSrc from '../assets/hero-carrier.png'
 
 const { theme, toggle } = useTheme()
 defineProps({ runningCount: { type: Number, default: 0 } })
-defineEmits(['toggle-status'])
+defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
 </script>
 
 <style scoped>
@@ -89,6 +91,33 @@ defineEmits(['toggle-status'])
   font-weight: 500;
   font-size: 0.95rem;
 }
+
+.config-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.config-btn:hover { background: var(--border); color: var(--text-1); }
+
+.help-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.help-btn:hover { background: var(--border); color: var(--text-1); }
 
 .theme-btn {
   background: transparent;

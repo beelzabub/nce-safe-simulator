@@ -101,10 +101,19 @@ class UtilitiesMixin:
     def _epic_type_display(self, labels: list) -> str:
         """Return the display name for the epic tier present in labels, or 'Unknown'.
 
-        Works with both scoped labels ('epic::epic' → 'Epic') and plain labels ('Epic' → 'Epic').
+        Detects the separator from the label itself:
+          'epic::epic' → 'Epic'   (double-colon GitLab scoped label)
+          'Epic:epic'  → 'Epic'   (single-colon label)
+          'Epic'       → 'Epic'   (plain label)
         """
         match = next((lbl for lbl in self.EPIC_TYPE_LABELS if lbl in labels), None)
-        return match.split("::")[-1].capitalize() if match else "Unknown"
+        if match is None:
+            return "Unknown"
+        if "::" in match:
+            return match.split("::")[-1].capitalize()
+        if ":" in match:
+            return match.split(":")[-1].capitalize()
+        return match.capitalize()
 
     def _parallel_delete(self, items, fn, workers=None):
         """Run fn(item) for each item in parallel. Returns (done, errors) counts.
@@ -213,6 +222,54 @@ class UtilitiesMixin:
     # ------------------------------------------------------------------
     # Custom field helpers
     # ------------------------------------------------------------------
+
+    @property
+    def _namespace_slug(self):
+        """Return gitlab_namespace as a URL path slug, resolving display names lazily.
+
+        If gitlab_namespace contains spaces it's treated as a group display name
+        and resolved to full_path via the REST API once, then cached.
+        """
+        ns = self.gitlab_namespace
+        if not ns or ' ' not in ns:
+            return ns
+        if not hasattr(self, '_namespace_slug_cache'):
+            g = self.get_group_by_name(ns)
+            self._namespace_slug_cache = g.full_path if g else ns
+        return self._namespace_slug_cache
+
+    def _find_bv_field(self, group=None):
+        """Return the Business Value custom field dict, or None if not found.
+
+        Searches self._namespace_slug first, then walks up the ancestor chain
+        derived from group (a gitlab group object or a full_path string) so the
+        field is found even when gitlab_namespace is misconfigured or the field
+        lives at a parent group.
+        """
+        field_name = self.BUSINESS_VALUE_FIELD["name"]
+        seen: set  = set()
+        candidates: list = []
+
+        ns = self._namespace_slug
+        if ns:
+            candidates.append(ns)
+            seen.add(ns)
+
+        if group is not None:
+            full_path = group if isinstance(group, str) else getattr(group, "full_path", "")
+            parts = full_path.split("/") if full_path else []
+            for i in range(len(parts), 0, -1):
+                path = "/".join(parts[:i])
+                if path not in seen:
+                    candidates.append(path)
+                    seen.add(path)
+
+        for ns_path in candidates:
+            fields = self._fetch_custom_fields(ns_path)
+            field  = next((f for f in fields if f["name"] == field_name), None)
+            if field:
+                return field
+        return None
 
     def _fetch_custom_fields(self, namespace_path):
         """Return list of custom field dicts for the given root namespace."""
@@ -326,13 +383,12 @@ class UtilitiesMixin:
         if errors:
             print(f"  Business Value clear error: {errors}")
 
-    def _fetch_epic_business_values(self, epics):
+    def _fetch_epic_business_values(self, epics, root_namespace=None):
         """Return {epic_id: int} Business Value custom field for epics that have it set."""
-        if not self.gitlab_namespace:
-            return {}
-        fields   = self._fetch_custom_fields(self.gitlab_namespace)
-        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        bv_field = self._find_bv_field(group=root_namespace)
+
         if not bv_field:
+            print(f"  Business Value field '{self.BUSINESS_VALUE_FIELD['name']}' not found — skipping.")
             return {}
         field_gid  = bv_field["id"]
         option_map = {}
@@ -619,7 +675,7 @@ class UtilitiesMixin:
 
         all_epics    = group.epics.list(all=True)
         epic_weights = self._fetch_epic_weights(all_epics)
-        bv_values    = self._fetch_epic_business_values(all_epics)
+        bv_values    = self._fetch_epic_business_values(all_epics, root_namespace=group)
         metrics      = {n: [] for n in self.EPIC_TYPE_DISPLAY_NAMES}
         all_epics_raw = []
 

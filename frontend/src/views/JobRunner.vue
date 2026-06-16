@@ -13,6 +13,7 @@
       <div
         v-for="job in jobs"
         :key="job.id"
+        :data-job-id="job.id"
         class="tab"
         :class="`tab--${job.status}`"
       >
@@ -68,11 +69,20 @@
 </template>
 
 <script setup>
+import { watch, nextTick } from 'vue'
 import LogPane from '../components/LogPane.vue'
 import { useJobs } from '../composables/useJobs.js'
 import heroSrc from '../assets/hero-carrier.png'
 
-const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose, toggleClosePin } = useJobs()
+const { jobs, cancelJob, closeJob, toggleCollapse, pauseClose, resumeClose, toggleClosePin, scrollToJobId } = useJobs()
+
+watch(scrollToJobId, async (id) => {
+  if (id === null) return
+  await nextTick()
+  const el = document.querySelector(`[data-job-id="${id}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  scrollToJobId.value = null
+})
 
 function startResize(e) {
   const body = e.currentTarget.parentElement
