@@ -145,7 +145,8 @@ cd ..</pre>
                 <div class="os-label">Windows</div>
                 <pre class="code-block">python NceGitLab.py --serve</pre>
                 <div class="step-desc">
-                  The server starts on <code>http://localhost:80</code> and opens the browser automatically.
+                  The server starts on <code>http://localhost:80</code>.
+                  Open <code>http://localhost:80/app/</code> in your browser.
                   Run the same command again to stop it.
                   If port 80 is unavailable, run with <code>sudo</code> (Linux/macOS) or from an Administrator terminal (Windows).
                 </div>
