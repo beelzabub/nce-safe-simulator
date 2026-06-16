@@ -1,0 +1,87 @@
+NCE Safe Simulator — Setup & Run
+==================================
+
+Prerequisites
+-------------
+- Python 3.9 or later
+- Node.js 18 or later  (for building the web frontend)
+- Git
+- A GitLab Personal Access Token with api scope
+
+
+1. Clone the repository
+-----------------------
+  git clone https://gitlab.com/saic-study-group/nce-safe-simulator.git
+  cd nce-safe-simulator
+
+
+2. Create and activate a Python virtual environment
+---------------------------------------------------
+  Linux / macOS:
+    python3 -m venv .venv
+    source .venv/bin/activate
+
+  Windows (Command Prompt):
+    python -m venv .venv
+    .venv\Scripts\activate.bat
+
+  Windows (PowerShell):
+    python -m venv .venv
+    .venv\Scripts\Activate.ps1
+
+
+3. Install Python dependencies
+-------------------------------
+  pip install -r requirements.txt
+
+
+4. Build the frontend
+---------------------
+  cd frontend
+  npm install
+  npm run build
+  cd ..
+
+  This compiles the Vue app into public/app/ where the server serves it.
+
+  On Windows, use the same commands — npm is cross-platform.
+
+
+5. Configure
+------------
+  Edit config.json and set at minimum:
+
+    "url"              — your GitLab instance URL (default: "https://gitlab.com")
+    "private_token"    — your GitLab Personal Access Token
+    "parent_group"     — the display name of your SAFe portfolio group
+    "gitlab_namespace" — the URL slug of the parent namespace that contains
+                         the portfolio group (e.g. "my-org")
+
+  All other settings can be edited through the ⚙ Config button in the web UI.
+
+
+6. Start the web server
+-----------------------
+  Linux / macOS:
+    python3 NceGitLab.py --serve
+
+  Windows:
+    python NceGitLab.py --serve
+
+  The server starts on http://localhost:80 and opens the browser automatically.
+  The web UI is at http://localhost:80/app/
+
+  Run the same command again to stop the server.
+
+
+Notes
+-----
+- If port 80 is unavailable or requires elevated privileges, the server will
+  fail to bind. On Linux/macOS run with sudo; on Windows run the terminal as
+  Administrator, or change the port in config.json.
+- Completed report runs are stored under reports/ and reappear in the Session
+  Jobs sidebar after a server restart.
+- Logs for tool runs are written to logs/YYYYMMDD/.
+- To run the Vue dev server independently (hot-reload during UI development):
+    cd frontend && npm run dev
+  This proxies /api to localhost:80, so the backend must also be running.
