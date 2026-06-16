@@ -259,6 +259,58 @@ A typical demo cycle:
 python3 NceGitLab.py --all
 ```
 
+### Web UI
+
+A Vue 3 browser interface provides an alternative to the CLI for running utility tools and viewing reports. The backend is a FastAPI server that exposes the same tools over HTTP/WebSocket.
+
+#### Starting the web UI
+
+**Production (recommended for demos):**
+
+```bash
+cd frontend && npm run build && cd ..
+python3 NceGitLab.py --serve          # serves on http://localhost:4645
+```
+
+Navigate to `http://localhost:4645/app/`.
+
+**Development (hot-reload, edit frontend without rebuilding):**
+
+```bash
+python3 NceGitLab.py --serve          # backend on port 4645
+cd frontend && npm run dev            # Vite dev server on http://localhost:5173
+```
+
+Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all non-app paths to the Python backend, so reports and API calls work without a production build.
+
+#### Layout
+
+| Area | Content |
+|------|---------|
+| Top nav | PMW 120 / NCE Safe Simulator wordmark; dark ↔ light theme toggle |
+| Left sidebar | Job picker + Reports link |
+| Main pane | Job runner and log output (E3, in progress) |
+
+#### Job picker
+
+- Tools are grouped by `parallelism_group` in collapsible sections (all collapsed by default)
+- Each row shows the tool key, a short description, and status badges (`read-only`, `● running`)
+- Filter input at the top narrows across all groups in real time; × clears the filter
+- Tools that share a parallelism group cannot run concurrently — selecting a tool while a same-group tool is running shows a **Conflict** banner and disables Launch
+- Parameterised tools open a modal dialog before launch; `dry_run` is highlighted amber; required fields block launch until filled
+
+#### Theme
+
+Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accents). Click the toggle in the nav bar to switch to light. Preference is saved to `localStorage` and survives page reload.
+
+#### Reports
+
+The **Reports ↗** link in the sidebar footer opens the quarto-rendered report site (`public/index.html`) in a new tab. Reports must be built first:
+
+```bash
+python3 NceGitLab.py -r all           # builds markdown + quarto + Marimo outputs
+```
+
 ---
 
 ## What `--create` Builds

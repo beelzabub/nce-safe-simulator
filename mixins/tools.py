@@ -193,6 +193,24 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "create-lorem-data",
+        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "confirm":     True,
+        "method":      "create_all_lorem_objects",
+        "params": [
+            {"name": "target_group",        "prompt": "Target group",            "type": str,   "widget": "group", "optional": True},
+            {"name": "num_value_streams",   "prompt": "Value Streams",           "type": int,   "optional": True, "gl_default": "default_num_value_streams",   "section": "SAFe Structure"},
+            {"name": "num_arts",            "prompt": "ARTs per Value Stream",   "type": int,   "optional": True, "gl_default": "default_num_arts"},
+            {"name": "num_teams",           "prompt": "Teams per ART",           "type": int,   "optional": True, "gl_default": "default_num_teams"},
+            {"name": "portfolio_epics",     "prompt": "Portfolio Epics",         "type": int,   "optional": True, "gl_default": "default_portfolio_epics",   "section": "Content Counts"},
+            {"name": "vs_epics",            "prompt": "VS Capabilities / VS",   "type": int,   "optional": True, "gl_default": "default_vs_caps_per_vs"},
+            {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
+            {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
+            {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+        ],
+    },
+    {
         "key":         "setup-bv-field",
         "description": "Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21, applies to Epic / Capability / Feature)",
         "method":      "_tool_setup_bv_field",
@@ -279,6 +297,15 @@ TOOLS = [
             {"name": "label",     "prompt": "Project label to assign (e.g. project::DO)", "type": str,  "optional": False},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
             {"name": "dry_run",   "prompt": "Dry run?",                                    "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "strip-project-labels",
+        "description": "Remove all project:: labels from every epic (clean slate for re-assignment)",
+        "method":      "_tool_strip_project_labels",
+        "params": [
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                              "type": bool, "default": False},
         ],
     },
     {
@@ -442,7 +469,7 @@ TOOL_CATEGORIES = [
         "description": "Assign or strip epic label sets",
         "tools": [
             "set-lifecycle-labels", "strip-lifecycle-labels",
-            "set-piid-labels", "set-project-labels", "set-risk-labels",
+            "set-piid-labels", "set-project-labels", "strip-project-labels", "set-risk-labels",
             "set-work-type-labels", "strip-work-type-labels",
             "set-business-value", "strip-business-value",
             "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
@@ -1620,6 +1647,49 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
+    def _tool_strip_project_labels(self, epic_type=None, dry_run=False):
+        """Remove all project:: labels from every epic (clean slate for re-assignment)."""
+        group    = self.get_group_by_name(self.parent_group)
+        proj_set = set(self._discover_labels(group, "project::"))
+
+        if not proj_set:
+            print("No project:: labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(proj_set)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        print("\nWalking epics...")
+        for epic in group.epics.list(all=True):
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            existing = set(epic.labels) & proj_set
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in proj_set]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                stripped += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no project:: or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
     def _tool_generate_issues(self, count=None, feature_percent=100.0, dry_run=False):
         """Create issues in team backlog projects linked to Feature epics."""
         if count is None:
@@ -1682,11 +1752,6 @@ class ToolsMixin:
                                 "weight":   w,
                                 "epic_id":  feat.id,
                             }
-                            if self.team_members:
-                                member = random.choice(self.team_members)
-                                uid = self._resolve_member_id(member)
-                                if uid:
-                                    issue_data["assignee_ids"] = [uid]
                             issue = proj.issues.create(issue_data)
                             proj.issues.update(issue.iid, {"title": f"{issue.iid} - {title}"})
                             print(f"  CREATED #{issue.iid} '{issue.iid} - {title[:45]}' → Feature '{feat.title[:40]}' ({w} pt)")
