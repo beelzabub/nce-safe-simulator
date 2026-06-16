@@ -126,7 +126,7 @@ Copy and edit `config.json`:
 | `gitlab_namespace` | Parent namespace for root group creation |
 | `project_labels` | Labels representing programs or workstreams (`project::*`) |
 | `piid_labels` | `PIID::YYYYQn` labels mapping work to PI quarters |
-| `epic_type_labels` | Must include `Epic`, `Capability`, `Feature` |
+| `epic_type_labels` | SAFe hierarchy tier labels — scoped (`epic::epic`, `epic::capability`, `epic::feature`) or plain (`Epic`, `Capability`, `Feature`). Display names are derived by stripping the scope prefix and capitalizing. All mixins, reports, and Marimo pages resolve tier names from this list; changing it reconfigures the entire application. |
 | `risk_labels` | `risk::*` labels used by the Risk Register report and `set-risk-labels` tool |
 | `work_type_labels` | `type::*` labels classifying epics by SAFe work type (feature, enabler, infrastructure, defect) |
 | `lifecycle_labels` | `lifecycle::*` labels representing SAFe Portfolio Kanban states (funnel → done) |
@@ -233,6 +233,9 @@ python3 NceGitLab.py -ut                  # Interactive utility tool menu
 python3 NceGitLab.py -ut audit-labels     # Run a single tool by key
 python3 NceGitLab.py -ut set-wsjf-labels --open_only  # Pass tool params as flags
 
+# Diagnostics
+python3 NceGitLab.py -D  / --diagnose     # Print environment, API, and label diagnostics to stdout
+
 # Scaffold
 python3 NceGitLab.py -s                   # Create SAFe group/project structure (prompted)
 python3 NceGitLab.py -s my/group          # Create structure under a specific group
@@ -254,6 +257,90 @@ A typical demo cycle:
 ```bash
 # Tear down yesterday's data, rebuild, and publish fresh reports
 python3 NceGitLab.py --all
+```
+
+### Web UI
+
+A Vue 3 browser interface provides an alternative to the CLI for running utility tools and viewing reports. The backend is a FastAPI server that exposes the same tools over HTTP/WebSocket.
+
+#### Starting the web UI
+
+**Production (recommended for demos):**
+
+```bash
+cd frontend && npm run build && cd ..
+python3 NceGitLab.py --serve          # serves on http://localhost:4645
+```
+
+Navigate to `http://localhost:4645/app/`.
+
+**Development (hot-reload, edit frontend without rebuilding):**
+
+```bash
+python3 NceGitLab.py --serve          # backend on port 4645
+cd frontend && npm run dev            # Vite dev server on http://localhost:5173
+```
+
+Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all non-app paths to the Python backend, so reports and API calls work without a production build.
+
+#### Layout
+
+| Area | Content |
+|------|---------|
+| Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
+| Left sidebar | Job picker (collapsible groups) + Run Reports button + Reports ↗ link |
+| Main pane | Job runner — one tab per launched job with streaming log output |
+| Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
+
+#### Job picker
+
+Tools are grouped by purpose in collapsible sections, all collapsed by default. A filter input at the top narrows across all groups in real time; × clears it. Each row shows the tool name, a short description, and a status badge (`read-only`, `⚙` for configurable, `● running`).
+
+Clicking a tool with no parameters launches it immediately. Clicking a parameterised tool opens a modal dialog — booleans become toggles (`dry_run` is highlighted amber), integers and floats get number inputs, strings get text inputs, and group-targeting fields pre-fill from the active config. Required fields block Launch until filled. Destructive tools show a confirmation step.
+
+Tools that share a `parallelism_group` cannot run concurrently; the dialog disables Launch and lists the blocking jobs if a conflict exists.
+
+**Run Reports…** — a button pinned at the bottom of the sidebar opens the report picker dialog: choose individual reports or toggle All, select output formats (markdown / plotly / interactive; plotly and interactive require all reports to be selected since site builds are project-wide), and optionally check **Use last available data snapshot** to skip the GitLab API fetch and re-render from the most recent `data/` directory.
+
+#### Job runner
+
+Each launched job appears as a card in the main pane, stacked vertically. The card header shows a status indicator (spinning while running, ✓ / ✕ / ◼ when done), the job name, and a Stop or × button. Click the header to collapse or expand the log pane.
+
+When a job finishes, a **countdown bar** drains across the bottom of the header — when it empties the tab closes automatically. Hover over the header to pause the countdown; click the bar to pin it (freezes until clicked again).
+
+The log pane is resizable after a job completes: drag the bottom-right corner triangle to set the height.
+
+#### Status panel
+
+Accessible via the toggle in the nav bar; slides in from the right and is itself resizable by dragging its left edge. Two tabs:
+
+**Server** — polls `/api/running` every 3 seconds and shows each active job with elapsed time and a Stop button. Jobs that started before the current browser session are shown as informational only (no Stop button).
+
+**Session** — two sections separated by a draggable divider:
+- *Jobs This Session* — in-memory history of every job run since the page loaded, with status dot, duration, line count, a Log ↗ link (for tool runs), and a View button to re-open the tab.
+- *Report Runs* — on-disk run directories from `reports/YYYYMMDD/HHMMSS/`, each with Log ↗ and Data ↗ links. Both sections have a Clear button with an inline confirmation.
+
+#### Config editor
+
+The **⚙** button in the nav bar opens a dialog for editing `config.json` directly from the browser. Changes are written to disk immediately and the running server reloads its config without a restart. The dialog is organised into four tabs:
+
+| Tab | Fields |
+|-----|--------|
+| Connection | GitLab URL, private token (masked by default), parent group, namespace, SSL verify, API timeout, delete workers |
+| Labels | All label arrays (project, PIID, epic type, risk, ROAM, work type, lifecycle, WSJF urgency/risk) — one value per line |
+| Weights | Fibonacci weights, epic type planned weights, business value field options |
+| Defaults | `defaults.bootstrap` and `defaults.tools` as editable JSON |
+
+#### Theme
+
+Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accents). Click the toggle in the nav bar to switch to light. Preference is saved to `localStorage` and survives page reload.
+
+#### Reports
+
+The **Reports ↗** link in the sidebar footer opens the quarto-rendered report site (`public/index.html`) in a new tab. Reports must be built first:
+
+```bash
+python3 NceGitLab.py -r all           # builds markdown + quarto + Marimo outputs
 ```
 
 ---
@@ -492,6 +579,29 @@ Reports flag items as **At Risk** (⚠️) when `% done < % elapsed through PI`.
 
 Run interactively with `-ut` (category → tool menu) or pass a key directly (e.g. `-ut audit-labels`). Tool params can be passed as flags (e.g. `-ut set-wsjf-labels --open_only`).
 
+### Diagnose
+
+| Key | Description |
+|---|---|
+| `diagnose` | Print software versions, REST and GraphQL API capability probes, label validation, and a per-report compatibility assessment to stdout |
+
+The `diagnose` tool is also available as a top-level CLI flag (`-D` / `--diagnose`) for quick checks without entering the interactive menu:
+
+```bash
+python3 NceGitLab.py --diagnose
+```
+
+The same diagnostic output is automatically appended as a collapsible **🔧 Environment & API Diagnostics** section at the bottom of the Portfolio Home wiki page (`/wikis/home`) every time reports are published. It covers:
+
+| Section | What it checks |
+|---|---|
+| **Software Versions** | Python, python-gitlab, requests, pandas, plotly, marimo, jupyter, nbformat, GitLab server version, and GitLab tier (Free / Premium / Ultimate) |
+| **Configuration** | Active label sets from `config.json` — Epic Type, PIID, Project, Risk, Lifecycle |
+| **REST API Capabilities** | Live probes of Group Epics, Group Wiki, Labels, Milestones, and Epic Issues endpoints with HTTP error detail on failure |
+| **GraphQL API Capabilities** | Functional probes (not schema introspection) for Epic blocking fields, `Epic.blockedByEpics`, `WorkItemWidgetWeight`, `Namespace.customFields`, `Issue.linkedWorkItems`, and `Group.workItemTypes` |
+| **Label Validation** | Checks every configured Epic Type, PIID, Project, and Risk label against what exists in the target group — missing labels are the most common cause of empty report cells |
+| **Compatibility Assessment** | Traffic-light (✅ / ❌ / ⚠️) verdict per report area with an overall summary sentence |
+
 ### Setup
 
 | Key | Description |
@@ -558,6 +668,8 @@ Run interactively with `-ut` (category → tool menu) or pass a key directly (e.
 | `audit-hierarchy` | Verify Features have valid parents (Capability or Epic) and Capabilities have Epic parents |
 | `audit-labels` | Report every epic missing a type, PIID, or project label |
 | `list-wikis` | List all wiki pages for a specified scope (portfolio / teams / all / group-path) |
+
+> `diagnose` is listed under the **Diagnose** category (first entry in the utilities menu) and via `-D` / `--diagnose` — see [Diagnose](#diagnose) above.
 
 ### Import / Export
 

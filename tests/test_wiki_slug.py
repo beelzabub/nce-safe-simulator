@@ -2,7 +2,7 @@
 import sys
 import pytest
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from mixins.reports import _wiki_slug
 

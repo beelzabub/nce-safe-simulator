@@ -3,7 +3,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock, call
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from conftest import ToolsHarness, _make_epic_mock, _make_issue_mock
 

@@ -44,6 +44,9 @@ ISSUE_IMPORT_REQUIRED = {"title"}
 VALID_DATE_FMT = "%Y-%m-%d"
 VALID_STATES   = {"opened", "open", "closed"}
 
+# Exports land here so FastAPI's static server can serve them for download.
+_EXPORTS_DIR = Path("public/exports")
+
 
 class ImportExportMixin:
 
@@ -56,7 +59,17 @@ class ImportExportMixin:
         return "json" if path.suffix.lower() == ".json" else "csv"
 
     def _default_export_name(self, stem, fmt):
-        return self._resolve_path(f"{self.sanitize_name(self.parent_group)}-{stem}.{fmt}")
+        _EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{self.sanitize_name(self.parent_group)}-{stem}.{fmt}"
+        return (_EXPORTS_DIR / filename).resolve()
+
+    def _export_url(self, path: Path):
+        """Return a download URL if *path* lives under the public/ static tree."""
+        try:
+            rel = path.relative_to(Path("public").resolve())
+            return f"http://localhost:4645/{rel.as_posix()}"
+        except ValueError:
+            return None
 
     # ── Validation primitives ─────────────────────────────────────────────────
 
@@ -228,6 +241,9 @@ class ImportExportMixin:
 
         self._write_file(path, fmt, rows, EPIC_EXPORT_FIELDS)
         print(f"  Exported {len(rows)} epic(s) → {path}")
+        url = self._export_url(path)
+        if url:
+            print(f"  Download: {url}")
 
     # ── Epic import ───────────────────────────────────────────────────────────
 
@@ -307,8 +323,7 @@ class ImportExportMixin:
         for gpath in sorted(by_group):
             print(f"  {gpath}")
             for epic in by_group[gpath]:
-                etype = next((l for l in (epic.labels or [])
-                              if l in ("Epic", "Capability", "Feature")), "—")
+                etype = self._epic_type_display(epic.labels or [])
                 choices.append((epic.id, epic.title))
                 idx = len(choices)
                 print(f"    [{idx:>3}] [{etype:<11}] {epic.title[:55]}  (#{epic.iid})")
@@ -595,6 +610,9 @@ class ImportExportMixin:
 
         self._write_file(path, fmt, rows, ISSUE_EXPORT_FIELDS)
         print(f"  Exported {len(rows)} issue(s) → {path}")
+        url = self._export_url(path)
+        if url:
+            print(f"  Download: {url}")
 
     # ── Issue import ──────────────────────────────────────────────────────────
 
