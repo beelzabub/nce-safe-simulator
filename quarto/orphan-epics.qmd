@@ -13,11 +13,11 @@ import json
 from pathlib import Path
 from IPython.display import HTML, display
 
-_candidates = [Path("data/orphan-epics.json"), Path("../data/orphan-epics.json")]
+_candidates = [Path("quarto-data/orphan-epics.json"), Path("../quarto-data/orphan-epics.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
 if data_file is None:
     raise FileNotFoundError(
-        "data/orphan-epics.json not found. "
+        "quarto-data/orphan-epics.json not found. "
         "Run: python NceGitLab.py --report orphan-epics"
     )
 

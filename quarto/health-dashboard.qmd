@@ -15,13 +15,13 @@ from IPython.display import HTML
 
 # Quarto may run kernel from this file's directory or the project root.
 _candidates = [
-    Path("data/health-dashboard.json"),
-    Path("../data/health-dashboard.json"),
+    Path("quarto-data/health-dashboard.json"),
+    Path("../quarto-data/health-dashboard.json"),
 ]
 data_file = next((p for p in _candidates if p.exists()), None)
 if data_file is None:
     raise FileNotFoundError(
-        "data/health-dashboard.json not found. "
+        "quarto-data/health-dashboard.json not found. "
         "Run: python NceGitLab.py --report health-dashboard"
     )
 

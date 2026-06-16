@@ -1,5 +1,7 @@
 import asyncio
 import json
+import re
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -153,6 +155,69 @@ def list_reports():
     return [_report_payload(r) for r in REPORTS]
 
 
+@app.get("/api/history")
+def list_history():
+    """Return completed report runs from disk as session-history entries, newest first.
+
+    Each entry matches the _sessionHistory shape in useJobs.js so the frontend
+    can pre-populate history on startup without having to replay WebSocket jobs.
+    """
+    runs = []
+    reports_root = Path("reports")
+    if not reports_root.is_dir():
+        return runs
+
+    for date_dir in sorted(reports_root.iterdir(), reverse=True):
+        if not date_dir.is_dir() or not re.match(r"^\d{8}$", date_dir.name):
+            continue
+        for time_dir in sorted(date_dir.iterdir(), reverse=True):
+            if not time_dir.is_dir() or not re.match(r"^\d{6}$", time_dir.name):
+                continue
+
+            log_files = sorted(time_dir.glob("*.log"))
+            if not log_files:
+                continue
+            log_file = log_files[0]
+
+            stem = log_file.stem
+            if stem == "reports-all":
+                key = "reports (all)"
+            elif re.match(r"^reports-\d+-selected$", stem):
+                key = f"reports ({stem.split('-')[1]})"
+            elif stem.startswith("reports-"):
+                key = stem[len("reports-"):]
+            else:
+                key = stem
+
+            d, t = date_dir.name, time_dir.name
+            try:
+                run_dt = datetime(int(d[:4]), int(d[4:6]), int(d[6:]),
+                                  int(t[:2]), int(t[2:4]), int(t[4:]))
+            except ValueError:
+                continue
+
+            started_ms = int(run_dt.timestamp() * 1000)
+            ended_ms   = int(log_file.stat().st_mtime * 1000)
+
+            try:
+                content = log_file.read_text(encoding="utf-8", errors="replace")
+                lines = [ln.rstrip() for ln in content.splitlines()]
+            except OSError:
+                lines = ["(log unreadable)"]
+
+            runs.append({
+                "id":        f"disk-{d}-{t}",
+                "key":       key,
+                "status":    "done",
+                "startedAt": started_ms,
+                "endedAt":   ended_ms,
+                "logPath":   str(log_file),
+                "lines":     lines,
+            })
+
+    return runs
+
+
 @app.get("/api/runs")
 def list_runs():
     """List report run directories, newest first.
@@ -170,11 +235,13 @@ def list_runs():
         for time_dir in sorted(date_dir.iterdir(), reverse=True):
             if not time_dir.is_dir() or not time_dir.name.isdigit():
                 continue
+            log_files = sorted(time_dir.glob("*.log"))
             runs.append({
                 "date":     date_dir.name,
                 "time":     time_dir.name,
                 "path":     f"reports/{date_dir.name}/{time_dir.name}",
-                "has_log":  (time_dir / "reports-all.log").is_file(),
+                "has_log":  bool(log_files),
+                "log_name": log_files[0].name if log_files else None,
                 "has_data": (time_dir / "data").is_dir(),
             })
     return runs
@@ -225,12 +292,7 @@ def browse_run_data(date: str, time: str):
 
 @app.delete("/api/runs")
 def clear_runs():
-    """Delete all timestamped report run directories from disk.
-
-    Removes reports/YYYYMMDD/HHMMSS/ trees and cleans up empty date dirs.
-    The reports/ root and any non-run content are left untouched.
-    """
-    import shutil
+    """Delete all timestamped report run directories from disk."""
     reports_dir = Path("reports")
     if not reports_dir.is_dir():
         return {"deleted": 0}
@@ -357,8 +419,6 @@ async def ws_run(websocket: WebSocket):
         await websocket.close()
         return
 
-    # Open a log file for tool runs so output is persisted to disk.
-    # Report runs are already logged internally by _run_reports/_tee_to_log.
     log_fh = None
     if "tool" in data:
         now = datetime.now()
@@ -372,6 +432,10 @@ async def ws_run(websocket: WebSocket):
     q: asyncio.Queue = asyncio.Queue()
 
     def on_output(text: str) -> None:
+        # Detect the log-path announcement printed by _tee_to_log / _run_reports.
+        if text.startswith("  log → "):
+            lp = text[len("  log → "):].strip()
+            loop.call_soon_threadsafe(q.put_nowait, ("log_path", lp))
         loop.call_soon_threadsafe(q.put_nowait, ("log", text))
         if log_fh is not None:
             log_fh.write(text + "\n")
@@ -391,6 +455,8 @@ async def ws_run(websocket: WebSocket):
             kind, payload = await q.get()
             if kind == "log":
                 await websocket.send_json({"type": "log", "text": payload})
+            elif kind == "log_path":
+                await websocket.send_json({"type": "log_path", "path": payload})
             elif kind == "done":
                 await websocket.send_json({"type": "done"})
                 break
@@ -466,11 +532,10 @@ def _build_job_fn(gl: object, data: dict):
 # Static file serving
 # ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
-# Skipped gracefully if public/ hasn't been built yet.
 
 _reports_dir = Path("reports")
-if _reports_dir.is_dir():
-    app.mount("/reports", StaticFiles(directory=str(_reports_dir)), name="reports-files")
+_reports_dir.mkdir(exist_ok=True)
+app.mount("/reports", StaticFiles(directory=str(_reports_dir)), name="reports")
 
 _logs_dir = Path("logs")
 _logs_dir.mkdir(exist_ok=True)   # ensure mount is always registered

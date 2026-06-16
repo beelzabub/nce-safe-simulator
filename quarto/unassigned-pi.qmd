@@ -13,11 +13,11 @@ import json
 from pathlib import Path
 from IPython.display import HTML, display
 
-_candidates = [Path("data/unassigned-pi.json"), Path("../data/unassigned-pi.json")]
+_candidates = [Path("quarto-data/unassigned-pi.json"), Path("../quarto-data/unassigned-pi.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
 if data_file is None:
     raise FileNotFoundError(
-        "data/unassigned-pi.json not found. "
+        "quarto-data/unassigned-pi.json not found. "
         "Run: python NceGitLab.py --report unassigned-pi"
     )
 

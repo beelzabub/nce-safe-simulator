@@ -452,12 +452,10 @@ class BootstrapMixin:
         self._ensure_business_value_field(interactive=False)
         self._bv_field_gid   = None
         self._bv_option_gids = []
-        if self.gitlab_namespace:
-            _fields = self._fetch_custom_fields(self.gitlab_namespace)
-            _bv     = next((f for f in _fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
-            if _bv:
-                self._bv_field_gid   = _bv["id"]
-                self._bv_option_gids = [o["id"] for o in (_bv.get("selectOptions") or []) if o.get("id")]
+        _bv = self._find_bv_field()
+        if _bv:
+            self._bv_field_gid   = _bv["id"]
+            self._bv_option_gids = [o["id"] for o in (_bv.get("selectOptions") or []) if o.get("id")]
         print()
 
         for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.ROAM_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS, self.LIFECYCLE_LABELS]:
@@ -799,12 +797,17 @@ class BootstrapMixin:
         expected_set   = set(expected_opts)
 
         # Resolve the Epic work item type GID (needed for create/update)
-        epic_type_id = self._get_epic_work_item_type_id(self.gitlab_namespace)
+        ns = self._namespace_slug
+        if not ns:
+            print("  WARNING: gitlab_namespace could not be resolved — skipping custom field setup.")
+            return "skipped"
+
+        epic_type_id = self._get_epic_work_item_type_id(ns)
         if not epic_type_id:
             print("  WARNING: Could not resolve Epic work item type ID — skipping custom field setup.")
             return "skipped"
 
-        existing = self._fetch_custom_fields(self.gitlab_namespace)
+        existing = self._fetch_custom_fields(ns)
         match    = next((f for f in existing if f["name"] == field_name), None)
 
         if match is None:
@@ -813,7 +816,7 @@ class BootstrapMixin:
                 print(f"  DRY  Would create '{field_name}' ({field_type}) with options {expected_opts}")
                 return "created"
             self._custom_field_create(
-                self.gitlab_namespace, field_name, field_type,
+                ns, field_name, field_type,
                 expected_opts, [epic_type_id],
             )
             print(f"  ✅  Created custom field '{field_name}' ({field_type}): {expected_opts}")
