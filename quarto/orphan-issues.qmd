@@ -46,7 +46,8 @@ if not projects:
 else:
     html = f"<p><strong>{total} orphaned issue(s) across {len(projects)} project(s).</strong></p>"
     for proj in projects:
-        html += f"<p class='project-path'>{proj['name']}</p>"
+        proj_link = f"<a href=\"{proj['url']}\" target=\"_blank\">{proj['name']}</a>" if proj.get('url') else proj['name']
+        html += f"<p class='project-path'>{proj_link}</p>"
         html += """
 <table class="table table-sm table-bordered">
   <thead><tr><th>#</th><th>Title</th><th>State</th><th>Assignees</th></tr></thead>

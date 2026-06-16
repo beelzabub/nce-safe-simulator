@@ -3346,6 +3346,7 @@ class ReportsMixin:
                 total += len(orphans)
                 project_rows.append({
                     "name": self._relative_project_name(project),
+                    "url":  project.get("web_url", ""),
                     "issues": [
                         {
                             "iid":       i["iid"],
