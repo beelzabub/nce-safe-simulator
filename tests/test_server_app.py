@@ -171,3 +171,82 @@ def test_run_job_isolates_threads():
     assert any("from-b" in s for s in results["b"])
     assert not any("from-b" in s for s in results["a"])
     assert not any("from-a" in s for s in results["b"])
+
+
+# ---------------------------------------------------------------------------
+# GET /api/config/full  and  PUT /api/config/full
+# ---------------------------------------------------------------------------
+
+SAMPLE_CONFIG = {
+    "url": "https://gitlab.example.com",
+    "private_token": "glpat-test",
+    "parent_group": "test-group",
+    "gitlab_namespace": "test-ns",
+    "project_labels": ["project::A"],
+}
+
+
+@pytest.fixture()
+def config_client(tmp_path, monkeypatch):
+    """Client with a temporary config.json in a temp directory."""
+    import json as _json
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(_json.dumps(SAMPLE_CONFIG), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    app.state.gl = None
+    return TestClient(app), tmp_path
+
+
+def test_get_config_full_returns_config(config_client):
+    client, _ = config_client
+    resp = client.get("/api/config/full")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["url"] == SAMPLE_CONFIG["url"]
+    assert data["parent_group"] == SAMPLE_CONFIG["parent_group"]
+    assert data["private_token"] == SAMPLE_CONFIG["private_token"]
+
+
+def test_get_config_full_404_when_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app.state.gl = None
+    client = TestClient(app)
+    resp = client.get("/api/config/full")
+    assert resp.status_code == 404
+
+
+def test_put_config_full_saves_to_disk(config_client):
+    import json as _json
+    client, tmp_path = config_client
+    new_cfg = {**SAMPLE_CONFIG, "parent_group": "updated-group"}
+    resp = client.put("/api/config/full", json=new_cfg)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    saved = _json.loads((tmp_path / "config.json").read_text())
+    assert saved["parent_group"] == "updated-group"
+
+
+def test_put_config_full_reloads_gl(config_client):
+    client, _ = config_client
+    reload_calls = []
+
+    class _MockGl:
+        def reload_config(self):
+            reload_calls.append(True)
+
+    app.state.gl = _MockGl()
+    try:
+        client.put("/api/config/full", json=SAMPLE_CONFIG)
+    finally:
+        app.state.gl = None
+    assert reload_calls, "reload_config was not called"
+
+
+def test_put_config_full_non_dict_returns_400(config_client):
+    client, _ = config_client
+    resp = client.put(
+        "/api/config/full",
+        content=b"[1, 2, 3]",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 400
