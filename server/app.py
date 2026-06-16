@@ -1,4 +1,7 @@
 import asyncio
+import json
+import re
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -6,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
@@ -108,9 +112,204 @@ def get_config(request: Request):
     return {"target_group": f"{ns}/{grp}" if ns else grp}
 
 
+@app.get("/api/config/full")
+def get_config_full():
+    """Return the full config.json contents."""
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="config.json not found")
+
+
+@app.put("/api/config/full", status_code=200)
+async def put_config_full(request: Request):
+    """Overwrite config.json with the supplied JSON body and reload the running client."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Config must be a JSON object")
+
+    try:
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write config.json: {exc}")
+
+    gl = getattr(request.app.state, "gl", None)
+    if gl is not None:
+        try:
+            gl.reload_config()
+        except Exception:
+            pass
+
+    return {"status": "ok"}
+
+
 @app.get("/api/reports")
 def list_reports():
     return [_report_payload(r) for r in REPORTS]
+
+
+@app.get("/api/history")
+def list_history():
+    """Return completed report runs from disk as session-history entries, newest first.
+
+    Each entry matches the _sessionHistory shape in useJobs.js so the frontend
+    can pre-populate history on startup without having to replay WebSocket jobs.
+    """
+    runs = []
+    reports_root = Path("reports")
+    if not reports_root.is_dir():
+        return runs
+
+    for date_dir in sorted(reports_root.iterdir(), reverse=True):
+        if not date_dir.is_dir() or not re.match(r"^\d{8}$", date_dir.name):
+            continue
+        for time_dir in sorted(date_dir.iterdir(), reverse=True):
+            if not time_dir.is_dir() or not re.match(r"^\d{6}$", time_dir.name):
+                continue
+
+            log_files = sorted(time_dir.glob("*.log"))
+            if not log_files:
+                continue
+            log_file = log_files[0]
+
+            stem = log_file.stem
+            if stem == "reports-all":
+                key = "reports (all)"
+            elif re.match(r"^reports-\d+-selected$", stem):
+                key = f"reports ({stem.split('-')[1]})"
+            elif stem.startswith("reports-"):
+                key = stem[len("reports-"):]
+            else:
+                key = stem
+
+            d, t = date_dir.name, time_dir.name
+            try:
+                run_dt = datetime(int(d[:4]), int(d[4:6]), int(d[6:]),
+                                  int(t[:2]), int(t[2:4]), int(t[4:]))
+            except ValueError:
+                continue
+
+            started_ms = int(run_dt.timestamp() * 1000)
+            ended_ms   = int(log_file.stat().st_mtime * 1000)
+
+            try:
+                content = log_file.read_text(encoding="utf-8", errors="replace")
+                lines = [ln.rstrip() for ln in content.splitlines()]
+            except OSError:
+                lines = ["(log unreadable)"]
+
+            runs.append({
+                "id":        f"disk-{d}-{t}",
+                "key":       key,
+                "status":    "done",
+                "startedAt": started_ms,
+                "endedAt":   ended_ms,
+                "logPath":   str(log_file),
+                "lines":     lines,
+            })
+
+    return runs
+
+
+@app.get("/api/runs")
+def list_runs():
+    """List report run directories, newest first.
+
+    Each entry has: date, time, path, has_log, has_data.
+    Used by the Session Jobs tab to link log and data files.
+    """
+    reports_dir = Path("reports")
+    if not reports_dir.is_dir():
+        return []
+    runs = []
+    for date_dir in sorted(reports_dir.iterdir(), reverse=True):
+        if not date_dir.is_dir() or not date_dir.name.isdigit():
+            continue
+        for time_dir in sorted(date_dir.iterdir(), reverse=True):
+            if not time_dir.is_dir() or not time_dir.name.isdigit():
+                continue
+            log_files = sorted(time_dir.glob("*.log"))
+            runs.append({
+                "date":     date_dir.name,
+                "time":     time_dir.name,
+                "path":     f"reports/{date_dir.name}/{time_dir.name}",
+                "has_log":  bool(log_files),
+                "log_name": log_files[0].name if log_files else None,
+                "has_data": (time_dir / "data").is_dir(),
+            })
+    return runs
+
+
+@app.get("/api/runs/{date}/{time}/data", response_class=HTMLResponse)
+def browse_run_data(date: str, time: str):
+    """Simple file browser for a run's data snapshot directory."""
+    data_dir = Path("reports") / date / time / "data"
+    if not data_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Data directory not found")
+    files = sorted(f for f in data_dir.iterdir() if f.is_file())
+    t = f"{time[:2]}:{time[2:4]}:{time[4:6]}"
+    d = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    items = "\n".join(
+        f'<li><a href="/reports/{date}/{time}/data/{f.name}" target="_blank">'
+        f'{f.name}</a> <span class="sz">{f.stat().st_size // 1024} KB</span></li>'
+        for f in files
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Data — {d} {t}</title>
+  <style>
+    body {{
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117; color: #e6edf3;
+      padding: 2rem; margin: 0;
+    }}
+    h1 {{ font-size: 1rem; color: #8b949e; margin: 0 0 1.2rem; font-weight: 500; }}
+    ul {{ list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }}
+    li {{ display: flex; align-items: baseline; gap: 0.75rem; }}
+    a {{
+      color: #60a5fa; text-decoration: none;
+      font-family: ui-monospace, monospace; font-size: 0.88rem;
+    }}
+    a:hover {{ text-decoration: underline; }}
+    .sz {{ color: #6e7681; font-size: 0.78rem; }}
+  </style>
+</head>
+<body>
+  <h1>Data snapshot &mdash; {d} &nbsp; {t}</h1>
+  <ul>{items}</ul>
+</body>
+</html>"""
+
+
+@app.delete("/api/runs")
+def clear_runs():
+    """Delete all timestamped report run directories from disk."""
+    reports_dir = Path("reports")
+    if not reports_dir.is_dir():
+        return {"deleted": 0}
+    deleted = 0
+    for date_dir in list(reports_dir.iterdir()):
+        if not date_dir.is_dir() or not date_dir.name.isdigit():
+            continue
+        for time_dir in list(date_dir.iterdir()):
+            if not time_dir.is_dir() or not time_dir.name.isdigit():
+                continue
+            shutil.rmtree(time_dir)
+            deleted += 1
+        try:
+            date_dir.rmdir()   # succeeds only if now empty
+        except OSError:
+            pass
+    return {"deleted": deleted}
 
 
 @app.get("/api/running")
@@ -208,6 +407,8 @@ async def ws_run(websocket: WebSocket):
         _running_jobs.add(job_key)
         _running_started[job_key] = time.time()
 
+    gl.reload_config()
+
     try:
         fn = _build_job_fn(gl, data)
     except ValueError as exc:
@@ -218,11 +419,27 @@ async def ws_run(websocket: WebSocket):
         await websocket.close()
         return
 
+    log_fh = None
+    if "tool" in data:
+        now = datetime.now()
+        log_dir = Path("logs") / now.strftime("%Y%m%d")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{now.strftime('%H%M%S')}_{job_key}.log"
+        log_fh = log_path.open("w", encoding="utf-8")
+        await websocket.send_json({"type": "log_path", "path": str(log_path)})
+
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
 
     def on_output(text: str) -> None:
+        # Detect the log-path announcement printed by _tee_to_log / _run_reports.
+        if text.startswith("  log → "):
+            lp = text[len("  log → "):].strip()
+            loop.call_soon_threadsafe(q.put_nowait, ("log_path", lp))
         loop.call_soon_threadsafe(q.put_nowait, ("log", text))
+        if log_fh is not None:
+            log_fh.write(text + "\n")
+            log_fh.flush()
 
     def on_done() -> None:
         loop.call_soon_threadsafe(q.put_nowait, ("done", None))
@@ -238,6 +455,8 @@ async def ws_run(websocket: WebSocket):
             kind, payload = await q.get()
             if kind == "log":
                 await websocket.send_json({"type": "log", "text": payload})
+            elif kind == "log_path":
+                await websocket.send_json({"type": "log_path", "path": payload})
             elif kind == "done":
                 await websocket.send_json({"type": "done"})
                 break
@@ -246,10 +465,34 @@ async def ws_run(websocket: WebSocket):
                 break
     finally:
         cancel_thread(thread)
+        if log_fh is not None:
+            try:
+                log_fh.close()
+            except Exception:
+                pass
         with _running_lock:
             _running_jobs.discard(job_key)
             _running_started.pop(job_key, None)
         await websocket.close()
+
+
+def _resolve_reuse_data(value) -> "Path | None":
+    """Resolve the reuse_data WebSocket field to a concrete data/ Path or None.
+
+    Accepts:
+      "last"  — find the most recent reports/YYYYMMDD/HHMMSS/data/ directory
+      None    — fetch fresh data (default)
+    """
+    if not value:
+        return None
+    if value == "last":
+        reports_dir = Path("reports")
+        candidates = sorted(
+            (d / "data" for d in reports_dir.glob("*/*/") if (d / "data").is_dir()),
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+    return Path(value)
 
 
 def _build_job_fn(gl: object, data: dict):
@@ -268,8 +511,9 @@ def _build_job_fn(gl: object, data: dict):
         report = next((r for r in REPORTS if r["key"] == key), None)
         if report is None:
             raise ValueError(f"Unknown report: {key!r}")
-        formats = set(data.get("formats") or ["markdown"])
-        return lambda: gl._run_reports([report], formats=formats)
+        formats    = set(data.get("formats") or ["markdown"])
+        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
+        return lambda: gl._run_reports([report], formats=formats, reuse_data=reuse_data)
 
     if "reports" in data:
         keys    = data["reports"]
@@ -277,8 +521,9 @@ def _build_job_fn(gl: object, data: dict):
         missing = [k for k, r in zip(keys, reports) if r is None]
         if missing:
             raise ValueError(f"Unknown report key(s): {missing}")
-        formats = set(data.get("formats") or ["markdown"])
-        return lambda: gl._run_reports([r for r in reports if r], formats=formats)
+        formats    = set(data.get("formats") or ["markdown"])
+        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
+        return lambda: gl._run_reports([r for r in reports if r], formats=formats, reuse_data=reuse_data)
 
     raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
@@ -287,7 +532,14 @@ def _build_job_fn(gl: object, data: dict):
 # Static file serving
 # ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
-# Skipped gracefully if public/ hasn't been built yet.
+
+_reports_dir = Path("reports")
+_reports_dir.mkdir(exist_ok=True)
+app.mount("/reports", StaticFiles(directory=str(_reports_dir)), name="reports")
+
+_logs_dir = Path("logs")
+_logs_dir.mkdir(exist_ok=True)   # ensure mount is always registered
+app.mount("/logs", StaticFiles(directory=str(_logs_dir)), name="logs-files")
 
 _public = Path("public")
 if _public.is_dir():

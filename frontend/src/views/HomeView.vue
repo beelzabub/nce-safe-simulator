@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell">
-    <NavBar :running-count="runningJobKeys.length" @toggle-status="showStatus = !showStatus" />
+    <NavBar :running-count="runningJobKeys.length" @toggle-status="showStatus = !showStatus" @toggle-config="showConfig = true" @toggle-help="showHelp = !showHelp" />
     <div class="workspace">
 
       <aside class="sidebar">
@@ -21,23 +21,32 @@
       <StatusSidebar :open="showStatus" @close="showStatus = false" />
 
     </div>
+
+    <ConfigDialog v-if="showConfig" @close="showConfig = false" />
+    <HelpDialog   v-if="showHelp"   @close="showHelp = false" />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import NavBar        from '../components/NavBar.vue'
 import JobPicker     from '../components/JobPicker.vue'
 import JobRunner     from './JobRunner.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
+import HelpDialog    from '../components/HelpDialog.vue'
+import ConfigDialog  from '../components/ConfigDialog.vue'
 import { useJobs }   from '../composables/useJobs.js'
 
-const { runningJobKeys, launch, launchReports } = useJobs()
+const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
 
 const showStatus = ref(false)
+const showConfig = ref(false)
+const showHelp   = ref(false)
+
+onMounted(() => { loadDiskHistory() })
 
 function onLaunch(job, params)          { launch(job, params) }
-function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
+function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, useLast) }
 </script>
 
 <style scoped>

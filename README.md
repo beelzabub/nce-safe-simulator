@@ -287,17 +287,49 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 | Area | Content |
 |------|---------|
-| Top nav | PMW 120 / NCE Safe Simulator wordmark; dark ↔ light theme toggle |
-| Left sidebar | Job picker + Reports link |
-| Main pane | Job runner and log output (E3, in progress) |
+| Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
+| Left sidebar | Job picker (collapsible groups) + Run Reports button + Reports ↗ link |
+| Main pane | Job runner — one tab per launched job with streaming log output |
+| Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
 #### Job picker
 
-- Tools are grouped by `parallelism_group` in collapsible sections (all collapsed by default)
-- Each row shows the tool key, a short description, and status badges (`read-only`, `● running`)
-- Filter input at the top narrows across all groups in real time; × clears the filter
-- Tools that share a parallelism group cannot run concurrently — selecting a tool while a same-group tool is running shows a **Conflict** banner and disables Launch
-- Parameterised tools open a modal dialog before launch; `dry_run` is highlighted amber; required fields block launch until filled
+Tools are grouped by purpose in collapsible sections, all collapsed by default. A filter input at the top narrows across all groups in real time; × clears it. Each row shows the tool name, a short description, and a status badge (`read-only`, `⚙` for configurable, `● running`).
+
+Clicking a tool with no parameters launches it immediately. Clicking a parameterised tool opens a modal dialog — booleans become toggles (`dry_run` is highlighted amber), integers and floats get number inputs, strings get text inputs, and group-targeting fields pre-fill from the active config. Required fields block Launch until filled. Destructive tools show a confirmation step.
+
+Tools that share a `parallelism_group` cannot run concurrently; the dialog disables Launch and lists the blocking jobs if a conflict exists.
+
+**Run Reports…** — a button pinned at the bottom of the sidebar opens the report picker dialog: choose individual reports or toggle All, select output formats (markdown / plotly / interactive; plotly and interactive require all reports to be selected since site builds are project-wide), and optionally check **Use last available data snapshot** to skip the GitLab API fetch and re-render from the most recent `data/` directory.
+
+#### Job runner
+
+Each launched job appears as a card in the main pane, stacked vertically. The card header shows a status indicator (spinning while running, ✓ / ✕ / ◼ when done), the job name, and a Stop or × button. Click the header to collapse or expand the log pane.
+
+When a job finishes, a **countdown bar** drains across the bottom of the header — when it empties the tab closes automatically. Hover over the header to pause the countdown; click the bar to pin it (freezes until clicked again).
+
+The log pane is resizable after a job completes: drag the bottom-right corner triangle to set the height.
+
+#### Status panel
+
+Accessible via the toggle in the nav bar; slides in from the right and is itself resizable by dragging its left edge. Two tabs:
+
+**Server** — polls `/api/running` every 3 seconds and shows each active job with elapsed time and a Stop button. Jobs that started before the current browser session are shown as informational only (no Stop button).
+
+**Session** — two sections separated by a draggable divider:
+- *Jobs This Session* — in-memory history of every job run since the page loaded, with status dot, duration, line count, a Log ↗ link (for tool runs), and a View button to re-open the tab.
+- *Report Runs* — on-disk run directories from `reports/YYYYMMDD/HHMMSS/`, each with Log ↗ and Data ↗ links. Both sections have a Clear button with an inline confirmation.
+
+#### Config editor
+
+The **⚙** button in the nav bar opens a dialog for editing `config.json` directly from the browser. Changes are written to disk immediately and the running server reloads its config without a restart. The dialog is organised into four tabs:
+
+| Tab | Fields |
+|-----|--------|
+| Connection | GitLab URL, private token (masked by default), parent group, namespace, SSL verify, API timeout, delete workers |
+| Labels | All label arrays (project, PIID, epic type, risk, ROAM, work type, lifecycle, WSJF urgency/risk) — one value per line |
+| Weights | Fibonacci weights, epic type planned weights, business value field options |
+| Defaults | `defaults.bootstrap` and `defaults.tools` as editable JSON |
 
 #### Theme
 
