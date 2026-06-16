@@ -7,11 +7,31 @@
         <button class="dialog-close" @click="$emit('close')">×</button>
       </div>
 
+      <!-- Data source -->
+      <div class="data-source-row">
+        <label class="check-label">
+          <input type="checkbox" v-model="useLast" />
+          Use last available data snapshot
+        </label>
+        <span class="data-source-hint">Skip API fetch — re-render from the most recent data/ directory</span>
+      </div>
+
       <!-- Format selection -->
       <div class="section-label">Output formats</div>
       <div class="format-row">
-        <label v-for="f in ALL_FORMATS" :key="f" class="check-label">
-          <input type="checkbox" :value="f" v-model="selectedFormats" />
+        <label
+          v-for="f in ALL_FORMATS"
+          :key="f"
+          class="check-label"
+          :class="{ 'check-label--disabled': !allSelected && f !== 'markdown' }"
+          :title="!allSelected && f !== 'markdown' ? 'Requires all reports selected — site build is project-wide' : ''"
+        >
+          <input
+            type="checkbox"
+            :value="f"
+            v-model="selectedFormats"
+            :disabled="!allSelected && f !== 'markdown'"
+          />
           {{ f }}
         </label>
       </div>
@@ -48,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -59,9 +79,17 @@ const ALL_FORMATS = ['markdown', 'plotly', 'interactive']
 
 const selectedFormats = ref([...ALL_FORMATS])
 const selectedKeys    = ref(props.reports.map(r => r.key))
+const useLast         = ref(false)
 
 const allSelected = computed(() => selectedKeys.value.length === props.reports.length)
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
+
+// Drop site-build formats when not all reports are selected
+watch(allSelected, (all) => {
+  if (!all) {
+    selectedFormats.value = selectedFormats.value.filter(f => f === 'markdown')
+  }
+})
 
 function toggleAll() {
   selectedKeys.value = allSelected.value ? [] : props.reports.map(r => r.key)
@@ -75,7 +103,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 function launch() {
   const selected = props.reports.filter(r => selectedKeys.value.includes(r.key))
-  emit('launch', selected, selectedFormats.value)
+  emit('launch', selected, selectedFormats.value, useLast.value)
 }
 </script>
 
@@ -138,6 +166,21 @@ function launch() {
   color: #8b949e;
 }
 
+/* ── Data source ── */
+.data-source-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 1rem 0.6rem;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+}
+.data-source-hint {
+  font-size: 0.75rem;
+  color: #6e7681;
+  padding-left: 1.4rem;
+}
+
 /* ── Format row ── */
 .format-row {
   display: flex;
@@ -164,6 +207,8 @@ function launch() {
   font-size: 0.85rem;
 }
 .check-label input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+.check-label--disabled { opacity: 0.38; cursor: not-allowed; }
+.check-label--disabled input { cursor: not-allowed; }
 
 .report-row {
   padding: 0.35rem 0.5rem;

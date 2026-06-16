@@ -14,11 +14,11 @@ from pathlib import Path
 from IPython.display import HTML, display
 import plotly.graph_objects as go
 
-_candidates = [Path("data/flow-metrics.json"), Path("../data/flow-metrics.json")]
+_candidates = [Path("quarto-data/flow-metrics.json"), Path("../quarto-data/flow-metrics.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
 if data_file is None:
     raise FileNotFoundError(
-        "data/flow-metrics.json not found. "
+        "quarto-data/flow-metrics.json not found. "
         "Run: python NceGitLab.py --report flow-metrics"
     )
 
