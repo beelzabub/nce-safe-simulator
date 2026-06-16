@@ -143,6 +143,23 @@ class WikiMixin:
                                     _conflict_slug = _s
                                     break
                         if _old is None:
+                            # Nested-path page already exists from a previous run
+                            # but wasn't in our startup cache — update it in-place.
+                            _existing = _fresh.get(_conflict_slug)
+                            if _existing is None:
+                                try:
+                                    _existing = group.wikis.get(_conflict_slug)
+                                except Exception:
+                                    pass
+                            if _existing is not None:
+                                _existing.title   = page_title
+                                _existing.content = content
+                                _existing.save()
+                                if cache is not None:
+                                    cache.setdefault(group.id, {})[_existing.slug] = _existing
+                                print(f"  → Wiki (updated): {page_title}")
+                                new_page = _existing
+                                break
                             raise _cur_exc
                         _old.delete()
                         _fresh.pop(_conflict_slug, None)

@@ -893,10 +893,31 @@ class ToolsMixin:
             print(f"Dry run complete — {len(all_pages)} page(s) across {total_groups} group(s) would be deleted.")
             return
 
-        def _delete_page(page):
-            page.delete()
-
-        done, errors = self._parallel_delete(all_pages, _delete_page)
+        # Delete serially, deepest first, retrying until no progress.
+        # GitLab rejects deleting a parent page that still has child pages (422).
+        # Retrying handles implicit intermediate nodes that GitLab doesn't return
+        # from wikis.list() but that disappear once their only child is deleted.
+        all_pages.sort(key=lambda p: p.slug.count("/"), reverse=True)
+        done = errors = 0
+        remaining = list(all_pages)
+        while remaining:
+            failed = []
+            for page in remaining:
+                try:
+                    page.delete()
+                    done += 1
+                    print(f"  deleted: {page.slug}")
+                except Exception as e:
+                    failed.append((page, e))
+            if len(failed) == len(remaining):
+                # No progress this pass — report stuck pages and stop
+                errors = len(failed)
+                for page, e in failed:
+                    print(f"  ERROR: {page.slug}: {e}")
+                break
+            remaining = [p for p, _ in failed]
+            if remaining:
+                remaining.sort(key=lambda p: p.slug.count("/"), reverse=True)
         print(f"Done — deleted {done} page(s) across {total_groups} group(s)."
               + (f"  Errors: {errors}" if errors else ""))
 
@@ -2390,12 +2411,7 @@ class ToolsMixin:
         if percent is None:
             percent = 20.0
 
-        if not self.gitlab_namespace:
-            print("Root namespace not configured — cannot manage Business Value custom field.")
-            return
-
-        fields   = self._fetch_custom_fields(self.gitlab_namespace)
-        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        bv_field = self._find_bv_field()
         if not bv_field:
             print("Business Value custom field not found. Run 'setup-bv-field' first.")
             return
@@ -2449,12 +2465,7 @@ class ToolsMixin:
 
     def _tool_strip_business_value(self, dry_run=False):
         """Clear the Business Value custom field from all epics."""
-        if not self.gitlab_namespace:
-            print("Root namespace not configured — cannot manage Business Value custom field.")
-            return
-
-        fields   = self._fetch_custom_fields(self.gitlab_namespace)
-        bv_field = next((f for f in fields if f["name"] == self.BUSINESS_VALUE_FIELD["name"]), None)
+        bv_field = self._find_bv_field()
         if not bv_field:
             print("Business Value custom field not found — nothing to strip.")
             return
@@ -2464,7 +2475,7 @@ class ToolsMixin:
         print("\nCollecting epics...")
         all_epics = group.epics.list(all=True)
 
-        bv_map    = self._fetch_epic_business_values(all_epics)
+        bv_map    = self._fetch_epic_business_values(all_epics, root_namespace=group)
         to_strip  = [e for e in all_epics if e.id in bv_map]
         skipped   = len(all_epics) - len(to_strip)
         print(f"  {len(to_strip)} with Business Value set, {skipped} already clear")

@@ -3676,11 +3676,12 @@ class ReportsMixin:
             size  = epic.get("planned_weight") or None
             v, u, r = (value or 0), (urgency or 0), (risk or 0)
             score = round((v + u + r) / size, 2) if size else None
+            etype = self._epic_type_display(epic.get("labels", []))
             candidates.append({
                 "title":   epic["title"],
                 "url":     epic.get("web_url", ""),
-                "type":    epic.get("type", "Unknown"),
-                "icon":    self.EPIC_TYPE_ICONS.get(epic.get("type", "Unknown"), "🏆"),
+                "type":    etype,
+                "icon":    self.EPIC_TYPE_ICONS.get(etype, "🏆"),
                 "piid":    epic.get("piid"),
                 "value":   value,
                 "urgency": urgency,
@@ -5508,7 +5509,7 @@ class ReportsMixin:
             score = round((v + u + r) / size, 2) if size else None
             candidates.append({
                 "epic":    epic,
-                "type":    epic.get("type", "Unknown"),
+                "type":    self._epic_type_display(labels),
                 "value":   value,
                 "urgency": urgency,
                 "risk":    risk,
@@ -5736,13 +5737,13 @@ class ReportsMixin:
         ]
 
         config_rows = [
-            ("GitLab URL",       self.url),
-            ("Parent Group",     self.parent_group),
-            ("Epic Type Labels", ", ".join(self.EPIC_TYPE_LABELS) or "none configured"),
-            ("PIID Labels",      ", ".join(self.PIID_LABELS)      or "none configured"),
-            ("Project Labels",   ", ".join(self.PROJECT_LABELS)   or "none configured"),
-            ("Risk Labels",      ", ".join(self.RISK_LABELS)      or "none configured"),
-            ("Lifecycle Labels", ", ".join(self.LIFECYCLE_LABELS) or "none configured"),
+            ("GitLab URL",                    self.url),
+            ("Parent Group",                  self.parent_group),
+            ("Epic Type Labels (reports)",    ", ".join(self.EPIC_TYPE_LABELS) or "none configured"),
+            ("Risk Labels (reports)",         ", ".join(self.RISK_LABELS)      or "none configured"),
+            ("Lifecycle Labels (reports)",    ", ".join(self.LIFECYCLE_LABELS) or "none configured"),
+            ("PIID Labels (create-lorem)",    ", ".join(self.PIID_LABELS)      or "none configured"),
+            ("Project Labels (create-lorem)", ", ".join(self.PROJECT_LABELS)   or "none configured"),
         ]
 
         group = getattr(self, "_rd_root_obj", None) or self.get_group_by_name(self.parent_group)
@@ -5824,9 +5825,10 @@ class ReportsMixin:
             (_wi_types_ok,        "Group.workItemTypes",    "Work item type GIDs — required for weight/BV write mutations"),
         ]
 
-        all_configured = sorted(set(
-            self.EPIC_TYPE_LABELS + self.PIID_LABELS + self.PROJECT_LABELS + self.RISK_LABELS
-        ))
+        # Only validate labels that reports filter by at query time.
+        # PIID_LABELS and PROJECT_LABELS are bootstrap-only; reports discover
+        # those dynamically from live epic labels in the snapshot.
+        all_configured = sorted(set(self.EPIC_TYPE_LABELS + self.RISK_LABELS))
         label_rows = None
         if all_configured:
             try:
@@ -5947,14 +5949,14 @@ class ReportsMixin:
             body.append(f"| {k} | `{v}` |")
         body.append("")
 
-        body += ["### Configuration", "", "| Setting | Value |", "|---------|-------|",
-                 f"| GitLab URL | `{self.url}` |",
-                 f"| Parent Group | `{self.parent_group}` |",
-                 f"| Epic Type Labels | {_lbl_md(self.EPIC_TYPE_LABELS)} |",
-                 f"| PIID Labels | {_lbl_md(self.PIID_LABELS)} |",
-                 f"| Project Labels | {_lbl_md(self.PROJECT_LABELS)} |",
-                 f"| Risk Labels | {_lbl_md(self.RISK_LABELS)} |",
-                 f"| Lifecycle Labels | {_lbl_md(self.LIFECYCLE_LABELS)} |",
+        body += ["### Configuration", "", "| Setting | Value | Used By |", "|---------|-------|---------|",
+                 f"| GitLab URL | `{self.url}` | all |",
+                 f"| Parent Group | `{self.parent_group}` | all |",
+                 f"| Epic Type Labels | {_lbl_md(self.EPIC_TYPE_LABELS)} | reports (filter) |",
+                 f"| Risk Labels | {_lbl_md(self.RISK_LABELS)} | reports (filter) |",
+                 f"| Lifecycle Labels | {_lbl_md(self.LIFECYCLE_LABELS)} | reports (filter) |",
+                 f"| PIID Labels | {_lbl_md(self.PIID_LABELS)} | create-lorem only — reports discover live |",
+                 f"| Project Labels | {_lbl_md(self.PROJECT_LABELS)} | create-lorem only — reports discover live |",
                  ""]
 
         body += ["### REST API Capabilities", "", "| Endpoint | Status | Notes |", "|----------|--------|-------|"]
@@ -5989,7 +5991,7 @@ class ReportsMixin:
 
         # Save JSON for Marimo/Quarto while we have the rendered markdown body
         try:
-            _data_dir = Path("data")
+            _data_dir = Path("quarto-data")
             _data_dir.mkdir(parents=True, exist_ok=True)
             (_data_dir / "diagnostics.json").write_text(
                 json.dumps({
@@ -7244,6 +7246,11 @@ class ReportsMixin:
                 delattr(self, _cache_attr)
 
         group = self.get_group_by_name(self.parent_group)
+        if group is None:
+            ns = self.gitlab_namespace
+            full = f"{ns}/{self.parent_group}" if ns else self.parent_group
+            print(f"\nError: group '{full}' not found. Check parent_group in config.json.")
+            return
         self._rd_root_obj = group
         gn = group.name
         self._wiki_t1 = f"{gn} — Portfolio Home/00 Executive Pulse"
@@ -7266,15 +7273,20 @@ class ReportsMixin:
                 self._wiki_page_cache = {}
 
         if reuse_data is not None:
-            print(f"  Reusing data snapshot from: {reuse_data}\n")
-            self._load_report_data(Path(reuse_data))
+            import shutil
+            src = Path(reuse_data)
+            print(f"  Reusing data snapshot from: {src}\n")
+            self._load_report_data(src)
+            for f in src.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, data_dir / f.name)
         else:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
         if do_site_build:
             print("Writing Quarto data layer...")
-            self.write_report_json(Path("data"), Path("public/data"))
+            self.write_report_json(Path("quarto-data"), Path("public/data"))
 
         phases = []
 

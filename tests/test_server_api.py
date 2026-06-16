@@ -39,6 +39,9 @@ class MockGl:
         for r in reports:
             print(f"report:{r['key']}")
 
+    def reload_config(self):
+        pass
+
     # Per-instance events wired in fixture
     _lifecycle_started: threading.Event
     _lifecycle_gate: threading.Event
