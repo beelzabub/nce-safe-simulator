@@ -63,6 +63,98 @@
           </p>
         </div>
 
+        <!-- ── Setup ── -->
+        <div v-if="activeTab === 'setup'" class="section">
+          <p class="lead">
+            Follow these steps to clone the repository, install dependencies, and start the web server.
+          </p>
+
+          <div class="subsection-label">Prerequisites</div>
+          <div class="kv-grid">
+            <span class="kv-key">Python</span><span class="kv-val">3.9 or later</span>
+            <span class="kv-key">Node.js</span><span class="kv-val">18 or later (for building the web frontend)</span>
+            <span class="kv-key">Git</span><span class="kv-val">any recent version</span>
+            <span class="kv-key">GitLab PAT</span><span class="kv-val">Personal Access Token with <code>api</code> scope</span>
+          </div>
+
+          <div class="workflow-steps">
+
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Clone the repository</div>
+                <pre class="code-block">git clone https://gitlab.com/saic-study-group/nce-safe-simulator.git
+cd nce-safe-simulator</pre>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <div class="step-title">Create a Python virtual environment</div>
+                <div class="os-label">Linux / macOS</div>
+                <pre class="code-block">python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt</pre>
+                <div class="os-label">Windows — Command Prompt</div>
+                <pre class="code-block">python -m venv .venv
+.venv\Scripts\activate.bat
+pip install -r requirements.txt</pre>
+                <div class="os-label">Windows — PowerShell</div>
+                <pre class="code-block">python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt</pre>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <div class="step-title">Build the frontend</div>
+                <pre class="code-block">cd frontend
+npm install
+npm run build
+cd ..</pre>
+                <div class="step-desc">Compiles the Vue app into <code>public/app/</code>. npm commands are the same on all platforms.</div>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-num">4</div>
+              <div class="step-body">
+                <div class="step-title">Configure</div>
+                <div class="step-desc">
+                  Edit <code>config.json</code> and set at minimum:
+                </div>
+                <div class="kv-grid" style="margin-top:0.5rem">
+                  <span class="kv-key">url</span><span class="kv-val">GitLab instance URL (default: https://gitlab.com)</span>
+                  <span class="kv-key">private_token</span><span class="kv-val">Your Personal Access Token</span>
+                  <span class="kv-key">parent_group</span><span class="kv-val">Display name of the SAFe portfolio root group</span>
+                  <span class="kv-key">gitlab_namespace</span><span class="kv-val">URL slug of the namespace that will contain the root group</span>
+                </div>
+                <div class="step-desc" style="margin-top:0.5rem">All other settings can be changed in the ⚙ Config dialog after the server is running.</div>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-num">5</div>
+              <div class="step-body">
+                <div class="step-title">Start the web server</div>
+                <div class="os-label">Linux / macOS</div>
+                <pre class="code-block">python3 NceGitLab.py --serve</pre>
+                <div class="os-label">Windows</div>
+                <pre class="code-block">python NceGitLab.py --serve</pre>
+                <div class="step-desc">
+                  The server starts on <code>http://localhost:80</code> and opens the browser automatically.
+                  Run the same command again to stop it.
+                  If port 80 is unavailable, run with <code>sudo</code> (Linux/macOS) or from an Administrator terminal (Windows).
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <!-- ── Workflow ── -->
         <div v-if="activeTab === 'workflow'" class="section">
           <p class="lead">
@@ -196,6 +288,7 @@ const emit = defineEmits(['close'])
 
 const TABS = [
   { key: 'about',    label: 'About'    },
+  { key: 'setup',    label: 'Setup'    },
   { key: 'workflow', label: 'Workflow' },
   { key: 'tools',    label: 'Tools'    },
   { key: 'reports',  label: 'Reports'  },
@@ -459,6 +552,37 @@ p {
 }
 .step-desc strong { color: var(--text-1); }
 .step-desc em { color: var(--text-2); font-style: italic; }
+
+/* ── Setup tab ── */
+.os-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0.65rem 0 0.2rem;
+}
+.code-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.55rem 0.75rem;
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--text-1);
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+}
+.step-body code {
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
 
 /* ── Tools tab ── */
 .tool-category { margin-bottom: 1rem; }

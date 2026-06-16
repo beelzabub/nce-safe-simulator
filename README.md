@@ -58,13 +58,80 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
 
 ## Installation
 
-Requires Python 3.9+.
+**Requirements:** Python 3.9+, Node.js 18+, Git, a GitLab Personal Access Token with `api` scope.
 
+### 1 — Clone
+
+```bash
+git clone https://gitlab.com/saic-study-group/nce-safe-simulator.git
+cd nce-safe-simulator
+```
+
+### 2 — Python virtual environment
+
+Linux / macOS:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Windows (Command Prompt):
+```bat
+python -m venv .venv
+.venv\Scripts\activate.bat
+pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 3 — Build the frontend
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+This compiles the Vue app into `public/app/`.
+
+### 4 — Configure
+
+Edit `config.json` and set at minimum:
+
+| Field | Description |
+|---|---|
+| `url` | GitLab instance URL (default `https://gitlab.com`) |
+| `private_token` | Personal Access Token with `api` scope |
+| `parent_group` | Display name of the SAFe portfolio root group |
+| `gitlab_namespace` | URL slug of the namespace that will contain the root group |
+
+All other settings can be edited in-browser via the ⚙ Config button once the server is running.
+
+### 5 — Start the web server
+
+Linux / macOS:
+```bash
+python3 NceGitLab.py --serve
+```
+
+Windows:
+```bat
+python NceGitLab.py --serve
+```
+
+The server starts on `http://localhost:80` and opens the web UI automatically.
+Run the same command again to stop it.
+
+> **Port 80 note:** if the port is in use or requires elevated privileges, run
+> with `sudo` (Linux/macOS) or from an Administrator terminal (Windows), or
+> change the port in `config.json`.
 
 ---
 
