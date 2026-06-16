@@ -3361,9 +3361,8 @@ class ReportsMixin:
             if orphans:
                 total += len(orphans)
                 project_rows.append({
-                    "name":       self._relative_project_name(project),
-                    "url":        project.get("web_url", ""),
-                    "breadcrumb": self._relative_project_breadcrumb(project),
+                    "name": self._relative_project_name(project),
+                    "url":  project.get("web_url", ""),
                     "issues": [
                         {
                             "iid":       i["iid"],
