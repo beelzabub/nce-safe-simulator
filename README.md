@@ -126,7 +126,7 @@ Windows:
 python NceGitLab.py --serve
 ```
 
-The server starts on `http://localhost:80` and opens the web UI automatically.
+The server starts on `http://localhost:80`. Open `http://localhost:80/app/` in your browser.
 Run the same command again to stop it.
 
 > **Port 80 note:** if the port is in use or requires elevated privileges, run

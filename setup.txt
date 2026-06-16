@@ -68,8 +68,8 @@ Prerequisites
   Windows:
     python NceGitLab.py --serve
 
-  The server starts on http://localhost:80 and opens the browser automatically.
-  The web UI is at http://localhost:80/app/
+  The server starts on http://localhost:80.
+  Open http://localhost:80/app/ in your browser.
 
   Run the same command again to stop the server.
 
