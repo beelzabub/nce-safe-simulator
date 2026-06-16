@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from IPython.display import HTML, display
 
-_candidates = [Path("data/art-feature-status.json"), Path("../data/art-feature-status.json")]
+_candidates = [Path("quarto-data/art-feature-status.json"), Path("../quarto-data/art-feature-status.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
 
 d             = json.loads(data_file.read_text()) if data_file else None

@@ -6,7 +6,7 @@ __pycache__/
 /.quarto/
 **/*.quarto_ipynb*
 /public/
-/data/
+/quarto-data/
 /logs/
 /reports/
 

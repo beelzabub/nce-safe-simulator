@@ -114,6 +114,10 @@ class ReportsHarness(ReportsMixin, UtilitiesMixin):
     EPIC_TYPE_ICONS         = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
     EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
     EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+    RISK_LABELS             = ["ROAM::Resolved", "ROAM::Owned", "ROAM::Accepted", "ROAM::Mitigated"]
+    LIFECYCLE_LABELS        = ["Funnel", "Reviewing", "Analyzing", "Portfolio Backlog", "Implementing", "Done"]
+    PIID_LABELS             = ["PIID::2025Q1", "PIID::2025Q2"]
+    PROJECT_LABELS          = ["project::alpha", "project::beta"]
 
     def __init__(
         self,
@@ -147,6 +151,7 @@ class ReportsHarness(ReportsMixin, UtilitiesMixin):
         self._uploaded = {}
         # Additional attributes used by Group C report methods
         self.url = "https://gitlab.com"
+        self.parent_group = "test-portfolio"
         self._rd_projects_by_nsid  = {}
         self._rd_epics_by_id       = {e["id"]: e for e in (epics_all or [])}
         self._rd_work_type_labels  = []

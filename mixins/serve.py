@@ -125,9 +125,9 @@ class ServeMixin:
 
     def _site_build_static(self) -> bool:
         """Render the Quarto static site. Returns True on success."""
-        data_files = list(Path("data").glob("*.json")) if Path("data").exists() else []
+        data_files = list(Path("quarto-data").glob("*.json")) if Path("quarto-data").exists() else []
         if not data_files:
-            print("\n  Cannot build: data/*.json not found.")
+            print("\n  Cannot build: quarto-data/*.json not found.")
             print("  Run reports first to generate the data layer:")
             print("    python NceGitLab.py --report all")
             return False
@@ -148,9 +148,9 @@ class ServeMixin:
         return ok
 
     def _restore_data_layer(self) -> int:
-        """Copy data/*.json → public/data/ after Quarto has cleaned public/.
+        """Copy quarto-data/*.json → public/data/ after Quarto has cleaned public/.
         Returns the number of files copied."""
-        src = Path("data")
+        src = Path("quarto-data")
         dst = Path("public/data")
         if not src.exists():
             return 0
