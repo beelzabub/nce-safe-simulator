@@ -184,13 +184,6 @@ class NceGitLab(
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
 
-        members_file = self.config_file.parent / "team_members.json"
-        if members_file.exists():
-            with open(members_file, "r", encoding="utf-8") as f:
-                self.team_members = json.load(f).get("members", [])
-        else:
-            self.team_members = []
-
         # project_labels and piid_labels are optional — used only for simulation/bootstrap.
         # Reports and tools discover these dynamically from live epic labels.
         missing_fields = [
@@ -442,7 +435,7 @@ def _parse_formats(raw_list):
     if "all" in tokens:
         return set(_all)
     if not tokens:
-        return {"markdown"}
+        return set(_all)
     return tokens
 
 
@@ -488,6 +481,8 @@ def main():
                         help="Print environment, software versions, API capabilities, and label validation to stdout")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
+    parser.add_argument("-w", "--serve",             action="store_true",
+                        help="Start the uvicorn server and open the browser")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -522,6 +517,18 @@ def main():
         _phase[0] = "scaffold"
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
+        return
+
+    if args.serve:
+        import uvicorn
+        from server.app import app as _fastapi_app
+
+        _phase[0] = "serve"
+        port = gl._serve_port()
+        _fastapi_app.state.gl = gl
+        gl._serve_build_frontend()
+
+        uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
 
     phases = []

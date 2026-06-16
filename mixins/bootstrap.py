@@ -360,7 +360,40 @@ class BootstrapMixin:
                                   vs_epics=None,
                                   art_epics=None,
                                   team_features=None,
-                                  direct_feature_ratio=None):
+                                  direct_feature_ratio=None,
+                                  target_group=None,
+                                  dry_run=False):
+        # Allow caller to override the target group (namespace/group_name).
+        # Restores instance state afterwards so other tools are unaffected.
+        _orig_ns  = self.gitlab_namespace
+        _orig_grp = self.parent_group
+        if target_group and target_group.strip():
+            parts = target_group.strip().rsplit("/", 1)
+            if len(parts) == 2:
+                self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+            else:
+                self.parent_group = parts[0]
+
+        try:
+            return self._create_all_lorem_objects_impl(
+                num_value_streams=num_value_streams, num_arts=num_arts,
+                num_teams=num_teams, portfolio_epics=portfolio_epics,
+                vs_epics=vs_epics, art_epics=art_epics,
+                team_features=team_features, direct_feature_ratio=direct_feature_ratio,
+                dry_run=dry_run,
+            )
+        finally:
+            self.gitlab_namespace = _orig_ns
+            self.parent_group     = _orig_grp
+
+    def _create_all_lorem_objects_impl(self,
+                                  num_value_streams=None, num_arts=None, num_teams=None,
+                                  portfolio_epics=None,
+                                  vs_epics=None,
+                                  art_epics=None,
+                                  team_features=None,
+                                  direct_feature_ratio=None,
+                                  dry_run=False):
         _cfg_vs    = num_value_streams if num_value_streams is not None else self.default_num_value_streams
         _cfg_arts  = num_arts          if num_arts          is not None else self.default_num_arts
         _cfg_teams = num_teams         if num_teams         is not None else self.default_num_teams
@@ -378,7 +411,15 @@ class BootstrapMixin:
         team_features        = _resolve_range(_cfg_tf)
         direct_feature_ratio = direct_feature_ratio if direct_feature_ratio is not None else self.default_direct_feature_ratio
 
-        print("\nSAFe structure (resolved):")
+        ns       = self.gitlab_namespace
+        grp      = self.parent_group
+        target   = f"{ns}/{grp}" if ns else grp
+
+        print("\nCreate Lorem SAFe Data")
+        print("=" * 52)
+        print(f"  Target group       : {target}")
+        print()
+        print("  SAFe structure (resolved from config):")
         print(f"  Value Streams      : {_range_label(_cfg_vs,    num_value_streams)}")
         print(f"  ARTs / VS          : {_range_label(_cfg_arts,  num_arts)}")
         print(f"  Teams / ART        : {_range_label(_cfg_teams, num_teams)}")
@@ -388,6 +429,14 @@ class BootstrapMixin:
         print(f"  Features / Team    : {_range_label(_cfg_tf,    team_features)}")
         print(f"  Direct feature %   : {int(direct_feature_ratio * 100)}%")
         print()
+        print("  Will create: label sets, subgroup hierarchy, epics,")
+        print("  capabilities, features, issues, and BV custom field.")
+        print("  Existing content is NOT removed first.")
+        print()
+
+        if dry_run:
+            print("[Dry run] No objects created. Uncheck 'Dry run' to proceed.")
+            return
 
         if not self.PROJECT_LABELS or not self.PIID_LABELS:
             print("ERROR: project_labels and piid_labels must be defined in config.json for simulation.")
