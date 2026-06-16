@@ -46,7 +46,7 @@ const showHelp   = ref(false)
 onMounted(() => { loadDiskHistory() })
 
 function onLaunch(job, params)          { launch(job, params) }
-function onLaunchReports(reports, fmts) { launchReports(reports, fmts) }
+function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, useLast) }
 </script>
 
 <style scoped>
