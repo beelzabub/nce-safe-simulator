@@ -253,18 +253,20 @@ def _item_risk_reasons(item, today=None):
 class ReportsMixin:
 
     def _relative_project_name(self, project):
-        """Return project name_with_namespace with the top-level gitlab_namespace stripped.
+        """Return project name_with_namespace starting from parent_group.
 
-        GitLab's name_with_namespace includes the root namespace
-        (e.g. "gl-demo-ultimate-lmwilliams / PMW-120 / VS 01 / ...").
-        Wiki reports should only show paths starting from parent_group.
+        GitLab's name_with_namespace includes every ancestor namespace.
+        Reports should only show the path from the portfolio root downward.
         """
         name = project.get("name_with_namespace", project.get("path_with_namespace", ""))
-        ns   = getattr(self, "gitlab_namespace", "")
-        if ns:
-            prefix = ns + " / "
-            if name.lower().startswith(prefix.lower()):
-                return name[len(prefix):]
+        pg   = getattr(self, "parent_group", "")
+        if pg:
+            parts = name.split(" / ")
+            try:
+                idx = next(i for i, p in enumerate(parts) if p.lower() == pg.lower())
+                return " / ".join(parts[idx:])
+            except StopIteration:
+                pass
         return name
 
     def generate_summary_report(self, group):
