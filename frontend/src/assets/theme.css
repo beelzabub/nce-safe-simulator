@@ -24,6 +24,8 @@
   --conflict-border: #92400e;
   --conflict-text:   #fde68a;
   --conflict-code-bg:#3d2e00;
+
+  --stripe-bg: rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="light"] {
@@ -51,6 +53,8 @@
   --conflict-border: #ca8a04;
   --conflict-text:   #713f12;
   --conflict-code-bg:#fde68a;
+
+  --stripe-bg: var(--surface-alt);
 }
 
 /* ── Base reset ── */
