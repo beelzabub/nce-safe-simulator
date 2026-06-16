@@ -1,7 +1,7 @@
 """Tests for generate_vs_cross_art_risk_report (Refs #24)."""
 import sys
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 from tests.conftest import ReportsHarness, make_epic
 

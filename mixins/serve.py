@@ -57,13 +57,11 @@ class ServeMixin:
             return False, None
 
     def _serve_start(self) -> int:
-        """Start HTTP server in a detached background process. Returns PID."""
-        port   = self._serve_port()
-        public = Path("public")
-        if not public.exists():
-            raise FileNotFoundError("public/ not found — build the site first.")
+        """Start the uvicorn server in a detached background process. Returns PID."""
+        port = self._serve_port()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "http.server", str(port), "--directory", str(public)],
+            [sys.executable, "-m", "uvicorn", "server.app:app",
+             "--port", str(port), "--host", "0.0.0.0"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,   # detach: survives NceGitLab exit
@@ -87,6 +85,27 @@ class ServeMixin:
     # Build
     # ------------------------------------------------------------------
 
+    def _serve_build_frontend(self) -> bool:
+        """Run `npm run build` in frontend/. Returns True on success, False if skipped."""
+        frontend = Path("frontend")
+        if not frontend.exists():
+            return False
+        print("\nBuilding frontend (npm run build)...\n")
+        proc = subprocess.Popen(
+            ["npm", "run", "build"],
+            cwd=str(frontend),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            print(f"  {line}", end="", flush=True)
+        rc = proc.wait()
+        ok = rc == 0
+        print(f"\n  {'OK' if ok else f'FAILED (exit {rc})'}")
+        return ok
+
     def _site_build_interactive(self) -> bool:
         """Export all Marimo WASM notebooks. Returns True on success."""
         print("\nBuilding interactive (Marimo WASM)...\n")
@@ -106,6 +125,13 @@ class ServeMixin:
 
     def _site_build_static(self) -> bool:
         """Render the Quarto static site. Returns True on success."""
+        data_files = list(Path("data").glob("*.json")) if Path("data").exists() else []
+        if not data_files:
+            print("\n  Cannot build: data/*.json not found.")
+            print("  Run reports first to generate the data layer:")
+            print("    python NceGitLab.py --report all")
+            return False
+
         print("\nBuilding static (quarto render)...\n")
         proc = subprocess.Popen(
             ["quarto", "render"],
@@ -215,8 +241,8 @@ class ServeMixin:
             print()
             print("  Build")
             print("  [1] interactive   Marimo WASM → public/interactive/")
-            print("  [2] static        quarto render → public/")
-            print("  [3] all           static → data → interactive")
+            print("  [2] static        quarto render → public/  (requires data/ from a report run)")
+            print("  [3] all           quarto → restore data → interactive  (requires data/)")
             print()
             print("  Clean")
             print("  [4] interactive   Delete public/interactive/")

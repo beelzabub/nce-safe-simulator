@@ -69,10 +69,11 @@ def _(summary, mo):
 
 
 @app.cell
-def _(mo):
+def _(mo, summary):
+    _levels = [s["type"] for s in summary]
     level_selector = mo.ui.multiselect(
-        ["Epic", "Capability", "Feature"],
-        value=["Epic", "Capability", "Feature"],
+        _levels,
+        value=_levels,
         label="SAFe Level",
     )
     mo.vstack([mo.md("## Hierarchy"), level_selector])

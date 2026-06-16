@@ -129,6 +129,7 @@ class NceGitLab(
 
         epic_labels_env = parse_label_env("EPIC_TYPE_LABELS")
         self.EPIC_TYPE_LABELS = epic_labels_env if epic_labels_env else config.get("epic_type_labels", [])
+        self.EPIC_TYPE_DISPLAY_NAMES = [t.split("::")[-1].capitalize() for t in self.EPIC_TYPE_LABELS]
 
         risk_labels_env = parse_label_env("RISK_LABELS")
         self.RISK_LABELS = risk_labels_env if risk_labels_env else config.get("risk_labels", [])
@@ -181,23 +182,16 @@ class NceGitLab(
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         _sd = config.get("defaults", {}).get("serve", {})
-        self.serve_port = _sd.get("port", 4645)
+        self.serve_port = _sd.get("port", 80)
 
-        members_file = self.config_file.parent / "team_members.json"
-        if members_file.exists():
-            with open(members_file, "r", encoding="utf-8") as f:
-                self.team_members = json.load(f).get("members", [])
-        else:
-            self.team_members = []
-
+        # project_labels and piid_labels are optional — used only for simulation/bootstrap.
+        # Reports and tools discover these dynamically from live epic labels.
         missing_fields = [
             field for field, val in [
                 ("url",              self.url),
                 ("parent_group",     self.parent_group),
                 ("private_token",    self.private_token),
                 ("fibonacci_weights", self.fibonacci_weights),
-                ("project_labels",   self.PROJECT_LABELS),
-                ("piid_labels",      self.PIID_LABELS),
                 ("epic_labels",      self.EPIC_TYPE_LABELS),
             ] if not val
         ]
@@ -441,7 +435,7 @@ def _parse_formats(raw_list):
     if "all" in tokens:
         return set(_all)
     if not tokens:
-        return {"markdown"}
+        return set(_all)
     return tokens
 
 
@@ -483,8 +477,12 @@ def main():
                         help="Disable SSL certificate verification (Aisle 5 / corporate network)")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
+    parser.add_argument("-D", "--diagnose",          action="store_true",
+                        help="Print environment, software versions, API capabilities, and label validation to stdout")
     parser.add_argument("-s", "--scaffold",          nargs="?", const="__prompt__", metavar="GROUP",
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
+    parser.add_argument("-w", "--serve",             action="store_true",
+                        help="Start the uvicorn server and open the browser")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -510,10 +508,27 @@ def main():
         gl.run_tools_menu(tool_key, prefills=prefills)
         return
 
+    if args.diagnose:
+        _phase[0] = "diagnose"
+        gl._tool_diagnose()
+        return
+
     if args.scaffold is not None:
         _phase[0] = "scaffold"
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
+        return
+
+    if args.serve:
+        import uvicorn
+        from server.app import app as _fastapi_app
+
+        _phase[0] = "serve"
+        port = gl._serve_port()
+        _fastapi_app.state.gl = gl
+        gl._serve_build_frontend()
+
+        uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
 
     phases = []

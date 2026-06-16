@@ -22,6 +22,7 @@ project:
     - quarto/orphan-epics.qmd
     - quarto/orphan-issues.qmd
     - quarto/premature-closures.qmd
+    - quarto/diagnostics.qmd
 
 website:
   title: "PEO C4I Portfolio Reports"
@@ -77,6 +78,8 @@ website:
             text: "Orphaned Issues"
           - href: quarto/premature-closures.qmd
             text: "Premature Closures"
+      - text: "Diagnostics"
+        href: quarto/diagnostics.qmd
 
 execute:
   execute-dir: project

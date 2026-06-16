@@ -77,7 +77,9 @@ else:
             else:
                 html += (
                     f'<tr><td><strong>{proj_display}</strong></td>'
-                    '<td colspan="7" style="color:#999">—</td></tr>'
+                    '<td style="color:#999"><em>no epics in this PI</em></td>'
+                    '<td></td><td></td><td></td><td></td><td></td><td></td>'
+                    '</tr>'
                 )
         html += "</tbody></table>"
     display(HTML(html))

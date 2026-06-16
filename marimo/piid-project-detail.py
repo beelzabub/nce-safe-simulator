@@ -71,26 +71,39 @@ def _(pis, pi_selector, mo):
         if not _has_data:
             _out = mo.Html(f"<p><em>{_meta}</em></p><p>No project data for this PI.</p>")
         else:
-            _th   = "padding:6px 10px;text-align:left;background:#0a2447;color:#fff"
-            _th_r = "padding:6px 10px;text-align:right;background:#0a2447;color:#fff"
+            _bdr  = "border:1px solid #d1d5db"
+            _th   = f"padding:6px 10px;text-align:left;background:#0a2447;color:#fff;{_bdr}"
+            _th_r = f"padding:6px 10px;text-align:right;background:#0a2447;color:#fff;{_bdr}"
+            _td   = f"padding:4px 10px;{_bdr}"
+            _td_r = f"padding:4px 10px;text-align:right;{_bdr}"
             _tbody = ""
             for _p in _projects:
+                _proj_display = _p["project"][len("project::"):] if _p["project"].startswith("project::") else _p["project"]
                 if not _p["has_data"]:
+                    _tbody += (
+                        f"<tr>"
+                        f"<td style='{_td}'><strong>{_proj_display}</strong></td>"
+                        f"<td style='{_td}'><em style='color:#999'>no epics in this PI</em></td>"
+                        f"<td style='{_td}'></td><td style='{_td}'></td><td style='{_td}'></td>"
+                        f"<td style='{_td}'></td><td style='{_td}'></td><td style='{_td}'></td>"
+                        f"<td style='{_td}'></td>"
+                        f"</tr>"
+                    )
                     continue
-                _board = f'<a href="{_p["board_url"]}" target="_blank">{_p["project"]}</a>' if _p.get("board_url") else _p["project"]
+                _board = f'<a href="{_p["board_url"]}" target="_blank">{_proj_display}</a>' if _p.get("board_url") else _proj_display
                 _delta_str = f'+{_p["delta"]}' if _p["delta"] > 0 else str(_p["delta"])
                 _pct_color = "color:#15803d;font-weight:600" if _p["avg_pct"] >= 80 else "color:#dc2626;font-weight:600"
                 _tbody += (
                     f"<tr>"
-                    f"<td style='padding:4px 10px'>{_board}</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_p['total']}</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_p['open']}</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_p['planned']}</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_p['actual']}</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_delta_str}</td>"
-                    f"<td style='padding:4px 10px;text-align:right;{_pct_color}'>{_p['avg_pct']}%</td>"
-                    f"<td style='padding:4px 10px;text-align:right'>{_p['blocked']}</td>"
-                    f"<td style='padding:4px 10px'>{_p['status']}</td>"
+                    f"<td style='{_td}'>{_board}</td>"
+                    f"<td style='{_td_r}'>{_p['total']}</td>"
+                    f"<td style='{_td_r}'>{_p['open']}</td>"
+                    f"<td style='{_td_r}'>{_p['planned']}</td>"
+                    f"<td style='{_td_r}'>{_p['actual']}</td>"
+                    f"<td style='{_td_r}'>{_delta_str}</td>"
+                    f"<td style='{_td_r};{_pct_color}'>{_p['avg_pct']}%</td>"
+                    f"<td style='{_td_r}'>{_p['blocked']}</td>"
+                    f"<td style='{_td}'>{_p['status']}</td>"
                     f"</tr>"
                 )
             _out = mo.Html(f"""

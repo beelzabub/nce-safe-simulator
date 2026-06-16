@@ -2,7 +2,7 @@
 import sys
 import pytest
 
-sys.path.insert(0, "/root/.venv/beelzabub-project")
+
 
 pytestmark = pytest.mark.stub
 

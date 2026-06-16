@@ -302,7 +302,7 @@ class BootstrapMixin:
 
     def _lorem_populate_group(self, group, epic_count, allowed_types=None):
         epics         = self._lorem_epics_in_group(group, epic_count, allowed_types=allowed_types)
-        feature_epics = [(e, lbl) for e, lbl in epics if lbl == "Feature"]
+        feature_epics = [(e, lbl) for e, lbl in epics if lbl == self.EPIC_TYPE_LABELS[-1]]
         if not feature_epics:
             return epics, None
 
@@ -360,7 +360,40 @@ class BootstrapMixin:
                                   vs_epics=None,
                                   art_epics=None,
                                   team_features=None,
-                                  direct_feature_ratio=None):
+                                  direct_feature_ratio=None,
+                                  target_group=None,
+                                  dry_run=False):
+        # Allow caller to override the target group (namespace/group_name).
+        # Restores instance state afterwards so other tools are unaffected.
+        _orig_ns  = self.gitlab_namespace
+        _orig_grp = self.parent_group
+        if target_group and target_group.strip():
+            parts = target_group.strip().rsplit("/", 1)
+            if len(parts) == 2:
+                self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+            else:
+                self.parent_group = parts[0]
+
+        try:
+            return self._create_all_lorem_objects_impl(
+                num_value_streams=num_value_streams, num_arts=num_arts,
+                num_teams=num_teams, portfolio_epics=portfolio_epics,
+                vs_epics=vs_epics, art_epics=art_epics,
+                team_features=team_features, direct_feature_ratio=direct_feature_ratio,
+                dry_run=dry_run,
+            )
+        finally:
+            self.gitlab_namespace = _orig_ns
+            self.parent_group     = _orig_grp
+
+    def _create_all_lorem_objects_impl(self,
+                                  num_value_streams=None, num_arts=None, num_teams=None,
+                                  portfolio_epics=None,
+                                  vs_epics=None,
+                                  art_epics=None,
+                                  team_features=None,
+                                  direct_feature_ratio=None,
+                                  dry_run=False):
         _cfg_vs    = num_value_streams if num_value_streams is not None else self.default_num_value_streams
         _cfg_arts  = num_arts          if num_arts          is not None else self.default_num_arts
         _cfg_teams = num_teams         if num_teams         is not None else self.default_num_teams
@@ -378,7 +411,15 @@ class BootstrapMixin:
         team_features        = _resolve_range(_cfg_tf)
         direct_feature_ratio = direct_feature_ratio if direct_feature_ratio is not None else self.default_direct_feature_ratio
 
-        print("\nSAFe structure (resolved):")
+        ns       = self.gitlab_namespace
+        grp      = self.parent_group
+        target   = f"{ns}/{grp}" if ns else grp
+
+        print("\nCreate Lorem SAFe Data")
+        print("=" * 52)
+        print(f"  Target group       : {target}")
+        print()
+        print("  SAFe structure (resolved from config):")
         print(f"  Value Streams      : {_range_label(_cfg_vs,    num_value_streams)}")
         print(f"  ARTs / VS          : {_range_label(_cfg_arts,  num_arts)}")
         print(f"  Teams / ART        : {_range_label(_cfg_teams, num_teams)}")
@@ -388,6 +429,18 @@ class BootstrapMixin:
         print(f"  Features / Team    : {_range_label(_cfg_tf,    team_features)}")
         print(f"  Direct feature %   : {int(direct_feature_ratio * 100)}%")
         print()
+        print("  Will create: label sets, subgroup hierarchy, epics,")
+        print("  capabilities, features, issues, and BV custom field.")
+        print("  Existing content is NOT removed first.")
+        print()
+
+        if dry_run:
+            print("[Dry run] No objects created. Uncheck 'Dry run' to proceed.")
+            return
+
+        if not self.PROJECT_LABELS or not self.PIID_LABELS:
+            print("ERROR: project_labels and piid_labels must be defined in config.json for simulation.")
+            return
 
         root_group = self._get_or_create_root_group()
         if root_group is None:
@@ -410,8 +463,8 @@ class BootstrapMixin:
         for label_array in [self.PROJECT_LABELS, self.PIID_LABELS, self.EPIC_TYPE_LABELS, self.RISK_LABELS, self.ROAM_LABELS, self.WSJF_LABELS, self.WORK_TYPE_LABELS, self.LIFECYCLE_LABELS]:
             self.create_and_apply_labels(root_group, label_array)
 
-        all_portfolio_epics = self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=["Epic"])
-        print(f"Portfolio: {portfolio_epics} Epics → {root_group.full_path}")
+        all_portfolio_epics = self._lorem_epics_in_group(root_group, portfolio_epics, allowed_types=[self.EPIC_TYPE_LABELS[0]])
+        print(f"Portfolio: {portfolio_epics} {self.EPIC_TYPE_DISPLAY_NAMES[0]}s → {root_group.full_path}")
 
         vis          = root_group.visibility
         all_vs_caps  = []
@@ -433,7 +486,7 @@ class BootstrapMixin:
                 'visibility': vis,
             })
             print(f"\n[Value Stream] {vs_group.full_path}")
-            vs_caps = self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=["Capability"])
+            vs_caps = self._lorem_epics_in_group(vs_group, vs_epics, allowed_types=[self.EPIC_TYPE_LABELS[1]])
             all_vs_caps.extend(vs_caps)
 
             for _ in range(num_arts):
@@ -445,7 +498,7 @@ class BootstrapMixin:
                     'visibility': vis,
                 })
                 print(f"\n[ART] {art_group.full_path}")
-                art_created = self._lorem_epics_in_group(art_group, art_epics, allowed_types=["Capability"])
+                art_created = self._lorem_epics_in_group(art_group, art_epics, allowed_types=[self.EPIC_TYPE_LABELS[1]])
                 all_art_caps.extend(art_created)
                 art_to_vs[art_group.id] = vs_caps
                 art_items_map[art_group.id] = {
@@ -464,7 +517,7 @@ class BootstrapMixin:
                     })
                     team_to_art[team_group.id] = art_created
                     print(f"\n[Agile Team] {team_group.full_path}")
-                    team_created, team_project = self._lorem_populate_group(team_group, team_features, allowed_types=["Feature"])
+                    team_created, team_project = self._lorem_populate_group(team_group, team_features, allowed_types=[self.EPIC_TYPE_LABELS[-1]])
                     if team_created:
                         all_features.extend(team_created)
                         art_items_map[art_group.id]["epics"].extend(team_created)

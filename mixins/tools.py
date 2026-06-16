@@ -37,6 +37,12 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "diagnose",
+        "description": "Print software versions, API capabilities, label validation, and compatibility assessment",
+        "method":      "_tool_diagnose",
+        "params":      [],
+    },
+    {
         "key":         "clean-wikis",
         "description": "Delete all wiki pages from: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
         "method":      "_tool_clean_wikis",
@@ -187,6 +193,24 @@ TOOLS = [
         "params":      [],
     },
     {
+        "key":         "create-lorem-data",
+        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "confirm":     True,
+        "method":      "create_all_lorem_objects",
+        "params": [
+            {"name": "target_group",        "prompt": "Target group",            "type": str,   "widget": "group", "optional": True},
+            {"name": "num_value_streams",   "prompt": "Value Streams",           "type": int,   "optional": True, "gl_default": "default_num_value_streams",   "section": "SAFe Structure"},
+            {"name": "num_arts",            "prompt": "ARTs per Value Stream",   "type": int,   "optional": True, "gl_default": "default_num_arts"},
+            {"name": "num_teams",           "prompt": "Teams per ART",           "type": int,   "optional": True, "gl_default": "default_num_teams"},
+            {"name": "portfolio_epics",     "prompt": "Portfolio Epics",         "type": int,   "optional": True, "gl_default": "default_portfolio_epics",   "section": "Content Counts"},
+            {"name": "vs_epics",            "prompt": "VS Capabilities / VS",   "type": int,   "optional": True, "gl_default": "default_vs_caps_per_vs"},
+            {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
+            {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
+            {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+        ],
+    },
+    {
         "key":         "setup-bv-field",
         "description": "Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21, applies to Epic / Capability / Feature)",
         "method":      "_tool_setup_bv_field",
@@ -273,6 +297,15 @@ TOOLS = [
             {"name": "label",     "prompt": "Project label to assign (e.g. project::DO)", "type": str,  "optional": False},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
             {"name": "dry_run",   "prompt": "Dry run?",                                    "type": bool, "default": False},
+        ],
+    },
+    {
+        "key":         "strip-project-labels",
+        "description": "Remove all project:: labels from every epic (clean slate for re-assignment)",
+        "method":      "_tool_strip_project_labels",
+        "params": [
+            {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str,  "optional": True},
+            {"name": "dry_run",   "prompt": "Dry run?",                                              "type": bool, "default": False},
         ],
     },
     {
@@ -413,6 +446,11 @@ TOOLS = [
 
 TOOL_CATEGORIES = [
     {
+        "name":        "Diagnose",
+        "description": "Environment, API compatibility, and label validation",
+        "tools": ["diagnose"],
+    },
+    {
         "name":        "Setup",
         "description": "Initialize structure and custom fields",
         "tools": ["scaffold", "setup-bv-field"],
@@ -431,7 +469,7 @@ TOOL_CATEGORIES = [
         "description": "Assign or strip epic label sets",
         "tools": [
             "set-lifecycle-labels", "strip-lifecycle-labels",
-            "set-piid-labels", "set-project-labels", "set-risk-labels",
+            "set-piid-labels", "set-project-labels", "strip-project-labels", "set-risk-labels",
             "set-work-type-labels", "strip-work-type-labels",
             "set-business-value", "strip-business-value",
             "set-wsjf-labels", "strip-wsjf-labels", "strip-labels",
@@ -1025,19 +1063,18 @@ class ToolsMixin:
         """Assign random planned weights to all epics based on their SAFe type label."""
         group        = self.get_group_by_name(self.parent_group)
         weight_pools = self.EPIC_TYPE_PLANNED_WEIGHTS
-        safe_types   = ["Epic", "Capability", "Feature"]
 
         print(f"Group: {group.full_path}")
 
         epics = group.epics.list(get_all=True, include_descendant_groups=True)
         print(f"Fetched {len(epics)} epics\n")
 
-        counts  = {t: 0 for t in safe_types}
+        counts  = {t: 0 for t in self.EPIC_TYPE_DISPLAY_NAMES}
         skipped = 0
 
         for epic in epics:
-            etype = next((t for t in safe_types if t in epic.labels), None)
-            if etype is None:
+            etype = self._epic_type_display(epic.labels)
+            if etype == "Unknown":
                 print(f"  SKIP  [{epic.iid}] '{epic.title[:60]}' — no SAFe type label")
                 skipped += 1
                 continue
@@ -1059,7 +1096,7 @@ class ToolsMixin:
             counts[etype] += 1
 
         print("\nDone.  Updated: " +
-              ", ".join(f"{t}={counts[t]}" for t in safe_types) +
+              ", ".join(f"{t}={counts[t]}" for t in self.EPIC_TYPE_DISPLAY_NAMES) +
               f"  Skipped: {skipped}")
         if dry_run:
             print("(dry-run — no changes saved)")
@@ -1069,19 +1106,18 @@ class ToolsMixin:
         group        = self.get_group_by_name(self.parent_group)
         weight_pools = self.EPIC_TYPE_PLANNED_WEIGHTS
         fib_weights  = self.fibonacci_weights
-        safe_types   = ["Epic", "Capability", "Feature"]
 
         print(f"Validating weights in: {group.full_path}\n")
 
         # --- Epics ---
         print("Checking epic weights...")
-        results = {t: {"ok": 0, "bad": []} for t in safe_types}
+        results = {t: {"ok": 0, "bad": []} for t in self.EPIC_TYPE_DISPLAY_NAMES}
         no_type = []
 
         for epic in group.epics.list(all=True):
-            etype = next((t for t in safe_types if t in epic.labels), None)
+            etype = self._epic_type_display(epic.labels)
             w     = getattr(epic, "weight", None)
-            if etype is None:
+            if etype == "Unknown":
                 no_type.append(epic)
                 continue
             pool = weight_pools.get(etype, [])
@@ -1093,7 +1129,7 @@ class ToolsMixin:
         print(f"\n{'Type':<15} {'Expected pool':<45} {'OK':>5} {'FAIL':>5}")
         print("-" * 74)
         all_pass = True
-        for t in safe_types:
+        for t in self.EPIC_TYPE_DISPLAY_NAMES:
             pool      = weight_pools.get(t, [])
             ok_count  = results[t]["ok"]
             bad_count = len(results[t]["bad"])
@@ -1378,7 +1414,7 @@ class ToolsMixin:
         """Report every epic missing a type, PIID, or project label."""
         group    = self.get_group_by_name(self.parent_group)
         all_grp_labels = {l.name for l in group.labels.list(all=True)}
-        type_set = all_grp_labels & {"Epic", "Capability", "Feature"}
+        type_set = all_grp_labels & set(self.EPIC_TYPE_LABELS)
         piid_set = {l for l in all_grp_labels if l.startswith("PIID::")}
         proj_set = {l for l in all_grp_labels if l.startswith("project::")}
 
@@ -1611,6 +1647,49 @@ class ToolsMixin:
         if dry_run:
             print("(dry-run — no changes saved)")
 
+    def _tool_strip_project_labels(self, epic_type=None, dry_run=False):
+        """Remove all project:: labels from every epic (clean slate for re-assignment)."""
+        group    = self.get_group_by_name(self.parent_group)
+        proj_set = set(self._discover_labels(group, "project::"))
+
+        if not proj_set:
+            print("No project:: labels found on group — nothing to strip.")
+            return
+
+        print(f"Group     : {group.full_path}")
+        print(f"Stripping : {sorted(proj_set)}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        stripped = skipped = errors = 0
+
+        print("\nWalking epics...")
+        for epic in group.epics.list(all=True):
+            if epic_type and epic_type not in epic.labels:
+                skipped += 1
+                continue
+            existing = set(epic.labels) & proj_set
+            if not existing:
+                skipped += 1
+                continue
+            new_labels = [l for l in epic.labels if l not in proj_set]
+            if dry_run:
+                print(f"  DRY  remove {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                stripped += 1
+            else:
+                try:
+                    epic.labels = new_labels
+                    epic.save()
+                    print(f"  STRIP  {sorted(existing)}  #{epic.iid} '{epic.title[:55]}'")
+                    stripped += 1
+                except Exception as e:
+                    print(f"  ERROR #{epic.iid}: {e}")
+                    errors += 1
+
+        print(f"\nDone.  Stripped: {stripped}  Skipped (no project:: or filtered): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("(dry-run — no changes saved)")
+
     def _tool_generate_issues(self, count=None, feature_percent=100.0, dry_run=False):
         """Create issues in team backlog projects linked to Feature epics."""
         if count is None:
@@ -1646,7 +1725,7 @@ class ToolsMixin:
             # Find the parent team group to get its Feature epics
             try:
                 team_group = self.gl.groups.get(proj.namespace["id"])
-                features   = [e for e in team_group.epics.list(all=True) if "Feature" in e.labels]
+                features   = [e for e in team_group.epics.list(all=True) if self.EPIC_TYPE_LABELS[-1] in e.labels]
             except Exception as e:
                 print(f"  ERROR fetching features for '{proj_stub.path}': {e}")
                 continue
@@ -1673,11 +1752,6 @@ class ToolsMixin:
                                 "weight":   w,
                                 "epic_id":  feat.id,
                             }
-                            if self.team_members:
-                                member = random.choice(self.team_members)
-                                uid = self._resolve_member_id(member)
-                                if uid:
-                                    issue_data["assignee_ids"] = [uid]
                             issue = proj.issues.create(issue_data)
                             proj.issues.update(issue.iid, {"title": f"{issue.iid} - {title}"})
                             print(f"  CREATED #{issue.iid} '{issue.iid} - {title[:45]}' → Feature '{feat.title[:40]}' ({w} pt)")
@@ -1764,21 +1838,27 @@ class ToolsMixin:
             labels = set(epic.labels)
             pid    = parent_map.get(eid)
 
-            if "Feature" in labels:
+            if self.EPIC_TYPE_LABELS[-1] in labels:
                 parent = all_epics.get(pid)
+                t_leaf = self.EPIC_TYPE_DISPLAY_NAMES[-1]
+                t_mid  = self.EPIC_TYPE_DISPLAY_NAMES[1]  if len(self.EPIC_TYPE_DISPLAY_NAMES) > 2 else None
+                t_top  = self.EPIC_TYPE_DISPLAY_NAMES[0]
+                valid_parents = self.EPIC_TYPE_LABELS[:-1]
                 if parent is None:
-                    violations.append((epic, "Feature has no parent (expected Capability or Epic)"))
-                elif "Capability" not in parent.labels and "Epic" not in parent.labels:
-                    ptype = next((t for t in ("Epic", "Capability", "Feature") if t in parent.labels), "unknown")
-                    violations.append((epic, f"Feature parent is {ptype}, expected Capability or Epic"))
+                    violations.append((epic, f"{t_leaf} has no parent"))
+                elif not any(t in parent.labels for t in valid_parents):
+                    ptype = self._epic_type_display(parent.labels)
+                    violations.append((epic, f"{t_leaf} parent is {ptype}, expected a higher tier"))
 
-            elif "Capability" in labels:
+            elif len(self.EPIC_TYPE_LABELS) > 2 and self.EPIC_TYPE_LABELS[1] in labels:
                 parent = all_epics.get(pid)
+                t_mid  = self.EPIC_TYPE_DISPLAY_NAMES[1]
+                t_top  = self.EPIC_TYPE_DISPLAY_NAMES[0]
                 if parent is None:
-                    violations.append((epic, "Capability has no parent (expected Epic)"))
-                elif "Epic" not in parent.labels:
-                    ptype = next((t for t in ("Epic", "Capability", "Feature") if t in parent.labels), "unknown")
-                    violations.append((epic, f"Capability parent is {ptype}, expected Epic"))
+                    violations.append((epic, f"{t_mid} has no parent (expected {t_top})"))
+                elif self.EPIC_TYPE_LABELS[0] not in parent.labels:
+                    ptype = self._epic_type_display(parent.labels)
+                    violations.append((epic, f"{t_mid} parent is {ptype}, expected {t_top}"))
 
         if not violations:
             print("  ✓  All hierarchy relationships are valid.")
@@ -1797,7 +1877,7 @@ class ToolsMixin:
         group   = self.get_group_by_name(self.parent_group)
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 
-        tiers = ["Epic", "Capability", "Feature"] if not epic_type else [epic_type]
+        tiers = self.EPIC_TYPE_DISPLAY_NAMES if not epic_type else [epic_type]
         epics = [e for t in tiers if t in metrics for e in metrics[t]]
 
         print(f"Group    : {group.full_path}")
@@ -1821,7 +1901,7 @@ class ToolsMixin:
             if drift_pct > threshold:
                 flagged += 1
                 direction = "▲ over" if actual > planned else "▼ under"
-                etype = next((t for t in ("Epic", "Capability", "Feature") if t in e.get("labels", [])), "?")
+                etype = self._epic_type_display(e.get("labels", []))
                 icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
                 print(
                     f"  !! {icon} [{e['iid']}] '{e['title'][:55]}'  "
@@ -2815,7 +2895,7 @@ class ToolsMixin:
             for epic in grp.epics.list(all=True):
                 if getattr(epic, "group_id", grp.id) != grp.id:
                     continue
-                if not any(t in epic.labels for t in ["Epic", "Capability", "Feature"]):
+                if not any(t in epic.labels for t in self.EPIC_TYPE_LABELS):
                     continue
                 if piid and piid not in epic.labels:
                     continue
@@ -2984,12 +3064,13 @@ class ToolsMixin:
             # Epics: Capabilities and Features
             eligible_epics = [
                 (g, e) for g, e in all_open
-                if ("Capability" in e.labels or "Feature" in e.labels)
+                if any(t in e.labels for t in self.EPIC_TYPE_LABELS[1:])
                 and _epic_no_past_due(e)
             ]
             k      = max(0, round(len(eligible_epics) * percent / 100))
             sample = random.sample(eligible_epics, min(k, len(eligible_epics)))
-            print(f"  Eligible Capability/Feature epics (no existing past due): {len(eligible_epics)}")
+            t_lower = "/".join(self.EPIC_TYPE_DISPLAY_NAMES[1:])
+            print(f"  Eligible {t_lower} epics (no existing past due): {len(eligible_epics)}")
             print(f"  Targeting {len(sample)}\n")
             updated = errors = 0
             for g, epic in sample:
@@ -3039,12 +3120,12 @@ class ToolsMixin:
             # Feature epics: making them overdue triggers Child Overdue on their parent Capability
             eligible_epics = [
                 (g, e) for g, e in all_open
-                if "Feature" in e.labels
+                if self.EPIC_TYPE_LABELS[-1] in e.labels
                 and _epic_no_past_due(e)
             ]
             k      = max(0, round(len(eligible_epics) * percent / 100))
             sample = random.sample(eligible_epics, min(k, len(eligible_epics)))
-            print(f"  Eligible Feature epics (no existing past due): {len(eligible_epics)}")
+            print(f"  Eligible {self.EPIC_TYPE_DISPLAY_NAMES[-1]} epics (no existing past due): {len(eligible_epics)}")
             print(f"  Targeting {len(sample)}\n")
             updated = errors = 0
             for g, epic in sample:
@@ -3156,16 +3237,16 @@ class ToolsMixin:
             # Epic targets: Capabilities and Features
             epic_targets = [
                 (g, e) for g, e in all_open
-                if "Capability" in e.labels or "Feature" in e.labels
+                if any(t in e.labels for t in self.EPIC_TYPE_LABELS[1:])
             ]
-            # Blocker pool: Epics and Capabilities (non-Feature)
-            blocker_pool = [(g, e) for g, e in all_open if "Feature" not in e.labels]
+            # Blocker pool: all tiers except the leaf
+            blocker_pool = [(g, e) for g, e in all_open if self.EPIC_TYPE_LABELS[-1] not in e.labels]
             if not blocker_pool:
                 blocker_pool = all_open
 
             k      = max(0, round(len(epic_targets) * percent / 100))
             sample = random.sample(epic_targets, min(k, len(epic_targets)))
-            print(f"  Eligible Capability/Feature epics: {len(epic_targets)}")
+            print(f"  Eligible {'/'.join(self.EPIC_TYPE_DISPLAY_NAMES[1:])} epics: {len(epic_targets)}")
             print(f"  Targeting {len(sample)}\n")
 
             updated = errors = 0
@@ -3363,3 +3444,8 @@ class ToolsMixin:
         else:
             print(f"  Done — removed {len(to_delete)} {label}(s), "
                   f"freed {freed // 1024} KB.")
+
+    def _tool_diagnose(self):
+        """Print software versions, API capabilities, label validation, and compatibility assessment."""
+        lines = self._generate_diagnostics_section(for_wiki=False)
+        print("\n".join(lines))
