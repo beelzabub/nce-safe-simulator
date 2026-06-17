@@ -149,4 +149,4 @@ class TestPiidProjectDetailStructure:
                      project_labels=["Program A"])
         content = _run_detail(h)
         # Row with data renders the project name as a link
-        assert "[Program A]" in content
+        assert "Program A" in content

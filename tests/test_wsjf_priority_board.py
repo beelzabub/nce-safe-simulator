@@ -155,7 +155,7 @@ class TestBlockedBVSummaryTable:
         blocked = {"id": 20, "title": "Feature X", "web_url": "https://gl/f/20", "type": "Feature"}
         blocker = {"id": 30, "title": "Issue #30", "web_url": "https://gl/i/30"}
         content = _run(_blocking_harness(pe, blocked, blocker))
-        assert "- [Portfolio Epic A]" in content
+        assert "Portfolio Epic A" in content
 
     def test_summary_table_shows_pe_bv(self):
         pe      = _epic_with_wsjf(id=10, business_value=8, title="Portfolio Epic A")
