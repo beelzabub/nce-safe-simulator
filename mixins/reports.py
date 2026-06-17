@@ -1360,6 +1360,7 @@ class ReportsMixin:
             issues   = self._rd_issues_by_project.get(project["path_with_namespace"], [])
             orphaned = [i for i in issues
                         if not i.get("epic_id")
+                        and i.get("state", "").lower() == "opened"
                         and not any(l.startswith("roam::") for l in (i.get("labels") or []))]
             if orphaned:
                 orphans_by_project[project["path_with_namespace"]] = (project, orphaned)
