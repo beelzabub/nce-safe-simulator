@@ -90,15 +90,16 @@ class TestOrphanIssuesWithData:
         content = _run(_harness(proj, issues))
         assert "3 orphaned issue(s)" in content
 
-    def test_grouped_by_project_section_header(self):
-        proj  = _project(name_with_ns="Test Group / My Project")
-        issue = _issue(iid=1, title="Task")
-        content = _run(_harness(proj, [issue]))
-        assert "My Project" in content
-
-    def test_section_heading_shows_project_name(self):
-        proj    = _project(path="test-group/my-project", name_with_ns="Test Group / My Project")
+    def test_section_heading_is_short_name_linked_to_project(self):
+        proj    = _project(path="test-group/my-project")
         issue   = _issue(iid=1, title="Task")
         content = _run(_harness(proj, [issue]))
-        assert "My Project" in content
-        assert "href" not in content
+        assert "[my-project](https://gitlab.com/test-group/my-project)" in content
+
+    def test_section_heading_plain_when_no_web_url(self):
+        proj            = _project(path="test-group/my-project")
+        proj["web_url"] = ""
+        issue           = _issue(iid=1, title="Task")
+        content         = _run(_harness(proj, [issue]))
+        assert "my-project" in content
+        assert "]()" not in content

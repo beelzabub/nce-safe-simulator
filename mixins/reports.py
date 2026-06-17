@@ -1381,7 +1381,10 @@ class ReportsMixin:
             md.append("")
 
             for _key, (project, issues) in sorted(orphans_by_project.items()):
-                md.append(f"### {self._relative_project_name(project)}")
+                name    = project.get("path", project.get("path_with_namespace", ""))
+                web_url = project.get("web_url", "")
+                heading = f"[{name}]({web_url})" if web_url else name
+                md.append(f"### {heading}")
                 md.append("")
                 md.append("| # | Title | State | Assignees |")
                 md.append("|---|-------|-------|-----------|")
