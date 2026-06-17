@@ -8,7 +8,7 @@ from tests.conftest import ReportsHarness
 
 def _project(path="test-group/my-project", name_with_ns="Test Group / My Project"):
     return {
-        "path":               path.split("/")[-1],
+        "path":                path.split("/")[-1],
         "path_with_namespace": path,
         "name_with_namespace": name_with_ns,
         "web_url":             f"https://gitlab.com/{path}",
@@ -64,6 +64,12 @@ class TestOrphanIssuesEmptyState:
         content = _run(_harness(proj, [linked]))
         assert "_No orphaned issues found._" in content
 
+    def test_closed_issue_excluded(self):
+        proj   = _project()
+        closed = _issue(iid=1, state="closed")
+        content = _run(_harness(proj, [closed]))
+        assert "_No orphaned issues found._" in content
+
     def test_roam_labelled_issues_excluded(self):
         proj = _project()
         roam = _issue(iid=1, labels=["roam::owned"])
@@ -84,8 +90,16 @@ class TestOrphanIssuesWithData:
         content = _run(_harness(proj, issues))
         assert "3 orphaned issue(s)" in content
 
-    def test_grouped_by_project_section_header(self):
-        proj  = _project(name_with_ns="Test Group / My Project")
-        issue = _issue(iid=1, title="Task")
+    def test_section_heading_is_short_name_linked_to_project(self):
+        proj    = _project(path="test-group/my-project")
+        issue   = _issue(iid=1, title="Task")
         content = _run(_harness(proj, [issue]))
-        assert "My Project" in content
+        assert "[my-project](https://gitlab.com/test-group/my-project)" in content
+
+    def test_section_heading_plain_when_no_web_url(self):
+        proj            = _project(path="test-group/my-project")
+        proj["web_url"] = ""
+        issue           = _issue(iid=1, title="Task")
+        content         = _run(_harness(proj, [issue]))
+        assert "my-project" in content
+        assert "]()" not in content

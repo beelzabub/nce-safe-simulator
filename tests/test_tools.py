@@ -442,3 +442,65 @@ def test_delete_all_wiki_pages_removes_all():
 
     pg1.delete.assert_called_once()
     pg2.delete.assert_called_once()
+
+
+# ─── orphan-issues tool ──────────────────────────────────────────────────────
+
+def _orphan_issues_harness(issues_by_epic):
+    """Wire a ToolsHarness for _tool_orphan_issues.
+
+    issues_by_epic: list of dicts, each with keys matching the GitLab
+    epic-issues API response (epic_issue_id, iid, title, state).
+    All items are attached to a single epic (group_id=1, iid=1).
+    """
+    h = ToolsHarness()
+    epic = MagicMock()
+    epic.iid     = 1
+    epic.group_id = 1
+    h._root_group.epics.list.return_value = [epic]
+
+    session  = MagicMock()
+    resp     = MagicMock()
+    resp.ok  = True
+    resp.json.return_value = issues_by_epic
+    session.get.return_value = resp
+    h._make_session = lambda: session
+
+    return h, session
+
+
+def test_orphan_issues_skips_closed_issues():
+    items = [
+        {"epic_issue_id": 10, "iid": 1, "title": "Open issue",   "state": "opened"},
+        {"epic_issue_id": 11, "iid": 2, "title": "Closed issue",  "state": "closed"},
+    ]
+    h, session = _orphan_issues_harness(items)
+    h._tool_orphan_issues(count=10, dry_run=True)
+    # Only one open candidate — DELETE must never be called (dry_run), and
+    # a real run would only see 1 candidate, not 2.
+    session.delete.assert_not_called()
+
+
+def test_orphan_issues_only_open_are_candidates(capsys):
+    items = [
+        {"epic_issue_id": 10, "iid": 1, "title": "Open A",   "state": "opened"},
+        {"epic_issue_id": 11, "iid": 2, "title": "Closed B",  "state": "closed"},
+        {"epic_issue_id": 12, "iid": 3, "title": "Open C",   "state": "opened"},
+    ]
+    h, session = _orphan_issues_harness(items)
+    h._tool_orphan_issues(count=10, dry_run=True)
+    out = capsys.readouterr().out
+    assert "Open A" in out
+    assert "Open C" in out
+    assert "Closed B" not in out
+
+
+def test_orphan_issues_all_closed_does_nothing(capsys):
+    items = [
+        {"epic_issue_id": 10, "iid": 1, "title": "Done", "state": "closed"},
+    ]
+    h, session = _orphan_issues_harness(items)
+    h._tool_orphan_issues(count=5, dry_run=True)
+    out = capsys.readouterr().out
+    assert "Nothing to orphan" in out
+    session.delete.assert_not_called()
