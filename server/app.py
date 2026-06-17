@@ -495,7 +495,10 @@ def _resolve_reuse_data(value) -> "Path | None":
             ),
             reverse=True,
         )
-        return candidates[0] if candidates else None
+        if candidates:
+            return candidates[0]
+        print("No complete snapshot found — fetching fresh data.")
+        return None
     return Path(value)
 
 
