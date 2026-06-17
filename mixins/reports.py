@@ -1383,13 +1383,15 @@ class ReportsMixin:
             for _key, (project, issues) in sorted(orphans_by_project.items()):
                 name    = project.get("path", project.get("path_with_namespace", ""))
                 web_url = project.get("web_url", "")
-                heading = f"[{name}]({web_url})" if web_url else name
+                heading = f'<a href="{web_url}" target="_blank">{name}</a>' if web_url else name
                 md.append(f"### {heading}")
                 md.append("")
                 md.append("| # | Title | State | Assignees |")
                 md.append("|---|-------|-------|-----------|")
                 for issue in issues:
-                    title_link = f"[{issue['title']}]({issue['web_url']})"
+                    url        = issue['web_url']
+                    title      = issue['title']
+                    title_link = f'<a href="{url}" target="_blank">{title}</a>'
                     state      = issue["state"].capitalize()
                     assignees  = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
                     md.append(f"| #{issue['iid']} | {title_link} | {state} | {assignees} |")
