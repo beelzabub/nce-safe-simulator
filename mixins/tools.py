@@ -2031,6 +2031,8 @@ class ToolsMixin:
             if not resp.ok:
                 continue
             for item in resp.json():
+                if item.get('state') != 'opened':
+                    continue
                 candidates.append((
                     grp_id, epic.iid,
                     item['epic_issue_id'],
