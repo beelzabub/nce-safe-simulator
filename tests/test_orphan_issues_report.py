@@ -8,7 +8,7 @@ from tests.conftest import ReportsHarness
 
 def _project(path="test-group/my-project", name_with_ns="Test Group / My Project"):
     return {
-        "path":               path.split("/")[-1],
+        "path":                path.split("/")[-1],
         "path_with_namespace": path,
         "name_with_namespace": name_with_ns,
         "web_url":             f"https://gitlab.com/{path}",
@@ -64,6 +64,12 @@ class TestOrphanIssuesEmptyState:
         content = _run(_harness(proj, [linked]))
         assert "_No orphaned issues found._" in content
 
+    def test_closed_issue_excluded(self):
+        proj   = _project()
+        closed = _issue(iid=1, state="closed")
+        content = _run(_harness(proj, [closed]))
+        assert "_No orphaned issues found._" in content
+
     def test_roam_labelled_issues_excluded(self):
         proj = _project()
         roam = _issue(iid=1, labels=["roam::owned"])
@@ -89,3 +95,10 @@ class TestOrphanIssuesWithData:
         issue = _issue(iid=1, title="Task")
         content = _run(_harness(proj, [issue]))
         assert "My Project" in content
+
+    def test_section_heading_shows_project_name(self):
+        proj    = _project(path="test-group/my-project", name_with_ns="Test Group / My Project")
+        issue   = _issue(iid=1, title="Task")
+        content = _run(_harness(proj, [issue]))
+        assert "My Project" in content
+        assert "href" not in content

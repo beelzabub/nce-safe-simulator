@@ -253,19 +253,37 @@ def _item_risk_reasons(item, today=None):
 class ReportsMixin:
 
     def _relative_project_name(self, project):
-        """Return project name_with_namespace with the top-level gitlab_namespace stripped.
-
-        GitLab's name_with_namespace includes the root namespace
-        (e.g. "gl-demo-ultimate-lmwilliams / PMW-120 / VS 01 / ...").
-        Wiki reports should only show paths starting from parent_group.
-        """
+        """Return project name_with_namespace starting from parent_group."""
         name = project.get("name_with_namespace", project.get("path_with_namespace", ""))
-        ns   = getattr(self, "gitlab_namespace", "")
-        if ns:
-            prefix = ns + " / "
-            if name.lower().startswith(prefix.lower()):
-                return name[len(prefix):]
+        pg   = getattr(self, "parent_group", "")
+        if pg:
+            parts = name.split(" / ")
+            try:
+                idx = next(i for i, p in enumerate(parts) if p.lower() == pg.lower())
+                return " / ".join(parts[idx:])
+            except StopIteration:
+                pass
         return name
+
+    def _relative_project_breadcrumb(self, project):
+        """Return [{name, url}, ...] for each path segment from parent_group down.
+
+        Zips name_with_namespace display names with path_with_namespace slugs so
+        each segment links to its GitLab group or project page.
+        """
+        name_parts = project.get("name_with_namespace", "").split(" / ")
+        path_parts = project.get("path_with_namespace", "").split("/")
+        base_url   = (getattr(self, "url", None) or "https://gitlab.com").rstrip("/")
+        pg         = getattr(self, "parent_group", "")
+        try:
+            start = next(i for i, p in enumerate(name_parts) if p.lower() == pg.lower())
+        except StopIteration:
+            start = 0
+        result = []
+        for i in range(start, len(name_parts)):
+            url = base_url + "/" + "/".join(path_parts[:i + 1]) if i < len(path_parts) else ""
+            result.append({"name": name_parts[i], "url": url})
+        return result
 
     def generate_summary_report(self, group):
         try:
@@ -1342,6 +1360,7 @@ class ReportsMixin:
             issues   = self._rd_issues_by_project.get(project["path_with_namespace"], [])
             orphaned = [i for i in issues
                         if not i.get("epic_id")
+                        and i.get("state", "").lower() == "opened"
                         and not any(l.startswith("roam::") for l in (i.get("labels") or []))]
             if orphaned:
                 orphans_by_project[project["path_with_namespace"]] = (project, orphaned)
@@ -3343,7 +3362,9 @@ class ReportsMixin:
             if orphans:
                 total += len(orphans)
                 project_rows.append({
-                    "name": self._relative_project_name(project),
+                    "name":       self._relative_project_name(project),
+                    "url":        project.get("web_url", ""),
+                    "breadcrumb": self._relative_project_breadcrumb(project),
                     "issues": [
                         {
                             "iid":       i["iid"],
