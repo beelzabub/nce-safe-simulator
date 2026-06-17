@@ -6726,6 +6726,9 @@ class ReportsMixin:
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
+        # Sentinel written last — its presence means all JSON files are complete.
+        (data_dir / "snapshot.complete").touch()
+
     # ------------------------------------------------------------------
     # Phase 4b Quarto data-layer methods
     # ------------------------------------------------------------------
