@@ -17,6 +17,9 @@ def _gid_to_int(gid_str):
     except (ValueError, AttributeError):
         return None
 
+def _mlink(title, url):
+    return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
+
 # ---------------------------------------------------------------------------
 # Report registry — each entry describes one runnable report.
 # needs_group: True  → method signature is  method(self, group)
@@ -342,7 +345,7 @@ class ReportsMixin:
         if unassigned_issues:
             markdown_report.append("## Unassigned Issues")
             for issue in unassigned_issues:
-                markdown_report.append(f"- **[{issue.title}]({issue.web_url})**")
+                markdown_report.append(f"- **{_mlink(issue.title, issue.web_url)}**")
             markdown_report.append("")
 
         md    = "\n".join(markdown_report)
@@ -406,7 +409,7 @@ class ReportsMixin:
             milestone_issues = project_issues_by_milestone.get(milestone.id, [])
             if milestone_issues:
                 for issue in milestone_issues:
-                    issue_line = f"  - **[{issue.title}]({issue.web_url})** (Status: {issue.state})"
+                    issue_line = f"  - **{_mlink(issue.title, issue.web_url)}** (Status: {issue.state})"
 
                     if hasattr(issue, 'epic_issue') and issue.epic_issue:
                         epic_id     = issue.epic_issue['epic_id']
@@ -415,7 +418,7 @@ class ReportsMixin:
                             linked_issues       = epic_to_issue_map.get(epic_id, [])
                             all_issues_closed   = all(i.state in ["closed", "done"] for i in linked_issues)
                             inferred_epic_state = "closed" if all_issues_closed else epic.state
-                            issue_line += f" (_Epic: [{epic.title}]({epic.web_url}) - **State:** {inferred_epic_state}_)"
+                            issue_line += f" (_Epic: {_mlink(epic.title, epic.web_url)} - **State:** {inferred_epic_state}_)"
                         else:
                             issue_line += " (_Epic: Unknown_)"
                     markdown_report.append(issue_line)
@@ -438,11 +441,11 @@ class ReportsMixin:
             all_issues_closed  = all(issue.state in ["closed", "done"] for issue in linked_issues)
             inferred_epic_state = "closed" if all_issues_closed else epic.state
 
-            markdown_report.append(f"- **Epic: [{epic.title}]({epic.web_url})**")
+            markdown_report.append(f"- **Epic: {_mlink(epic.title, epic.web_url)}**")
             markdown_report.append(f"  - **State:** {epic.state}")
             markdown_report.append(f"  - **Linked Issues:** {len(linked_issues)} issue(s)")
             for issue in linked_issues:
-                markdown_report.append(f"    - **[{issue.title}]({issue.web_url})** (State: {issue.state})")
+                markdown_report.append(f"    - **{_mlink(issue.title, issue.web_url)}** (State: {issue.state})")
             markdown_report.append("")
 
         md    = "\n".join(markdown_report)
@@ -511,7 +514,7 @@ class ReportsMixin:
             markdown_report.append("  |-------------|--------|-----------|")
 
             for issue in issue_list:
-                issue_title    = f"[{issue.title}]({issue.web_url})"
+                issue_title    = _mlink(issue.title, issue.web_url)
                 status         = issue.state.capitalize()
                 milestone_title = issue.milestone['title'] if issue.milestone else "None"
                 markdown_report.append(f"  | {issue_title} | {status} | {milestone_title} |")
@@ -579,7 +582,7 @@ class ReportsMixin:
 
         md = []
         md.append(f"# Program × PI Report (Group: {group.name})")
-        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  [→ Per-PI Detail View]({detail_url})")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  {_mlink('→ Per-PI Detail View', detail_url)}")
         md.append("")
         md.append("Each cell shows: **Status · Epics (open/total) · % Done (PI elapsed%) · Planned pt → Actual pt**")
         md.append("")
@@ -611,7 +614,7 @@ class ReportsMixin:
                     f"{open_cnt}/{total} epics<br>"
                     f"{avg_pct}% done (PI {pi_str})<br>"
                     f"Planned {planned}pt → {actual}pt {delta_str}<br>"
-                    f"[View →]({board}) "
+                    f"{_mlink('View →', board)} "
                 )
 
             md.append("| **" + proj + "** |" + "|".join(cells) + "|")
@@ -643,9 +646,9 @@ class ReportsMixin:
             "",
             "## Quick Links",
             "",
-            f"- [Work Items]({group.web_url}/-/work_items)",
-            f"- [Roadmap]({group.web_url}/-/roadmap)",
-            f"- [Epic Boards]({group.web_url}/-/epics)",
+            f"- {_mlink('Work Items', f'{group.web_url}/-/work_items')}",
+            f"- {_mlink('Roadmap', f'{group.web_url}/-/roadmap')}",
+            f"- {_mlink('Epic Boards', f'{group.web_url}/-/epics')}",
             "",
         ])
 
@@ -700,7 +703,7 @@ class ReportsMixin:
 
         md = []
         md.append(f"# Program PI Detail Report (Group: {group.name})")
-        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  [→ Program × PI Matrix View]({matrix_url})")
+        md.append(f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  {_mlink('→ Program × PI Matrix View', matrix_url)}")
         md.append("")
         md.append("One section per Program Increment. Each table row is a project/program workstream.")
         md.append("")
@@ -739,7 +742,7 @@ class ReportsMixin:
                     f"&state=all"
                 )
                 md.append(
-                    f"| **[{proj}]({board_url})** "
+                    f"| **{_mlink(proj, board_url)}** "
                     f"| {open_cnt}/{total} "
                     f"| {avg_pct}% "
                     f"| {status} "
@@ -818,7 +821,7 @@ class ReportsMixin:
                     drift_str = ""
 
                 meta  = f"(State: {epic.get('state')} | {pct_done}%{risk}{pi_str}{drift_str})"
-                label = f"{block_icon}{icon} **[{epic['title']}]({epic['web_url']})** {meta}"
+                label = f"{block_icon}{icon} **{_mlink(epic['title'], epic['web_url'])}** {meta}"
 
                 if not children:
                     markdown_report.append(label)
@@ -882,9 +885,9 @@ class ReportsMixin:
 
             summary.append(
                 f"| {icon} **{metric_type}** "
-                f"| [{total}]({url_all}) "
-                f"| [{open_count}]({url_open}) "
-                f"| [{closed_count}]({url_closed}) "
+                f"| {_mlink(str(total), url_all)} "
+                f"| {_mlink(str(open_count), url_open)} "
+                f"| {_mlink(str(closed_count), url_closed)} "
                 f"| {total_blocked_by} "
                 f"| {total_blocks} "
                 f"| {avg_done}% "
@@ -1188,7 +1191,7 @@ class ReportsMixin:
         md.append(f"# Blocking & Cross-ART Risk — {group.name}")
         md.append(
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{group.name}]({group.web_url})"
+            f"**Group:** {link(group.name, group.web_url)}"
         )
         md.append("")
 
@@ -1244,7 +1247,7 @@ class ReportsMixin:
         for vs_name, vs_wiki_url, total_deps, critical in vs_index_entries:
             crit_str  = f"🔴 {critical}" if critical else "—"
             deps_str  = f"{total_deps}" if total_deps else "✅ None"
-            md.append(f"| [🔷 {vs_name}]({vs_wiki_url}) | {deps_str} | {crit_str} |")
+            md.append(f"| {link(f'🔷 {vs_name}', vs_wiki_url)} | {deps_str} | {crit_str} |")
         md.append("")
 
         # ── Blocked items detail ────────────────────────────────────────────── #
@@ -1342,7 +1345,7 @@ class ReportsMixin:
             for epic in orphans:
                 etype      = self._epic_type_display(epic["labels"])
                 icon       = self.EPIC_TYPE_ICONS.get(etype, "❓")
-                title_link = f"[{epic['title']}]({epic['web_url']})"
+                title_link = _mlink(epic['title'], epic['web_url'])
                 md.append(f"| {icon} {title_link} | {epic['state']} |")
 
         md.extend(_LEGEND_OPEN + _TYPE_ICON_LEGEND + _LEGEND_CLOSE)
@@ -1444,7 +1447,7 @@ class ReportsMixin:
         md.append(f"# Premature Closures — {group.name}")
         md.append(
             f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{group.name}]({group.web_url})"
+            f"**Group:** {_mlink(group.name, group.web_url)}"
         )
         md.append("")
         md.append(
@@ -1475,7 +1478,7 @@ class ReportsMixin:
                 epic         = f["epic"]
                 open_children = f["open_children"]
                 open_issues   = f["open_issues"]
-                title_link   = f"[{epic['title']}]({epic['web_url']})"
+                title_link   = _mlink(epic['title'], epic['web_url'])
                 child_note   = f"⚠️ {len(open_children)} open child epic(s)" if open_children else ""
                 issue_note   = f"⚠️ {len(open_issues)} open issue(s)" if open_issues else ""
                 notes        = " · ".join(x for x in (child_note, issue_note) if x)
@@ -1491,7 +1494,7 @@ class ReportsMixin:
                     for child in sorted(open_children, key=lambda c: c["title"]):
                         ctype = self._epic_type_display(child.get("labels", []))
                         cicon     = self.EPIC_TYPE_ICONS.get(ctype, "❓")
-                        clink     = f"[{child['title']}]({child['web_url']})"
+                        clink     = _mlink(child['title'], child['web_url'])
                         piid      = next((l for l in child.get("labels", []) if l.startswith("PIID::")), "—")
                         md.append(f"| {cicon} {clink} | {piid} |")
                     md.append("")
@@ -1502,7 +1505,7 @@ class ReportsMixin:
                     md.append("| # | Issue | Assignee |")
                     md.append("|---|-------|----------|")
                     for issue in sorted(open_issues, key=lambda i: i.get("iid", 0)):
-                        ilink     = f"[{issue['title']}]({issue['web_url']})"
+                        ilink     = _mlink(issue['title'], issue['web_url'])
                         assignees = ", ".join(issue.get("assignees") or []) or "_Unassigned_"
                         md.append(f"| #{issue['iid']} | {ilink} | {assignees} |")
                     md.append("")
@@ -1543,7 +1546,7 @@ class ReportsMixin:
             md.append("| Title | State | Parent |")
             md.append("|-------|-------|--------|")
             for e in sorted(items, key=lambda x: x["title"]):
-                title_link = f"[{e['title']}]({e['web_url']})"
+                title_link = _mlink(e['title'], e['web_url'])
                 state      = e["state"]
                 parent_id  = e.get("parent_id")
                 parent     = f"_{epic_title_by_id[parent_id]}_" if parent_id and parent_id in epic_title_by_id else "—"
@@ -1717,7 +1720,7 @@ class ReportsMixin:
         md.append(f"# Risk Register — {group.name}")
         md.append(
             f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{group.name}]({group.web_url})"
+            f"**Group:** {_mlink(group.name, group.web_url)}"
         )
         md.append("")
 
@@ -1820,10 +1823,10 @@ class ReportsMixin:
                 md.append("| Risk Issue | Assignee | Epics Threatened |")
                 md.append("|------------|----------|-----------------|")
                 for risk, epics in sorted(rows, key=lambda x: x[0].get("title", "")):
-                    risk_link  = f"[{risk['title']}]({risk['web_url']})"
+                    risk_link  = _mlink(risk['title'], risk['web_url'])
                     assignee   = risk.get("assignee") or "—"
                     epic_links = ", ".join(
-                        f"[{e['title']}]({e['web_url']})" for e in epics
+                        _mlink(e['title'], e['web_url']) for e in epics
                     )
                     md.append(f"| {risk_link} | {assignee} | {epic_links} |")
                 md.append("")
@@ -1843,7 +1846,7 @@ class ReportsMixin:
             md.append("|------|----|-------------|-------|-----------------|")
             for epic in sorted(epics, key=_pi_sort_key):
                 etype, eicon, pi, path, state = _epic_meta(epic)
-                title_link = f"[{epic['title']}]({epic['web_url']})"
+                title_link = _mlink(epic['title'], epic['web_url'])
                 reasons    = _item_risk_reasons(epic, today)
                 if prepend and prepend not in reasons:
                     reasons = (f"{prepend} · " + reasons) if reasons != "—" else prepend
@@ -1981,7 +1984,7 @@ class ReportsMixin:
         md.append(f"# PI Predictability Scorecard — {group.name}")
         md.append(
             f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{group.name}]({group.web_url})"
+            f"**Group:** {_mlink(group.name, group.web_url)}"
         )
         md.append("")
         md.append(
@@ -2004,7 +2007,7 @@ class ReportsMixin:
             if not pi_data:
                 continue
             any_rows = True
-            art_link = f"[{art_group['name']}]({art_group['web_url']})"
+            art_link = _mlink(art_group['name'], art_group['web_url'])
             cells = []
             for piid in all_pis:
                 epics = pi_data.get(piid, [])
@@ -2077,7 +2080,7 @@ class ReportsMixin:
             if art_name != current_art:
                 md.append(f"#### {art_name}")
                 current_art = art_name
-            md.append(f"- [**{team_name} — Team Backlog**]({wiki_url})  {summary}")
+            md.append(f'- <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{team_name} — Team Backlog</strong></a>  {summary}')
 
         md.append("")
         self.upload_to_wiki(root_group, f"{self._wiki_t3}/Team Backlogs", "\n".join(md))
@@ -2126,7 +2129,7 @@ class ReportsMixin:
         md.append(
             f"**{breadcrumb}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[**View Project**]({backlog_project['web_url']})"
+            f'<a href="{backlog_project["web_url"]}" target="_blank" rel="noopener noreferrer"><strong>View Project</strong></a>'
         )
         md.append("")
         md.append("## Summary")
@@ -2154,7 +2157,7 @@ class ReportsMixin:
 
                 md.append(
                     f"<details><summary>🛠️ "
-                    f"<a href=\"{epic_url}\">{epic_title}</a>"
+                    f'<a href="{epic_url}" target="_blank" rel="noopener noreferrer">{epic_title}</a>'
                     f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
                 )
                 md.append("")
@@ -2166,7 +2169,7 @@ class ReportsMixin:
                     w     = issue.get("weight") or "—"
                     state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                     md.append(
-                        f"| [{issue['title']}]({issue['web_url']}) "
+                        f"| {_mlink(issue['title'], issue['web_url'])} "
                         f"| {state} | {w} pt |"
                     )
                 md.append("")
@@ -2182,7 +2185,7 @@ class ReportsMixin:
                 w     = issue.get("weight") or "—"
                 state = "✅ Closed" if issue["state"] == "closed" else "🔵 Open"
                 md.append(
-                    f"| [{issue['title']}]({issue['web_url']}) "
+                    f"| {_mlink(issue['title'], issue['web_url'])} "
                     f"| {state} | {w} pt |"
                 )
             md.append("")
@@ -2240,7 +2243,7 @@ class ReportsMixin:
                 current_vs = vs_name
             risk_str    = f" · ⚠️ {at_risk} at risk" if at_risk else ""
             blocked_str = f" · 🔒 {blocked} blocked" if blocked else ""
-            md.append(f"- [**{art_name} — Feature Status**]({wiki_url})  · {total_f} features{risk_str}{blocked_str}")
+            md.append(f'- <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{art_name} — Feature Status</strong></a>  · {total_f} features{risk_str}{blocked_str}')
 
         md.append("")
         # (flat index page removed — navigation is via the nested wiki tree)
@@ -2264,7 +2267,7 @@ class ReportsMixin:
             for art_name, art_url, total_f, at_risk, blocked in arts:
                 risk_str    = str(at_risk) if at_risk else "—"
                 blocked_str = str(blocked) if blocked else "—"
-                md_vs.append(f"| **{art_name}** | {total_f} | {risk_str} | {blocked_str} | [View →]({art_url}) |")
+                md_vs.append(f"| **{art_name}** | {total_f} | {risk_str} | {blocked_str} | {_mlink('View →', art_url)} |")
             md_vs.append("")
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
@@ -2280,8 +2283,8 @@ class ReportsMixin:
         md_top.append("")
         for vs_name, arts in vs_arts.items():
             vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t3}/ART Feature Status/{vs_name}')}"
-            art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
-            md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
+            art_links = "  ·  ".join(_mlink(art_name, art_url) for art_name, art_url, *_ in arts)
+            md_top.append(f'- 🔷 <a href="{vs_url}" target="_blank" rel="noopener noreferrer"><strong>{vs_name}</strong></a>  —  {art_links}')
         md_top.append("")
         self.upload_to_wiki(root_group, f"{self._wiki_t3}/ART Feature Status", "\n".join(md_top))
         print(f"    → Wiki: {self._wiki_t3}/ART Feature Status")
@@ -2295,7 +2298,7 @@ class ReportsMixin:
         md.append(
             f"**{vs_group['name']} / {art_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View ART Group]({art_group['web_url']})"
+            f"{_mlink('View ART Group', art_group['web_url'])}"
         )
         md.append("")
 
@@ -2338,7 +2341,7 @@ class ReportsMixin:
                 weight_str = f"{planned}pt → {actual}pt"
                 reason     = _item_risk_reasons(f)
                 md.append(
-                    f"| [{title}]({url}) | {piid} | {state} "
+                    f"| {_mlink(title, url)} | {piid} | {state} "
                     f"| {pct_done}% | {pi_str} | {weight_str} | {status} | {reason} |"
                 )
                 total_f += 1
@@ -2409,7 +2412,7 @@ class ReportsMixin:
             if under_cnt:
                 flags.append(f"🔵 {under_cnt} under-capacity")
             flag_str = "  · " + "  · ".join(flags) if flags else ""
-            md.append(f"- [**{art_name} — Capacity Balance**]({wiki_url}){flag_str}")
+            md.append(f'- <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{art_name} — Capacity Balance</strong></a>{flag_str}')
 
         md.append("")
         # (flat legacy index removed — top-level landing page is the T2 page below)
@@ -2433,7 +2436,7 @@ class ReportsMixin:
             for art_name, art_url, over_cnt, under_cnt in arts:
                 over_str  = f"🔴 {over_cnt}" if over_cnt else "—"
                 under_str = f"🔵 {under_cnt}" if under_cnt else "—"
-                md_vs.append(f"| **{art_name}** | {over_str} | {under_str} | [View →]({art_url}) |")
+                md_vs.append(f"| **{art_name}** | {over_str} | {under_str} | {_mlink('View →', art_url)} |")
             md_vs.append("")
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
@@ -2448,8 +2451,8 @@ class ReportsMixin:
         md_top.append("")
         for vs_name, arts in vs_arts.items():
             vs_url    = f"{root_group.web_url}/-/wikis/{_wiki_slug(f'{self._wiki_t2}/ART Capacity Balance/{vs_name}')}"
-            art_links = "  ·  ".join(f"[{art_name}]({art_url})" for art_name, art_url, *_ in arts)
-            md_top.append(f"- 🔷 [**{vs_name}**]({vs_url})  —  {art_links}")
+            art_links = "  ·  ".join(_mlink(art_name, art_url) for art_name, art_url, *_ in arts)
+            md_top.append(f'- 🔷 <a href="{vs_url}" target="_blank" rel="noopener noreferrer"><strong>{vs_name}</strong></a>  —  {art_links}')
         md_top.append("")
         self.upload_to_wiki(root_group, f"{self._wiki_t2}/ART Capacity Balance", "\n".join(md_top))
         print(f"    → Wiki: {self._wiki_t2}/ART Capacity Balance")
@@ -2468,7 +2471,7 @@ class ReportsMixin:
         md.append(
             f"**{vs_group['name']} / {art_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View ART Group]({art_group['web_url']})"
+            f"{_mlink('View ART Group', art_group['web_url'])}"
         )
         md.append("")
 
@@ -2513,7 +2516,7 @@ class ReportsMixin:
                 else:
                     status = "—"
 
-                team_link = f'<a href="{team_group["web_url"]}">{team_group["name"]}</a>'
+                team_link = f'<a href="{team_group["web_url"]}" target="_blank" rel="noopener noreferrer">{team_group["name"]}</a>'
                 md.append(
                     f"| {team_link} | {planned} pt | {actual} pt "
                     f"| {delta_str} | {load_pct}% | {status} |"
@@ -2624,7 +2627,7 @@ class ReportsMixin:
             counts      = "  · " + "  · ".join(parts) if parts else ""
             risk_str    = f"  · ⚠️ {at_risk} at risk" if at_risk else ""
             blocked_str = f"  · 🔒 {blocked} blocked" if blocked else ""
-            md.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
+            md.append(f'- 🔷 <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{vs_name} — Capability Dashboard</strong></a>{counts}{risk_str}{blocked_str}')
 
         md.append("")
         # (flat legacy index removed — top-level landing page is the T3 page below)
@@ -2650,7 +2653,7 @@ class ReportsMixin:
             counts      = "  ·  " + "  ·  ".join(parts) if parts else ""
             risk_str    = f"  ·  ⚠️ {at_risk} at risk" if at_risk else ""
             blocked_str = f"  ·  🔒 {blocked} blocked" if blocked else ""
-            md_top.append(f"- 🔷 [**{vs_name} — Capability Dashboard**]({wiki_url}){counts}{risk_str}{blocked_str}")
+            md_top.append(f'- 🔷 <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{vs_name} — Capability Dashboard</strong></a>{counts}{risk_str}{blocked_str}')
         md_top.append("")
         self.upload_to_wiki(root_group, f"{self._wiki_t3}/VS Capability Dashboard", "\n".join(md_top))
         print(f"    → Wiki: {self._wiki_t3}/VS Capability Dashboard")
@@ -2669,7 +2672,7 @@ class ReportsMixin:
         md.append(
             f"**{vs_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View VS Group]({vs_group['web_url']})"
+            f"{_mlink('View VS Group', vs_group['web_url'])}"
         )
         md.append("")
 
@@ -2706,7 +2709,7 @@ class ReportsMixin:
                 weight_str = f"{item.get('planned_weight', 0)}pt → {item.get('actual_weight', 0)}pt"
                 reason     = _item_risk_reasons(item)
                 rows.append(
-                    f"| [{item['title']}]({item['web_url']}) | {item['state'].capitalize()} "
+                    f"| {_mlink(item['title'], item['web_url'])} | {item['state'].capitalize()} "
                     f"| {item['pct_complete']}% | {pi_str} | {weight_str} | {status} | {reason} |"
                 )
             return rows
@@ -2748,7 +2751,7 @@ class ReportsMixin:
                         status = "✅ On Track"
                     else:
                         status = "⚠️ At Risk"
-                    art_link = f'<a href="{art_url}">{art_name}</a>' if art_url else art_name
+                    art_link = f'<a href="{art_url}" target="_blank" rel="noopener noreferrer">{art_name}</a>' if art_url else art_name
                     md.append(f"| {art_link} | {len(caps)} | {planned} pt | {actual} pt | {delta_str} | {avg_pct}% | {status} |")
                     art_rows.append((art_name, art_url, caps))
                     total_caps += len(caps)
@@ -2791,7 +2794,7 @@ class ReportsMixin:
                         status = "✅ On Track"
                     else:
                         status = "⚠️ At Risk"
-                    art_link = f'<a href="{art_url}">{art_name}</a>' if art_url else art_name
+                    art_link = f'<a href="{art_url}" target="_blank" rel="noopener noreferrer">{art_name}</a>' if art_url else art_name
                     md.append(f"| {art_link} | {len(feats)} | {planned} pt | {actual} pt | {delta_str} | {avg_pct}% | {status} |")
                     art_direct_rows.append((art_name, art_url, feats))
                     total_direct += len(feats)
@@ -2901,7 +2904,7 @@ class ReportsMixin:
         for vs_name, wiki_url, total_deps, critical in index_entries:
             crit_str = f"  · 🔴 {critical} critical" if critical else ""
             clear_str = "  · ✅ No cross-ART blocks" if total_deps == 0 else f"  · {total_deps} cross-ART dependencies"
-            md.append(f"- 🔷 [**{vs_name} — Cross-ART Risk**]({wiki_url}){clear_str}{crit_str}")
+            md.append(f'- 🔷 <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{vs_name} — Cross-ART Risk</strong></a>{clear_str}{crit_str}')
 
         md.append("")
         # (flat legacy index removed — top-level landing page is the T3 page below)
@@ -2959,7 +2962,7 @@ class ReportsMixin:
         md.append(
             f"**{vs_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"[View VS Group]({vs_group['web_url']})"
+            f"{_mlink('View VS Group', vs_group['web_url'])}"
         )
         md.append("")
 
@@ -2993,8 +2996,8 @@ class ReportsMixin:
                 b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
                 bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
 
-                b_link  = f'[{b_icon} {blocked["title"]}]({blocked["web_url"]})'
-                bl_link = f'[{bl_icon} {blocker["title"]}]({blocker["web_url"]})'
+                b_link  = _mlink(f'{b_icon} {blocked["title"]}', blocked["web_url"])
+                bl_link = _mlink(f'{bl_icon} {blocker["title"]}', blocker["web_url"])
 
                 if sev_sort == 0:
                     critical += 1
@@ -4792,7 +4795,7 @@ class ReportsMixin:
         md.append(f"# Portfolio Health Dashboard — {root_group.name}")
         md.append(
             f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{root_group.name}]({root_group.web_url})"
+            f"**Group:** {_mlink(root_group.name, root_group.web_url)}"
         )
         md.append("")
         md.append(
@@ -4845,7 +4848,7 @@ class ReportsMixin:
 
         for row in vs_rows:
             vs      = row["vs"]
-            vs_link = f"[{vs['name']}]({vs['web_url']})"
+            vs_link = _mlink(vs['name'], vs['web_url'])
             md.append(
                 f"| {vs_link} "
                 f"| {row['overall']} "
@@ -5000,7 +5003,7 @@ class ReportsMixin:
         md.append(f"# Epic Lifecycle / Portfolio Kanban — {gn}")
         md.append(
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{gn}]({group.web_url})"
+            f"**Group:** {_mlink(gn, group.web_url)}"
         )
         md.append("")
         md.append(
@@ -5247,7 +5250,7 @@ class ReportsMixin:
         md.append(f"# Flow Metrics — {gn}")
         md.append(
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{gn}]({group.web_url})"
+            f"**Group:** {_mlink(gn, group.web_url)}"
         )
         md.append("")
         md.append("---")
@@ -5449,7 +5452,7 @@ class ReportsMixin:
         scorecard_slug = _wiki_slug(f"{self._wiki_t2}/PI Predictability Scorecard")
         md.append(
             f"Full predictability trend by ART → "
-            f"[PI Predictability Scorecard]({base}/{scorecard_slug})"
+            f"{_mlink('PI Predictability Scorecard', f'{base}/{scorecard_slug}')}"
         )
         md.append("")
 
@@ -5551,7 +5554,7 @@ class ReportsMixin:
         md.append(f"# WSJF Priority Board — {group.name}")
         md.append(
             f"**Report Date:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{group.name}]({group.web_url})"
+            f"**Group:** {_mlink(group.name, group.web_url)}"
         )
         md.append("")
         md.append(
@@ -5590,7 +5593,7 @@ class ReportsMixin:
             for rank, c in enumerate(candidates, 1):
                 epic   = c["epic"]
                 icon   = self.EPIC_TYPE_ICONS.get(c["type"], "🏆")
-                link   = f"[{epic['title']}]({epic['web_url']})"
+                link   = _mlink(epic['title'], epic['web_url'])
                 piid   = c["piid"] or "_backlog_"
                 v_str  = str(c["value"])   if c["value"]   is not None else "—"
                 u_str  = str(c["urgency"]) if c["urgency"] is not None else "—"
@@ -5627,19 +5630,19 @@ class ReportsMixin:
             pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else (ancs or [blocked])
 
             blocker_str  = ", ".join(
-                f"[{b['title']}]({b['web_url']})" if b.get("web_url") else b["title"]
+                _mlink(b['title'], b['web_url']) if b.get("web_url") else b["title"]
                 for b in blockers
             )
             b_type  = blocked.get("type", _t0)
             b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
-            bl_link = (f"[{blocked['title']}]({blocked['web_url']})"
+            bl_link = (_mlink(blocked['title'], blocked['web_url'])
                        if blocked.get("web_url") else blocked["title"])
 
             for pe in pe_candidates:
                 pe_id   = pe.get("id") or pe.get("id_int")
                 pe_bv   = bv_by_id.get(pe_id)
                 pe_url  = pe.get("web_url") or epic_url_by_id.get(pe_id, "")
-                pe_link = f"[{pe['title']}]({pe_url})" if pe_url else pe["title"]
+                pe_link = _mlink(pe['title'], pe_url) if pe_url else pe["title"]
                 pe_type = pe.get("type", _t0)
                 bv_rows.append((pe_id, pe_link, pe_bv, bl_link, f"{b_icon} {b_type}", blocker_str))
                 if pe_id not in seen_pe_bv:
@@ -6045,13 +6048,13 @@ class ReportsMixin:
         base  = f"{self.url}/groups/{group.full_path}/-/wikis"
 
         def _wl(page_title, display=None):
-            return f"[{display or page_title}]({base}/{_wiki_slug(page_title)})"
+            return _mlink(display or page_title, f"{base}/{_wiki_slug(page_title)}")
 
         md = []
         md.append(f"# {gn} — Portfolio Home")
         md.append(
             f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
-            f"**Group:** [{gn}]({group.web_url})"
+            f"**Group:** {_mlink(gn, group.web_url)}"
         )
         md.append("")
         md.append("---")
@@ -6175,17 +6178,17 @@ class ReportsMixin:
         print(f"  ↳ Wiki home page updated for {gn}")
 
         home_url  = f"{self.url}/groups/{group.full_path}/-/wikis/home"
-        _back     = f"[← Portfolio Home]({home_url})"
+        _back     = _mlink("← Portfolio Home", home_url)
         root_name = f"{gn} — Portfolio Home"
 
         # ── Root folder page (in case GitLab surfaces it as blank) ────────── #
         root_folder_md = [
             f"# {root_name}",
-            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** [{gn}]({group.web_url})",
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** {_mlink(gn, group.web_url)}",
             "",
             f"This is the SAFe portfolio wiki for **{gn}**. Reports are organized into four tiers "
             f"by audience and cadence — start with the tier that matches your role, then drill down "
-            f"as needed. Return to the [Portfolio Home]({home_url}) index at any time.",
+            f"as needed. Return to the {_mlink('Portfolio Home', home_url)} index at any time.",
             "",
             "## How to navigate",
             "",
@@ -6195,13 +6198,13 @@ class ReportsMixin:
             "",
             f"| Tier | Audience | Cadence | Purpose |",
             f"|------|----------|---------|---------|",
-            f"| [📊 00 Executive Pulse]({base}/{_wiki_slug(self._wiki_t1)}) "
+            f"| {_mlink('📊 00 Executive Pulse', f'{base}/{_wiki_slug(self._wiki_t1)}')} "
             f"| Executives, Portfolio Managers | Daily | At-a-glance portfolio health |",
-            f"| [🗂️ 01 Program Management]({base}/{_wiki_slug(self._wiki_t2)}) "
+            f"| {_mlink('🗂️ 01 Program Management', f'{base}/{_wiki_slug(self._wiki_t2)}')} "
             f"| Release Train Engineers, PMs | Weekly | Predictability, risk, and prioritisation |",
-            f"| [🔍 02 Operational Detail]({base}/{_wiki_slug(self._wiki_t3)}) "
+            f"| {_mlink('🔍 02 Operational Detail', f'{base}/{_wiki_slug(self._wiki_t3)}')} "
             f"| ART and Team leads | On demand | Root-cause drill-down and hierarchy view |",
-            f"| [🔧 03 Data Quality]({base}/{_wiki_slug(self._wiki_t4)}) "
+            f"| {_mlink('🔧 03 Data Quality', f'{base}/{_wiki_slug(self._wiki_t4)}')} "
             f"| All — fix labeling gaps | As needed | Find and fix missing labels and broken links |",
             "",
         ]
