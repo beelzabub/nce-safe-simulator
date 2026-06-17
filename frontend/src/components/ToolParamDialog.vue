@@ -144,6 +144,7 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
+import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
 const props = defineProps({
   tool:     { type: Object, default: null },
@@ -162,9 +163,12 @@ watch(() => props.tool, tool => {
   groupLocked.value = true
   confirming.value  = false
   if (!tool) { values.value = {}; return }
+  const stored = loadStored(`nce-tool-params:${tool.key}`, {})
   const init = {}
   for (const p of tool.params) {
-    init[p.name] = _initValue(p)
+    init[p.name] = Object.prototype.hasOwnProperty.call(stored, p.name)
+      ? stored[p.name]
+      : _initValue(p)
   }
   values.value = init
 }, { immediate: true })
@@ -257,6 +261,7 @@ function submit() {
 }
 
 function doLaunch() {
+  saveStored(`nce-tool-params:${props.tool.key}`, values.value)
   emit('launch', props.tool, _buildParams())
 }
 </script>
