@@ -292,6 +292,13 @@ def test_resolve_reuse_data_last_skips_incomplete_snapshot(tmp_path, monkeypatch
     assert result is None
 
 
+def test_resolve_reuse_data_last_logs_when_no_complete_snapshot(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _make_data_dir(tmp_path, complete=False)
+    _resolve_reuse_data("last")
+    assert "No complete snapshot found" in capsys.readouterr().out
+
+
 def test_resolve_reuse_data_last_picks_newest_complete(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _make_data_dir(tmp_path, date="20260101", time="090000", complete=True)
