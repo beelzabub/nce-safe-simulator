@@ -488,10 +488,17 @@ def _resolve_reuse_data(value) -> "Path | None":
     if value == "last":
         reports_dir = Path("reports")
         candidates = sorted(
-            (d / "data" for d in reports_dir.glob("*/*/") if (d / "data").is_dir()),
+            (
+                d / "data"
+                for d in reports_dir.glob("*/*/")
+                if (d / "data" / "snapshot.complete").is_file()
+            ),
             reverse=True,
         )
-        return candidates[0] if candidates else None
+        if candidates:
+            return candidates[0]
+        print("No complete snapshot found — fetching fresh data.")
+        return None
     return Path(value)
 
 

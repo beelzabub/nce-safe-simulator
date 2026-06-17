@@ -94,7 +94,7 @@ class TestOrphanIssuesWithData:
         proj    = _project(path="test-group/my-project")
         issue   = _issue(iid=1, title="Task")
         content = _run(_harness(proj, [issue]))
-        assert "[my-project](https://gitlab.com/test-group/my-project)" in content
+        assert '<a href="https://gitlab.com/test-group/my-project" target="_blank">my-project</a>' in content
 
     def test_section_heading_plain_when_no_web_url(self):
         proj            = _project(path="test-group/my-project")
