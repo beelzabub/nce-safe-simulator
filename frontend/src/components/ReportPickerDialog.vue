@@ -69,6 +69,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -76,10 +77,34 @@ const props = defineProps({
 const emit = defineEmits(['launch', 'close'])
 
 const ALL_FORMATS = ['markdown', 'plotly', 'interactive']
+const STORAGE_KEY = 'nce-report-picker'
 
-const selectedFormats = ref([...ALL_FORMATS])
-const selectedKeys    = ref(props.reports.map(r => r.key))
-const useLast         = ref(false)
+function _loadState() {
+  const saved = loadStored(STORAGE_KEY, {})
+  const validKeys = new Set(props.reports.map(r => r.key))
+  return {
+    formats: Array.isArray(saved.formats)
+      ? saved.formats.filter(f => ALL_FORMATS.includes(f))
+      : [...ALL_FORMATS],
+    keys: Array.isArray(saved.keys)
+      ? saved.keys.filter(k => validKeys.has(k))
+      : props.reports.map(r => r.key),
+    useLast: saved.useLast ?? false,
+  }
+}
+
+const _init          = _loadState()
+const selectedFormats = ref(_init.formats)
+const selectedKeys    = ref(_init.keys)
+const useLast         = ref(_init.useLast)
+
+watch([selectedFormats, selectedKeys, useLast], () => {
+  saveStored(STORAGE_KEY, {
+    formats: selectedFormats.value,
+    keys:    selectedKeys.value,
+    useLast: useLast.value,
+  })
+}, { deep: true })
 
 const allSelected = computed(() => selectedKeys.value.length === props.reports.length)
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
@@ -119,8 +144,8 @@ function launch() {
 }
 
 .dialog {
-  background: #161b22;
-  border: 1px solid #30363d;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   width: 520px;
   max-height: 80vh;
@@ -135,15 +160,15 @@ function launch() {
   align-items: center;
   justify-content: space-between;
   padding: 0.85rem 1rem 0.75rem;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.dialog-title { font-size: 0.95rem; font-weight: 600; color: #e6edf3; }
+.dialog-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
 .dialog-close {
   background: none; border: none;
-  color: #6e7681; cursor: pointer; font-size: 1.1rem; line-height: 1;
+  color: var(--text-3); cursor: pointer; font-size: 1.1rem; line-height: 1;
 }
-.dialog-close:hover { color: #e6edf3; }
+.dialog-close:hover { color: var(--text-1); }
 
 /* ── Sections ── */
 .section-label {
@@ -155,7 +180,7 @@ function launch() {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #6e7681;
+  color: var(--text-3);
   flex-shrink: 0;
 }
 .all-toggle {
@@ -163,7 +188,7 @@ function launch() {
   font-weight: 400;
   text-transform: none;
   letter-spacing: 0;
-  color: #8b949e;
+  color: var(--text-2);
 }
 
 /* ── Data source ── */
@@ -172,12 +197,12 @@ function launch() {
   flex-direction: column;
   gap: 0.2rem;
   padding: 0.55rem 1rem 0.6rem;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .data-source-hint {
   font-size: 0.75rem;
-  color: #6e7681;
+  color: var(--text-3);
   padding-left: 1.4rem;
 }
 
@@ -186,7 +211,7 @@ function launch() {
   display: flex;
   gap: 1.25rem;
   padding: 0.3rem 1rem 0.65rem;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -203,7 +228,7 @@ function launch() {
   align-items: baseline;
   gap: 0.5rem;
   cursor: pointer;
-  color: #e6edf3;
+  color: var(--text-1);
   font-size: 0.85rem;
 }
 .check-label input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
@@ -214,9 +239,9 @@ function launch() {
   padding: 0.35rem 0.5rem;
   border-radius: 4px;
 }
-.report-row:hover { background: #1c2128; }
+.report-row:hover { background: var(--surface-alt); }
 .report-key  { font-family: monospace; font-size: 0.82rem; white-space: nowrap; }
-.report-desc { color: #8b949e; font-size: 0.78rem; }
+.report-desc { color: var(--text-2); font-size: 0.78rem; }
 
 /* ── Footer ── */
 .dialog-footer {
@@ -224,28 +249,30 @@ function launch() {
   justify-content: flex-end;
   gap: 0.6rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid #30363d;
+  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 .btn-cancel {
   padding: 6px 16px;
-  background: none;
-  border: 1px solid #30363d;
+  background: transparent;
+  border: 1px solid var(--border);
   border-radius: 5px;
-  color: #8b949e;
+  color: var(--text-2);
   cursor: pointer;
   font-size: 0.85rem;
+  transition: border-color 0.15s, color 0.15s;
 }
-.btn-cancel:hover { border-color: #6e7681; color: #e6edf3; }
+.btn-cancel:hover { border-color: var(--text-2); color: var(--text-1); }
 .btn-launch {
   padding: 6px 16px;
-  background: #2563eb;
+  background: var(--action);
   border: none;
   border-radius: 5px;
   color: #fff;
   cursor: pointer;
   font-size: 0.85rem;
+  transition: background 0.15s;
 }
-.btn-launch:disabled { background: #1e3a8a; color: #60a5fa; cursor: not-allowed; }
-.btn-launch:not(:disabled):hover { background: #1d4ed8; }
+.btn-launch:disabled { background: var(--action-off); color: var(--action-off-text); cursor: not-allowed; }
+.btn-launch:not(:disabled):hover { background: var(--action-hover); }
 </style>
