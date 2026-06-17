@@ -250,3 +250,66 @@ def test_put_config_full_non_dict_returns_400(config_client):
         headers={"Content-Type": "application/json"},
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# _resolve_reuse_data — sentinel file guards
+# ---------------------------------------------------------------------------
+
+from server.app import _resolve_reuse_data
+
+
+def _make_data_dir(base, date="20260101", time="120000", complete=True):
+    """Create a reports/date/time/data/ directory, optionally with sentinel."""
+    d = base / "reports" / date / time / "data"
+    d.mkdir(parents=True)
+    if complete:
+        (d / "snapshot.complete").touch()
+    return d
+
+
+def test_resolve_reuse_data_none_returns_none(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_reuse_data(None) is None
+
+
+def test_resolve_reuse_data_empty_string_returns_none(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_reuse_data("") is None
+
+
+def test_resolve_reuse_data_last_picks_complete_snapshot(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    d = _make_data_dir(tmp_path, complete=True)
+    result = _resolve_reuse_data("last")
+    assert result is not None and result.resolve() == d
+
+
+def test_resolve_reuse_data_last_skips_incomplete_snapshot(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _make_data_dir(tmp_path, complete=False)
+    result = _resolve_reuse_data("last")
+    assert result is None
+
+
+def test_resolve_reuse_data_last_picks_newest_complete(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _make_data_dir(tmp_path, date="20260101", time="090000", complete=True)
+    newer = _make_data_dir(tmp_path, date="20260101", time="120000", complete=True)
+    result = _resolve_reuse_data("last")
+    assert result is not None and result.resolve() == newer
+
+
+def test_resolve_reuse_data_last_skips_incomplete_prefers_older_complete(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    older = _make_data_dir(tmp_path, date="20260101", time="090000", complete=True)
+    _make_data_dir(tmp_path, date="20260101", time="120000", complete=False)
+    result = _resolve_reuse_data("last")
+    assert result is not None and result.resolve() == older
+
+
+def test_resolve_reuse_data_explicit_path_returned_as_is(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = _resolve_reuse_data("reports/20260101/090000/data")
+    from pathlib import Path
+    assert result == Path("reports/20260101/090000/data")
