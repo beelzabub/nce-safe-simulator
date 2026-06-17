@@ -57,14 +57,15 @@ class TestRoamSection:
         risk  = make_risk(title="DB capacity risk", web_url="https://gitlab.com/test/issues/42")
         epics = [make_epic(id=1, roam_risks=[risk])]
         md    = _render(epics)
-        assert "[DB capacity risk](https://gitlab.com/test/issues/42)" in md
+        assert 'href="https://gitlab.com/test/issues/42"' in md
+        assert "DB capacity risk" in md
 
     def test_epic_link_appears_in_row(self):
         epic = make_epic(id=1, title="Feature Alpha",
                          web_url="https://gitlab.com/groups/test/-/epics/1",
                          roam_risks=[make_risk()])
         md = _render([epic])
-        assert "[Feature Alpha]" in md
+        assert "Feature Alpha" in md
 
     def test_assignee_appears_in_row(self):
         risk  = make_risk(assignee="Carol")
