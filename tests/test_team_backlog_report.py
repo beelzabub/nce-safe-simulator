@@ -109,9 +109,17 @@ class TestTeamBacklogWithData:
         assert "Parent Feature" in pages["backlog"]
         assert "Issues by Feature" in pages["backlog"]
 
-    def test_unlinked_issues_section_present(self):
+    def test_feature_details_open_by_default(self):
+        epic   = make_epic(id=100, title="Parent Feature", etype="Feature")
+        issues = [_issue(iid=1, title="Linked Issue", epic_id=100)]
+        h = _harness(issues=issues, epics_by_id={100: epic})
+        pages = _run(h)
+        assert "<details open>" in pages["backlog"]
+
+    def test_unlinked_issues_is_details_element(self):
         issues = [_issue(iid=1, title="Free Issue", epic_id=None)]
         pages = _run(_harness(issues=issues))
+        assert "<details open>" in pages["backlog"]
         assert "Unlinked Issues" in pages["backlog"]
 
     def test_pct_done_calculated_from_weights(self):
@@ -125,3 +133,25 @@ class TestTeamBacklogWithData:
     def test_team_appears_in_index(self):
         pages = _run(_harness())
         assert "Team Alpha" in pages["index"]
+
+    def test_index_uses_table_format(self):
+        pages = _run(_harness())
+        assert "| Team | Issues | % Done | Weight |" in pages["index"]
+
+    def test_index_table_contains_team_stats(self):
+        issues = [
+            _issue(iid=1, state="closed", weight=4),
+            _issue(iid=2, state="opened", weight=4),
+        ]
+        pages = _run(_harness(issues=issues))
+        assert "| 2 | 50% | 8 pt |" in pages["index"]
+
+    def test_vs_heading_links_to_group(self):
+        pages = _run(_harness())
+        assert 'href="https://gitlab.com/test/vs-20"' in pages["index"]
+        assert "VS 01" in pages["index"]
+
+    def test_art_heading_links_to_group(self):
+        pages = _run(_harness())
+        assert 'href="https://gitlab.com/test/art-30"' in pages["index"]
+        assert "ART 01" in pages["index"]

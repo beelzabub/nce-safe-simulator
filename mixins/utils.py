@@ -629,18 +629,53 @@ class UtilitiesMixin:
             query EpicBlockCounts($fullPath: ID!) {
               group(fullPath: $fullPath) {
                 epics {
-                  nodes { webUrl blocked blockedByCount blockingCount }
+                  nodes { id webUrl blocked blockedByCount blockingCount }
                 }
               }
             }
             """,
             variables={"fullPath": group.full_path},
         )
-        epic_blocks = {}
+        epic_blocks_by_url = {}
+        epic_blocks_by_gid = {}
         if gql_data:
-            epic_blocks = {
-                n["webUrl"]: n for n in gql_data["group"]["epics"]["nodes"]
-            }
+            for n in gql_data["group"]["epics"]["nodes"]:
+                epic_blocks_by_url[n["webUrl"]] = n
+                epic_blocks_by_gid[n["id"]]     = n
+
+        # GitLab 17+ blocking set through the work-items UI is NOT reflected in
+        # group.epics.blockedByCount — query WorkItemWidgetLinkedItems separately.
+        wi_blocks_by_gid = {}
+        try:
+            wi_data = self.graphql_query(
+                """
+                query WorkItemBlockStatus($fullPath: ID!) {
+                  group(fullPath: $fullPath) {
+                    workItems(types: [EPIC]) {
+                      nodes {
+                        id
+                        widgets {
+                          ... on WorkItemWidgetLinkedItems {
+                            blocked
+                            blockingCount
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """,
+                variables={"fullPath": group.full_path},
+            )
+            if wi_data and wi_data.get("group", {}).get("workItems"):
+                for node in wi_data["group"]["workItems"]["nodes"]:
+                    blocked = next(
+                        (w.get("blocked", False) for w in node.get("widgets", []) if "blocked" in w),
+                        False,
+                    )
+                    wi_blocks_by_gid[node["id"]] = {"blocked": blocked}
+        except Exception:
+            pass
 
         print("  Fetching issues...")
         issues_by_epic_id  = defaultdict(list)
@@ -681,7 +716,11 @@ class UtilitiesMixin:
 
         print(f"  Processing {len(all_epics)} epics...")
         for epic in all_epics:
-            gql    = epic_blocks.get(epic.web_url, {})
+            gql    = (epic_blocks_by_url.get(epic.web_url)
+                      or epic_blocks_by_gid.get(f"gid://gitlab/Epic/{epic.id}")
+                      or {})
+            wi_gid = f"gid://gitlab/WorkItem/{getattr(epic, 'work_item_id', None)}"
+            wi_blk = wi_blocks_by_gid.get(wi_gid, {})
             issues = issues_by_epic_id.get(epic.id, [])
 
             total_w  = sum(i.weight or 0 for i in issues)
@@ -702,8 +741,8 @@ class UtilitiesMixin:
                 "title":            epic.title,
                 "description":      getattr(epic, 'description', None),
                 "state":            epic.state.capitalize(),
-                "blocked_by_count": gql.get("blockedByCount") or (1 if gql.get("blocked") else 0),
-                "blocks_count":     gql.get("blockingCount", 0),
+                "blocked_by_count": gql.get("blockedByCount") or (1 if (gql.get("blocked") or wi_blk.get("blocked")) else 0),
+                "blocks_count":     gql.get("blockingCount", 0) or wi_blk.get("blockingCount", 0),
                 "web_url":          epic.web_url,
                 "labels":           epic.labels,
                 "parent_id":        getattr(epic, 'parent_id', None),
