@@ -20,22 +20,26 @@ set-vpc:
 diff:
 	cdk diff
 
-## Deploy (or update) the full AWS stack; auto-pushes image on first deploy if ECR repo is empty
+## Deploy (or update) the full AWS stack.
+## Fresh deploy (empty ECR): creates infra with service at 0 tasks, pushes image, then scales up.
+## Normal update (image present): applies CDK changes directly.
 deploy:
-	cdk deploy --require-approval never
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	IMAGE_COUNT=$$(aws ecr list-images --repository-name nce-safe-simulator --region $$REGION --query 'length(imageIds)' --output text) && \
+	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
+	IMAGE_COUNT=$$(aws ecr list-images --repository-name $$APP_NAME --region $$REGION --query 'length(imageIds)' --output text 2>/dev/null || echo "0") && \
 	if [ "$$IMAGE_COUNT" = "0" ]; then \
-	  echo "ECR repo is empty — pushing initial image..." && \
-	  REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	  echo "==> No image in ECR — deploying infra with service scaled to 0..." && \
+	  cdk deploy --require-approval never --context desired_count=0 && \
+	  echo "==> Building and pushing initial image..." && \
 	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
-	  docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
-	  docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	  docker build --platform linux/arm64 -t $$APP_NAME ../ && \
+	  docker tag $$APP_NAME:latest "$$REPO:latest" && \
 	  docker push "$$REPO:latest" && \
-	  aws ecs update-service --cluster nce --service nce-safe-simulator \
-	    --region $$REGION --force-new-deployment --output text --query 'service.serviceArn'; \
-	fi
+	  echo "==> Image ready — scaling service up..."; \
+	fi && \
+	cdk deploy --require-approval never
 
 ## Tear down all AWS resources (EFS and CloudWatch logs are retained)
 destroy:
