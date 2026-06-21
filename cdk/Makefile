@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -67,3 +67,14 @@ ecs-redeploy:
 ## Tail live ECS container logs
 ecs-logs:
 	aws logs tail /ecs/nce-safe-simulator --follow
+
+## Open an interactive shell in the running Fargate task via ECS Exec
+ecs-exec:
+	@CLUSTER=$$(jq -r '.context.cluster_name' cdk.json) && \
+	SERVICE=$$(jq -r '.context.app_name' cdk.json) && \
+	CONTAINER=$$(jq -r '.context.container_name' cdk.json) && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	TASK=$$(aws ecs list-tasks --cluster $$CLUSTER --service-name $$SERVICE \
+	  --region $$REGION --query 'taskArns[0]' --output text) && \
+	aws ecs execute-command --cluster $$CLUSTER --task $$TASK \
+	  --container $$CONTAINER --region $$REGION --interactive --command /bin/sh
