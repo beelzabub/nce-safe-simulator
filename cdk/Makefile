@@ -1,0 +1,69 @@
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs
+
+## Install CDK CLI and Python CDK dependencies (run once)
+install:
+	npm install -g aws-cdk
+	pip install -r requirements.txt
+
+## Bootstrap CDK for this AWS account/region (run once per account+region)
+bootstrap:
+	cdk bootstrap
+
+## Discover the VPC from the 'powers-dev' EC2 instance and save it to cdk.json
+set-vpc:
+	@VPC_ID=$$(aws ec2 describe-instances --filters "Name=tag:Name,Values=powers-dev" "Name=instance-state-name,Values=running,stopped" --query 'Reservations[0].Instances[0].VpcId' --output text) && \
+	[ "$$VPC_ID" != "None" ] && [ -n "$$VPC_ID" ] || { echo "ERROR: no running/stopped EC2 instance named 'powers-dev' found"; exit 1; } && \
+	jq --arg v "$$VPC_ID" '.context.vpc_id = $$v' cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
+	echo "vpc_id set to $$VPC_ID"
+
+## Show what CDK will change without deploying
+diff:
+	cdk diff
+
+## Deploy (or update) the full AWS stack; auto-pushes image on first deploy if ECR repo is empty
+deploy:
+	cdk deploy --require-approval never
+	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	IMAGE_COUNT=$$(aws ecr list-images --repository-name nce-safe-simulator --region $$REGION --query 'length(imageIds)' --output text) && \
+	if [ "$$IMAGE_COUNT" = "0" ]; then \
+	  echo "ECR repo is empty — pushing initial image..." && \
+	  REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
+	  docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
+	  docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	  docker push "$$REPO:latest" && \
+	  aws ecs update-service --cluster nce --service nce-safe-simulator \
+	    --region $$REGION --force-new-deployment --output text --query 'service.serviceArn'; \
+	fi
+
+## Tear down all AWS resources (EFS and CloudWatch logs are retained)
+destroy:
+	cdk destroy --force
+
+## Store config.json in SSM as a SecureString (run once after deploy; re-run to update)
+seed-config:
+	@echo "Storing config.json in SSM as SecureString /nce/config..."
+	aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$(cat ../config.json)"
+	@echo "Done. Run 'make ecs-redeploy' to pick up the new config."
+
+## Build and push :latest to ECR (run after code changes; follow with ecs-redeploy)
+ecr-push:
+	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
+	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
+	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	docker push "$$REPO:latest" && \
+	echo "Pushed $$REPO:latest — run 'make ecs-redeploy' to activate."
+
+## Force a new ECS deployment (picks up a freshly pushed image without a full CDK run)
+ecs-redeploy:
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	aws ecs update-service --cluster nce --service nce-safe-simulator \
+	  --region $$REGION --force-new-deployment --output text --query 'service.serviceArn'
+
+## Tail live ECS container logs
+ecs-logs:
+	aws logs tail /ecs/nce-safe-simulator --follow

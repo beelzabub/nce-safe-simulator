@@ -1,0 +1,36 @@
+{
+  "app": "python app.py",
+  "context": {
+    "vpc_id": "vpc-06c1d6ba7f71a217f",
+
+    "app_name": "nce-safe-simulator",
+    "cluster_name": "nce",
+    "alb_name": "nce-alb",
+    "log_group": "/ecs/nce-safe-simulator",
+    "config_param": "/nce/config",
+
+    "container_name": "nce",
+    "container_port": 80,
+    "image_tag": "latest",
+
+    "task_cpu": 2048,
+    "task_memory_mib": 4096,
+
+    "efs_config_path": "/config",
+    "efs_reports_path": "/reports",
+    "efs_interactive_path": "/interactive",
+    "efs_quarto_path": "/quarto-site",
+
+    "mnt_config": "/mnt/config",
+    "mnt_reports": "/app/reports",
+    "mnt_interactive": "/app/public/interactive",
+    "mnt_quarto": "/app/quarto-site",
+
+    "hc_interval_seconds": 30,
+    "hc_healthy_codes": "200-399",
+    "hc_healthy_count": 2,
+    "hc_unhealthy_count": 3,
+
+    "desired_count": 1
+  }
+}
