@@ -90,6 +90,8 @@ class ServeMixin:
         frontend = Path("frontend")
         if not frontend.exists():
             return False
+        if (frontend / "dist" / "index.html").exists():
+            return True  # already built (e.g. pre-built in Docker image)
         print("\nBuilding frontend (npm run build)...\n")
         proc = subprocess.Popen(
             ["npm", "run", "build"],
