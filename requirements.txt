@@ -11,6 +11,7 @@ fastapi
 uvicorn[standard]
 httpx
 websockets
+markdown
 
 pytest
 pytest-mock

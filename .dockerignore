@@ -1,0 +1,12 @@
+.git
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+frontend/node_modules
+public/app
+reports
+logs
+config.json
+.server.pid
