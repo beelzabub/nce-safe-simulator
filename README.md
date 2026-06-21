@@ -779,7 +779,10 @@ The simulator runs as a Fargate service behind an Application Load Balancer. All
 - AWS CLI configured (`aws configure`)
 - Docker (for building the container image)
 - CDK CLI: `npm install -g aws-cdk`
-- SSM Session Manager plugin: [install instructions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) (required for `make ecs-exec`)
+- SSM Session Manager plugin (required for `make ecs-exec`):
+  ```bash
+  sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_arm64/session-manager-plugin.rpm
+  ```
 
 ### Deploy
 
