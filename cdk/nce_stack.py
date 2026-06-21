@@ -1,4 +1,3 @@
-import os
 import aws_cdk as cdk
 from aws_cdk import (
     Stack,
@@ -15,16 +14,40 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
-CONFIG_PARAM_NAME = "/nce/config"
-
 
 class NceStack(Stack):
     def __init__(self, scope: Construct, id: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
+        # ── Context ───────────────────────────────────────────────────────────
+        ctx = self.node.try_get_context
+
+        vpc_id           = ctx("vpc_id")
+        app_name         = ctx("app_name")
+        cluster_name     = ctx("cluster_name")
+        alb_name         = ctx("alb_name")
+        log_group_name   = ctx("log_group")
+        config_param     = ctx("config_param")
+        container_name   = ctx("container_name")
+        container_port   = ctx("container_port")
+        image_tag        = ctx("image_tag")
+        task_cpu         = ctx("task_cpu")
+        task_memory      = ctx("task_memory_mib")
+        efs_config_path      = ctx("efs_config_path")
+        efs_reports_path     = ctx("efs_reports_path")
+        efs_interactive_path = ctx("efs_interactive_path")
+        efs_quarto_path      = ctx("efs_quarto_path")
+        mnt_config       = ctx("mnt_config")
+        mnt_reports      = ctx("mnt_reports")
+        mnt_interactive  = ctx("mnt_interactive")
+        mnt_quarto       = ctx("mnt_quarto")
+        hc_interval      = ctx("hc_interval_seconds")
+        hc_codes         = ctx("hc_healthy_codes")
+        hc_healthy       = ctx("hc_healthy_count")
+        hc_unhealthy     = ctx("hc_unhealthy_count")
+        desired_count    = ctx("desired_count")
+
         # ── VPC ──────────────────────────────────────────────────────────────
-        vpc_id = self.node.try_get_context("vpc_id")
         if vpc_id:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
         else:
@@ -36,7 +59,7 @@ class NceStack(Stack):
         repo = ecr.Repository(
             self,
             "Repo",
-            repository_name="nce-safe-simulator",
+            repository_name=app_name,
             removal_policy=RemovalPolicy.DESTROY,
             empty_on_delete=True,
         )
@@ -57,151 +80,95 @@ class NceStack(Stack):
             throughput_mode=efs.ThroughputMode.BURSTING,
             encrypted=True,
             removal_policy=RemovalPolicy.DESTROY,
-            file_system_name="nce-safe-simulator",
+            file_system_name=app_name,
         )
 
-        config_ap = filesystem.add_access_point(
-            "ConfigAp",
-            path="/config",
-            create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
-            posix_user=efs.PosixUser(uid="0", gid="0"),
-        )
-        reports_ap = filesystem.add_access_point(
-            "ReportsAp",
-            path="/reports",
-            create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
-            posix_user=efs.PosixUser(uid="0", gid="0"),
-        )
-        interactive_ap = filesystem.add_access_point(
-            "InteractiveAp",
-            path="/interactive",
-            create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
-            posix_user=efs.PosixUser(uid="0", gid="0"),
-        )
-        quarto_site_ap = filesystem.add_access_point(
-            "QuartoSiteAp",
-            path="/quarto-site",
-            create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
-            posix_user=efs.PosixUser(uid="0", gid="0"),
-        )
+        def _ap(name, path):
+            return filesystem.add_access_point(
+                name,
+                path=path,
+                create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
+                posix_user=efs.PosixUser(uid="0", gid="0"),
+            )
+
+        config_ap      = _ap("ConfigAp",      efs_config_path)
+        reports_ap     = _ap("ReportsAp",     efs_reports_path)
+        interactive_ap = _ap("InteractiveAp", efs_interactive_path)
+        quarto_site_ap = _ap("QuartoSiteAp",  efs_quarto_path)
 
         # ── CloudWatch logs ───────────────────────────────────────────────────
         log_group = logs.LogGroup(
             self,
             "LogGroup",
-            log_group_name="/ecs/nce-safe-simulator",
+            log_group_name=log_group_name,
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY,
         )
 
         # ── ECS cluster ───────────────────────────────────────────────────────
-        cluster = ecs.Cluster(self, "Cluster", cluster_name="nce", vpc=vpc)
+        cluster = ecs.Cluster(self, "Cluster", cluster_name=cluster_name, vpc=vpc)
 
         # ── Task definition ───────────────────────────────────────────────────
         task_def = ecs.FargateTaskDefinition(
             self,
             "TaskDef",
-            family="nce-safe-simulator",
-            cpu=2048,
-            memory_limit_mib=4096,
+            family=app_name,
+            cpu=task_cpu,
+            memory_limit_mib=task_memory,
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.ARM64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
             ),
         )
 
-        # Grant task role permission to read the SecureString config parameter
         task_def.task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
                 resources=[
-                    f"arn:aws:ssm:{self.region}:{self.account}:parameter{CONFIG_PARAM_NAME}"
+                    f"arn:aws:ssm:{self.region}:{self.account}:parameter{config_param}"
                 ],
             )
         )
 
-        task_def.add_volume(
-            name="nce-config",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=filesystem.file_system_id,
-                transit_encryption="ENABLED",
-                authorization_config=ecs.AuthorizationConfig(
-                    access_point_id=config_ap.access_point_id,
-                    iam="ENABLED",
+        def _vol(vol_name, access_point):
+            task_def.add_volume(
+                name=vol_name,
+                efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                    file_system_id=filesystem.file_system_id,
+                    transit_encryption="ENABLED",
+                    authorization_config=ecs.AuthorizationConfig(
+                        access_point_id=access_point.access_point_id,
+                        iam="ENABLED",
+                    ),
                 ),
-            ),
-        )
-        task_def.add_volume(
-            name="nce-reports",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=filesystem.file_system_id,
-                transit_encryption="ENABLED",
-                authorization_config=ecs.AuthorizationConfig(
-                    access_point_id=reports_ap.access_point_id,
-                    iam="ENABLED",
-                ),
-            ),
-        )
-        task_def.add_volume(
-            name="nce-interactive",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=filesystem.file_system_id,
-                transit_encryption="ENABLED",
-                authorization_config=ecs.AuthorizationConfig(
-                    access_point_id=interactive_ap.access_point_id,
-                    iam="ENABLED",
-                ),
-            ),
-        )
-        task_def.add_volume(
-            name="nce-quarto-site",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=filesystem.file_system_id,
-                transit_encryption="ENABLED",
-                authorization_config=ecs.AuthorizationConfig(
-                    access_point_id=quarto_site_ap.access_point_id,
-                    iam="ENABLED",
-                ),
-            ),
-        )
+            )
+
+        _vol("nce-config",      config_ap)
+        _vol("nce-reports",     reports_ap)
+        _vol("nce-interactive", interactive_ap)
+        _vol("nce-quarto-site", quarto_site_ap)
 
         container = task_def.add_container(
-            "nce",
-            container_name="nce",
-            image=ecs.ContainerImage.from_ecr_repository(repo, tag="latest"),
+            container_name,
+            container_name=container_name,
+            image=ecs.ContainerImage.from_ecr_repository(repo, tag=image_tag),
             entry_point=["sh"],
             command=["/app/scripts/entrypoint-ecs.sh"],
             environment={
-                "CONFIG_PARAM": CONFIG_PARAM_NAME,
+                "CONFIG_PARAM": config_param,
                 "AWS_DEFAULT_REGION": self.region,
             },
-            port_mappings=[ecs.PortMapping(container_port=80)],
+            port_mappings=[ecs.PortMapping(container_port=container_port)],
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="ecs",
                 log_group=log_group,
             ),
         )
         container.add_mount_points(
-            ecs.MountPoint(
-                container_path="/mnt/config",
-                read_only=False,
-                source_volume="nce-config",
-            ),
-            ecs.MountPoint(
-                container_path="/app/reports",
-                read_only=False,
-                source_volume="nce-reports",
-            ),
-            ecs.MountPoint(
-                container_path="/app/public/interactive",
-                read_only=False,
-                source_volume="nce-interactive",
-            ),
-            ecs.MountPoint(
-                container_path="/app/quarto-site",
-                read_only=False,
-                source_volume="nce-quarto-site",
-            ),
+            ecs.MountPoint(container_path=mnt_config,      read_only=False, source_volume="nce-config"),
+            ecs.MountPoint(container_path=mnt_reports,     read_only=False, source_volume="nce-reports"),
+            ecs.MountPoint(container_path=mnt_interactive, read_only=False, source_volume="nce-interactive"),
+            ecs.MountPoint(container_path=mnt_quarto,      read_only=False, source_volume="nce-quarto-site"),
         )
 
         # ── ALB + Fargate service ─────────────────────────────────────────────
@@ -209,29 +176,27 @@ class NceStack(Stack):
             self,
             "Service",
             cluster=cluster,
-            service_name="nce-safe-simulator",
+            service_name=app_name,
             task_definition=task_def,
-            load_balancer_name="nce-alb",
-            desired_count=1,
+            load_balancer_name=alb_name,
+            desired_count=desired_count,
             public_load_balancer=True,
             assign_public_ip=True,
             task_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             # Single-task service: allow 0 tasks during deployment (rolling stop-start)
             min_healthy_percent=0,
             max_healthy_percent=100,
-            # Fail fast and roll back if the new task can't start
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
         )
 
         service.target_group.configure_health_check(
             path="/",
-            healthy_http_codes="200-399",
-            interval=Duration.seconds(30),
-            healthy_threshold_count=2,
-            unhealthy_threshold_count=3,
+            healthy_http_codes=hc_codes,
+            interval=Duration.seconds(hc_interval),
+            healthy_threshold_count=hc_healthy,
+            unhealthy_threshold_count=hc_unhealthy,
         )
 
-        # Allow Fargate tasks to reach EFS (NFS port 2049)
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
 
@@ -257,6 +222,6 @@ class NceStack(Stack):
         CfnOutput(
             self,
             "LogTail",
-            value=f"aws logs tail /ecs/nce-safe-simulator --follow --region {self.region}",
+            value=f"aws logs tail {log_group_name} --follow --region {self.region}",
             description="Command to follow container logs",
         )
