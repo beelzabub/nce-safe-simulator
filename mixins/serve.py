@@ -150,10 +150,10 @@ class ServeMixin:
         return ok
 
     def _restore_data_layer(self) -> int:
-        """Copy quarto-data/*.json → public/data/ after Quarto has cleaned public/.
+        """Copy quarto-data/*.json → quarto-site/data/ for browser availability.
         Returns the number of files copied."""
         src = Path("quarto-data")
-        dst = Path("public/data")
+        dst = Path("quarto-site/data")
         if not src.exists():
             return 0
         dst.mkdir(parents=True, exist_ok=True)
@@ -166,10 +166,9 @@ class ServeMixin:
     def _site_build_all(self) -> Tuple[bool, bool]:
         """Run static, restore data layer, then interactive. Returns (marimo_ok, quarto_ok).
 
-        Quarto cleans all of public/ before rendering, which wipes both
-        public/interactive/ and public/data/.  Sequence:
-          1. quarto render  — cleans + builds public/
-          2. copy data/*.json → public/data/  (Quarto wiped it)
+        Sequence:
+          1. quarto render --no-clean  — builds quarto-site/
+          2. copy quarto-data/*.json → quarto-site/data/
           3. build_interactive.py  — writes public/interactive/
         """
         print("\nBuilding all (static → data → interactive)...\n")
@@ -178,7 +177,7 @@ class ServeMixin:
         quarto_ok = self._site_build_static()
 
         n = self._restore_data_layer()
-        print(f"\n  Restored {n} JSON file(s) to public/data/")
+        print(f"\n  Restored {n} JSON file(s) to quarto-site/data/")
 
         marimo_ok = self._site_build_interactive()
 
