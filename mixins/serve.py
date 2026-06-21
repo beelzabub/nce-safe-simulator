@@ -136,7 +136,7 @@ class ServeMixin:
 
         print("\nBuilding static (quarto render)...\n")
         proc = subprocess.Popen(
-            ["quarto", "render"],
+            ["quarto", "render", "--no-clean"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

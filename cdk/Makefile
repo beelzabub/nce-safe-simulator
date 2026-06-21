@@ -20,9 +20,22 @@ set-vpc:
 diff:
 	cdk diff
 
-## Deploy (or update) the full AWS stack — builds image, pushes to ECR, provisions infra
+## Deploy (or update) the full AWS stack; auto-pushes image on first deploy if ECR repo is empty
 deploy:
 	cdk deploy --require-approval never
+	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	IMAGE_COUNT=$$(aws ecr list-images --repository-name nce-safe-simulator --region $$REGION --query 'length(imageIds)' --output text) && \
+	if [ "$$IMAGE_COUNT" = "0" ]; then \
+	  echo "ECR repo is empty — pushing initial image..." && \
+	  REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
+	  docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
+	  docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	  docker push "$$REPO:latest" && \
+	  aws ecs update-service --cluster nce --service nce-safe-simulator \
+	    --region $$REGION --force-new-deployment --output text --query 'service.serviceArn'; \
+	fi
 
 ## Tear down all AWS resources (EFS and CloudWatch logs are retained)
 destroy:
@@ -37,7 +50,7 @@ seed-config:
 ## Build and push :latest to ECR (run after code changes; follow with ecs-redeploy)
 ecr-push:
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
-	REGION=$$(aws configure get region) && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
 	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
 	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
@@ -47,8 +60,9 @@ ecr-push:
 
 ## Force a new ECS deployment (picks up a freshly pushed image without a full CDK run)
 ecs-redeploy:
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	aws ecs update-service --cluster nce --service nce-safe-simulator \
-	  --force-new-deployment --output text --query 'service.serviceArn'
+	  --region $$REGION --force-new-deployment --output text --query 'service.serviceArn'
 
 ## Tail live ECS container logs
 ecs-logs:
