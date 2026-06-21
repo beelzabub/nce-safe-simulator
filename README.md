@@ -770,6 +770,53 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ---
 
+## AWS Deployment
+
+The simulator runs as a Fargate service behind an Application Load Balancer. All infrastructure is defined in `cdk/` and deployed with CDK. Configuration (the GitLab token and project settings) is stored as a SecureString in SSM and persisted to EFS on first boot.
+
+### Prerequisites
+
+- AWS CLI configured (`aws configure`)
+- Docker (for building the container image)
+- CDK CLI: `npm install -g aws-cdk`
+- SSM Session Manager plugin: [install instructions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) (required for `make ecs-exec`)
+
+### Deploy
+
+```bash
+cd cdk
+make install       # install CDK CLI + Python deps (once)
+make bootstrap     # bootstrap CDK for the account/region (once)
+make set-vpc       # auto-detect VPC from the powers-dev EC2 instance
+make deploy        # deploy stack; pushes initial Docker image if ECR is empty
+make seed-config   # store config.json in SSM (once after deploy; re-run to update)
+```
+
+### Day-to-day operations
+
+| Command | Description |
+|---|---|
+| `make ecr-push` | Build and push a new `:latest` image to ECR |
+| `make ecs-redeploy` | Force a new deployment to pick up a freshly pushed image |
+| `make ecs-logs` | Tail live container logs |
+| `make ecs-exec` | Open an interactive shell in the running task |
+| `make diff` | Preview CDK changes before deploying |
+| `make destroy` | Tear down all AWS resources |
+
+### Debugging with ECS Exec
+
+`make ecs-exec` opens a `/bin/sh` shell inside the running Fargate task via an SSM tunnel — no inbound ports required. Use it to inspect EFS mount contents, check environment variables, or diagnose entrypoint failures:
+
+```bash
+make ecs-exec
+# → sh-5.2# ls /app/reports
+# → sh-5.2# cat /mnt/config/config.json
+```
+
+Requires the SSM Session Manager plugin on the local machine and `enable_execute_command=True` on the service (already set in the CDK stack).
+
+---
+
 ## Contributing
 
 Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/saic-study-group/nce-safe-simulator/-/issues](https://gitlab.com/saic-study-group/nce-safe-simulator/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
