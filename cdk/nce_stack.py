@@ -6,7 +6,7 @@ from aws_cdk import (
     RemovalPolicy,
     CfnOutput,
     aws_ec2 as ec2,
-    aws_ecr_assets as ecr_assets,
+    aws_ecr as ecr,
     aws_efs as efs,
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
@@ -30,14 +30,15 @@ class NceStack(Stack):
         else:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
 
-        # ── Docker image ──────────────────────────────────────────────────────
-        # Built from project root and pushed to CDK-managed ECR on each deploy.
-        # Host is ARM64 (Graviton); Fargate task matches.
-        image_asset = ecr_assets.DockerImageAsset(
+        # ── ECR repository ────────────────────────────────────────────────────
+        # Image is built and pushed externally via 'make ecr-push'.
+        # ECS always pulls :latest; use 'make ecs-redeploy' to pick up a new image.
+        repo = ecr.Repository(
             self,
-            "Image",
-            directory=PROJECT_ROOT,
-            platform=ecr_assets.Platform.LINUX_ARM64,
+            "Repo",
+            repository_name="nce-safe-simulator",
+            removal_policy=RemovalPolicy.DESTROY,
+            empty_on_delete=True,
         )
 
         # ── SSM: config seed permission ───────────────────────────────────────
@@ -150,7 +151,7 @@ class NceStack(Stack):
         container = task_def.add_container(
             "nce",
             container_name="nce",
-            image=ecs.ContainerImage.from_docker_image_asset(image_asset),
+            image=ecs.ContainerImage.from_ecr_repository(repo, tag="latest"),
             entry_point=["sh"],
             command=["/app/scripts/entrypoint-ecs.sh"],
             environment={
@@ -218,6 +219,12 @@ class NceStack(Stack):
             "AppUrl",
             value=f"http://{service.load_balancer.load_balancer_dns_name}",
             description="NCE Safe Simulator public URL",
+        )
+        CfnOutput(
+            self,
+            "EcrRepo",
+            value=repo.repository_uri,
+            description="ECR repository URI — tag and push :latest, then make ecs-redeploy",
         )
         CfnOutput(
             self,
