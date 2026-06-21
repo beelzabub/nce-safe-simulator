@@ -129,6 +129,17 @@ class NceStack(Stack):
                 ],
             )
         )
+        task_def.task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "ssmmessages:CreateControlChannel",
+                    "ssmmessages:CreateDataChannel",
+                    "ssmmessages:OpenControlChannel",
+                    "ssmmessages:OpenDataChannel",
+                ],
+                resources=["*"],
+            )
+        )
 
         def _vol(vol_name, access_point):
             task_def.add_volume(
@@ -187,6 +198,7 @@ class NceStack(Stack):
             min_healthy_percent=0,
             max_healthy_percent=100,
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
+            enable_execute_command=True,
         )
 
         service.target_group.configure_health_check(
