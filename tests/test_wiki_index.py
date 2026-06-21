@@ -95,7 +95,7 @@ class TestWikiIndexTier3Content:
 
     def test_home_contains_workload_link(self):
         uploaded = _run(ReportsHarness())
-        assert "ART-Team Workload" in uploaded.get("home", "")
+        assert "Program Workload by Group" in uploaded.get("home", "")
 
     def test_home_contains_flow_metrics_link(self):
         uploaded = _run(ReportsHarness())

@@ -64,7 +64,7 @@ def _(pis, mo):
         label="ART / Team",
     )
     mo.vstack([
-        mo.md("## ART-Team Workload"),
+        mo.md("## Program Workload by Group"),
         mo.hstack([pi_selector, group_selector], gap="2rem"),
     ])
     return (group_names, group_selector, pi_ids, pi_selector)

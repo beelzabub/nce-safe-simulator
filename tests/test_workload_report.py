@@ -29,27 +29,27 @@ def _harness(epics=None, groups_by_id=None):
 
 def _run(h):
     h.generate_workload_report()
-    return h._uploaded.get(f"{h._wiki_t3}/ART-Team Workload", "")
+    return h._uploaded.get(f"{h._wiki_t3}/Program Workload by Group", "")
 
 
 class TestWorkloadReportStructure:
     def test_no_upload_when_empty(self):
         h = _harness()
         h.generate_workload_report()
-        assert f"{h._wiki_t3}/ART-Team Workload" not in h._uploaded
+        assert f"{h._wiki_t3}/Program Workload by Group" not in h._uploaded
 
     def test_uploads_to_correct_wiki_page_when_data_present(self):
         epic = make_epic(id=10, etype="Feature", piid="PIID::2026Q1",
                          group_id=30, labels=["Feature", "PIID::2026Q1"])
         h = _harness(epics=[epic])
         h.generate_workload_report()
-        assert f"{h._wiki_t3}/ART-Team Workload" in h._uploaded
+        assert f"{h._wiki_t3}/Program Workload by Group" in h._uploaded
 
     def test_page_title_present(self):
         epic = make_epic(id=10, etype="Feature", piid="PIID::2026Q1",
                          group_id=30, labels=["Feature", "PIID::2026Q1"])
         content = _run(_harness(epics=[epic]))
-        assert "# ART/Team Workload Report" in content
+        assert "# Program Workload by Group" in content
 
     def test_pi_section_heading_present(self):
         epic = make_epic(id=10, etype="Feature", piid="PIID::2026Q1",
