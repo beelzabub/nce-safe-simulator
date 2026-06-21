@@ -20,6 +20,9 @@ def _gid_to_int(gid_str):
 def _mlink(title, url):
     return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
 
+def _tip(icon, label):
+    return f'<span title="{label}">{icon}</span>'
+
 # ---------------------------------------------------------------------------
 # Report registry — each entry describes one runnable report.
 # needs_group: True  → method signature is  method(self, group)
@@ -142,7 +145,7 @@ REPORTS = [
     },
     {
         "key":         "workload",
-        "description": "ART-Team Workload Report — planned vs actual weight per group per PI",
+        "description": "Program Workload by Group — planned vs actual weight per group per PI",
         "method":      "generate_workload_report",
         "needs_group": False,
     },
@@ -185,6 +188,8 @@ _ROAM_ICONS = {
     "roam::resolved": "⚠️ R",
 }
 
+_ACTIVE_ROAM = {"roam::owned", "roam::accepted", "roam::mitigated"}
+
 _TYPE_ICON_LEGEND = [
     "",
     "### Epic Type Icons",
@@ -221,19 +226,21 @@ def _item_risk_reasons(item, today=None):
       🔒 Blocked         — has one or more active blocking relationships
       ⏱️ Behind Schedule — active PI, % done < % PI elapsed
       📅 Past Due        — due_date in the past, not Closed
-      ⚠️ N risk(s)       — has linked ROAM risk issues (Refs #10)
-    Returns "—" when no risk applies.
+      ⚠️ N risk(s)       — has linked active ROAM risk issues (Refs #10)
+    Returns "—" when no risk applies, or when work and PI are both 100% complete.
     """
     if today is None:
         today = date.today()
-    reasons = []
     state    = (item.get("state") or "").lower()
     pct_done = item.get("pct_complete", 0)
     pct_pi   = item.get("pct_through_pi")
     due_date = item.get("due_date")
-    labels   = item.get("labels") or []
     blocked  = (item.get("blocked_by_count") or 0) > 0
 
+    if pct_done >= 100 and pct_pi is not None and pct_pi >= 100:
+        return "—"
+
+    reasons = []
     if blocked:
         reasons.append("🔒 Blocked")
     if pct_pi is not None and 0 < pct_pi < 100 and state != "closed" and pct_done < pct_pi:
@@ -246,9 +253,10 @@ def _item_risk_reasons(item, today=None):
         except (ValueError, TypeError):
             pass
 
-    roam_risks = item.get("roam_risks") or []
-    if roam_risks:
-        reasons.append(f"⚠️ {len(roam_risks)} risk(s)")
+    active_roam = [r for r in (item.get("roam_risks") or [])
+                   if (r.get("roam_status") or "roam::owned") in _ACTIVE_ROAM]
+    if active_roam:
+        reasons.append(f"⚠️ {len(active_roam)} risk(s)")
 
     return " · ".join(reasons) if reasons else "—"
 
@@ -647,7 +655,6 @@ class ReportsMixin:
             "## Quick Links",
             "",
             f"- {_mlink('Work Items', f'{group.web_url}/-/work_items')}",
-            f"- {_mlink('Roadmap', f'{group.web_url}/-/roadmap')}",
             f"- {_mlink('Epic Boards', f'{group.web_url}/-/epics')}",
             "",
         ])
@@ -798,7 +805,7 @@ class ReportsMixin:
                 nonlocal markdown_report
 
                 epic_type = self._epic_type_display(epic.get("labels", []))
-                icon      = self.EPIC_TYPE_ICONS.get(epic_type, "🏆")
+                icon      = _tip(self.EPIC_TYPE_ICONS.get(epic_type, "🏆"), epic_type)
                 children  = epic_hierarchy.get(epic['id'], [])
 
                 blocked    = epic.get('blocked_by_count', 0) > 0
@@ -852,6 +859,7 @@ class ReportsMixin:
 
     def generate_portfolio_summary(self, metrics, group):
         base = f"{group.web_url}/-/epics"
+        label_by_type = {dn: lbl for lbl, dn in zip(self.EPIC_TYPE_LABELS, self.EPIC_TYPE_DISPLAY_NAMES)}
 
         summary = []
         summary.append("## 📊 Portfolio Summary")
@@ -878,10 +886,11 @@ class ReportsMixin:
             risk_flag = " ⚠️" if avg_pi is not None and avg_done < avg_pi else ""
             pi_cell   = f"{avg_pi}%{risk_flag}" if avg_pi is not None else "—"
 
-            icon       = self.EPIC_TYPE_ICONS.get(metric_type, "🏆")
-            url_all    = f"{base}?label_name[]={metric_type}&state=all"
-            url_open   = f"{base}?label_name[]={metric_type}&state=opened"
-            url_closed = f"{base}?label_name[]={metric_type}&state=closed"
+            icon       = _tip(self.EPIC_TYPE_ICONS.get(metric_type, "🏆"), metric_type)
+            lbl        = label_by_type.get(metric_type, metric_type)
+            url_all    = f"{base}?label_name[]={lbl}&state=all"
+            url_open   = f"{base}?label_name[]={lbl}&state=opened"
+            url_closed = f"{base}?label_name[]={lbl}&state=closed"
 
             summary.append(
                 f"| {icon} **{metric_type}** "
@@ -899,7 +908,7 @@ class ReportsMixin:
 
     def generate_workload_report(self):
         group = self._rd_root_obj
-        print("  Generating ART/Team Workload Report...")
+        print("  Generating Program Workload by Group Report...")
 
         metrics   = self._rd_metrics
         all_epics = [e for t in self.EPIC_TYPE_DISPLAY_NAMES for e in metrics.get(t, [])]
@@ -934,7 +943,12 @@ class ReportsMixin:
         )
 
         md = []
-        md.append(f"# ART/Team Workload Report (Group: {group.name})")
+        md.append(f"# Program Workload by Group (Group: {group.name})")
+        md.append(
+            "> **Note:** The Epics count reflects work items directly owned by each group. "
+            "The linked Work Items page includes items from sub-groups, so the count and the link may differ."
+        )
+        md.append("")
         md.append(f"## Report Date: {datetime.today().strftime('%Y-%m-%d')}")
         md.append("")
 
@@ -997,9 +1011,8 @@ class ReportsMixin:
 
                 if grp:
                     wi_url = (
-                        f"{self.url}/groups/{grp['full_path']}/-/epics"
-                        f"?state=opened"
-                        f"&label_name[]={quote(piid, safe='')}"
+                        f"{self.url}/groups/{grp['full_path']}/-/work_items"
+                        f"?type[]=8&label_name[]={quote(piid, safe='')}"
                     )
                     epics_cell = f'<a href="{wi_url}" target="_blank" rel="noopener noreferrer">{len(fs)}</a>'
                 else:
@@ -1038,7 +1051,7 @@ class ReportsMixin:
             "- PIID labels follow the pattern `PIID::YYYYQn` and map to calendar quarters: Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec",
         ] + _LEGEND_CLOSE)
 
-        self.upload_to_wiki(group, f"{self._wiki_t3}/ART-Team Workload", "\n".join(md))
+        self.upload_to_wiki(group, f"{self._wiki_t3}/Program Workload by Group", "\n".join(md))
 
     def list_blocking_epics(self):
         group     = self.get_group_by_name(self.parent_group)
@@ -2072,15 +2085,27 @@ class ReportsMixin:
 
         current_vs  = None
         current_art = None
-        for vs_name, art_name, team_name, wiki_url, summary in index_entries:
+        for vs_name, vs_url, art_name, art_url, team_name, wiki_url, issue_cnt, pct, total_w in index_entries:
             if vs_name != current_vs:
-                md.append(f"### 🔷 {vs_name}")
+                vs_link = f'<a href="{vs_url}" target="_blank" rel="noopener noreferrer">🔷 {vs_name}</a>' if vs_url else f"🔷 {vs_name}"
+                md.append(f"### {vs_link}")
+                md.append("")
                 current_vs  = vs_name
                 current_art = None
             if art_name != current_art:
-                md.append(f"#### {art_name}")
+                art_link = f'<a href="{art_url}" target="_blank" rel="noopener noreferrer">{art_name}</a>' if art_url else art_name
+                md.append(f"#### {art_link}")
+                md.append("")
+                md.append("| Team | Issues | % Done | Weight |")
+                md.append("|------|--------|--------|--------|")
                 current_art = art_name
-            md.append(f'- <a href="{wiki_url}" target="_blank" rel="noopener noreferrer"><strong>{team_name} — Team Backlog</strong></a>  {summary}')
+            team_link = f'<a href="{wiki_url}" target="_blank" rel="noopener noreferrer">{team_name}</a>'
+            if issue_cnt is None:
+                md.append(f"| {team_link} | _(no backlog project)_ | — | — |")
+            else:
+                md.append(f"| {team_link} | {issue_cnt} | {pct}% | {total_w} pt |")
+        if index_entries:
+            md.append("")
 
         md.append("")
         self.upload_to_wiki(root_group, f"{self._wiki_t3}/Team Backlogs", "\n".join(md))
@@ -2106,7 +2131,7 @@ class ReportsMixin:
             ]
             self.upload_to_wiki(team_group_live, wiki_title, "\n".join(md))
             print(f"    → {team_group['full_path']} wiki: {wiki_title}")
-            return (vs_group["name"], art_group["name"], team_group["name"], wiki_url, "_(no backlog project)_")
+            return (vs_group["name"], vs_group.get("web_url", ""), art_group["name"], art_group.get("web_url", ""), team_group["name"], wiki_url, None, None, None)
 
         all_issues = self._rd_issues_by_project.get(backlog_project["path_with_namespace"], [])
 
@@ -2156,7 +2181,7 @@ class ReportsMixin:
                 epic_title = epic_info.get("title", f"Epic {epic_id}") if epic_info else f"Epic {epic_id}"
 
                 md.append(
-                    f"<details><summary>🛠️ "
+                    f"<details open><summary>🛠️ "
                     f'<a href="{epic_url}" target="_blank" rel="noopener noreferrer">{epic_title}</a>'
                     f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
                 )
@@ -2177,7 +2202,7 @@ class ReportsMixin:
                 md.append("")
 
         if unlinked:
-            md.append("## Unlinked Issues (no Feature)")
+            md.append(f"<details open><summary>📋 Unlinked Issues (no Feature) — {len(unlinked)} issue(s)</summary>")
             md.append("")
             md.append("| Issue | State | Weight |")
             md.append("|-------|-------|--------|")
@@ -2189,12 +2214,13 @@ class ReportsMixin:
                     f"| {state} | {w} pt |"
                 )
             md.append("")
+            md.append("</details>")
+            md.append("")
 
         self.upload_to_wiki(team_group_live, wiki_title, "\n".join(md))
         print(f"    → {team_group['full_path']} wiki: {wiki_title}")
 
-        summary = f"· {len(all_issues)} issues · {pct}% done · {total_w} pt total"
-        return (vs_group["name"], art_group["name"], team_group["name"], wiki_url, summary)
+        return (vs_group["name"], vs_group.get("web_url", ""), art_group["name"], art_group.get("web_url", ""), team_group["name"], wiki_url, len(all_issues), pct, total_w)
 
     # ------------------------------------------------------------------
     # ART-level reports
@@ -2265,9 +2291,11 @@ class ReportsMixin:
             md_vs.append("| ART | Features | At Risk | Blocked | Detail |")
             md_vs.append("|-----|----------|---------|---------|--------|")
             for art_name, art_url, total_f, at_risk, blocked in arts:
-                risk_str    = str(at_risk) if at_risk else "—"
-                blocked_str = str(blocked) if blocked else "—"
-                md_vs.append(f"| **{art_name}** | {total_f} | {risk_str} | {blocked_str} | {_mlink('View →', art_url)} |")
+                art_link    = _mlink(f"**{art_name}**", art_url)
+                feat_str    = _mlink(str(total_f), art_url)
+                risk_str    = _mlink(str(at_risk), art_url) if at_risk else "—"
+                blocked_str = _mlink(str(blocked), art_url) if blocked else "—"
+                md_vs.append(f"| {art_link} | {feat_str} | {risk_str} | {blocked_str} | {_mlink('View →', art_url)} |")
             md_vs.append("")
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
@@ -2384,9 +2412,11 @@ class ReportsMixin:
                 art_pi_buckets[art_grp["id"]][piid][gid].append(f)
 
         index_entries = []
+        vs_web_urls: dict = {}
         for vs_group, art_group in self._iter_art_groups():
             if art_group["id"] not in art_pi_buckets:
                 continue
+            vs_web_urls[vs_group["name"]] = vs_group.get("web_url", "")
             entry = self._generate_art_capacity_balance_page(
                 root_group, vs_group, art_group,
                 art_pi_buckets[art_group["id"]], team_hierarchy,
@@ -2425,18 +2455,21 @@ class ReportsMixin:
         # VS-level pages
         for vs_name, arts in vs_arts.items():
             wiki_title = f"{self._wiki_t2}/ART Capacity Balance/{vs_name}"
+            vs_url     = vs_web_urls.get(vs_name, "")
+            vs_link    = _mlink(vs_name, vs_url) if vs_url else vs_name
             md_vs = []
             md_vs.append(f"# ART Capacity Balance — {vs_name}")
-            md_vs.append(f"**Value Stream:** {vs_name}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
+            md_vs.append(f"**Value Stream:** {vs_link}  |  **Report Date:** {datetime.today().strftime('%Y-%m-%d')}")
             md_vs.append("")
             md_vs.append(f"Planned vs actual team capacity by Program Increment for each ART in the **{vs_name}** Value Stream.")
             md_vs.append("")
             md_vs.append("| ART | Over-capacity | Under-capacity | Detail |")
             md_vs.append("|-----|--------------|----------------|--------|")
             for art_name, art_url, over_cnt, under_cnt in arts:
-                over_str  = f"🔴 {over_cnt}" if over_cnt else "—"
-                under_str = f"🔵 {under_cnt}" if under_cnt else "—"
-                md_vs.append(f"| **{art_name}** | {over_str} | {under_str} | {_mlink('View →', art_url)} |")
+                art_link  = _mlink(f"**{art_name}**", art_url)
+                over_str  = _mlink(f"🔴 {over_cnt}", art_url) if over_cnt else "—"
+                under_str = _mlink(f"🔵 {under_cnt}", art_url) if under_cnt else "—"
+                md_vs.append(f"| {art_link} | {over_str} | {under_str} | {_mlink('View →', art_url)} |")
             md_vs.append("")
             self.upload_to_wiki(root_group, wiki_title, "\n".join(md_vs))
             print(f"    → Wiki: {wiki_title}")
@@ -2466,12 +2499,16 @@ class ReportsMixin:
             key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
         )
 
+        feature_status_title = f"{self._wiki_t3}/ART Feature Status/{vs_group['name']}/{art_group['name']}"
+        feature_status_url   = f"{root_group.web_url}/-/wikis/{_wiki_slug(feature_status_title)}"
+
         md = []
         md.append(f"# ART Capacity Balance — {art_group['name']}")
         md.append(
             f"**{vs_group['name']} / {art_group['name']}**  |  "
             f"**Report Date:** {datetime.today().strftime('%Y-%m-%d')}  |  "
-            f"{_mlink('View ART Group', art_group['web_url'])}"
+            f"{_mlink('View ART Group', art_group['web_url'])}  |  "
+            f"{_mlink('Feature Status →', feature_status_url)}"
         )
         md.append("")
 
@@ -2479,14 +2516,19 @@ class ReportsMixin:
         total_under = 0
 
         for piid in sorted_pis:
-            team_buckets = pi_buckets[piid]
-            pct_pi       = self._pct_through_pi(piid)
-            start, end   = self._pi_dates_from_label(piid)
-            date_range   = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
+            team_buckets  = pi_buckets[piid]
+            pct_pi        = self._pct_through_pi(piid)
+            start, end    = self._pi_dates_from_label(piid)
+            date_range    = f"_{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}_" if start else ""
+            pi_board_url  = (
+                f"{art_group['web_url']}/-/epics"
+                f"?label_name[]={quote(piid, safe='')}&state=all"
+            )
 
             md.append(f"## {piid}")
-            if date_range:
-                md.append(date_range)
+            meta_parts = [date_range] if date_range else []
+            meta_parts.append(_mlink("View Features →", pi_board_url))
+            md.append("  |  ".join(meta_parts))
             md.append("")
             md.append("| Team | Planned | Actual | Δ | Load% | Status |")
             md.append("|------|---------|--------|---|-------|--------|")
@@ -4555,8 +4597,8 @@ class ReportsMixin:
                 epics_url = ""
                 if grp and grp.get("full_path"):
                     epics_url = (
-                        f"{self.url}/groups/{grp['full_path']}/-/epics"
-                        f"?state=opened&label_name[]={quote(piid, safe='')}"
+                        f"{self.url}/groups/{grp['full_path']}/-/work_items"
+                        f"?type[]=8&label_name[]={quote(piid, safe='')}"
                     )
 
                 groups_out.append({
@@ -5103,14 +5145,13 @@ class ReportsMixin:
             md.append("")
             md.append(f"_{guidance}_")
             md.append("")
-            md.append("| Epic | Type | Age | PI | Group | Link |")
-            md.append("|------|------|-----|----|-------|------|")
+            md.append("| Epic | Type | Age | PI | Group |")
+            md.append("|------|------|-----|----|-------|")
             for e in sorted(stuck, key=lambda x: _age_days(x) or 0, reverse=True):
                 age = _age_days(e) or 0
                 md.append(
-                    f"| {e['title'][:50]} | {e.get('type','?')} | **{age}d** "
-                    f"| {_pi(e)} | {_group_name(e)} "
-                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
+                    f"| {_mlink(e['title'][:50], e['web_url'])} | {e.get('type','?')} | **{age}d** "
+                    f"| {_pi(e)} | {_group_name(e)} |"
                 )
             md.append("")
             md.append("---")
@@ -5145,15 +5186,14 @@ class ReportsMixin:
                 md.append("")
                 continue
             thresh = STUCK_THRESHOLDS.get(key)
-            md.append("| Epic | Type | Age | PI | Group | Link |")
-            md.append("|------|------|-----|----|-------|------|")
+            md.append("| Epic | Type | Age | PI | Group |")
+            md.append("|------|------|-----|----|-------|")
             for e in sorted(epics, key=lambda x: _age_days(x) or 0, reverse=True):
                 age     = _age_days(e)
                 age_str = f"**{age}d** ⚠️" if (thresh and age and age > thresh) else (f"{age}d" if age else "—")
                 md.append(
-                    f"| {e['title'][:50]} | {e.get('type','?')} | {age_str} "
-                    f"| {_pi(e)} | {_group_name(e)} "
-                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
+                    f"| {_mlink(e['title'][:50], e['web_url'])} | {e.get('type','?')} | {age_str} "
+                    f"| {_pi(e)} | {_group_name(e)} |"
                 )
             md.append("")
 
@@ -5165,14 +5205,13 @@ class ReportsMixin:
                 "Apply a lifecycle label or use `set-lifecycle-labels` to assign in bulk._"
             )
             md.append("")
-            md.append("| Epic | Type | Age | PI | Group | Link |")
-            md.append("|------|------|-----|----|-------|------|")
+            md.append("| Epic | Type | Age | PI | Group |")
+            md.append("|------|------|-----|----|-------|")
             for e in sorted(unlab, key=lambda x: _age_days(x) or 0, reverse=True):
                 age = _age_days(e)
                 md.append(
-                    f"| {e['title'][:50]} | {e.get('type','?')} | {age or '—'} "
-                    f"| {_pi(e)} | {_group_name(e)} "
-                    f"| <a href=\"{e['web_url']}\" target=\"_blank\">→</a> |"
+                    f"| {_mlink(e['title'][:50], e['web_url'])} | {e.get('type','?')} | {age or '—'} "
+                    f"| {_pi(e)} | {_group_name(e)} |"
                 )
             md.append("")
 
@@ -5275,7 +5314,7 @@ class ReportsMixin:
             counts = {t: sum(1 for e in pi_closed if e["type"] == t) for t in _dn[1:]}
             vel_rows.append((pi, counts))
 
-        md.append("| PI | " + " | ".join(f"{t}s" for t in _dn[1:]) + " | Total Delivered |")
+        md.append("| PI | " + " | ".join(f"{t[:-1]}ies" if t.endswith("y") else f"{t}s" for t in _dn[1:]) + " | Total Delivered |")
         md.append("|----|" + "----------|" * len(_dn[1:]) + "-----------------|")
         for pi, counts in vel_rows:
             cells = " | ".join(str(counts[t]) for t in _dn[1:])
@@ -6134,7 +6173,7 @@ class ReportsMixin:
             f"| Collapsible Epic → Capability/Feature hierarchy with % complete and PI progress |"
         )
         md.append(
-            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
+            f"| {_wl(f'{self._wiki_t3}/Program Workload by Group', 'Program Workload by Group')} "
             f"| Per-PI planned vs actual weight per group with on-track / at-risk flags |"
         )
         md.append(
@@ -6382,7 +6421,7 @@ class ReportsMixin:
             f"| Issues grouped by Feature per Team — story-point progress and open/closed count |",
             f"| {_wl(f'{self._wiki_t3}/SAFe Portfolio Hierarchy', 'SAFe Portfolio Hierarchy')} "
             f"| Full Epic → Capability → Feature hierarchy with % complete and PI labels |",
-            f"| {_wl(f'{self._wiki_t3}/ART-Team Workload', 'ART-Team Workload')} "
+            f"| {_wl(f'{self._wiki_t3}/Program Workload by Group', 'Program Workload by Group')} "
             f"| Planned vs actual weight per group per PI — on-track / at-risk flags |",
             f"| {_wl(f'{self._wiki_t3}/Flow Metrics', 'Flow Metrics')} "
             f"| SAFe flow metrics: velocity, WIP load, work type distribution, and cycle time |",

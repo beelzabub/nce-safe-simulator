@@ -9,7 +9,13 @@
         </div>
         <div class="sidebar-footer">
           <a href="/" target="_blank" rel="noopener" class="reports-link">
-            Reports&thinsp;↗
+            Quarto&thinsp;↗
+          </a>
+          <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
+            Wiki&thinsp;↗
+          </a>
+          <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="reports-link">
+            GitLab&thinsp;↗
           </a>
         </div>
       </aside>
@@ -39,11 +45,21 @@ import { useJobs }   from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
 
-const showStatus = ref(false)
-const showConfig = ref(false)
-const showHelp   = ref(false)
+const showStatus    = ref(false)
+const showConfig    = ref(false)
+const showHelp      = ref(false)
+const gitlabWikiUrl = ref('')
 
-onMounted(() => { loadDiskHistory() })
+onMounted(async () => {
+  loadDiskHistory()
+  try {
+    const r = await fetch('/api/config')
+    if (r.ok) {
+      const data = await r.json()
+      gitlabWikiUrl.value = data.wiki_url || ''
+    }
+  } catch { /* server not yet ready */ }
+})
 
 function onLaunch(job, params)          { launch(job, params) }
 function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, useLast) }
@@ -83,6 +99,9 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   padding: 0.6rem 1rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
 }
 .reports-link {
   display: inline-flex;
