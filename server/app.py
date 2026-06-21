@@ -8,8 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import markdown as _md
+
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
@@ -106,10 +108,27 @@ def list_tools(request: Request):
 def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
     if gl is None:
-        return {"target_group": ""}
+        return {"target_group": "", "wiki_url": ""}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
-    return {"target_group": f"{ns}/{grp}" if ns else grp}
+
+    # Resolve the GitLab group web_url for the wiki link.
+    # Cache keyed on parent_group so a config change triggers a fresh lookup.
+    if getattr(request.app.state, "_wiki_url_group", None) != grp:
+        wiki_url = ""
+        try:
+            group = gl.get_group_by_name(grp)
+            if group:
+                wiki_url = f"{group.web_url}/-/wikis"
+        except Exception:
+            pass
+        request.app.state._wiki_url       = wiki_url
+        request.app.state._wiki_url_group = grp
+
+    return {
+        "target_group": f"{ns}/{grp}" if ns else grp,
+        "wiki_url":     getattr(request.app.state, "_wiki_url", ""),
+    }
 
 
 @app.get("/api/config/full")
@@ -288,6 +307,137 @@ def browse_run_data(date: str, time: str):
   <ul>{items}</ul>
 </body>
 </html>"""
+
+
+_WIKI_CSS = """
+body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#e6edf3;
+  margin:0;padding:0}
+.page{max-width:960px;margin:0 auto;padding:1.5rem 2rem 4rem}
+nav{font-size:0.8rem;color:#8b949e;margin-bottom:1.5rem}
+nav a{color:#60a5fa;text-decoration:none}
+nav a:hover{text-decoration:underline}
+h1{font-size:1.6rem;border-bottom:1px solid #30363d;padding-bottom:.5rem;margin-top:0}
+h2{font-size:1.2rem;border-bottom:1px solid #21262d;padding-bottom:.3rem;margin-top:2rem}
+h3{font-size:1rem;margin-top:1.5rem}
+h4,h5,h6{font-size:.95rem;margin-top:1.2rem}
+a{color:#60a5fa;text-decoration:none}
+a:hover{text-decoration:underline}
+p{line-height:1.6;margin:.5rem 0}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.88rem}
+th,td{border:1px solid #30363d;padding:.4rem .75rem;text-align:left}
+th{background:#161b22;font-weight:600;color:#c9d1d9}
+tr:nth-child(even) td{background:#0d1117}
+tr:nth-child(odd) td{background:#111820}
+code{background:#161b22;border:1px solid #30363d;border-radius:3px;
+  padding:.1em .35em;font-family:ui-monospace,monospace;font-size:.85em}
+pre{background:#161b22;border:1px solid #30363d;border-radius:6px;
+  padding:1rem;overflow-x:auto}
+pre code{background:none;border:none;padding:0}
+blockquote{border-left:3px solid #30363d;margin:0;padding:.3rem 1rem;color:#8b949e}
+details{border:1px solid #30363d;border-radius:6px;padding:.5rem 1rem;margin:.75rem 0}
+summary{cursor:pointer;font-weight:600;color:#c9d1d9}
+summary:hover{color:#e6edf3}
+hr{border:none;border-top:1px solid #30363d;margin:1.5rem 0}
+ul,ol{padding-left:1.5rem;line-height:1.7}
+strong{color:#e6edf3}
+"""
+
+_WIKI_INDEX_CSS = """
+body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#e6edf3;
+  padding:2rem;margin:0}
+h1{font-size:1rem;color:#8b949e;margin:0 0 1.2rem;font-weight:500}
+ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.35rem}
+li{display:flex;align-items:baseline;gap:.75rem}
+a{color:#60a5fa;text-decoration:none;font-size:.9rem}
+a:hover{text-decoration:underline}
+.stem{color:#6e7681;font-family:ui-monospace,monospace;font-size:.75rem}
+"""
+
+
+def _wiki_page_title(path: Path) -> str:
+    """Extract the first H1 heading from a markdown file, fall back to stem."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("# "):
+                return line[2:].strip()
+    except Exception:
+        pass
+    return path.stem
+
+
+def _latest_wiki_run() -> Optional[tuple]:
+    """Return (date, time) of the most recent run that has a wiki directory."""
+    reports_root = Path("reports")
+    if not reports_root.is_dir():
+        return None
+    for date_dir in sorted(reports_root.iterdir(), reverse=True):
+        if not date_dir.is_dir() or not date_dir.name.isdigit():
+            continue
+        for time_dir in sorted(date_dir.iterdir(), reverse=True):
+            if (time_dir / "wiki").is_dir():
+                return date_dir.name, time_dir.name
+    return None
+
+
+@app.get("/api/wiki", response_class=HTMLResponse)
+def wiki_latest():
+    """Redirect to the most recent run's wiki index."""
+    run = _latest_wiki_run()
+    if not run:
+        raise HTTPException(status_code=404, detail="No wiki output found")
+    return RedirectResponse(url=f"/api/runs/{run[0]}/{run[1]}/wiki")
+
+
+@app.get("/api/runs/{date}/{time}/wiki", response_class=HTMLResponse)
+def browse_run_wiki(date: str, time: str):
+    """HTML index of wiki pages for a run."""
+    wiki_dir = Path("reports") / date / time / "wiki"
+    if not wiki_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Wiki directory not found")
+    pages = sorted(
+        ((f.stem, _wiki_page_title(f)) for f in wiki_dir.glob("*.md")),
+        key=lambda x: x[1].lower(),
+    )
+    d = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    t = f"{time[:2]}:{time[2:4]}:{time[4:6]}"
+    items = "\n".join(
+        f'<li><a href="/api/runs/{date}/{time}/wiki/{stem}">{title}</a>'
+        f' <span class="stem">{stem}</span></li>'
+        for stem, title in pages
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Wiki — {d} {t}</title>
+<style>{_WIKI_INDEX_CSS}</style></head>
+<body>
+  <h1>Wiki pages &mdash; {d} &nbsp; {t} &nbsp; ({len(pages)} pages)</h1>
+  <ul>{items}</ul>
+</body></html>"""
+
+
+@app.get("/api/runs/{date}/{time}/wiki/{slug}", response_class=HTMLResponse)
+def view_wiki_page(date: str, time: str, slug: str):
+    """Render a markdown wiki page as HTML."""
+    wiki_dir = Path("reports") / date / time / "wiki"
+    md_path  = wiki_dir / f"{slug}.md"
+    if not md_path.is_file():
+        raise HTTPException(status_code=404, detail="Wiki page not found")
+    content   = md_path.read_text(encoding="utf-8")
+    html_body = _md.markdown(content, extensions=["extra", "toc"])
+    d = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    t = f"{time[:2]}:{time[2:4]}:{time[4:6]}"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{_wiki_page_title(md_path)}</title>
+<style>{_WIKI_CSS}</style></head>
+<body>
+  <div class="page">
+    <nav><a href="/api/runs/{date}/{time}/wiki">← Wiki index</a>
+    &nbsp;·&nbsp; {d} {t}</nav>
+    {html_body}
+  </div>
+</body></html>"""
 
 
 @app.delete("/api/runs")

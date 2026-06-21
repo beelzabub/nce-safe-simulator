@@ -108,10 +108,14 @@ class TestRoamRisks:
         epic = make_epic(roam_risks=[], labels=["Feature", "risk::high"])
         assert "risk(s)" not in _item_risk_reasons(epic, TODAY)
 
-    def test_all_roam_statuses_trigger_flag(self):
-        for status in ("roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"):
+    def test_active_roam_statuses_trigger_flag(self):
+        for status in ("roam::owned", "roam::accepted", "roam::mitigated"):
             epic = make_epic(roam_risks=[make_risk(roam_status=status)])
             assert "⚠️ 1 risk(s)" in _item_risk_reasons(epic, TODAY), f"Failed for {status}"
+
+    def test_resolved_roam_does_not_trigger_flag(self):
+        epic = make_epic(roam_risks=[make_risk(roam_status="roam::resolved")])
+        assert "risk(s)" not in _item_risk_reasons(epic, TODAY)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +130,21 @@ class TestNoRisk:
     def test_on_track_no_risk_returns_dash(self):
         epic = make_epic(pct_complete=60, pct_through_pi=50)
         assert _item_risk_reasons(epic, TODAY) == "—"
+
+    def test_100pct_done_and_pi_elapsed_suppresses_all(self):
+        # Work complete + PI over — no reason is relevant
+        epic = make_epic(
+            pct_complete=100, pct_through_pi=100,
+            blocked_by_count=1,
+            due_date="2024-03-31",
+            roam_risks=[make_risk(roam_status="roam::owned")],
+        )
+        assert _item_risk_reasons(epic, TODAY) == "—"
+
+    def test_100pct_done_active_pi_not_suppressed(self):
+        # Work complete but PI still running — blocked flag should still show
+        epic = make_epic(pct_complete=100, pct_through_pi=50, blocked_by_count=1)
+        assert "🔒 Blocked" in _item_risk_reasons(epic, TODAY)
 
 
 # ---------------------------------------------------------------------------
