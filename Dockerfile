@@ -10,6 +10,16 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
+# Install Quarto (required for plotly/static site build format)
+ARG QUARTO_VERSION=1.9.38
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-${ARCH}.deb" \
+         -o /tmp/quarto.deb && \
+    dpkg -i /tmp/quarto.deb && \
+    rm /tmp/quarto.deb && \
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

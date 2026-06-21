@@ -8,7 +8,7 @@
           <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
         </div>
         <div class="sidebar-footer">
-          <a href="/" target="_blank" rel="noopener" class="reports-link">
+          <a href="/quarto/" target="_blank" rel="noopener" class="reports-link">
             Quarto&thinsp;↗
           </a>
           <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
