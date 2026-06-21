@@ -5,8 +5,10 @@ __pycache__
 *.pyo
 .pytest_cache
 frontend/node_modules
-public/app
+public/
 reports
 logs
 config.json
 .server.pid
+cdk/
+cdk.out/

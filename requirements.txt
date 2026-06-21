@@ -1,4 +1,5 @@
 python-gitlab
+boto3
 pandas
 python-dateutil
 requests
