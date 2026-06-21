@@ -15,8 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Overlay the pre-built dist from Stage 1
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+# Overlay the pre-built frontend from Stage 1 (vite outDir is ../public/app)
+COPY --from=frontend-builder /app/public/app ./public/app
 
 # config.json and reports/ are provided at runtime via volume mounts:
 #   -v /path/to/config.json:/app/config.json:ro

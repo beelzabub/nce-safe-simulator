@@ -5,7 +5,7 @@ __pycache__
 *.pyo
 .pytest_cache
 frontend/node_modules
-frontend/dist
+public/app
 reports
 logs
 config.json
