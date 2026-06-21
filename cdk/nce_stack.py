@@ -78,6 +78,12 @@ class NceStack(Stack):
             create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
             posix_user=efs.PosixUser(uid="0", gid="0"),
         )
+        quarto_site_ap = filesystem.add_access_point(
+            "QuartoSiteAp",
+            path="/quarto-site",
+            create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
+            posix_user=efs.PosixUser(uid="0", gid="0"),
+        )
 
         # ── CloudWatch logs ───────────────────────────────────────────────────
         log_group = logs.LogGroup(
@@ -96,8 +102,8 @@ class NceStack(Stack):
             self,
             "TaskDef",
             family="nce-safe-simulator",
-            cpu=512,
-            memory_limit_mib=1024,
+            cpu=2048,
+            memory_limit_mib=4096,
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.ARM64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
@@ -147,6 +153,17 @@ class NceStack(Stack):
                 ),
             ),
         )
+        task_def.add_volume(
+            name="nce-quarto-site",
+            efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                file_system_id=filesystem.file_system_id,
+                transit_encryption="ENABLED",
+                authorization_config=ecs.AuthorizationConfig(
+                    access_point_id=quarto_site_ap.access_point_id,
+                    iam="ENABLED",
+                ),
+            ),
+        )
 
         container = task_def.add_container(
             "nce",
@@ -179,6 +196,11 @@ class NceStack(Stack):
                 container_path="/app/public/interactive",
                 read_only=False,
                 source_volume="nce-interactive",
+            ),
+            ecs.MountPoint(
+                container_path="/app/quarto-site",
+                read_only=False,
+                source_volume="nce-quarto-site",
             ),
         )
 
