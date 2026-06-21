@@ -1,7 +1,6 @@
 project:
   type: website
   output-dir: public
-  clean: false
   render:
     - index.qmd
     - quarto/health-dashboard.qmd
