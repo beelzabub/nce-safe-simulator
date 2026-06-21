@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecs-redeploy ecs-logs
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -33,6 +33,17 @@ seed-config:
 	@echo "Storing config.json in SSM as SecureString /nce/config..."
 	aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$(cat ../config.json)"
 	@echo "Done. Run 'make ecs-redeploy' to pick up the new config."
+
+## Build and push :latest to ECR (run after code changes; follow with ecs-redeploy)
+ecr-push:
+	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	REGION=$$(aws configure get region) && \
+	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
+	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
+	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	docker push "$$REPO:latest" && \
+	echo "Pushed $$REPO:latest — run 'make ecs-redeploy' to activate."
 
 ## Force a new ECS deployment (picks up a freshly pushed image without a full CDK run)
 ecs-redeploy:
