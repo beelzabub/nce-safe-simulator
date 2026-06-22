@@ -45,7 +45,8 @@ class NceStack(Stack):
         hc_codes         = ctx("hc_healthy_codes")
         hc_healthy       = ctx("hc_healthy_count")
         hc_unhealthy     = ctx("hc_unhealthy_count")
-        desired_count    = ctx("desired_count")
+        _desired_count   = ctx("desired_count")
+        desired_count    = int(_desired_count) if _desired_count is not None else None
 
         # ── VPC ──────────────────────────────────────────────────────────────
         if vpc_id:
@@ -190,7 +191,7 @@ class NceStack(Stack):
             service_name=app_name,
             task_definition=task_def,
             load_balancer_name=alb_name,
-            desired_count=desired_count,
+            desired_count=desired_count if (desired_count is None or desired_count > 0) else 1,
             public_load_balancer=True,
             assign_public_ip=True,
             task_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
@@ -201,6 +202,12 @@ class NceStack(Stack):
             enable_execute_command=True,
         )
 
+        # CDK L2 rejects desired_count=0, but CloudFormation accepts it.
+        # Apply 0 at the L1 layer so the fresh-deploy path can start the service
+        # with no tasks (avoiding a hang waiting for a not-yet-pushed image).
+        if desired_count == 0:
+            service.service.node.default_child.add_property_override("DesiredCount", 0)
+
         service.target_group.configure_health_check(
             path="/",
             healthy_http_codes=hc_codes,
@@ -208,6 +215,7 @@ class NceStack(Stack):
             healthy_threshold_count=hc_healthy,
             unhealthy_threshold_count=hc_unhealthy,
         )
+        service.target_group.set_attribute("deregistration_delay.timeout_seconds", "30")
 
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
