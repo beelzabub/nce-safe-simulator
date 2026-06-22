@@ -813,7 +813,7 @@ make grafana-deploy  # install Infinity plugin, configure datasource, push dashb
 
 Amazon Managed Grafana is provisioned automatically by `make deploy`. After deploying:
 
-1. Run `make grafana-setup` once to create an Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 90 days)
+1. Run `make grafana-setup` once to create an Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 30 days)
 2. Run `make grafana-deploy` to install the Infinity plugin, wire up the datasource, and push all dashboards from `grafana/`
 
 Dashboards read JSON data from `<ALB>/data/<report>.json`, which the server serves from the most recent complete report snapshot on EFS. Re-run `make grafana-deploy` any time dashboard files in `grafana/` change.
