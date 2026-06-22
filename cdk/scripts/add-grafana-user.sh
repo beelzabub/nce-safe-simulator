@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+REGION=$(aws configure get region 2>/dev/null \
+  || aws ec2 describe-availability-zones \
+       --query 'AvailabilityZones[0].RegionName' --output text)
+APP_NAME=$(jq -r '.context.app_name' "$(dirname "$0")/../cdk.json")
+
+WORKSPACE_ID=$(aws grafana list-workspaces --region "$REGION" \
+  --query "workspaces[?name=='$APP_NAME'].id" --output text)
+[ -n "$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; }
+
+# IAM Identity Center user ID — stable across destroy/deploy cycles (IDC is not CDK-managed)
+SSO_USER_ID="68f15380-f0d1-70fa-314b-b561ab686952"
+
+echo "==> Adding Admin permissions for $SSO_USER_ID in workspace $WORKSPACE_ID..."
 aws grafana update-permissions \
-  --workspace-id g-acdbcc3e21 \
-  --update-instruction-batch '[{"action":"ADD","role":"ADMIN","users":[{"id":"68f15380-f0d1-70fa-314b-b561ab686952","type":"SSO_USER"}]}]'
+  --workspace-id "$WORKSPACE_ID" \
+  --region "$REGION" \
+  --update-instruction-batch "[{\"action\":\"ADD\",\"role\":\"ADMIN\",\"users\":[{\"id\":\"$SSO_USER_ID\",\"type\":\"SSO_USER\"}]}]"
+echo "==> Done."
