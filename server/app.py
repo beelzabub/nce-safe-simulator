@@ -11,7 +11,7 @@ from typing import Optional
 import markdown as _md
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
@@ -687,6 +687,24 @@ def _build_job_fn(gl: object, data: dict):
 
 # ---------------------------------------------------------------------------
 # Static file serving
+# ---------------------------------------------------------------------------
+# Latest-run data endpoint — serves JSON files from the most recent complete
+# snapshot so Grafana's Infinity datasource can reach them via the ALB.
+
+@app.get("/data/{filename}")
+def latest_data(filename: str):
+    reports_dir = Path("reports")
+    candidates = sorted(
+        (d / "data" for d in reports_dir.glob("*/*/") if (d / "data" / "snapshot.complete").is_file()),
+        reverse=True,
+    )
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No complete snapshot available")
+    f = candidates[0] / filename
+    if not f.exists():
+        raise HTTPException(status_code=404, detail=f"{filename} not found in latest snapshot")
+    return FileResponse(str(f), media_type="application/json")
+
 # ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
 

@@ -31,6 +31,8 @@
     "hc_healthy_count": 2,
     "hc_unhealthy_count": 3,
 
-    "desired_count": 1
+    "desired_count": 1,
+
+    "grafana_api_key_param": "/nce/grafana-api-key"
   }
 }

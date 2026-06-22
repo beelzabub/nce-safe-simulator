@@ -791,8 +791,10 @@ cd cdk
 make install       # install CDK CLI + Python deps (once)
 make bootstrap     # bootstrap CDK for the account/region (once)
 make set-vpc       # auto-detect VPC from the powers-dev EC2 instance
-make deploy        # deploy stack; pushes initial Docker image if ECR is empty
-make seed-config   # store config.json in SSM (once after deploy; re-run to update)
+make deploy          # deploy stack; pushes initial Docker image if ECR is empty
+make seed-config     # store config.json in SSM (once after deploy; re-run to update)
+make grafana-setup   # create Grafana Admin API key and store in SSM (once after deploy)
+make grafana-deploy  # install Infinity plugin, configure datasource, push dashboards
 ```
 
 ### Day-to-day operations
@@ -805,6 +807,18 @@ make seed-config   # store config.json in SSM (once after deploy; re-run to upda
 | `make ecs-exec` | Open an interactive shell in the running task |
 | `make diff` | Preview CDK changes before deploying |
 | `make destroy` | Tear down all AWS resources |
+| `make grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
+
+### Grafana dashboards
+
+Amazon Managed Grafana is provisioned automatically by `make deploy`. After deploying:
+
+1. Run `make grafana-setup` once to create an Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 90 days)
+2. Run `make grafana-deploy` to install the Infinity plugin, wire up the datasource, and push all dashboards from `grafana/`
+
+Dashboards read JSON data from `<ALB>/data/<report>.json`, which the server serves from the most recent complete report snapshot on EFS. Re-run `make grafana-deploy` any time dashboard files in `grafana/` change.
+
+> **Note:** The AMG workspace requires AWS IAM Identity Center to be enabled in the account (one-time setup — no ongoing cost or configuration required). The Grafana UI is accessible at the workspace URL output by `make deploy`. API keys are used for all automation; SSO is used only for browser login.
 
 ### Debugging with ECS Exec
 
