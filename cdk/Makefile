@@ -83,7 +83,7 @@ grafana-setup:
 	KEY=$$(aws grafana create-workspace-api-key \
 	  --key-name "nce-deploy" \
 	  --key-role "ADMIN" \
-	  --seconds-to-live 7776000 \
+	  --seconds-to-live 2592000 \
 	  --workspace-id $$WORKSPACE_ID \
 	  --region $$REGION \
 	  --query 'key' --output text) && \
