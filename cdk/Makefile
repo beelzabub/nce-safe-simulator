@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -71,6 +71,68 @@ ecs-redeploy:
 ## Tail live ECS container logs
 ecs-logs:
 	aws logs tail /ecs/nce-safe-simulator --follow
+
+## Create an Admin API key for the Grafana workspace and store it in SSM (run once after deploy)
+grafana-setup:
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
+	  --query "workspaces[?name=='$$(jq -r '.context.app_name' cdk.json)'].id" \
+	  --output text) && \
+	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; } && \
+	echo "==> Creating Grafana Admin API key in workspace $$WORKSPACE_ID..." && \
+	KEY=$$(aws grafana create-workspace-api-key \
+	  --key-name "nce-deploy" \
+	  --key-role "ADMIN" \
+	  --seconds-to-live 7776000 \
+	  --workspace-id $$WORKSPACE_ID \
+	  --region $$REGION \
+	  --query 'key' --output text) && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	aws ssm put-parameter --name $$PARAM --type SecureString --overwrite \
+	  --value "$$KEY" --region $$REGION && \
+	echo "==> API key stored in SSM at $$PARAM (valid 90 days). Run 'make grafana-deploy' to push dashboards."
+
+## Install Infinity plugin, configure datasource, and deploy all dashboards to Grafana (idempotent)
+grafana-deploy:
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
+	  --query "workspaces[?name=='$$APP_NAME'].id" --output text) && \
+	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; } && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
+	  --region $$REGION --query 'Parameter.Value' --output text) && \
+	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
+	ALB_URL="http://$$(aws cloudformation describe-stacks --region $$REGION \
+	  --query "Stacks[?contains(StackName,'NceStack')].Outputs[?OutputKey=='AppUrl'].OutputValue" \
+	  --output text | sed 's|http://||')" && \
+	echo "==> Installing Infinity plugin..." && \
+	curl -sf -X POST "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/install" \
+	  -H "Authorization: Bearer $$API_KEY" || true && \
+	echo "==> Configuring Infinity datasource..." && \
+	DS_PAYLOAD='{"name":"Infinity","type":"yesoreyeram-infinity-datasource","access":"proxy","isDefault":true,"jsonData":{}}' && \
+	EXISTING_DS=$$(curl -sf "$$GRAFANA_URL/api/datasources/name/Infinity" \
+	  -H "Authorization: Bearer $$API_KEY" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "") && \
+	if [ -n "$$EXISTING_DS" ]; then \
+	  curl -sf -X PUT "$$GRAFANA_URL/api/datasources/$$EXISTING_DS" \
+	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
+	    -d "$$DS_PAYLOAD" > /dev/null; \
+	else \
+	  curl -sf -X POST "$$GRAFANA_URL/api/datasources" \
+	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
+	    -d "$$DS_PAYLOAD" > /dev/null; \
+	fi && \
+	echo "==> Deploying dashboards..." && \
+	find ../grafana -name '*.json' | while read DASH; do \
+	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$ALB_URL/data/|g") && \
+	  TITLE=$$(echo "$$PATCHED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))") && \
+	  RESULT=$$(echo "{\"dashboard\":$$PATCHED,\"overwrite\":true,\"folderId\":0}" | \
+	    curl -sf -X POST "$$GRAFANA_URL/api/dashboards/import" \
+	      -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
+	      -d @- 2>&1) && \
+	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
+	done && \
+	echo "==> Done. Open $$GRAFANA_URL"
 
 ## Open an interactive shell in the running Fargate task via ECS Exec
 ecs-exec:

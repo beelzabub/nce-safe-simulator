@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_efs as efs,
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
+    aws_grafana as grafana,
     aws_iam as iam,
     aws_logs as logs,
 )
@@ -244,4 +245,36 @@ class NceStack(Stack):
             "LogTail",
             value=f"aws logs tail {log_group_name} --follow --region {self.region}",
             description="Command to follow container logs",
+        )
+
+        # ── Amazon Managed Grafana ────────────────────────────────────────────
+        grafana_role = iam.Role(
+            self,
+            "GrafanaRole",
+            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+        )
+
+        workspace = grafana.CfnWorkspace(
+            self,
+            "GrafanaWorkspace",
+            name=app_name,
+            account_access_type="CURRENT_ACCOUNT",
+            authentication_providers=["AWS_SSO"],
+            permission_type="CUSTOMER_MANAGED",
+            role_arn=grafana_role.role_arn,
+            grafana_version="10.4",
+            plugin_admin_enabled=True,
+        )
+
+        CfnOutput(
+            self,
+            "GrafanaWorkspaceId",
+            value=workspace.ref,
+            description="AMG workspace ID — used by make grafana-setup and grafana-deploy",
+        )
+        CfnOutput(
+            self,
+            "GrafanaUrl",
+            value=f"https://{workspace.attr_endpoint}",
+            description="Grafana dashboard URL",
         )
