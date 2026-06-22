@@ -1,0 +1,1 @@
+watch -n 5 'aws ecs describe-services --cluster nce --services nce-safe-simulator --region us-east-1 --query "services[0].{running:runningCount,pending:pendingCount,desired:desiredCount,status:deployments[*].{id:id,status:status,running:runningCount,pending:pendingCount}}" --output json'
