@@ -30,7 +30,6 @@ website:
   navbar:
     logo: quarto/assets/peo-c4i-seal.png
     logo-alt: "PEO C4I"
-    logo-href: /quarto/
     background: "#0a2447"
     foreground: "#dce6f5"
     left:
