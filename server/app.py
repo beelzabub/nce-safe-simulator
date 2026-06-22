@@ -725,8 +725,8 @@ _logs_dir.mkdir(exist_ok=True)   # ensure mount is always registered
 app.mount("/logs", StaticFiles(directory=str(_logs_dir)), name="logs-files")
 
 _quarto_site = Path("quarto-site")
-if _quarto_site.is_dir():
-    app.mount("/quarto", StaticFiles(directory=str(_quarto_site), html=True), name="quarto-static")
+_quarto_site.mkdir(exist_ok=True)   # ensure mount is always registered
+app.mount("/quarto", StaticFiles(directory=str(_quarto_site), html=True), name="quarto-static")
 
 @app.get("/")
 def root():
