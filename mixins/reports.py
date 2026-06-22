@@ -6794,9 +6794,6 @@ class ReportsMixin:
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
-        # Sentinel written last — its presence means all JSON files are complete.
-        (data_dir / "snapshot.complete").touch()
-
     # ------------------------------------------------------------------
     # Phase 4b Quarto data-layer methods
     # ------------------------------------------------------------------
@@ -7355,9 +7352,12 @@ class ReportsMixin:
             self._write_report_data(data_dir)
             self._load_report_data(data_dir)
 
+        print("Writing Grafana dashboard data files...")
         if do_site_build:
-            print("Writing Quarto data layer...")
-            self.write_report_json(Path("quarto-data"), Path("public/data"))
+            self.write_report_json(data_dir, Path("quarto-data"), Path("public/data"))
+        else:
+            self.write_report_json(data_dir)
+        (data_dir / "snapshot.complete").touch()
 
         phases = []
 

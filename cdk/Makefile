@@ -103,24 +103,36 @@ grafana-deploy:
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
-	ALB_URL="http://$$(aws cloudformation describe-stacks --region $$REGION \
-	  --query "Stacks[?contains(StackName,'NceStack')].Outputs[?OutputKey=='AppUrl'].OutputValue" \
-	  --output text | sed 's|http://||')" && \
+	ALB_URL="$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
+	  --query 'Stacks[0].Outputs[?OutputKey==`AppUrl`].OutputValue' \
+	  --output text)" && \
+	[ -n "$$ALB_URL" ] || { echo "ERROR: could not resolve ALB URL from NceStack outputs"; exit 1; } && \
 	echo "==> Installing Infinity plugin..." && \
-	curl -sf -X POST "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/install" \
-	  -H "Authorization: Bearer $$API_KEY" || true && \
+	PLUGIN_STATUS=$$(curl -s "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/settings" \
+	  -H "Authorization: Bearer $$API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null) && \
+	if [ -n "$$PLUGIN_STATUS" ]; then \
+	  echo "  Infinity plugin already installed (v$$PLUGIN_STATUS)"; \
+	else \
+	  INSTALL_CODE=$$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+	    "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/install" \
+	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
+	    -d '{"version":"2.11.0"}') && \
+	  [ "$$INSTALL_CODE" = "200" ] || { echo "ERROR: plugin install returned HTTP $$INSTALL_CODE"; exit 1; }; \
+	  echo "  Installed yesoreyeram-infinity-datasource 2.11.0"; \
+	fi && \
 	echo "==> Configuring Infinity datasource..." && \
-	DS_PAYLOAD='{"name":"Infinity","type":"yesoreyeram-infinity-datasource","access":"proxy","isDefault":true,"jsonData":{}}' && \
+	ALB_HOST=$$(echo "$$ALB_URL" | sed 's|https\?://||') && \
+	DS_PAYLOAD=$$(python3 -c "import json; print(json.dumps({'uid':'ffon28bht91c0b','name':'Infinity','type':'yesoreyeram-infinity-datasource','access':'proxy','isDefault':True,'jsonData':{'allowedHosts':['$$ALB_HOST']},'url':''}))" ) && \
 	EXISTING_DS=$$(curl -sf "$$GRAFANA_URL/api/datasources/name/Infinity" \
 	  -H "Authorization: Bearer $$API_KEY" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "") && \
 	if [ -n "$$EXISTING_DS" ]; then \
 	  curl -sf -X PUT "$$GRAFANA_URL/api/datasources/$$EXISTING_DS" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Updated datasource (id=$$EXISTING_DS, uid=ffon28bht91c0b, host=$$ALB_HOST)"; \
 	else \
 	  curl -sf -X POST "$$GRAFANA_URL/api/datasources" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Created datasource (uid=ffon28bht91c0b, host=$$ALB_HOST)"; \
 	fi && \
 	echo "==> Deploying dashboards..." && \
 	find ../grafana -name '*.json' | while read DASH; do \
