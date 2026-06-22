@@ -4,6 +4,8 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     CfnOutput,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_ec2 as ec2,
     aws_ecr as ecr,
     aws_efs as efs,
@@ -221,12 +223,38 @@ class NceStack(Stack):
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
 
+        # ── CloudFront distribution ───────────────────────────────────────────
+        # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
+        # can run in browser/direct mode without mixed-content or allowedHosts issues.
+        distribution = cloudfront.Distribution(
+            self,
+            "DataDistribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.HttpOrigin(
+                    service.load_balancer.load_balancer_dns_name,
+                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+                ),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                # Forward all viewer headers (including Sec-WebSocket-Key/Version) so
+                # WebSocket upgrades reach the origin intact.
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            ),
+        )
+
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(
             self,
             "AppUrl",
             value=f"http://{service.load_balancer.load_balancer_dns_name}",
             description="NCE Safe Simulator public URL",
+        )
+        CfnOutput(
+            self,
+            "CloudFrontUrl",
+            value=f"https://{distribution.domain_name}",
+            description="CloudFront HTTPS endpoint — used by Grafana direct-mode datasource",
         )
         CfnOutput(
             self,

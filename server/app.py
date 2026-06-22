@@ -11,6 +11,7 @@ from typing import Optional
 import markdown as _md
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -20,6 +21,13 @@ from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
