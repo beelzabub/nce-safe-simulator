@@ -215,6 +215,7 @@ class NceStack(Stack):
             healthy_threshold_count=hc_healthy,
             unhealthy_threshold_count=hc_unhealthy,
         )
+        service.target_group.set_attribute("deregistration_delay.timeout_seconds", "30")
 
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
