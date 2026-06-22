@@ -45,7 +45,7 @@ class NceStack(Stack):
         hc_codes         = ctx("hc_healthy_codes")
         hc_healthy       = ctx("hc_healthy_count")
         hc_unhealthy     = ctx("hc_unhealthy_count")
-        desired_count    = ctx("desired_count")
+        desired_count    = int(ctx("desired_count")) if ctx("desired_count") is not None else None
 
         # ── VPC ──────────────────────────────────────────────────────────────
         if vpc_id:
