@@ -76,12 +76,13 @@ log ""
 log "--- [4/5] Waiting for ECS service to stabilize ---"
 log "Cluster: ${CLUSTER}, Service: ${APP_NAME}"
 # Force a new deployment so the task picks up the freshly seeded config
-aws ecs update-service \
+SERVICE_ARN=$(aws ecs update-service \
   --cluster "${CLUSTER}" \
   --service "${APP_NAME}" \
   --force-new-deployment \
   --region "${REGION}" \
-  --output text --query 'service.serviceArn' | xargs -I{} log "Service ARN: {}"
+  --output text --query 'service.serviceArn')
+log "Service ARN: ${SERVICE_ARN}"
 
 log "Waiting for running count to reach desired (this can take a few minutes)..."
 aws ecs wait services-stable \
