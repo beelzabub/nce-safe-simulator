@@ -93,7 +93,7 @@ class NceEksStack(Stack):
             namespace="kube-system",
         )
         efs_csi_sa.role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEFSCSIDriverPolicy")
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEFSCSIDriverPolicy")
         )
         eks.CfnAddon(
             self, "EfsCsiAddon",
