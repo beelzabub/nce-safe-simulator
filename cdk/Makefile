@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-destroy help
+.PHONY: install bootstrap set-vpc set-efs diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -372,6 +372,9 @@ eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + helm + ALB + CloudF
 	@$(MAKE) --no-print-directory eks-set-alb
 	@$(MAKE) --no-print-directory eks-cloudfront-deploy
 	@$(MAKE) --no-print-directory eks-grafana-deploy
+
+eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
+	bash scripts/redeploy-eks.sh
 
 eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
