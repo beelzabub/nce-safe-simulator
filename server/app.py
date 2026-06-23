@@ -117,7 +117,7 @@ def list_tools(request: Request):
 def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
     if gl is None:
-        return {"target_group": "", "wiki_url": ""}
+        return {"target_group": "", "wiki_url": "", "grafana_url": ""}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
@@ -137,7 +137,7 @@ def get_config(request: Request):
     return {
         "target_group": f"{ns}/{grp}" if ns else grp,
         "wiki_url":     getattr(request.app.state, "_wiki_url", ""),
-        "grafana_url":  os.environ.get("GRAFANA_URL", ""),
+        "grafana_url":  os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
     }
 
 
@@ -610,6 +610,14 @@ async def ws_run(websocket: WebSocket):
     install_writer()
     thread = run_job(fn, on_output, on_done=on_done, on_error=on_error)
 
+    async def _watch_disconnect():
+        try:
+            await websocket.receive()
+        except Exception:
+            pass
+        q.put_nowait(("cancel", None))
+
+    disconnect_task = asyncio.create_task(_watch_disconnect())
     try:
         while True:
             kind, payload = await q.get()
@@ -623,7 +631,10 @@ async def ws_run(websocket: WebSocket):
             elif kind == "error":
                 await websocket.send_json({"type": "error", "message": payload})
                 break
+            elif kind == "cancel":
+                break
     finally:
+        disconnect_task.cancel()
         cancel_thread(thread)
         if log_fh is not None:
             try:
