@@ -42,7 +42,15 @@ class NceEksStack(Stack):
         )
 
         # ── EKS cluster ───────────────────────────────────────────────────────
-        public_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
+        # us-east-1e does not support EKS control plane — exclude it explicitly.
+        public_subnets = ec2.SubnetSelection(
+            subnet_type=ec2.SubnetType.PUBLIC,
+            subnet_filters=[
+                ec2.SubnetFilter.availability_zones(
+                    ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1f"]
+                )
+            ],
+        )
 
         cluster = eks.Cluster(
             self, "Cluster",
