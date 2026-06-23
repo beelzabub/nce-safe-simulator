@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -22,7 +22,7 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	EFS_ID=$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
 	  --query 'Stacks[0].Outputs[?OutputKey==`EfsId`].OutputValue' --output text) && \
-	[ -n "$$EFS_ID" ] || { echo "ERROR: EfsId not found in NceStack outputs — run make deploy first"; exit 1; } && \
+	[ -n "$$EFS_ID" ] || { echo "ERROR: EfsId not found in NceStack outputs — run make ecs-deploy first"; exit 1; } && \
 	echo "==> EFS ID: $$EFS_ID" && \
 	AP_JSON=$$(aws efs describe-access-points --file-system-id $$EFS_ID --region $$REGION \
 	  --query 'AccessPoints[].{id:AccessPointId,path:RootDirectory.Path}' --output json) && \
@@ -44,10 +44,10 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 	   cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
 	echo "EFS config written to cdk.json (efs_id=$$EFS_ID, efs_sg_id=$$EFS_SG_ID)"
 
-diff: ## Show what CDK will change without deploying
-	cdk diff
+ecs-diff: ## Show what ECS CDK stack will change without deploying
+	cdk diff NceStack
 
-deploy: ## Deploy (or update) the full AWS stack
+ecs-deploy: ## Deploy (or update) the ECS stack
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
@@ -65,8 +65,8 @@ deploy: ## Deploy (or update) the full AWS stack
 	fi && \
 	cdk deploy --require-approval never
 
-destroy: ## Tear down all AWS resources (EFS and CloudWatch logs are retained)
-	cdk destroy --force
+ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
+	cdk destroy NceStack --force
 
 seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
 	@echo "Storing config.json in SSM as SecureString /nce/config..."
@@ -120,14 +120,14 @@ grafana-setup: ## Create Grafana Admin API key and store in SSM (idempotent)
 	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
 	aws ssm put-parameter --name $$PARAM --type SecureString --overwrite \
 	  --value "$$KEY" --region $$REGION && \
-	echo "==> API key stored in SSM at $$PARAM (valid 90 days). Run 'make grafana-deploy' to push dashboards."
+	echo "==> API key stored in SSM at $$PARAM (valid 90 days). Run 'make ecs-grafana-deploy' or 'make eks-grafana-deploy' to push dashboards."
 
-grafana-deploy: ## Install Infinity plugin, configure datasource, and deploy all dashboards (idempotent)
+ecs-grafana-deploy: ## Install Infinity plugin, configure ECS datasource, and deploy all dashboards (idempotent)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
 	  --query "workspaces[?name=='$$APP_NAME'].id" --output text) && \
-	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; } && \
+	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make ecs-deploy first"; exit 1; } && \
 	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
@@ -177,8 +177,8 @@ grafana-deploy: ## Install Infinity plugin, configure datasource, and deploy all
 grafana-add-user: ## Assign Grafana Admin role to the SSO user defined in cdk.json (idempotent)
 	bash scripts/add-grafana-user.sh
 
-full-deploy: ## Deploy CDK stack then configure Grafana end-to-end (fresh stack after destroy)
-	@$(MAKE) --no-print-directory deploy
+ecs-full-deploy: ## Deploy ECS CDK stack then configure Grafana end-to-end (fresh stack after ecs-destroy)
+	@$(MAKE) --no-print-directory ecs-deploy
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
@@ -194,7 +194,7 @@ full-deploy: ## Deploy CDK stack then configure Grafana end-to-end (fresh stack 
 	done && \
 	[ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
 	$(MAKE) --no-print-directory grafana-setup
-	@$(MAKE) --no-print-directory grafana-deploy
+	@$(MAKE) --no-print-directory ecs-grafana-deploy
 	@$(MAKE) --no-print-directory grafana-add-user
 
 ecs-full-redeploy: ## Full ECS teardown and redeploy — safe to run unattended (nohup make ecs-full-redeploy > redeploy-ecs.log 2>&1 &)
