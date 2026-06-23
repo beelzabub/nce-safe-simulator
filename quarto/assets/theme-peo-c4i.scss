@@ -36,12 +36,14 @@ $font-family-sans-serif: "Segoe UI", system-ui, -apple-system, sans-serif;
   color: #b8ccdf !important;
   font-weight: 500;
   transition: color 0.15s;
+  text-decoration: none !important;
 }
 
 .navbar .nav-link:hover,
 .navbar .nav-link:focus,
 .navbar .active > .nav-link {
   color: #c8a951 !important;
+  text-decoration: none !important;
 }
 
 .navbar .dropdown-menu {
@@ -175,6 +177,20 @@ main.content {
   border-radius: 4px;
   box-shadow: 0 2px 16px rgba(10, 36, 71, 0.08);
   padding: 1.2rem 1.6rem;
+}
+
+/* ── Right-side utility nav link (Diagnostics) ──────────── */
+
+.navbar-nav.ms-auto .nav-link {
+  color: rgba(184, 204, 223, 0.4) !important;
+  font-size: 0.78rem;
+  font-weight: 400;
+  transition: color 0.2s ease;
+}
+
+.navbar-nav.ms-auto .nav-link:hover,
+.navbar-nav.ms-auto .nav-link:focus {
+  color: #b8ccdf !important;
 }
 
 /* ── Footer ─────────────────────────────────────────────── */
