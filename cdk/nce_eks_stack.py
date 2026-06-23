@@ -116,22 +116,6 @@ class NceEksStack(Stack):
                 managed_policy_arn=f"arn:aws:iam::{self.account}:policy/AWSLoadBalancerControllerIAMPolicy",
             )
         )
-        cluster.add_helm_chart(
-            "AwsLbController",
-            chart="aws-load-balancer-controller",
-            repository="https://aws.github.io/eks-charts",
-            namespace="kube-system",
-            values={
-                "clusterName": cluster.cluster_name,
-                "serviceAccount": {
-                    "create": False,
-                    "name": "aws-load-balancer-controller",
-                },
-                "region": self.region,
-                "vpcId": vpc_id,
-            },
-        )
-
         # ── App namespace ─────────────────────────────────────────────────────
         cluster.add_manifest(
             "NceNamespace",
@@ -161,4 +145,5 @@ class NceEksStack(Stack):
 
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "EksClusterName", value=cluster.cluster_name)
+        CfnOutput(self, "EksLbSaRoleArn", value=lb_sa.role.role_arn)
         CfnOutput(self, "EksAppSaRoleArn", value=app_sa.role.role_arn)

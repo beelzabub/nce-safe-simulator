@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -220,6 +220,21 @@ eks-kubeconfig: ## Configure kubectl to talk to the EKS cluster
 	CLUSTER=$$(jq -r '.context.eks_cluster_name' cdk.json) && \
 	aws eks update-kubeconfig --name $$CLUSTER --region $$REGION
 
+eks-lb-controller: ## Install AWS Load Balancer Controller via Helm (run after eks-kubeconfig)
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	CLUSTER=$$(jq -r '.context.eks_cluster_name' cdk.json) && \
+	VPC_ID=$$(jq -r '.context.vpc_id' cdk.json) && \
+	helm repo add eks https://aws.github.io/eks-charts 2>/dev/null || true && \
+	helm repo update eks && \
+	helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+	  --namespace kube-system \
+	  --set clusterName=$$CLUSTER \
+	  --set serviceAccount.create=false \
+	  --set serviceAccount.name=aws-load-balancer-controller \
+	  --set region=$$REGION \
+	  --set vpcId=$$VPC_ID && \
+	echo "==> AWS Load Balancer Controller installed."
+
 eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from cdk.json)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
@@ -334,10 +349,11 @@ eks-exec: ## Open an interactive shell in the running pod
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
-eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + helm + ALB + CloudFront + Grafana
+eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + LB controller + helm + ALB + CloudFront + Grafana
 	@$(MAKE) --no-print-directory set-efs
 	@$(MAKE) --no-print-directory eks-deploy
 	@$(MAKE) --no-print-directory eks-kubeconfig
+	@$(MAKE) --no-print-directory eks-lb-controller
 	@$(MAKE) --no-print-directory eks-helm-install
 	@$(MAKE) --no-print-directory eks-set-alb
 	@$(MAKE) --no-print-directory eks-cloudfront-deploy
