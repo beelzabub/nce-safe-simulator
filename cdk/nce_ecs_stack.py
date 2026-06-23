@@ -294,6 +294,8 @@ class NceEcsStack(Stack):
             plugin_admin_enabled=True,
         )
 
+        container.add_environment("GRAFANA_URL", f"https://{workspace.attr_endpoint}")
+
         CfnOutput(
             self,
             "GrafanaWorkspaceId",
