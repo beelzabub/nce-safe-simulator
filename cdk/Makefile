@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
+.PHONY: install bootstrap set-vpc set-efs diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -197,8 +197,8 @@ full-deploy: ## Deploy CDK stack then configure Grafana end-to-end (fresh stack 
 	@$(MAKE) --no-print-directory grafana-deploy
 	@$(MAKE) --no-print-directory grafana-add-user
 
-redeploy: ## Full teardown and redeploy — safe to run unattended (nohup make redeploy > redeploy.log 2>&1 &)
-	bash scripts/redeploy.sh
+ecs-full-redeploy: ## Full ECS teardown and redeploy — safe to run unattended (nohup make ecs-full-redeploy > redeploy-ecs.log 2>&1 &)
+	bash scripts/redeploy-ecs.sh
 
 eks-install: ## Download and create LB Controller IAM policy (once per AWS account)
 	@POLICY_FILE=$$(mktemp) && \
