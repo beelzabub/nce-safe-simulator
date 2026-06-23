@@ -14,7 +14,6 @@ from aws_cdk import (
     aws_grafana as grafana,
     aws_iam as iam,
     aws_logs as logs,
-    aws_s3 as s3,
 )
 from constructs import Construct
 
@@ -224,38 +223,6 @@ class NceStack(Stack):
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
 
-        # ── S3 bucket — Grafana dashboard data ───────────────────────────────
-        # Browser-side Infinity datasource fetches JSON from here. AMG's CSP
-        # allows *.s3.amazonaws.com; CloudFront is not in the allowlist.
-        data_bucket = s3.Bucket(
-            self,
-            "GrafanaDataBucket",
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-            block_public_access=s3.BlockPublicAccess(
-                block_public_acls=False,
-                block_public_policy=False,
-                ignore_public_acls=False,
-                restrict_public_buckets=False,
-            ),
-            cors=[s3.CorsRule(
-                allowed_methods=[s3.HttpMethods.GET],
-                allowed_origins=["*"],
-                allowed_headers=["*"],
-            )],
-        )
-        data_bucket.add_to_resource_policy(
-            iam.PolicyStatement(
-                actions=["s3:GetObject"],
-                resources=[data_bucket.arn_for_objects("*")],
-                principals=[iam.AnyPrincipal()],
-            )
-        )
-        data_bucket.grant_put(task_def.task_role)
-
-        # Inject bucket name so the container can upload after each report run.
-        container.add_environment("GRAFANA_DATA_BUCKET", data_bucket.bucket_name)
-
         # ── CloudFront distribution ───────────────────────────────────────────
         # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
         # can run in browser/direct mode without mixed-content or allowedHosts issues.
@@ -288,12 +255,6 @@ class NceStack(Stack):
             "CloudFrontUrl",
             value=f"https://{distribution.domain_name}",
             description="CloudFront HTTPS endpoint for WebSocket/app access",
-        )
-        CfnOutput(
-            self,
-            "GrafanaDataUrl",
-            value=f"https://{data_bucket.bucket_name}.s3.{self.region}.amazonaws.com",
-            description="Public S3 base URL for Grafana dashboard JSON files",
         )
         CfnOutput(
             self,

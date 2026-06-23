@@ -105,10 +105,10 @@ grafana-deploy:
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
-	S3_URL="$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
-	  --query 'Stacks[0].Outputs[?OutputKey==`GrafanaDataUrl`].OutputValue' \
+	DATA_URL="$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
+	  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
 	  --output text)" && \
-	[ -n "$$S3_URL" ] || { echo "ERROR: could not resolve GrafanaDataUrl from NceStack outputs"; exit 1; } && \
+	[ -n "$$DATA_URL" ] || { echo "ERROR: could not resolve CloudFrontUrl from NceStack outputs"; exit 1; } && \
 	echo "==> Installing Infinity plugin..." && \
 	PLUGIN_STATUS=$$(curl -s "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/settings" \
 	  -H "Authorization: Bearer $$API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null) && \
@@ -123,21 +123,21 @@ grafana-deploy:
 	  echo "  Installed yesoreyeram-infinity-datasource 2.11.0"; \
 	fi && \
 	echo "==> Configuring Infinity datasource..." && \
-	DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"$$S3_URL\",\"jsonData\":{}}" && \
+	DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"$$DATA_URL\",\"jsonData\":{}}" && \
 	EXISTING_DS=$$(curl -sf "$$GRAFANA_URL/api/datasources/name/Infinity" \
 	  -H "Authorization: Bearer $$API_KEY" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "") && \
 	if [ -n "$$EXISTING_DS" ]; then \
 	  curl -sf -X PUT "$$GRAFANA_URL/api/datasources/$$EXISTING_DS" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Updated datasource (id=$$EXISTING_DS, uid=ffon28bht91c0b, url=$$S3_URL)"; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Updated datasource (id=$$EXISTING_DS, uid=ffon28bht91c0b, url=$$DATA_URL)"; \
 	else \
 	  curl -sf -X POST "$$GRAFANA_URL/api/datasources" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Created datasource (uid=ffon28bht91c0b, url=$$S3_URL)"; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Created datasource (uid=ffon28bht91c0b, url=$$DATA_URL)"; \
 	fi && \
 	echo "==> Deploying dashboards..." && \
 	find ../grafana -name '*.json' | while read DASH; do \
-	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$S3_URL/data/|g") && \
+	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$DATA_URL/data/|g") && \
 	  TITLE=$$(echo "$$PATCHED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))") && \
 	  RESULT=$$(echo "{\"dashboard\":$$PATCHED,\"overwrite\":true,\"folderId\":0}" | \
 	    curl -sf -X POST "$$GRAFANA_URL/api/dashboards/import" \
@@ -145,7 +145,7 @@ grafana-deploy:
 	      -d @- 2>&1) && \
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
-	echo "==> Done. Open $$GRAFANA_URL"
+	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
 ## Deploy CDK stack then configure Grafana end-to-end (use on a fresh stack after destroy)
 ## Waits up to 20 min for the workspace to become ACTIVE, then sets up API key (if absent) and deploys dashboards.

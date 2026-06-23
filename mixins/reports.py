@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 from collections import defaultdict
@@ -7357,6 +7358,7 @@ class ReportsMixin:
             self.write_report_json(data_dir, Path("quarto-data"), Path("public/data"))
         else:
             self.write_report_json(data_dir)
+
         (data_dir / "snapshot.complete").touch()
 
         phases = []
