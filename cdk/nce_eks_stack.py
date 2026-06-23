@@ -2,6 +2,7 @@ import aws_cdk as cdk
 from aws_cdk import (
     Stack,
     RemovalPolicy,
+    CfnJson,
     CfnOutput,
     aws_ec2 as ec2,
     aws_efs as efs,
@@ -100,17 +101,20 @@ class NceEksStack(Stack):
         # ── EFS CSI driver (IRSA) ─────────────────────────────────────────────
         # The addon creates and owns efs-csi-controller-sa, so we create only
         # the IAM role here (no add_service_account, which would conflict).
+        # CfnJson delays OIDC issuer token resolution to deploy time so it can
+        # be used as a map key (synth-time interpolation fails with KeyMustResolveToString).
         oidc_issuer = cluster.cluster_open_id_connect_issuer
+        efs_csi_conditions = CfnJson(self, "EfsCsiOidcConditions", value={
+            "StringEquals": {
+                f"{oidc_issuer}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
+                f"{oidc_issuer}:aud": "sts.amazonaws.com",
+            }
+        })
         efs_csi_role = iam.Role(
             self, "EfsCsiRole",
             assumed_by=iam.FederatedPrincipal(
                 cluster.open_id_connect_provider.open_id_connect_provider_arn,
-                {
-                    "StringEquals": {
-                        f"{oidc_issuer}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
-                        f"{oidc_issuer}:aud": "sts.amazonaws.com",
-                    }
-                },
+                {"StringEquals": efs_csi_conditions},
                 "sts:AssumeRoleWithWebIdentity",
             ),
         )
