@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: {{ .Release.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "/app/scripts/entrypoint-eks.sh"]
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          env:
+            - name: CONFIG_PARAM
+              value: {{ .Values.config.param | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.config.awsRegion | quote }}
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
+          volumeMounts:
+            - name: nce-config
+              mountPath: /mnt/config
+            - name: nce-reports
+              mountPath: /app/reports
+            - name: nce-interactive
+              mountPath: /app/public/interactive
+            - name: nce-quarto-site
+              mountPath: /app/quarto-site
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: nce-config
+          persistentVolumeClaim:
+            claimName: nce-config
+        - name: nce-reports
+          persistentVolumeClaim:
+            claimName: nce-reports
+        - name: nce-interactive
+          persistentVolumeClaim:
+            claimName: nce-interactive
+        - name: nce-quarto-site
+          persistentVolumeClaim:
+            claimName: nce-quarto-site

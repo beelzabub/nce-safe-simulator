@@ -34,6 +34,19 @@
     "desired_count": 1,
 
     "grafana_api_key_param": "/nce/grafana-api-key",
-    "grafana_admin_sso_user_id": "68f15380-f0d1-70fa-314b-b561ab686952"
+    "grafana_admin_sso_user_id": "68f15380-f0d1-70fa-314b-b561ab686952",
+
+    "eks_cluster_name": "nce-eks",
+    "eks_namespace":    "nce",
+    "eks_node_instance": "m6g.large",
+    "efs_id":           "",
+    "efs_sg_id":        "",
+    "efs_ap_config":    "",
+    "efs_ap_reports":   "",
+    "efs_ap_interactive": "",
+    "efs_ap_quarto":    "",
+    "eks_alb_dns":      "",
+    "eks_cf_distribution_id": "",
+    "eks_cf_url":       ""
   }
 }
