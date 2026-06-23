@@ -235,19 +235,21 @@ eks-lb-controller: ## Install AWS Load Balancer Controller via Helm (run after e
 	  --set vpcId=$$VPC_ID && \
 	echo "==> AWS Load Balancer Controller installed."
 
-eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from cdk.json)
+eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from NceEksStack outputs)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
-	EFS_ID=$$(jq -r '.context.efs_id' cdk.json) && \
-	AP_CONFIG=$$(jq -r '.context.efs_ap_config' cdk.json) && \
-	AP_REPORTS=$$(jq -r '.context.efs_ap_reports' cdk.json) && \
-	AP_INTERACTIVE=$$(jq -r '.context.efs_ap_interactive' cdk.json) && \
-	AP_QUARTO=$$(jq -r '.context.efs_ap_quarto' cdk.json) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
-	SA_ROLE_ARN=$$(aws cloudformation describe-stacks --stack-name NceEksStack --region $$REGION \
-	  --query 'Stacks[0].Outputs[?OutputKey==`EksAppSaRoleArn`].OutputValue' --output text) && \
+	OUTPUTS=$$(aws cloudformation describe-stacks --stack-name NceEksStack --region $$REGION \
+	  --query 'Stacks[0].Outputs' --output json) && \
+	_out() { echo "$$OUTPUTS" | python3 -c "import sys,json; o=json.load(sys.stdin); print(next(x['OutputValue'] for x in o if x['OutputKey']=='$$1'))"; } && \
+	SA_ROLE_ARN=$$(_out EksAppSaRoleArn) && \
+	EFS_ID=$$(_out EfsId) && \
+	AP_CONFIG=$$(_out EfsApConfig) && \
+	AP_REPORTS=$$(_out EfsApReports) && \
+	AP_INTERACTIVE=$$(_out EfsApInteractive) && \
+	AP_QUARTO=$$(_out EfsApQuartoSite) && \
 	helm upgrade --install $$APP_NAME ../helm/nce-safe-simulator \
 	  --namespace $$NAMESPACE --create-namespace \
 	  --set image.repository=$$REPO \
@@ -350,7 +352,6 @@ eks-exec: ## Open an interactive shell in the running pod
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
 eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + LB controller + helm + ALB + CloudFront + Grafana
-	@$(MAKE) --no-print-directory set-efs
 	@$(MAKE) --no-print-directory eks-deploy
 	@$(MAKE) --no-print-directory eks-kubeconfig
 	@$(MAKE) --no-print-directory eks-lb-controller
