@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy redeploy
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy full-deploy redeploy
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -144,6 +144,34 @@ grafana-deploy:
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
 	echo "==> Done. Open $$GRAFANA_URL"
+
+## Deploy CDK stack then configure Grafana end-to-end (use on a fresh stack after destroy)
+## Waits up to 20 min for the workspace to become ACTIVE, then sets up API key (if absent) and deploys dashboards.
+full-deploy:
+	@$(MAKE) --no-print-directory deploy
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	echo "==> Waiting for Grafana workspace to reach ACTIVE (up to 20 min)..." && \
+	STATUS="" && i=0 && \
+	while [ $$i -lt 40 ]; do \
+	  STATUS=$$(aws grafana list-workspaces --region $$REGION \
+	    --query "workspaces[?name=='$$APP_NAME'].status" --output text 2>/dev/null); \
+	  [ "$$STATUS" = "ACTIVE" ] && break; \
+	  i=$$((i+1)); \
+	  printf "  [%02d/40] %-12s — waiting 30s...\n" $$i "$${STATUS:-pending}"; \
+	  sleep 30; \
+	done && \
+	[ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
+	EXISTING_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
+	  --region $$REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "") && \
+	if [ -z "$$EXISTING_KEY" ]; then \
+	  echo "==> No API key in SSM — running grafana-setup..." && \
+	  $(MAKE) --no-print-directory grafana-setup; \
+	else \
+	  echo "==> API key already in SSM — skipping grafana-setup."; \
+	fi
+	@$(MAKE) --no-print-directory grafana-deploy
 
 ## Full teardown and redeploy: destroy stack, rebuild image, deploy, seed config, set up Grafana.
 ## Safe to run unattended: nohup make redeploy > redeploy.log 2>&1 &
