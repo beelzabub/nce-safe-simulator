@@ -1,5 +1,5 @@
 {
-  "app": "python app.py",
+  "app": "python ecs_app.py",
   "context": {
     "vpc_id": "vpc-06c1d6ba7f71a217f",
 
