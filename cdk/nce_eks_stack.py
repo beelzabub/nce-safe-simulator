@@ -20,8 +20,8 @@ class NceEksStack(Stack):
 
         vpc_id            = ctx("vpc_id")
         config_param      = ctx("config_param")
-        efs_id            = ctx("efs_id")
-        efs_sg_id         = ctx("efs_sg_id")
+        efs_id            = ctx("efs_id") or ""
+        efs_sg_id         = ctx("efs_sg_id") or ""
         eks_cluster_name  = ctx("eks_cluster_name")
         eks_namespace     = ctx("eks_namespace")
         eks_node_instance = ctx("eks_node_instance")
@@ -31,14 +31,6 @@ class NceEksStack(Stack):
             vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
         else:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
-
-        # ── EFS (imported from NceStack) ──────────────────────────────────────
-        efs_sg = ec2.SecurityGroup.from_security_group_id(self, "EfsSg", efs_sg_id)
-        filesystem = efs.FileSystem.from_file_system_attributes(
-            self, "Efs",
-            file_system_id=efs_id,
-            security_group=efs_sg,
-        )
 
         # ── CloudWatch logs ───────────────────────────────────────────────────
         logs.LogGroup(
@@ -69,8 +61,16 @@ class NceEksStack(Stack):
             desired_size=1,
         )
 
-        # Allow EKS nodes to reach EFS on port 2049
-        filesystem.connections.allow_default_port_from(cluster.cluster_security_group)
+        # ── EFS (imported from NceStack — requires 'make set-efs' first) ────────
+        # Guarded so the stack synthesizes cleanly before set-efs is run.
+        if efs_id and efs_sg_id:
+            efs_sg = ec2.SecurityGroup.from_security_group_id(self, "EfsSg", efs_sg_id)
+            filesystem = efs.FileSystem.from_file_system_attributes(
+                self, "Efs",
+                file_system_id=efs_id,
+                security_group=efs_sg,
+            )
+            filesystem.connections.allow_default_port_from(cluster.cluster_security_group)
 
         # ── EFS CSI driver (IRSA) ─────────────────────────────────────────────
         efs_csi_sa = cluster.add_service_account(
@@ -142,7 +142,8 @@ class NceEksStack(Stack):
                 ],
             )
         )
-        filesystem.grant_read_write(app_sa.role)
+        if efs_id and efs_sg_id:
+            filesystem.grant_read_write(app_sa.role)
 
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "EksClusterName", value=cluster.cluster_name)
