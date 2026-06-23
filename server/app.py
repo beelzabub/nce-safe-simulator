@@ -11,7 +11,8 @@ from typing import Optional
 import markdown as _md
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
@@ -20,6 +21,13 @@ from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
@@ -688,6 +696,24 @@ def _build_job_fn(gl: object, data: dict):
 # ---------------------------------------------------------------------------
 # Static file serving
 # ---------------------------------------------------------------------------
+# Latest-run data endpoint — serves JSON files from the most recent complete
+# snapshot so Grafana's Infinity datasource can reach them via the ALB.
+
+@app.get("/data/{filename}")
+def latest_data(filename: str):
+    reports_dir = Path("reports")
+    candidates = sorted(
+        (d / "data" for d in reports_dir.glob("*/*/") if (d / "data" / "snapshot.complete").is_file()),
+        reverse=True,
+    )
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No complete snapshot available")
+    f = candidates[0] / filename
+    if not f.exists():
+        raise HTTPException(status_code=404, detail=f"{filename} not found in latest snapshot")
+    return FileResponse(str(f), media_type="application/json")
+
+# ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
 
 _reports_dir = Path("reports")
@@ -699,8 +725,8 @@ _logs_dir.mkdir(exist_ok=True)   # ensure mount is always registered
 app.mount("/logs", StaticFiles(directory=str(_logs_dir)), name="logs-files")
 
 _quarto_site = Path("quarto-site")
-if _quarto_site.is_dir():
-    app.mount("/quarto", StaticFiles(directory=str(_quarto_site), html=True), name="quarto-static")
+_quarto_site.mkdir(exist_ok=True)   # ensure mount is always registered
+app.mount("/quarto", StaticFiles(directory=str(_quarto_site), html=True), name="quarto-static")
 
 @app.get("/")
 def root():

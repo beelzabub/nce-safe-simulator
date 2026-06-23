@@ -1,34 +1,58 @@
 {
-  "title": "NCE SAFe — Home",
+  "title": "NCE SAFe \u2014 Home",
   "uid": "nce-safe-home",
   "schemaVersion": 38,
   "version": 1,
   "editable": true,
-  "tags": ["safe", "nce", "home"],
-  "time": { "from": "now-1y", "to": "now" },
+  "tags": [
+    "safe",
+    "nce",
+    "home"
+  ],
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "refresh": "",
   "links": [],
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "panels": [
     {
       "id": 1,
       "title": "Current PI",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
-          "root_selector": "",
-          "url_options": { "method": "GET", "data": "" },
+          "url": "__BASE_URL__/data/health-dashboard.json",
+          "root_selector": "pi",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "current_piid", "text": "current_piid", "type": "string" }
+            {
+              "selector": "current",
+              "text": "current",
+              "type": "string"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -36,10 +60,21 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "#0a2447" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0a2447"
+          },
           "custom": {},
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -48,7 +83,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" , "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -56,19 +97,34 @@
       "id": 2,
       "title": "Portfolio % Done",
       "type": "stat",
-      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "url": "__BASE_URL__/data/health-dashboard.json",
           "root_selector": "portfolio",
-          "url_options": { "method": "GET", "data": "" },
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "pct_done", "text": "pct_done", "type": "number" }
+            {
+              "selector": "pct_done",
+              "text": "pct_done",
+              "type": "number"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -79,15 +135,26 @@
           "unit": "percent",
           "min": 0,
           "max": 100,
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {},
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red",    "value": null },
-              { "color": "yellow", "value": 40   },
-              { "color": "green",  "value": 70   }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "green",
+                "value": 70
+              }
             ]
           }
         },
@@ -98,7 +165,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -106,19 +179,34 @@
       "id": 3,
       "title": "Total Blocked",
       "type": "stat",
-      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/blocking.json",
+          "url": "__BASE_URL__/data/blocking.json",
           "root_selector": "summary",
-          "url_options": { "method": "GET", "data": "" },
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "total_blocked", "text": "total_blocked", "type": "number" }
+            {
+              "selector": "total_blocked",
+              "text": "total_blocked",
+              "type": "number"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -126,15 +214,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {},
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green",  "value": null },
-              { "color": "yellow", "value": 3    },
-              { "color": "red",    "value": 8    }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
             ]
           }
         },
@@ -145,7 +244,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -153,19 +258,34 @@
       "id": 4,
       "title": "Behind Schedule",
       "type": "stat",
-      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/risk-register.json",
+          "url": "__BASE_URL__/data/risk-register.json",
           "root_selector": "behind_schedule",
-          "url_options": { "method": "GET", "data": "" },
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "piid", "text": "piid", "type": "string" }
+            {
+              "selector": "piid",
+              "text": "piid",
+              "type": "string"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -173,15 +293,26 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {},
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green",  "value": null },
-              { "color": "yellow", "value": 5    },
-              { "color": "red",    "value": 10   }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           }
         },
@@ -192,7 +323,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["count"], "fields": "/.*/" , "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "count"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -200,19 +337,34 @@
       "id": 5,
       "title": "WSJF In-Flight",
       "type": "stat",
-      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/wsjf.json",
+          "url": "__BASE_URL__/data/wsjf.json",
           "root_selector": "summary",
-          "url_options": { "method": "GET", "data": "" },
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "in_flight", "text": "in_flight", "type": "number" }
+            {
+              "selector": "in_flight",
+              "text": "in_flight",
+              "type": "number"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -220,10 +372,21 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
           "custom": {},
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -232,7 +395,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -240,19 +409,34 @@
       "id": 6,
       "title": "Total Epics",
       "type": "stat",
-      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
-      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "ffon28bht91c0b" },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "ffon28bht91c0b"
+      },
       "targets": [
         {
           "refId": "A",
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "url": "__BASE_URL__/data/health-dashboard.json",
           "root_selector": "portfolio",
-          "url_options": { "method": "GET", "data": "" },
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
           "columns": [
-            { "selector": "epics_total", "text": "epics_total", "type": "number" }
+            {
+              "selector": "epics_total",
+              "text": "epics_total",
+              "type": "number"
+            }
           ],
           "filters": [],
           "global_query_id": ""
@@ -260,10 +444,21 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
           "custom": {},
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -272,7 +467,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -280,34 +481,58 @@
       "id": 10,
       "title": "Executive",
       "type": "text",
-      "gridPos": { "x": 0, "y": 4, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
       "options": {
         "mode": "markdown",
-        "content": "## Executive\n\n---\n\n### [Portfolio Health](/d/nce-safe-portfolio-health)\nValue stream health traffic lights, at-risk epics, and top blocked items.\n\n&nbsp;\n\n### [WSJF Priority Board](/d/nce-safe-wsjf)\nWeighted Shortest Job First scoring — ranked candidates and full scoring table.\n\n&nbsp;\n\n### [Risk Register](/d/nce-safe-risk-register)\nROAM risk distribution and behind-schedule items.\n\n&nbsp;\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered."
+        "content": "## Executive\n\n---\n\n### [Portfolio Health](/d/nce-safe-portfolio-health)\nValue stream health traffic lights, at-risk epics, and top blocked items.\n\n&nbsp;\n\n### [WSJF Priority Board](/d/nce-safe-wsjf)\nWeighted Shortest Job First scoring \u2014 ranked candidates and full scoring table.\n\n&nbsp;\n\n### [Risk Register](/d/nce-safe-risk-register)\nROAM risk distribution and behind-schedule items.\n\n&nbsp;\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered."
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 11,
       "title": "Program",
       "type": "text",
-      "gridPos": { "x": 8, "y": 4, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
       "options": {
         "mode": "markdown",
         "content": "## Program\n\n---\n\n### [Flow Metrics](/d/nce-safe-flow-metrics)\nPI velocity, predictability %, committed vs delivered.\n\n&nbsp;\n\n### [Team Backlogs](/d/nce-safe-team-backlog)\nPer-team % done, open/closed issue counts, and backlog summary.\n\n&nbsp;\n\n### [Epic Lifecycle](/d/nce-safe-epic-lifecycle)\nEpic count and age by lifecycle state."
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     },
     {
       "id": 12,
       "title": "Site",
       "type": "text",
-      "gridPos": { "x": 16, "y": 4, "w": 8, "h": 8 },
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
       "options": {
         "mode": "markdown",
-        "content": "## Full Reports Site\n\n---\n\nThe Quarto + Marimo site has all 19 reports including interactive pages not available in Grafana.\n\n&nbsp;\n\n### [Open Report Site](https://beelzabub-project-d081ac.gitlab.io)\nPortfolio hierarchy, blocking graph, interactive WSJF scoring, capability dashboard, and more.\n\n&nbsp;\n\n**Data freshness:** All Grafana panels read live from the Pages JSON files. Data updates automatically on each push to `develop`."
+        "content": "## Full Reports Site\n\n---\n\nThe Quarto + Marimo site has all 19 reports including interactive pages not available in Grafana.\n\n&nbsp;\n\n### [Open Report Site](__BASE_URL__)\nPortfolio hierarchy, blocking graph, interactive WSJF scoring, capability dashboard, and more.\n\n&nbsp;\n\n**Data freshness:** All Grafana panels read live from the Pages JSON files. Data updates automatically on each push to `develop`."
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     }
   ]
 }

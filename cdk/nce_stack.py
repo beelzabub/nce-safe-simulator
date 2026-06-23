@@ -4,11 +4,14 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     CfnOutput,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_ec2 as ec2,
     aws_ecr as ecr,
     aws_efs as efs,
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
+    aws_grafana as grafana,
     aws_iam as iam,
     aws_logs as logs,
 )
@@ -220,12 +223,38 @@ class NceStack(Stack):
         filesystem.connections.allow_default_port_from(service.service.connections)
         filesystem.grant_read_write(task_def.task_role)
 
+        # ── CloudFront distribution ───────────────────────────────────────────
+        # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
+        # can run in browser/direct mode without mixed-content or allowedHosts issues.
+        distribution = cloudfront.Distribution(
+            self,
+            "DataDistribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.HttpOrigin(
+                    service.load_balancer.load_balancer_dns_name,
+                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+                ),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                # Forward all viewer headers (including Sec-WebSocket-Key/Version) so
+                # WebSocket upgrades reach the origin intact.
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            ),
+        )
+
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(
             self,
             "AppUrl",
             value=f"http://{service.load_balancer.load_balancer_dns_name}",
             description="NCE Safe Simulator public URL",
+        )
+        CfnOutput(
+            self,
+            "CloudFrontUrl",
+            value=f"https://{distribution.domain_name}",
+            description="CloudFront HTTPS endpoint for WebSocket/app access",
         )
         CfnOutput(
             self,
@@ -244,4 +273,36 @@ class NceStack(Stack):
             "LogTail",
             value=f"aws logs tail {log_group_name} --follow --region {self.region}",
             description="Command to follow container logs",
+        )
+
+        # ── Amazon Managed Grafana ────────────────────────────────────────────
+        grafana_role = iam.Role(
+            self,
+            "GrafanaRole",
+            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+        )
+
+        workspace = grafana.CfnWorkspace(
+            self,
+            "GrafanaWorkspace",
+            name=app_name,
+            account_access_type="CURRENT_ACCOUNT",
+            authentication_providers=["AWS_SSO"],
+            permission_type="SERVICE_MANAGED",
+            role_arn=grafana_role.role_arn,
+            grafana_version="10.4",
+            plugin_admin_enabled=True,
+        )
+
+        CfnOutput(
+            self,
+            "GrafanaWorkspaceId",
+            value=workspace.ref,
+            description="AMG workspace ID — used by make grafana-setup and grafana-deploy",
+        )
+        CfnOutput(
+            self,
+            "GrafanaUrl",
+            value=f"https://{workspace.attr_endpoint}",
+            description="Grafana dashboard URL",
         )
