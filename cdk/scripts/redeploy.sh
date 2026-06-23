@@ -119,16 +119,15 @@ log "API key stored at ${GRAFANA_API_KEY_PARAM}."
 
 log "==> Deploying dashboards..."
 GRAFANA_URL="https://${WORKSPACE_ID}.grafana-workspace.${REGION}.amazonaws.com"
-S3_URL=$(aws cloudformation describe-stacks \
+DATA_URL=$(aws cloudformation describe-stacks \
   --stack-name NceStack \
   --region "${REGION}" \
-  --query 'Stacks[0].Outputs[?OutputKey==`GrafanaDataUrl`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
   --output text)
-[ -n "${S3_URL}" ] || fail "GrafanaDataUrl not found in NceStack outputs."
-S3_HOST="${S3_URL#https://}"
+[ -n "${DATA_URL}" ] || fail "CloudFrontUrl not found in NceStack outputs."
 
 log "Grafana URL: ${GRAFANA_URL}"
-log "Data URL:    ${S3_URL}"
+log "Data URL:    ${DATA_URL}"
 
 # Install Infinity plugin
 PLUGIN_VER=$(curl -sf "${GRAFANA_URL}/api/plugins/yesoreyeram-infinity-datasource/settings" \
@@ -145,8 +144,8 @@ else
   log "  Installed yesoreyeram-infinity-datasource 2.11.0"
 fi
 
-# Configure datasource
-DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"proxy\",\"isDefault\":true,\"url\":\"${S3_URL}\",\"jsonData\":{\"allowedHosts\":[\"${S3_HOST}\"]}}"
+# Configure datasource (access: direct — browser fetches CloudFront directly)
+DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"${DATA_URL}\",\"jsonData\":{}}"
 EXISTING_DS=$(curl -sf "${GRAFANA_URL}/api/datasources/name/Infinity" \
   -H "Authorization: Bearer ${KEY}" 2>/dev/null \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
@@ -164,7 +163,7 @@ fi
 
 # Deploy dashboards
 find ../grafana -name '*.json' | sort | while read -r DASH; do
-  PATCHED=$(sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|${S3_URL}/data/|g" "${DASH}")
+  PATCHED=$(sed "s|__BASE_URL__|${DATA_URL}|g" "${DASH}")
   TITLE=$(echo "${PATCHED}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))")
   RESULT=$(echo "{\"dashboard\":${PATCHED},\"overwrite\":true,\"folderId\":0}" | \
     curl -sf -X POST "${GRAFANA_URL}/api/dashboards/import" \

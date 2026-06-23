@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/wsjf.json",
+          "url": "__BASE_URL__/data/wsjf.json",
           "root_selector": "candidates",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -81,7 +81,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/wsjf.json",
+          "url": "__BASE_URL__/data/wsjf.json",
           "root_selector": "candidates",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
