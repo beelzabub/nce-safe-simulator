@@ -55,7 +55,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	IMAGE_COUNT=$$(aws ecr list-images --repository-name $$APP_NAME --region $$REGION --query 'length(imageIds)' --output text 2>/dev/null || echo "0") && \
 	if [ "$$IMAGE_COUNT" = "0" ]; then \
 	  echo "==> No image in ECR — deploying infra with service scaled to 0..." && \
-	  cdk deploy --require-approval never --context desired_count=0 && \
+	  cdk deploy NceStack --require-approval never --context desired_count=0 && \
 	  echo "==> Building and pushing initial image..." && \
 	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
 	  docker build --platform linux/arm64 -t $$APP_NAME ../ && \
@@ -63,7 +63,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	  docker push "$$REPO:latest" && \
 	  echo "==> Image ready — scaling service up..."; \
 	fi && \
-	cdk deploy --require-approval never
+	cdk deploy NceStack --require-approval never
 
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --force
