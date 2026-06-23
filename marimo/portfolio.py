@@ -24,8 +24,9 @@ def _(mo):
     if _data_file is not None:
         d = json.loads(_data_file.read_text())
     else:
-        import urllib.request
-        d = json.loads(urllib.request.urlopen("/data/portfolio.json").read())
+        import js
+        import pyodide.http
+        d = json.loads(pyodide.http.open_url(f"{js.self.location.origin}/data/portfolio.json").read())
 
     group     = d["group"]
     summary   = d["summary"]

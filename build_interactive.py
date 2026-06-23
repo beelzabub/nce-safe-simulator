@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 NOTEBOOKS = [
@@ -44,8 +45,7 @@ def export_notebook(nb: str) -> None:
         text=True,
     )
     if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}", file=sys.stderr)
-        raise SystemExit(1)
+        raise RuntimeError(f"{nb}: {result.stderr.strip()}")
 
 
 def promote_assets(nb: str) -> None:
@@ -95,11 +95,21 @@ def main() -> None:
     inline_css  = css_file.read_text(encoding="utf-8")  if css_file.exists()  else ""
     inline_head = head_file.read_text(encoding="utf-8") if head_file.exists() else ""
 
-    for i, nb in enumerate(NOTEBOOKS):
-        print(f"  {nb}...")
-        export_notebook(nb)
-        if i == 0:
-            promote_assets(nb)
+    print(f"Exporting {len(NOTEBOOKS)} notebooks in parallel...")
+    with ThreadPoolExecutor(max_workers=len(NOTEBOOKS)) as pool:
+        futs = {pool.submit(export_notebook, nb): nb for nb in NOTEBOOKS}
+        for fut in as_completed(futs):
+            nb = futs[fut]
+            try:
+                fut.result()
+                print(f"  ✓ {nb}")
+            except RuntimeError as exc:
+                print(f"  ✗ {exc}", file=sys.stderr)
+                raise SystemExit(1)
+
+    promote_assets(NOTEBOOKS[0])
+
+    for nb in NOTEBOOKS:
         rewrite_html(nb, inline_css, inline_head)
 
     size_mb = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file()) / 1e6
