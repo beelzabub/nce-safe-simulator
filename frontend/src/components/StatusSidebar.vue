@@ -251,7 +251,7 @@ function formatElapsed(s) {
 }
 
 function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' }) + ' UTC'
 }
 
 function formatDur(ms) {
@@ -261,10 +261,10 @@ function formatDur(ms) {
 }
 
 function formatRunLabel(run) {
-  // "20260615/201347" → "2026-06-15  20:13:47"
+  // "20260615/201347" → "2026-06-15  20:13:47 UTC"
   const d = run.date   // "20260615"
   const t = run.time   // "201347"
-  return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}  ${t.slice(0,2)}:${t.slice(2,4)}:${t.slice(4,6)}`
+  return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}  ${t.slice(0,2)}:${t.slice(2,4)}:${t.slice(4,6)} UTC`
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
