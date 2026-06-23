@@ -315,6 +315,12 @@ class NceStack(Stack):
         )
 
         # ── Amazon Managed Grafana ────────────────────────────────────────────
+        grafana_role = iam.Role(
+            self,
+            "GrafanaRole",
+            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+        )
+
         workspace = grafana.CfnWorkspace(
             self,
             "GrafanaWorkspace",
@@ -322,6 +328,7 @@ class NceStack(Stack):
             account_access_type="CURRENT_ACCOUNT",
             authentication_providers=["AWS_SSO"],
             permission_type="SERVICE_MANAGED",
+            role_arn=grafana_role.role_arn,
             grafana_version="10.4",
             plugin_admin_enabled=True,
         )
