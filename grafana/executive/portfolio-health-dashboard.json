@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "url": "__BASE_URL__/data/health-dashboard.json",
           "root_selector": "vs_rows",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -73,7 +73,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "url": "__BASE_URL__/data/health-dashboard.json",
           "root_selector": "at_risk_epics",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -135,7 +135,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/health-dashboard.json",
+          "url": "__BASE_URL__/data/health-dashboard.json",
           "root_selector": "top_blocked",
           "url_options": { "method": "GET", "data": "" },
           "columns": [

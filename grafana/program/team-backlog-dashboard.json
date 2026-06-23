@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "url": "__BASE_URL__/data/team-backlog.json",
           "root_selector": "teams",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -87,7 +87,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "url": "__BASE_URL__/data/team-backlog.json",
           "root_selector": "teams",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -144,7 +144,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/team-backlog.json",
+          "url": "__BASE_URL__/data/team-backlog.json",
           "root_selector": "teams",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
