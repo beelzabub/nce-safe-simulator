@@ -45,7 +45,7 @@ defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
   justify-content: space-between;
   padding: 0 1.25rem;
   gap: 1rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* ── Hero background — fixed to viewport so it lines up with main pane ── */

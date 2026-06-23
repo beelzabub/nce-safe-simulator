@@ -1,5 +1,5 @@
 <template>
-  <div class="clock-widget" :class="{ 'clock-widget--two': tz2On }" @click.stop>
+  <div ref="widgetEl" class="clock-widget" :class="{ 'clock-widget--two': tz2On }">
     <div class="clock-row">
       <span class="clock-time">{{ utcTime }}</span>
     </div>
@@ -49,9 +49,12 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useClock } from '../composables/useClock.js'
 
 const { utcTime, tz2Time, tz2, tz2On, setTz2, toggleTz2 } = useClock()
-const open = ref(false)
+const open     = ref(false)
+const widgetEl = ref(null)
 
-function onDocClick() { open.value = false }
+function onDocClick(e) {
+  if (!widgetEl.value?.contains(e.target)) open.value = false
+}
 onMounted(()   => document.addEventListener('click', onDocClick))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
