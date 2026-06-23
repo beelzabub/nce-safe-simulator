@@ -79,7 +79,9 @@ grafana-setup:
 	  --query "workspaces[?name=='$$(jq -r '.context.app_name' cdk.json)'].id" \
 	  --output text) && \
 	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; } && \
-	echo "==> Creating Grafana Admin API key in workspace $$WORKSPACE_ID..." && \
+	echo "==> Rotating Grafana Admin API key in workspace $$WORKSPACE_ID..." && \
+	aws grafana delete-workspace-api-key --key-name "nce-deploy" \
+	  --workspace-id $$WORKSPACE_ID --region $$REGION 2>/dev/null || true && \
 	KEY=$$(aws grafana create-workspace-api-key \
 	  --key-name "nce-deploy" \
 	  --key-role "ADMIN" \
@@ -163,14 +165,7 @@ full-deploy:
 	  sleep 30; \
 	done && \
 	[ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
-	EXISTING_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
-	  --region $$REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "") && \
-	if [ -z "$$EXISTING_KEY" ]; then \
-	  echo "==> No API key in SSM — running grafana-setup..." && \
-	  $(MAKE) --no-print-directory grafana-setup; \
-	else \
-	  echo "==> API key already in SSM — skipping grafana-setup."; \
-	fi
+	$(MAKE) --no-print-directory grafana-setup
 	@$(MAKE) --no-print-directory grafana-deploy
 
 ## Full teardown and redeploy: destroy stack, rebuild image, deploy, seed config, set up Grafana.
