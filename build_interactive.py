@@ -1,6 +1,6 @@
 """Export all Marimo WASM notebooks with a shared asset directory.
 
-Each notebook is exported normally, then per-notebook asset directories are
+Each notebook is exported in parallel, then per-notebook asset directories are
 consolidated into a single public/interactive/assets/ location and HTML
 references are rewritten to point there.  This reduces the public/interactive/
 footprint from ~400 MB (11 × 34 MB) to ~40 MB.
@@ -108,6 +108,10 @@ def main() -> None:
                 raise SystemExit(1)
 
     promote_assets(NOTEBOOKS[0])
+
+    seal_src = CUSTOM_ASSETS / "peo-c4i-seal.png"
+    if seal_src.exists():
+        shutil.copy2(seal_src, SHARED_ASSETS / "peo-c4i-seal.png")
 
     for nb in NOTEBOOKS:
         rewrite_html(nb, inline_css, inline_head)
