@@ -8,6 +8,7 @@
       <span class="brand-divider">|</span>
       <span class="brand-name">NCE Safe Simulator</span>
     </div>
+    <ClockWidget />
     <div class="nav-actions">
       <button class="status-btn" :class="{ active: runningCount > 0 }" @click="$emit('toggle-status')">
         <span v-if="runningCount > 0" class="status-dot" />
@@ -25,6 +26,7 @@
 <script setup>
 import { useTheme } from '../composables/useTheme.js'
 import heroSrc from '../assets/hero-carrier.png'
+import ClockWidget from './ClockWidget.vue'
 
 const { theme, toggle } = useTheme()
 defineProps({ runningCount: { type: Number, default: 0 } })
@@ -43,7 +45,7 @@ defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
   justify-content: space-between;
   padding: 0 1.25rem;
   gap: 1rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* ── Hero background — fixed to viewport so it lines up with main pane ── */

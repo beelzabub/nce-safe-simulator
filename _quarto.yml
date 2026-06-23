@@ -77,6 +77,7 @@ website:
             text: "Orphaned Issues"
           - href: quarto/premature-closures.qmd
             text: "Premature Closures"
+    right:
       - text: "Diagnostics"
         href: quarto/diagnostics.qmd
 

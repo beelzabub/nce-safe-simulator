@@ -229,6 +229,8 @@ class NceGitLab(
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
 
+        self.grafana_url = os.getenv("GRAFANA_URL") or config.get("grafana_url", "")
+
 
 def _confirm_create(gl):
     """Show a summary of what Create will do and ask for confirmation."""
