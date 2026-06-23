@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_logs as logs,
 )
+from aws_cdk.lambda_layer_kubectl_v31 import KubectlV31Layer
 from constructs import Construct
 
 
@@ -41,11 +42,15 @@ class NceEksStack(Stack):
         )
 
         # ── EKS cluster ───────────────────────────────────────────────────────
+        public_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
+
         cluster = eks.Cluster(
             self, "Cluster",
             cluster_name=eks_cluster_name,
             version=eks.KubernetesVersion.V1_31,
+            kubectl_layer=KubectlV31Layer(self, "KubectlLayer"),
             vpc=vpc,
+            vpc_subnets=[public_subnets],
             default_capacity=0,
             output_cluster_name=True,
             output_config_command=True,
@@ -59,6 +64,7 @@ class NceEksStack(Stack):
             min_size=1,
             max_size=3,
             desired_size=1,
+            subnets=public_subnets,
         )
 
         # ── EFS (imported from NceStack — requires 'make set-efs' first) ────────
