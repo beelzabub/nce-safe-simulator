@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy redeploy
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -103,10 +103,10 @@ grafana-deploy:
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
-	CF_URL="$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
-	  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
+	S3_URL="$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
+	  --query 'Stacks[0].Outputs[?OutputKey==`GrafanaDataUrl`].OutputValue' \
 	  --output text)" && \
-	[ -n "$$CF_URL" ] || { echo "ERROR: could not resolve CloudFrontUrl from NceStack outputs"; exit 1; } && \
+	[ -n "$$S3_URL" ] || { echo "ERROR: could not resolve GrafanaDataUrl from NceStack outputs"; exit 1; } && \
 	echo "==> Installing Infinity plugin..." && \
 	PLUGIN_STATUS=$$(curl -s "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/settings" \
 	  -H "Authorization: Bearer $$API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null) && \
@@ -121,21 +121,21 @@ grafana-deploy:
 	  echo "  Installed yesoreyeram-infinity-datasource 2.11.0"; \
 	fi && \
 	echo "==> Configuring Infinity datasource..." && \
-	DS_PAYLOAD='{"uid":"ffon28bht91c0b","name":"Infinity","type":"yesoreyeram-infinity-datasource","access":"direct","isDefault":true,"url":"","jsonData":{}}' && \
+	DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"$$S3_URL\",\"jsonData\":{}}" && \
 	EXISTING_DS=$$(curl -sf "$$GRAFANA_URL/api/datasources/name/Infinity" \
 	  -H "Authorization: Bearer $$API_KEY" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "") && \
 	if [ -n "$$EXISTING_DS" ]; then \
 	  curl -sf -X PUT "$$GRAFANA_URL/api/datasources/$$EXISTING_DS" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Updated datasource (id=$$EXISTING_DS, uid=ffon28bht91c0b, direct mode)"; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Updated datasource (id=$$EXISTING_DS, uid=ffon28bht91c0b, url=$$S3_URL)"; \
 	else \
 	  curl -sf -X POST "$$GRAFANA_URL/api/datasources" \
 	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
-	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Created datasource (uid=ffon28bht91c0b, direct mode)"; \
+	    -d "$$DS_PAYLOAD" > /dev/null && echo "  Created datasource (uid=ffon28bht91c0b, url=$$S3_URL)"; \
 	fi && \
 	echo "==> Deploying dashboards..." && \
 	find ../grafana -name '*.json' | while read DASH; do \
-	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$CF_URL/data/|g") && \
+	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$S3_URL/data/|g") && \
 	  TITLE=$$(echo "$$PATCHED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))") && \
 	  RESULT=$$(echo "{\"dashboard\":$$PATCHED,\"overwrite\":true,\"folderId\":0}" | \
 	    curl -sf -X POST "$$GRAFANA_URL/api/dashboards/import" \
@@ -144,6 +144,11 @@ grafana-deploy:
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
 	echo "==> Done. Open $$GRAFANA_URL"
+
+## Full teardown and redeploy: destroy stack, rebuild image, deploy, seed config, set up Grafana.
+## Safe to run unattended: nohup make redeploy > redeploy.log 2>&1 &
+redeploy:
+	bash scripts/redeploy.sh
 
 ## Open an interactive shell in the running Fargate task via ECS Exec
 ecs-exec:
