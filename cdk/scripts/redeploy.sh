@@ -163,7 +163,7 @@ fi
 
 # Deploy dashboards
 find ../grafana -name '*.json' | sort | while read -r DASH; do
-  PATCHED=$(sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|${DATA_URL}/data/|g" "${DASH}")
+  PATCHED=$(sed "s|__BASE_URL__|${DATA_URL}|g" "${DASH}")
   TITLE=$(echo "${PATCHED}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))")
   RESULT=$(echo "{\"dashboard\":${PATCHED},\"overwrite\":true,\"folderId\":0}" | \
     curl -sf -X POST "${GRAFANA_URL}/api/dashboards/import" \

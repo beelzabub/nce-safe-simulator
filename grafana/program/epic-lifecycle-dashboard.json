@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/epic-lifecycle.json",
+          "url": "__BASE_URL__/data/epic-lifecycle.json",
           "root_selector": "states",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -77,7 +77,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/epic-lifecycle.json",
+          "url": "__BASE_URL__/data/epic-lifecycle.json",
           "root_selector": "states",
           "url_options": { "method": "GET", "data": "" },
           "columns": [

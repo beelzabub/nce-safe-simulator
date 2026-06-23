@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/risk-register.json",
+          "url": "__BASE_URL__/data/risk-register.json",
           "root_selector": "summary.roam",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -78,7 +78,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/risk-register.json",
+          "url": "__BASE_URL__/data/risk-register.json",
           "root_selector": "behind_schedule",
           "url_options": { "method": "GET", "data": "" },
           "columns": [

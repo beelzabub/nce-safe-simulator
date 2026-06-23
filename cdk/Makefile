@@ -137,7 +137,7 @@ grafana-deploy:
 	fi && \
 	echo "==> Deploying dashboards..." && \
 	find ../grafana -name '*.json' | while read DASH; do \
-	  PATCHED=$$(cat "$$DASH" | sed "s|https://beelzabub-project-d081ac.gitlab.io/data/|$$DATA_URL/data/|g") && \
+	  PATCHED=$$(cat "$$DASH" | sed "s|__BASE_URL__|$$DATA_URL|g") && \
 	  TITLE=$$(echo "$$PATCHED" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))") && \
 	  RESULT=$$(echo "{\"dashboard\":$$PATCHED,\"overwrite\":true,\"folderId\":0}" | \
 	    curl -sf -X POST "$$GRAFANA_URL/api/dashboards/import" \
