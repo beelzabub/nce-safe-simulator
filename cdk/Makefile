@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy full-deploy redeploy
+.PHONY: install bootstrap set-vpc diff deploy destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup grafana-deploy grafana-add-user full-deploy redeploy
 
 ## Install CDK CLI and Python CDK dependencies (run once)
 install:
@@ -147,6 +147,10 @@ grafana-deploy:
 	done && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
+## Assign Grafana Admin role to the SSO user defined in cdk.json (idempotent)
+grafana-add-user:
+	bash scripts/add-grafana-user.sh
+
 ## Deploy CDK stack then configure Grafana end-to-end (use on a fresh stack after destroy)
 ## Waits up to 20 min for the workspace to become ACTIVE, then sets up API key (if absent) and deploys dashboards.
 full-deploy:
@@ -167,6 +171,7 @@ full-deploy:
 	[ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
 	$(MAKE) --no-print-directory grafana-setup
 	@$(MAKE) --no-print-directory grafana-deploy
+	@$(MAKE) --no-print-directory grafana-add-user
 
 ## Full teardown and redeploy: destroy stack, rebuild image, deploy, seed config, set up Grafana.
 ## Safe to run unattended: nohup make redeploy > redeploy.log 2>&1 &

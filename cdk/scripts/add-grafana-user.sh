@@ -10,8 +10,7 @@ WORKSPACE_ID=$(aws grafana list-workspaces --region "$REGION" \
   --query "workspaces[?name=='$APP_NAME'].id" --output text)
 [ -n "$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; }
 
-# IAM Identity Center user ID — stable across destroy/deploy cycles (IDC is not CDK-managed)
-SSO_USER_ID="68f15380-f0d1-70fa-314b-b561ab686952"
+SSO_USER_ID=$(jq -r '.context.grafana_admin_sso_user_id' "$(dirname "$0")/../cdk.json")
 
 echo "==> Adding Admin permissions for $SSO_USER_ID in workspace $WORKSPACE_ID..."
 aws grafana update-permissions \
