@@ -24,7 +24,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "url": "__BASE_URL__/data/flow-metrics.json",
           "root_selector": "velocity",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -87,7 +87,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "url": "__BASE_URL__/data/flow-metrics.json",
           "root_selector": "predictability",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
@@ -144,7 +144,7 @@
           "type": "json",
           "source": "url",
           "format": "table",
-          "url": "https://beelzabub-project-d081ac.gitlab.io/data/flow-metrics.json",
+          "url": "__BASE_URL__/data/flow-metrics.json",
           "root_selector": "predictability",
           "url_options": { "method": "GET", "data": "" },
           "columns": [
