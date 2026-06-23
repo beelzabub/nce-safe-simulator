@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nce-safe-simulator
+description: NCE Safe Simulator — Kubernetes deployment
+version: 0.1.0
+appVersion: "latest"
