@@ -21,8 +21,6 @@ class NceEksStack(Stack):
 
         vpc_id            = ctx("vpc_id")
         config_param      = ctx("config_param")
-        efs_id            = ctx("efs_id") or ""
-        efs_sg_id         = ctx("efs_sg_id") or ""
         eks_cluster_name  = ctx("eks_cluster_name")
         eks_namespace     = ctx("eks_namespace")
         eks_node_instance = ctx("eks_node_instance")
@@ -75,16 +73,29 @@ class NceEksStack(Stack):
             subnets=public_subnets,
         )
 
-        # ── EFS (imported from NceStack — requires 'make set-efs' first) ────────
-        # Guarded so the stack synthesizes cleanly before set-efs is run.
-        if efs_id and efs_sg_id:
-            efs_sg = ec2.SecurityGroup.from_security_group_id(self, "EfsSg", efs_sg_id)
-            filesystem = efs.FileSystem.from_file_system_attributes(
-                self, "Efs",
-                file_system_id=efs_id,
-                security_group=efs_sg,
+        # ── EFS ───────────────────────────────────────────────────────────────
+        efs_sg = ec2.SecurityGroup(self, "EfsSg", vpc=vpc, description="EFS NFS for EKS")
+        efs_sg.add_ingress_rule(cluster.cluster_security_group, ec2.Port.tcp(2049))
+
+        filesystem = efs.FileSystem(
+            self, "Efs",
+            vpc=vpc,
+            security_group=efs_sg,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
+        def _ap(ap_id, path):
+            return filesystem.add_access_point(
+                ap_id,
+                path=path,
+                create_acl=efs.Acl(owner_uid="0", owner_gid="0", permissions="755"),
+                posix_user=efs.PosixUser(uid="0", gid="0"),
             )
-            filesystem.connections.allow_default_port_from(cluster.cluster_security_group)
+
+        ap_config      = _ap("ApConfig",      "/config")
+        ap_reports     = _ap("ApReports",     "/reports")
+        ap_interactive = _ap("ApInteractive", "/interactive")
+        ap_quarto      = _ap("ApQuartoSite",  "/quarto-site")
 
         # ── EFS CSI driver (IRSA) ─────────────────────────────────────────────
         # The addon creates and owns efs-csi-controller-sa, so we create only
@@ -151,10 +162,14 @@ class NceEksStack(Stack):
                 ],
             )
         )
-        if efs_id and efs_sg_id:
-            filesystem.grant_read_write(app_sa.role)
+        filesystem.grant_read_write(app_sa.role)
 
         # ── Outputs ───────────────────────────────────────────────────────────
-        CfnOutput(self, "EksClusterName", value=cluster.cluster_name)
-        CfnOutput(self, "EksLbSaRoleArn", value=lb_sa.role.role_arn)
-        CfnOutput(self, "EksAppSaRoleArn", value=app_sa.role.role_arn)
+        CfnOutput(self, "EksClusterName",   value=cluster.cluster_name)
+        CfnOutput(self, "EksLbSaRoleArn",   value=lb_sa.role.role_arn)
+        CfnOutput(self, "EksAppSaRoleArn",  value=app_sa.role.role_arn)
+        CfnOutput(self, "EfsId",            value=filesystem.file_system_id)
+        CfnOutput(self, "EfsApConfig",      value=ap_config.access_point_id)
+        CfnOutput(self, "EfsApReports",     value=ap_reports.access_point_id)
+        CfnOutput(self, "EfsApInteractive", value=ap_interactive.access_point_id)
+        CfnOutput(self, "EfsApQuartoSite",  value=ap_quarto.access_point_id)

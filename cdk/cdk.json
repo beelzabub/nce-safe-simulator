@@ -30,13 +30,7 @@
     "eks_cluster_name": "nce-eks",
     "eks_namespace": "nce",
     "eks_node_instance": "t4g.small",
-    "efs_id": "fs-0fdffffcda75ec054",
-    "efs_sg_id": "sg-0e24a89669dd48e9e",
-    "efs_ap_config": "fsap-0ba93aef88bbbdbe1",
-    "efs_ap_reports": "fsap-0e2821001b252e2eb",
-    "efs_ap_interactive": "fsap-069abf0fb07ecf83b",
-    "efs_ap_quarto": "fsap-00868361789ab6e27",
-    "eks_alb_dns": "",
+"eks_alb_dns": "",
     "eks_cf_distribution_id": "",
     "eks_cf_url": ""
   }
