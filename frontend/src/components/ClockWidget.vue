@@ -6,57 +6,98 @@
     <div v-if="tz2On" class="clock-row">
       <span class="clock-time clock-time--secondary">{{ tz2Time }}</span>
     </div>
-    <button class="clock-gear" @click.stop="open = !open" title="Clock settings" aria-label="Clock settings">⚙</button>
+    <button class="clock-gear" @click="openDialog" title="Clock settings" aria-label="Clock settings">⚙</button>
+  </div>
 
-    <div v-if="open" class="clock-popover">
-      <label class="clock-popover-row">
-        <input type="checkbox" :checked="tz2On" @change="toggleTz2($event.target.checked)" />
-        <span>Show second clock</span>
-      </label>
-      <div v-if="tz2On" class="clock-popover-row">
-        <span class="clock-popover-label">Timezone</span>
-        <select class="clock-tz-select" :value="tz2" @change="setTz2($event.target.value)">
-          <optgroup label="US / Canada">
-            <option value="America/New_York">Eastern (New York)</option>
-            <option value="America/Chicago">Central (Chicago)</option>
-            <option value="America/Denver">Mountain (Denver)</option>
-            <option value="America/Los_Angeles">Pacific (San Diego)</option>
-            <option value="America/Anchorage">Alaska</option>
-            <option value="Pacific/Honolulu">Hawaii</option>
-          </optgroup>
-          <optgroup label="Europe">
-            <option value="Europe/London">London</option>
-            <option value="Europe/Paris">Central Europe</option>
-            <option value="Europe/Helsinki">Eastern Europe</option>
-          </optgroup>
-          <optgroup label="Asia / Pacific">
-            <option value="Asia/Tokyo">Tokyo</option>
-            <option value="Asia/Shanghai">Beijing / Shanghai</option>
-            <option value="Asia/Kolkata">India (IST)</option>
-            <option value="Australia/Sydney">Sydney</option>
-          </optgroup>
-          <optgroup label="Other">
-            <option value="UTC">UTC</option>
-          </optgroup>
-        </select>
+  <Teleport to="body">
+    <div v-if="open" class="clock-overlay" @click.self="open = false">
+      <div class="clock-dialog" :style="dialogStyle">
+        <div class="clock-dialog-header">
+          <span>Clock settings</span>
+          <button class="clock-dialog-close" @click="open = false" aria-label="Close">×</button>
+        </div>
+        <label class="clock-dialog-row">
+          <input type="checkbox" :checked="tz2On" @change="toggleTz2($event.target.checked)" />
+          <span>Show second clock</span>
+        </label>
+        <div v-if="tz2On" class="clock-dialog-tz-section">
+          <div class="clock-dialog-tz-header">
+            <span class="clock-dialog-label">Timezone</span>
+            <input
+              ref="tzSearchEl"
+              v-model="tzSearch"
+              class="clock-tz-search"
+              type="search"
+              placeholder="filter…"
+              autocomplete="off"
+            />
+          </div>
+          <select class="clock-tz-select" size="20" :value="tz2" @change="setTz2($event.target.value)">
+            <template v-for="(tzs, group) in filteredTzGroups" :key="group">
+              <optgroup :label="group">
+                <option v-for="item in tzs" :key="item.tz" :value="item.tz">{{ item.label }}</option>
+              </optgroup>
+            </template>
+          </select>
+        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useClock } from '../composables/useClock.js'
 
 const { utcTime, tz2Time, tz2, tz2On, setTz2, toggleTz2 } = useClock()
-const open     = ref(false)
-const widgetEl = ref(null)
+const open        = ref(false)
+const widgetEl    = ref(null)
+const dialogStyle = ref({})
+const tzSearch    = ref('')
+const tzSearchEl  = ref(null)
 
-function onDocClick(e) {
-  if (!widgetEl.value?.contains(e.target)) open.value = false
+const tzGroups = computed(() => {
+  const now = new Date()
+  const groups = {}
+  for (const tz of Intl.supportedValuesOf('timeZone')) {
+    const slash = tz.indexOf('/')
+    const prefix = slash === -1 ? 'Other' : tz.slice(0, slash)
+    if (!groups[prefix]) groups[prefix] = []
+    const city = slash === -1 ? tz : tz.slice(slash + 1).replace(/_/g, ' ').replace(/\//g, ' / ')
+    const offsetPart = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'shortOffset' })
+      .formatToParts(now).find(p => p.type === 'timeZoneName')?.value ?? ''
+    const offset = offsetPart.replace('GMT', 'UTC')
+    groups[prefix].push({ tz, label: `${city}  ${offset}` })
+  }
+  return groups
+})
+
+const filteredTzGroups = computed(() => {
+  const q = tzSearch.value.trim().toLowerCase()
+  if (!q) return tzGroups.value
+  const result = {}
+  for (const [group, tzs] of Object.entries(tzGroups.value)) {
+    const matches = tzs.filter(item =>
+      item.tz.toLowerCase().includes(q) || item.label.toLowerCase().includes(q)
+    )
+    if (matches.length) result[group] = matches
+  }
+  return result
+})
+
+async function openDialog() {
+  const rect = widgetEl.value.getBoundingClientRect()
+  dialogStyle.value = {
+    position: 'fixed',
+    top:  `${rect.bottom + 8}px`,
+    left: `${rect.left + rect.width / 2}px`,
+    transform: 'translateX(-50%)',
+  }
+  tzSearch.value = ''
+  open.value = true
+  await nextTick()
+  tzSearchEl.value?.focus()
 }
-onMounted(()   => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <style scoped>
@@ -71,27 +112,23 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   padding: 0 1.5rem 0 0.25rem;
 }
 
-.clock-row {
-  display: flex;
-  align-items: center;
-}
+.clock-row { display: flex; align-items: center; }
 
 .clock-time {
   font-family: monospace;
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   color: var(--text-2);
   letter-spacing: 0.04em;
   white-space: nowrap;
+  transition: font-size 0.4s ease, line-height 0.4s ease;
 }
 
 .clock-widget--two .clock-time {
-  font-size: 0.72rem;
-  line-height: 1.2;
+  font-size: 0.78rem;
+  line-height: 1.3;
 }
 
-.clock-time--secondary {
-  color: var(--text-3);
-}
+.clock-time--secondary { color: var(--text-3); }
 
 .clock-gear {
   position: absolute;
@@ -111,11 +148,15 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 .clock-widget:hover .clock-gear { opacity: 1; }
 .clock-gear:hover { color: var(--text-1); }
 
-.clock-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+/* ── Teleported dialog ── */
+.clock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: transparent;
+}
+
+.clock-dialog {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -123,12 +164,37 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  z-index: 100;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+  min-width: 220px;
+  max-height: 90vh;
+  max-width: 90vw;
+  overflow-y: auto;
 }
 
-.clock-popover-row {
+.clock-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.clock-dialog-close {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.clock-dialog-close:hover { color: var(--text-1); }
+
+.clock-dialog-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -136,11 +202,34 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   color: var(--text-2);
 }
 
-.clock-popover-label {
+.clock-dialog-label {
   font-size: 0.75rem;
   color: var(--text-3);
   min-width: 60px;
 }
+
+.clock-dialog-tz-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.clock-dialog-tz-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.clock-tz-search {
+  flex: 1;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  padding: 3px 6px;
+}
+.clock-tz-search:focus { outline: 1px solid var(--accent, #4a9eff); }
 
 .clock-tz-select {
   background: var(--surface-alt);
@@ -150,5 +239,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   font-size: 0.78rem;
   padding: 3px 6px;
   cursor: pointer;
+  max-height: calc(90vh - 80px);
+  overflow-y: auto;
 }
 </style>
