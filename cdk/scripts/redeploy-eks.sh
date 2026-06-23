@@ -38,7 +38,7 @@ else
   log "No helm release found — continuing."
 fi
 if CDK_DEFAULT_ACCOUNT="${ACCOUNT}" CDK_DEFAULT_REGION="${REGION}" \
-   cdk destroy NceEksStack --force; then
+   cdk destroy NceEksStack --app "python eks_app.py" --force; then
   log "NceEksStack destroyed."
 else
   log "Destroy returned non-zero (stack may not have existed). Continuing."
@@ -49,7 +49,7 @@ log ""
 log "--- [2/7] Deploying EKS CDK stack ---"
 log "Note: EKS cluster creation typically takes 15-20 minutes."
 CDK_DEFAULT_ACCOUNT="${ACCOUNT}" CDK_DEFAULT_REGION="${REGION}" \
-  cdk deploy NceEksStack --require-approval never
+  cdk deploy NceEksStack --app "python eks_app.py" --require-approval never
 log "NceEksStack deployed."
 
 # ── Step 3: Configure kubectl ──────────────────────────────────────────────────

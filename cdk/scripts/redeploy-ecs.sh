@@ -21,7 +21,7 @@ log "Working directory: $(pwd)"
 # ── Step 1: Destroy ──────────────────────────────────────────────────────────
 log ""
 log "--- [1/5] Destroying existing stack ---"
-if cdk destroy NceStack --force; then
+if cdk destroy NceStack --app "python ecs_app.py" --force; then
   log "Stack destroyed."
 else
   # Stack may not exist on first run — that's fine
@@ -42,7 +42,7 @@ REPO="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${APP_NAME}"
 log "Account: ${ACCOUNT}, Region: ${REGION}, App: ${APP_NAME}"
 
 log "==> Deploying infra with service scaled to 0 tasks..."
-cdk deploy NceStack --require-approval never --context desired_count=0
+cdk deploy NceStack --app "python ecs_app.py" --require-approval never --context desired_count=0
 
 log "==> Building Docker image for linux/arm64..."
 docker build --platform linux/arm64 -t "${APP_NAME}" ../
@@ -56,7 +56,7 @@ docker push "${REPO}:latest"
 log "==> Image pushed."
 
 log "==> Scaling service up to 1 task..."
-cdk deploy NceStack --require-approval never
+cdk deploy NceStack --app "python ecs_app.py" --require-approval never
 
 # ── Step 3: Seed config ───────────────────────────────────────────────────────
 log ""
