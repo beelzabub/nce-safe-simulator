@@ -17,6 +17,9 @@
           <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="reports-link">
             GitLab&thinsp;↗
           </a>
+          <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="reports-link">
+            Grafana&thinsp;↗
+          </a>
         </div>
       </aside>
 
@@ -49,6 +52,7 @@ const showStatus    = ref(false)
 const showConfig    = ref(false)
 const showHelp      = ref(false)
 const gitlabWikiUrl = ref('')
+const grafanaUrl    = ref('')
 
 onMounted(async () => {
   loadDiskHistory()
@@ -56,7 +60,8 @@ onMounted(async () => {
     const r = await fetch('/api/config')
     if (r.ok) {
       const data = await r.json()
-      gitlabWikiUrl.value = data.wiki_url || ''
+      gitlabWikiUrl.value = data.wiki_url    || ''
+      grafanaUrl.value    = data.grafana_url || ''
     }
   } catch { /* server not yet ready */ }
 })
