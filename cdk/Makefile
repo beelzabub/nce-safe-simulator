@@ -262,38 +262,8 @@ eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of E
 	@ALB_DNS=$$(jq -r '.context.eks_alb_dns // empty' cdk.json) && \
 	[ -n "$$ALB_DNS" ] || { echo "ERROR: eks_alb_dns not set — run make eks-set-alb first"; exit 1; } && \
 	EXISTING_ID=$$(jq -r '.context.eks_cf_distribution_id // empty' cdk.json) && \
-	DIST_CONFIG=$$(python3 - <<PYEOF
-import json, sys
-alb_dns = "$$ALB_DNS"
-config = {
-    "CallerReference": "nce-eks-alb",
-    "Comment": "NCE Safe Simulator EKS",
-    "DefaultCacheBehavior": {
-        "TargetOriginId": "nce-eks-alb",
-        "ViewerProtocolPolicy": "https-only",
-        "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-        "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
-        "AllowedMethods": {
-            "Quantity": 7,
-            "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"],
-            "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]},
-        },
-        "Compress": True,
-    },
-    "Origins": {"Quantity": 1, "Items": [{
-        "Id": "nce-eks-alb",
-        "DomainName": alb_dns,
-        "CustomOriginConfig": {
-            "HTTPPort": 80, "HTTPSPort": 443,
-            "OriginProtocolPolicy": "http-only",
-        },
-    }]},
-    "Enabled": True,
-    "HttpVersion": "http2",
-}
-print(json.dumps(config))
-PYEOF
-) && \
+	DIST_CONFIG=$$(jq -nc --arg alb "$$ALB_DNS" \
+	  '{"CallerReference":"nce-eks-alb","Comment":"NCE Safe Simulator EKS","DefaultCacheBehavior":{"TargetOriginId":"nce-eks-alb","ViewerProtocolPolicy":"https-only","CachePolicyId":"4135ea2d-6df8-44a3-9df3-4b5a84be39ad","OriginRequestPolicyId":"b689b0a8-53d0-40ab-baf2-68738e2966ac","AllowedMethods":{"Quantity":7,"Items":["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"],"CachedMethods":{"Quantity":2,"Items":["GET","HEAD"]}},"Compress":true},"Origins":{"Quantity":1,"Items":[{"Id":"nce-eks-alb","DomainName":$alb,"CustomOriginConfig":{"HTTPPort":80,"HTTPSPort":443,"OriginProtocolPolicy":"http-only"}}]},"Enabled":true,"HttpVersion":"http2"}') && \
 	if [ -n "$$EXISTING_ID" ]; then \
 	  echo "==> Updating existing distribution $$EXISTING_ID..." && \
 	  ETAG=$$(aws cloudfront get-distribution-config --id "$$EXISTING_ID" \
