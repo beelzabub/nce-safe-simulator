@@ -126,12 +126,10 @@ Windows:
 python NceGitLab.py --serve
 ```
 
-The server starts on `http://localhost:80`. Open `http://localhost:80/app/` in your browser.
+The server starts on `http://localhost:4645`. Open `http://localhost:4645/app/` in your browser.
 Run the same command again to stop it.
 
-> **Port 80 note:** if the port is in use or requires elevated privileges, run
-> with `sudo` (Linux/macOS) or from an Administrator terminal (Windows), or
-> change the port in `config.json`.
+> **Port override:** the default port is `4645`. To use a different port, pass `--port NNNN` on the command line or set `"port": NNNN` in `config.json`.
 
 ---
 
@@ -355,7 +353,7 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 | Area | Content |
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
-| Left sidebar | Job picker (collapsible groups) + Run Reports button + Reports ↗ link |
+| Left sidebar | Job picker (collapsible groups) + Run Reports button + footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
 | Main pane | Job runner — one tab per launched job with streaming log output |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
@@ -404,10 +402,10 @@ Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accent
 
 #### Reports
 
-The **Reports ↗** link in the sidebar footer opens the quarto-rendered report site (`public/index.html`) in a new tab. Reports must be built first:
+The sidebar footer contains four links. **Quarto ↗** opens the static Quarto report site (`/quarto/`) in a new tab. **Wiki ↗** opens the GitLab group wiki. **GitLab ↗** opens the root GitLab group. **AMG ↗** opens the Amazon Managed Grafana workspace (only shown when `grafana_url` is set in config). Reports and interactive pages must be built first:
 
 ```bash
-python3 NceGitLab.py -r all           # builds markdown + quarto + Marimo outputs
+python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo outputs
 ```
 
 ---
@@ -582,12 +580,12 @@ When `--formats` is omitted, `markdown` is assumed. Pass `--no-ssl-verify` to di
 `build_interactive.py` exports a subset of reports as Marimo WASM notebooks — self-contained HTML files that run Python in the browser via WebAssembly. No server required; pages work from GitLab Pages or any static host.
 
 ```bash
-python3 build_interactive.py    # exports all 11 notebooks → public/interactive/
+python3 build_interactive.py    # exports all 12 notebooks → public/interactive/
 ```
 
-Interactive pages share a single `public/interactive/assets/` directory (~34 MB total vs ~400 MB if each notebook kept its own copy).
+Interactive pages share a single `public/interactive/assets/` directory (~34 MB total vs ~400 MB if each notebook kept its own copy). Notebooks are exported in parallel for speed.
 
-Available interactive reports: health-dashboard, pi-predictability, flow-metrics, art-capacity-balance, piid-project, piid-project-detail, workload, art-feature-status, vs-capability-dashboard, team-backlog, portfolio.
+Available interactive reports: health-dashboard, pi-predictability, flow-metrics, art-capacity-balance, piid-project, piid-project-detail, workload, art-feature-status, vs-capability-dashboard, team-backlog, portfolio, diagnostics.
 
 #### CI and GitLab Pages
 
@@ -795,6 +793,10 @@ make deploy          # deploy stack; pushes initial Docker image if ECR is empty
 make seed-config     # store config.json in SSM (once after deploy; re-run to update)
 make grafana-setup   # create Grafana Admin API key and store in SSM (once after deploy)
 make grafana-deploy  # install Infinity plugin, configure datasource, push dashboards
+
+> **After first deploy:** navigate to the app and use **Run Reports…** from the sidebar to
+> generate the initial report set. This populates the Quarto static site and Marimo interactive
+> pages on EFS — they are not pre-populated by the deploy.
 ```
 
 ### Day-to-day operations
@@ -813,10 +815,12 @@ make grafana-deploy  # install Infinity plugin, configure datasource, push dashb
 
 Amazon Managed Grafana is provisioned automatically by `make deploy`. After deploying:
 
-1. Run `make grafana-setup` once to create an Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 30 days)
-2. Run `make grafana-deploy` to install the Infinity plugin, wire up the datasource, and push all dashboards from `grafana/`
+The full redeploy script (`make ecs-full-redeploy`) handles Grafana setup automatically as its final step. For day-to-day operations:
 
-Dashboards read JSON data from `<ALB>/data/<report>.json`, which the server serves from the most recent complete report snapshot on EFS. Re-run `make grafana-deploy` any time dashboard files in `grafana/` change.
+1. Run `make grafana-setup` to rotate the Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 30 days; re-run before expiry)
+2. Run `make grafana-deploy` any time dashboard files in `grafana/` change
+
+Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, which the server serves from the most recent complete report snapshot on EFS. Data is refreshed automatically each time reports are run from the web UI.
 
 > **Note:** The AMG workspace requires AWS IAM Identity Center to be enabled in the account (one-time setup — no ongoing cost or configuration required). The Grafana UI is accessible at the workspace URL output by `make deploy`. API keys are used for all automation; SSO is used only for browser login.
 
