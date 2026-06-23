@@ -87,19 +87,30 @@ class NceEksStack(Stack):
             filesystem.connections.allow_default_port_from(cluster.cluster_security_group)
 
         # ── EFS CSI driver (IRSA) ─────────────────────────────────────────────
-        efs_csi_sa = cluster.add_service_account(
-            "EfsCsiSA",
-            name="efs-csi-controller-sa",
-            namespace="kube-system",
+        # The addon creates and owns efs-csi-controller-sa, so we create only
+        # the IAM role here (no add_service_account, which would conflict).
+        oidc_issuer = cluster.cluster_open_id_connect_issuer
+        efs_csi_role = iam.Role(
+            self, "EfsCsiRole",
+            assumed_by=iam.FederatedPrincipal(
+                cluster.open_id_connect_provider.open_id_connect_provider_arn,
+                {
+                    "StringEquals": {
+                        f"{oidc_issuer}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
+                        f"{oidc_issuer}:aud": "sts.amazonaws.com",
+                    }
+                },
+                "sts:AssumeRoleWithWebIdentity",
+            ),
         )
-        efs_csi_sa.role.add_managed_policy(
+        efs_csi_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEFSCSIDriverPolicy")
         )
         eks.CfnAddon(
             self, "EfsCsiAddon",
             cluster_name=cluster.cluster_name,
             addon_name="aws-efs-csi-driver",
-            service_account_role_arn=efs_csi_sa.role.role_arn,
+            service_account_role_arn=efs_csi_role.role_arn,
         )
 
         # ── AWS Load Balancer Controller (IRSA) ───────────────────────────────
