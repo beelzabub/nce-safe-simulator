@@ -150,6 +150,12 @@ REPORTS = [
         "method":      "generate_workload_report",
         "needs_group": False,
     },
+    {
+        "key":         "diagnostics",
+        "description": "Environment & API Diagnostics — software versions, REST/GraphQL compatibility, and label validation",
+        "method":      "generate_diagnostics_report",
+        "needs_group": False,
+    },
 ]
 
 ALL_FORMATS = frozenset({"markdown", "plotly", "interactive"})
@@ -5758,6 +5764,10 @@ class ReportsMixin:
     # Environment & API Diagnostics
     # ------------------------------------------------------------------
 
+    def generate_diagnostics_report(self):
+        """Standalone report: run diagnostics and write quarto-data/diagnostics.json."""
+        self._generate_diagnostics_section()
+
     def _generate_diagnostics_section(self, for_wiki=True) -> list:
         """Return lines for the environment & API diagnostics output.
 
@@ -7356,6 +7366,8 @@ class ReportsMixin:
         print("Writing Grafana dashboard data files...")
         if do_site_build:
             self.write_report_json(data_dir, Path("quarto-data"), Path("public/data"))
+            if not do_markdown:
+                self.generate_diagnostics_report()
         else:
             self.write_report_json(data_dir)
 

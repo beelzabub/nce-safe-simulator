@@ -308,3 +308,5 @@ class NceStack(Stack):
             value=f"https://{workspace.attr_endpoint}",
             description="Grafana dashboard URL",
         )
+
+        container.add_environment("GRAFANA_URL", f"https://{workspace.attr_endpoint}")

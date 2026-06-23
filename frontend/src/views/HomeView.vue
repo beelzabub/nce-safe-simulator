@@ -18,7 +18,7 @@
             GitLab&thinsp;↗
           </a>
           <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="reports-link">
-            AMG&thinsp;↗
+            Grafana&thinsp;↗
           </a>
         </div>
       </aside>

@@ -15,17 +15,14 @@ from IPython.display import HTML, Markdown, display
 
 _candidates = [Path("quarto-data/diagnostics.json"), Path("../quarto-data/diagnostics.json")]
 data_file = next((p for p in _candidates if p.exists()), None)
-if data_file is None:
-    raise FileNotFoundError(
-        "quarto-data/diagnostics.json not found. "
-        "Run: python NceGitLab.py --all-reports"
-    )
-
-d = json.loads(data_file.read_text())
+d = json.loads(data_file.read_text()) if data_file else None
 ```
 
 ```{python}
-HTML(f"""
+if d is None:
+    display(Markdown("> **No diagnostics data available.** Run `python NceGitLab.py --all-reports` to generate it."))
+else:
+    HTML(f"""
 <p>
   <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
   <strong>Group:</strong> <a href="{d['group']['url']}" target="_blank">{d['group']['name']}</a>
@@ -36,9 +33,11 @@ label validation, and overall report compatibility assessment.</p>
 ```
 
 ```{python}
-display(Markdown(d["content"]))
+if d is not None:
+    display(Markdown(d["content"]))
 ```
 
 ```{python}
-display(Markdown(f"> {d['verdict_md']}"))
+if d is not None:
+    display(Markdown(f"> {d['verdict_md']}"))
 ```

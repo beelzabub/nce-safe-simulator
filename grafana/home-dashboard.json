@@ -527,7 +527,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "## Full Reports Site\n\n---\n\nThe Quarto + Marimo site has all 19 reports including interactive pages not available in Grafana.\n\n&nbsp;\n\n### [Open Report Site](__BASE_URL__)\nPortfolio hierarchy, blocking graph, interactive WSJF scoring, capability dashboard, and more.\n\n&nbsp;\n\n**Data freshness:** All Grafana panels read live from the Pages JSON files. Data updates automatically on each push to `develop`."
+        "content": "## Full Reports Site\n\n---\n\nThe Quarto + Marimo site has all 19 reports including interactive pages not available in Grafana.\n\n&nbsp;\n\n### <a href=\"__BASE_URL__/quarto/\" target=\"_blank\">Open Report Site</a>\nPortfolio hierarchy, blocking graph, interactive WSJF scoring, capability dashboard, and more.\n\n&nbsp;\n\n**Data freshness:** All Grafana panels read live from the Pages JSON files. Data updates automatically on each push to `develop`."
       },
       "fieldConfig": {
         "defaults": {},
