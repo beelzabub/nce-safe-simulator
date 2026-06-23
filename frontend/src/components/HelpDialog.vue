@@ -145,10 +145,10 @@ cd ..</pre>
                 <div class="os-label">Windows</div>
                 <pre class="code-block">python NceGitLab.py --serve</pre>
                 <div class="step-desc">
-                  The server starts on <code>http://localhost:80</code>.
-                  Open <code>http://localhost:80/app/</code> in your browser.
+                  The server starts on <code>http://localhost:4645</code>.
+                  Open <code>http://localhost:4645/app/</code> in your browser.
                   Run the same command again to stop it.
-                  If port 80 is unavailable, run with <code>sudo</code> (Linux/macOS) or from an Administrator terminal (Windows).
+                  To use a different port, pass <code>--port NNNN</code> on the command line or set <code>"port": NNNN</code> in <code>config.json</code>.
                 </div>
               </div>
             </div>
@@ -226,9 +226,11 @@ cd ..</pre>
               <div class="step-body">
                 <div class="step-title">Generate reports</div>
                 <div class="step-desc">
-                  Click <strong>Reports</strong> in the sidebar to select and run one or more Quarto reports.
-                  Reports render as HTML (and optionally PDF/DOCX) and open automatically in your browser.
-                  The Reports site link at the bottom of the sidebar opens the full report index.
+                  Click <strong>Run Reports…</strong> in the sidebar to select reports and output formats.
+                  Choose <em>plotly</em> for static Quarto HTML, <em>interactive</em> for Marimo WASM
+                  drill-down pages, or <em>all</em> for both. When complete, use the
+                  <strong>Quarto ↗</strong> link in the sidebar footer to open the report site.
+                  Each static page links to its interactive Marimo counterpart via a toggle button.
                 </div>
               </div>
             </div>
