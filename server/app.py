@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import shutil
 import threading
@@ -136,7 +137,7 @@ def get_config(request: Request):
     return {
         "target_group": f"{ns}/{grp}" if ns else grp,
         "wiki_url":     getattr(request.app.state, "_wiki_url", ""),
-        "grafana_url":  getattr(gl, "grafana_url", ""),
+        "grafana_url":  os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
     }
 
 

@@ -14,9 +14,8 @@ def _():
 def _(mo):
     # DATA LOADING PATTERN (copy for each notebook):
     # 1. Try local file paths for `marimo edit` dev workflow.
-    # 2. Fall back to HTTP fetch for WASM context (Pyodide patches urllib.request).
-    #    The WASM page is served from public/interactive/, data from public/data/,
-    #    so the relative URL resolves correctly at runtime.
+    # 2. Fall back to HTTP fetch for WASM context via pyodide.http.open_url (XHR),
+    #    which avoids Python's http.client chunked-encoding path.
     import json
     from pathlib import Path
 
@@ -29,9 +28,9 @@ def _(mo):
     if _data_file is not None:
         d = json.loads(_data_file.read_text())
     else:
-        import urllib.request
-        # Absolute path — resolves against origin regardless of worker script location.
-        d = json.loads(urllib.request.urlopen("/data/health-dashboard.json").read())
+        import js
+        import pyodide.http
+        d = json.loads(pyodide.http.open_url(f"{js.self.location.origin}/data/health-dashboard.json").read())
 
     group   = d["group"]
     pi      = d["pi"]

@@ -24,8 +24,9 @@ def _(mo):
     if _data_file is not None:
         d = json.loads(_data_file.read_text())
     else:
-        import urllib.request
-        d = json.loads(urllib.request.urlopen("/data/team-backlog.json").read())
+        import js
+        import pyodide.http
+        d = json.loads(pyodide.http.open_url(f"{js.self.location.origin}/data/team-backlog.json").read())
 
     group = d["group"]
     teams = d["teams"]
