@@ -1,0 +1,85 @@
+{{- $fsId := .Values.efs.fileSystemId -}}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nce-config
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    name: nce-config
+    namespace: {{ .Release.Namespace }}
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.config }}"
+    volumeAttributes:
+      encryptInTransit: "false"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nce-reports
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    name: nce-reports
+    namespace: {{ .Release.Namespace }}
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.reports }}"
+    volumeAttributes:
+      encryptInTransit: "false"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nce-interactive
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    name: nce-interactive
+    namespace: {{ .Release.Namespace }}
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.interactive }}"
+    volumeAttributes:
+      encryptInTransit: "false"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nce-quarto-site
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    name: nce-quarto-site
+    namespace: {{ .Release.Namespace }}
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.quartoSite }}"
+    volumeAttributes:
+      encryptInTransit: "false"

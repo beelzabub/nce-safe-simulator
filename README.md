@@ -770,71 +770,101 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ## AWS Deployment
 
-The simulator runs as a Fargate service behind an Application Load Balancer. All infrastructure is defined in `cdk/` and deployed with CDK. Configuration (the GitLab token and project settings) is stored as a SecureString in SSM and persisted to EFS on first boot.
+The simulator runs on AWS in two configurations. **EKS (Kubernetes)** is recommended for production — managed node group, EFS persistent storage, CloudFront in front of the ALB. **ECS (Fargate)** is the simpler option for lower-traffic or short-lived deployments. Both share the same CDK project (`cdk/`), ECR image, SSM-stored config, EFS layout, and Grafana workspace.
 
 ### Prerequisites
 
 - AWS CLI configured (`aws configure`)
 - Docker (for building the container image)
 - CDK CLI: `npm install -g aws-cdk`
-- SSM Session Manager plugin (required for `make ecs-exec`):
+- `kubectl` (EKS only)
+- SSM Session Manager plugin (for exec into the running container):
   ```bash
   sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_arm64/session-manager-plugin.rpm
   ```
 
-### Deploy
+### Option 1 — EKS (Kubernetes)
+
+The app runs on an ARM64 managed node group behind an ALB provisioned by the AWS Load Balancer Controller. CloudFront sits in front of the ALB providing HTTPS and restricting inbound traffic to CloudFront edge IPs only. Amazon Managed Grafana is provisioned by the CDK stack.
+
+```
+Browser → CloudFront (HTTPS) → ALB (HTTP, CloudFront-only SG) → EKS pod
+                                                                    ↓
+                                                    EFS (config / reports / interactive / quarto-site)
+```
+
+#### Deploy (fresh stack)
 
 ```bash
 cd cdk
-make install       # install CDK CLI + Python deps (once)
-make bootstrap     # bootstrap CDK for the account/region (once)
-make set-vpc       # auto-detect VPC from the powers-dev EC2 instance
-make deploy          # deploy stack; pushes initial Docker image if ECR is empty
-make seed-config     # store config.json in SSM (once after deploy; re-run to update)
-make grafana-setup   # create Grafana Admin API key and store in SSM (once after deploy)
-make grafana-deploy  # install Infinity plugin, configure datasource, push dashboards
-
-> **After first deploy:** navigate to the app and use **Run Reports…** from the sidebar to
-> generate the initial report set. This populates the Quarto static site and Marimo interactive
-> pages on EFS — they are not pre-populated by the deploy.
+make eks-install        # create LB Controller IAM policy (once per AWS account)
+make bootstrap          # bootstrap CDK (once per account+region)
+make ecr-push           # build and push :latest to ECR
+make eks-full-deploy    # end-to-end: CDK + kubeconfig + LB controller + Helm + Grafana (~30-40 min)
+make seed-config        # store config.json in SSM (re-run any time config changes)
 ```
 
-### Day-to-day operations
+After `eks-full-deploy` finishes, navigate to the CloudFront URL (printed in CDK outputs) and use **Run Reports…** from the sidebar to generate the initial report set. This populates the Quarto static site, Marimo interactive pages, and Grafana dashboards on EFS.
+
+#### Day-to-day operations
 
 | Command | Description |
 |---|---|
 | `make ecr-push` | Build and push a new `:latest` image to ECR |
-| `make ecs-redeploy` | Force a new deployment to pick up a freshly pushed image |
+| `make eks-redeploy` | Restart the pod to pick up a freshly pushed image |
+| `make eks-logs` | Tail live pod logs |
+| `make eks-exec` | Open a shell in the running pod (SSM tunnel, no inbound ports) |
+| `make eks-deploy` | Apply CDK stack changes |
+| `make eks-grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
+| `make grafana-setup` | Rotate the Grafana Admin API key in SSM (valid 30 days) |
+| `make eks-destroy` | Tear down all EKS resources |
+
+---
+
+### Option 2 — ECS (Fargate)
+
+The app runs as a single Fargate task on ARM64 behind an ALB with CloudFront in front. Simpler than EKS — no Kubernetes tooling required.
+
+#### Deploy (fresh stack)
+
+```bash
+cd cdk
+make bootstrap          # bootstrap CDK (once per account+region)
+make ecr-push           # build and push :latest to ECR
+make ecs-full-deploy    # CDK deploy + Grafana setup end-to-end
+make seed-config        # store config.json in SSM
+```
+
+#### Day-to-day operations
+
+| Command | Description |
+|---|---|
+| `make ecr-push` | Build and push a new `:latest` image to ECR |
+| `make ecs-redeploy` | Force a new ECS deployment to pick up a freshly pushed image |
 | `make ecs-logs` | Tail live container logs |
-| `make ecs-exec` | Open an interactive shell in the running task |
-| `make diff` | Preview CDK changes before deploying |
-| `make destroy` | Tear down all AWS resources |
-| `make grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
+| `make ecs-exec` | Open a shell in the running Fargate task (SSM tunnel) |
+| `make ecs-deploy` | Apply CDK stack changes |
+| `make ecs-grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
+| `make grafana-setup` | Rotate the Grafana Admin API key in SSM (valid 30 days) |
+| `make ecs-destroy` | Tear down ECS resources (EFS and CloudWatch logs are retained) |
+
+---
+
+### Shared operations
+
+| Command | Description |
+|---|---|
+| `make seed-config` | Write `config.json` to SSM as a SecureString (re-run to update) |
+| `make grafana-setup` | Create/rotate the Grafana Admin API key, store in SSM |
+| `make grafana-add-user` | Assign Grafana Admin role to the SSO user defined in `cdk.json` |
 
 ### Grafana dashboards
 
-Amazon Managed Grafana is provisioned automatically by `make deploy`. After deploying:
+Amazon Managed Grafana is provisioned automatically by the CDK stack. Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, served by the app from the most recent complete report snapshot on EFS. Data refreshes automatically each time reports are run from the web UI.
 
-The full redeploy script (`make ecs-full-redeploy`) handles Grafana setup automatically as its final step. For day-to-day operations:
+> **AMG prerequisite:** AWS IAM Identity Center must be enabled in the account (one-time setup, no ongoing cost). Browser login uses SSO; all automation uses an Admin API key stored in SSM at `/nce/grafana-api-key`.
 
-1. Run `make grafana-setup` to rotate the Admin API key (stored in SSM at `/nce/grafana-api-key`, valid 30 days; re-run before expiry)
-2. Run `make grafana-deploy` any time dashboard files in `grafana/` change
-
-Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, which the server serves from the most recent complete report snapshot on EFS. Data is refreshed automatically each time reports are run from the web UI.
-
-> **Note:** The AMG workspace requires AWS IAM Identity Center to be enabled in the account (one-time setup — no ongoing cost or configuration required). The Grafana UI is accessible at the workspace URL output by `make deploy`. API keys are used for all automation; SSO is used only for browser login.
-
-### Debugging with ECS Exec
-
-`make ecs-exec` opens a `/bin/sh` shell inside the running Fargate task via an SSM tunnel — no inbound ports required. Use it to inspect EFS mount contents, check environment variables, or diagnose entrypoint failures:
-
-```bash
-make ecs-exec
-# → sh-5.2# ls /app/reports
-# → sh-5.2# cat /mnt/config/config.json
-```
-
-Requires the SSM Session Manager plugin on the local machine and `enable_execute_command=True` on the service (already set in the CDK stack).
+> **Tip:** `make eks-exec` / `make ecs-exec` opens a `/bin/sh` shell inside the running container via SSM — no inbound ports required. Use it to inspect EFS contents, check environment variables, or diagnose startup failures.
 
 ---
 

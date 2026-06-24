@@ -1,4 +1,0 @@
-make cdk-set-vpc
-make cdk-bootstrap
-make seed-config
-make cdk-deploy
