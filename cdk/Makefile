@@ -378,14 +378,17 @@ eks-exec: ## Open an interactive shell in the running pod
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
-eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + subnet tags + LB controller + helm + ALB + Grafana
-	@$(MAKE) --no-print-directory eks-deploy
-	@$(MAKE) --no-print-directory eks-kubeconfig
-	@$(MAKE) --no-print-directory eks-tag-subnets
-	@$(MAKE) --no-print-directory eks-lb-controller
-	@$(MAKE) --no-print-directory eks-helm-install
-	@$(MAKE) --no-print-directory eks-set-alb
-	@$(MAKE) --no-print-directory eks-grafana-deploy
+eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to re-run
+	@$(MAKE) --no-print-directory eks-deploy        # CDK: cluster + EFS + IAM + AlbSg + Grafana workspace (CloudFront created with placeholder origin if eks_alb_dns is empty)
+	@$(MAKE) --no-print-directory eks-kubeconfig    # configure kubectl
+	@$(MAKE) --no-print-directory eks-tag-subnets   # tag public subnets for LBC
+	@$(MAKE) --no-print-directory eks-lb-controller # install AWS Load Balancer Controller via Helm
+	@$(MAKE) --no-print-directory eks-helm-install  # deploy app + Ingress (LBC provisions ALB)
+	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk.json
+	@$(MAKE) --no-print-directory eks-deploy        # CDK again: update CloudFront origin to real ALB DNS
+	@$(MAKE) --no-print-directory grafana-setup     # create/rotate Grafana API key in SSM
+	@$(MAKE) --no-print-directory grafana-add-user  # assign SSO user as Grafana admin
+	@$(MAKE) --no-print-directory eks-grafana-deploy # install plugin, configure datasource, push dashboards
 
 eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
 	bash scripts/redeploy-eks.sh
