@@ -856,7 +856,8 @@ make seed-config        # store config.json in SSM
 |---|---|
 | `make seed-config` | Write `config.json` to SSM as a SecureString (re-run to update) |
 | `make grafana-setup` | Create/rotate the Grafana Admin API key, store in SSM |
-| `make grafana-add-user` | Assign Grafana Admin role to the SSO user defined in `cdk.json` |
+| `make grafana-add-user` | Assign Grafana Admin role to the SSO user defined in `cdk-ecs.json` |
+| `make audit` | Audit AWS resources for both ECS and EKS stacks — shows what is deployed, missing, or orphaned |
 
 ### Architecture diagram
 
