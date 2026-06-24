@@ -2,9 +2,9 @@
 .DEFAULT_GOAL := help
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-	  awk -F':.*?## ' '{printf "  %-26s %s\n", $$1, $$2}'
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n"} /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
+##@ Setup (run once per account)
 install: ## Install CDK CLI and Python CDK dependencies (run once)
 	npm install -g aws-cdk
 	pip install -r requirements.txt
@@ -44,6 +44,7 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 	   cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
 	echo "EFS config written to cdk.json (efs_id=$$EFS_ID, efs_sg_id=$$EFS_SG_ID)"
 
+##@ ECS / Fargate
 ecs-diff: ## Show what ECS CDK stack will change without deploying
 	cdk diff NceStack --app "python ecs_app.py"
 
@@ -68,6 +69,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --app "python ecs_app.py" --force
 
+##@ Shared
 seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
 	@echo "Storing config.json in SSM as SecureString /nce/config..."
 	aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$(cat ../config.json)"
@@ -200,6 +202,7 @@ ecs-full-deploy: ## Deploy ECS CDK stack then configure Grafana end-to-end (fres
 ecs-full-redeploy: ## Full ECS teardown and redeploy — safe to run unattended (nohup make ecs-full-redeploy > redeploy-ecs.log 2>&1 &)
 	bash scripts/redeploy-ecs.sh
 
+##@ EKS / Kubernetes
 eks-install: ## Download and create LB Controller IAM policy (once per AWS account)
 	@POLICY_FILE=$$(mktemp) && \
 	curl -sL https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json \
