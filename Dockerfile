@@ -6,19 +6,16 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2 — architecture diagram builder (requires graphviz + cdk-dia)
-FROM node:20-slim AS diagram-builder
+# Stage 2 — architecture diagram builder (Python diagrams library + graphviz)
+FROM python:3.11-slim AS diagram-builder
 RUN apt-get update && apt-get install -y --no-install-recommends graphviz \
     && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir diagrams
 WORKDIR /build
-COPY cdk/package*.json ./
-RUN npm ci
-COPY cdk/cdk.out/tree.json ./cdk.out/tree.json
-COPY cdk/cdk-ecs.out/tree.json ./cdk-ecs.out/tree.json
+COPY diagrams/ ./
 RUN mkdir -p /diagrams \
-    && npx cdk-dia --stacks NceEksStack --target-path /diagrams/eks-architecture.png 2>/dev/null || true \
-    && npx cdk-dia --cdk-tree-path ./cdk-ecs.out/tree.json --stacks NceStack \
-         --target-path /diagrams/ecs-architecture.png 2>/dev/null || true
+    && python3 eks_architecture.py /diagrams/eks-architecture.png \
+    && python3 ecs_architecture.py /diagrams/ecs-architecture.png
 
 # Stage 3 — runtime image
 FROM python:3.11-slim

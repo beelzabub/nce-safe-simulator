@@ -29,6 +29,10 @@ spec:
               value: {{ .Values.config.param | quote }}
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsRegion | quote }}
+            {{- if .Values.config.grafanaUrl }}
+            - name: GRAFANA_URL
+              value: {{ .Values.config.grafanaUrl | quote }}
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu | quote }}
