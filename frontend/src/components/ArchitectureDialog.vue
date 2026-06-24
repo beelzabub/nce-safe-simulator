@@ -1,15 +1,15 @@
 <template>
   <div class="overlay" @click.self="$emit('close')">
-    <div class="dialog" @keydown.esc="$emit('close')">
+    <div class="dialog">
 
       <div class="dialog-header">
         <span class="dialog-title">AWS Architecture</span>
         <div class="header-right">
-          <div class="tab-bar">
+          <div v-if="availableTabs.length > 1" class="tab-bar">
             <button
-              v-for="t in TABS" :key="t.key"
+              v-for="t in availableTabs" :key="t.key"
               class="tab-btn" :class="{ active: activeTab === t.key }"
-              @click="activeTab = t.key; imageError = false"
+              @click="activeTab = t.key"
             >{{ t.label }}</button>
           </div>
           <button class="dialog-close" @click="$emit('close')" aria-label="Close">×</button>
@@ -17,9 +17,9 @@
       </div>
 
       <div class="dialog-body">
-        <div v-if="imageError" class="no-diagram">
-          <p>Diagram not available for <strong>{{ activeTab.toUpperCase() }}</strong>.</p>
-          <p class="hint">Run <code>make {{ activeTab }}-diagram</code> in <code>cdk/</code>, then rebuild the container.</p>
+        <div v-if="!availableTabs.length" class="no-diagram">
+          <p>No architecture diagram available.</p>
+          <p class="hint">Run <code>make eks-diagram</code> or <code>make ecs-diagram</code> in <code>cdk/</code>, then rebuild the container.</p>
         </div>
         <img
           v-else
@@ -29,12 +29,11 @@
           class="arch-img"
           :class="{ zoomed }"
           @click="zoomed = !zoomed"
-          @error="imageError = true"
         />
       </div>
 
       <div class="dialog-footer">
-        <a v-if="!imageError" :href="imgUrl" :download="`${activeTab}-architecture.png`" class="dl-btn">
+        <a v-if="availableTabs.length" :href="imgUrl" :download="`${activeTab}-architecture.png`" class="dl-btn">
           ↓ Download
         </a>
         <button class="close-btn" @click="$emit('close')">Close</button>
@@ -45,20 +44,37 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 defineEmits(['close'])
 
-const TABS = [
+const ALL_TABS = [
   { key: 'eks', label: 'EKS' },
   { key: 'ecs', label: 'ECS' },
 ]
 
-const activeTab  = ref('eks')
-const zoomed     = ref(false)
-const imageError = ref(false)
+const availableTabs = ref([])
+const activeTab     = ref('')
+const zoomed        = ref(false)
 
 const imgUrl = computed(() => `/architecture/${activeTab.value}-architecture.png`)
+
+async function probe(key) {
+  try {
+    const r = await fetch(`/architecture/${key}-architecture.png`, { method: 'HEAD' })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+onMounted(async () => {
+  const results = await Promise.all(ALL_TABS.map(t => probe(t.key)))
+  availableTabs.value = ALL_TABS.filter((_, i) => results[i])
+  if (availableTabs.value.length) {
+    activeTab.value = availableTabs.value[0].key
+  }
+})
 </script>
 
 <style scoped>
