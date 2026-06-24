@@ -104,6 +104,29 @@ function onDragMove(e) {
 }
 function onDragEnd() { dragging.value = false }
 
+function onWheel(e) {
+  e.preventDefault()
+  const vp       = viewport.value
+  const oldZoom  = zoom.value
+  const delta    = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+  const newZoom  = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +(oldZoom + delta).toFixed(2)))
+  if (newZoom === oldZoom) return
+
+  // Keep the point under the cursor fixed during zoom.
+  const rect  = vp.getBoundingClientRect()
+  const cx    = e.clientX - rect.left   // cursor x relative to viewport
+  const cy    = e.clientY - rect.top    // cursor y relative to viewport
+  const ratio = newZoom / oldZoom
+  zoom.value  = newZoom
+
+  // After the DOM updates width, adjust scroll so cursor stays over the same image point.
+  // nextTick isn't imported — use a microtask instead.
+  Promise.resolve().then(() => {
+    vp.scrollLeft = (vp.scrollLeft + cx) * ratio - cx
+    vp.scrollTop  = (vp.scrollTop  + cy) * ratio - cy
+  })
+}
+
 function onKey(e) {
   if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn() }
   if (e.key === '-')                  { e.preventDefault(); zoomOut() }
@@ -123,8 +146,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
+  // passive:false required so we can preventDefault and block page scroll.
+  viewport.value.addEventListener('wheel', onWheel, { passive: false })
 
-  // If we know the deployment type, only probe that one diagram.
   const candidates = props.deploymentType
     ? ALL_TABS.filter(t => t.key === props.deploymentType)
     : ALL_TABS
@@ -138,6 +162,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', onDragEnd)
+  viewport.value?.removeEventListener('wheel', onWheel)
 })
 </script>
 
