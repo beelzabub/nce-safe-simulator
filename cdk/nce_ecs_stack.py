@@ -247,7 +247,7 @@ class NceEcsStack(Stack):
                     service.load_balancer.load_balancer_dns_name,
                     protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
                 ),
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                 # Forward all viewer headers (including Sec-WebSocket-Key/Version) so
