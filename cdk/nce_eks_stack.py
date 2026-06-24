@@ -192,6 +192,12 @@ class NceEksStack(Stack):
             ec2.Peer.prefix_list(cf_prefix_list.prefix_list_id),
             ec2.Port.tcp(80),
         )
+        # When a custom SG is set on the ALB the LBC stops auto-managing node SG
+        # rules, so we add the return path explicitly: ALB -> pod on port 80.
+        cluster.cluster_security_group.add_ingress_rule(
+            alb_sg,
+            ec2.Port.tcp(80),
+        )
 
         # ── CloudFront distribution ───────────────────────────────────────────
         # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
