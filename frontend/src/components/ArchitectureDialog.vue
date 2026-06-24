@@ -224,9 +224,6 @@ onUnmounted(() => {
 .img-viewport {
   flex: 1;
   overflow: auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding: 0.75rem;
   cursor: grab;
   user-select: none;
@@ -238,6 +235,7 @@ onUnmounted(() => {
 .arch-img {
   display: block;
   height: auto;
+  margin: 0 auto;
   border-radius: 4px;
   transition: width 0.15s ease;
   pointer-events: none;
