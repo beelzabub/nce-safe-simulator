@@ -30,6 +30,7 @@ class NceEksStack(Stack):
         eks_namespace     = ctx("eks_namespace")
         eks_node_instance = ctx("eks_node_instance")
         eks_alb_dns       = ctx("eks_alb_dns")
+        eks_admin_iam_user = ctx("eks_admin_iam_user")
 
         # ── VPC ───────────────────────────────────────────────────────────────
         if vpc_id:
@@ -78,6 +79,13 @@ class NceEksStack(Stack):
             desired_size=1,
             subnets=public_subnets,
         )
+
+        # ── kubectl admin access ──────────────────────────────────────────────
+        if eks_admin_iam_user:
+            cluster.aws_auth.add_user_mapping(
+                iam.User.from_user_name(self, "AdminUser", eks_admin_iam_user),
+                groups=["system:masters"],
+            )
 
         # ── EFS ───────────────────────────────────────────────────────────────
         efs_sg = ec2.SecurityGroup(self, "EfsSg", vpc=vpc, description="EFS NFS for EKS")
@@ -173,6 +181,21 @@ class NceEksStack(Stack):
         # Node group role performs NFS mounts; it needs ClientMount in addition to
         # the app SA role grant above (which only covers the pod's IRSA identity).
         filesystem.grant_read_write(nodegroup.role)
+
+        # Ensure the EFS resource policy includes ClientMount so plain NFS mounts
+        # succeed (the EFS CSI driver TLS watchdog may not start in container mode;
+        # without ClientMount in the resource policy all mounts are rejected by EFS).
+        filesystem.add_to_resource_policy(
+            iam.PolicyStatement(
+                principals=[iam.AnyPrincipal()],
+                actions=[
+                    "elasticfilesystem:ClientMount",
+                    "elasticfilesystem:ClientWrite",
+                    "elasticfilesystem:ClientRootAccess",
+                ],
+                conditions={"Bool": {"elasticfilesystem:AccessedViaMountTarget": "true"}},
+            )
+        )
 
         # ── ALB security group (CloudFront-only ingress) ──────────────────────
         # The LBC creates its own default SG; specifying this one via the
