@@ -1,5 +1,12 @@
-.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram audit help
 .DEFAULT_GOAL := help
+
+# Separate CDK config files for ECS and EKS stacks.
+# CDK always looks for a file literally named "cdk.json", so each group of
+# commands copies the right source into place first.  The generated cdk.json
+# is transient (listed in .git/info/exclude, never committed).
+ECS_CTX := cdk-ecs.json
+EKS_CTX := cdk-eks.json
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n"} /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -10,15 +17,16 @@ install: ## Install CDK CLI and Python CDK dependencies (run once)
 	pip install -r requirements.txt
 
 bootstrap: ## Bootstrap CDK for this AWS account/region (run once per account+region)
-	cdk bootstrap
+	cp -f $(ECS_CTX) cdk.json && cdk bootstrap
 
-set-vpc: ## Discover the VPC from the 'powers-dev' EC2 instance and save it to cdk.json
+set-vpc: ## Discover the VPC from the 'powers-dev' EC2 instance and save it to cdk-ecs.json and cdk-eks.json
 	@VPC_ID=$$(aws ec2 describe-instances --filters "Name=tag:Name,Values=powers-dev" "Name=instance-state-name,Values=running,stopped" --query 'Reservations[0].Instances[0].VpcId' --output text) && \
 	[ "$$VPC_ID" != "None" ] && [ -n "$$VPC_ID" ] || { echo "ERROR: no running/stopped EC2 instance named 'powers-dev' found"; exit 1; } && \
-	jq --arg v "$$VPC_ID" '.context.vpc_id = $$v' cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
-	echo "vpc_id set to $$VPC_ID"
+	jq --arg v "$$VPC_ID" '.context.vpc_id = $$v' $(ECS_CTX) > cdk-ecs.json.tmp && mv cdk-ecs.json.tmp $(ECS_CTX) && \
+	jq --arg v "$$VPC_ID" '.context.vpc_id = $$v' $(EKS_CTX) > cdk-eks.json.tmp && mv cdk-eks.json.tmp $(EKS_CTX) && \
+	echo "vpc_id set to $$VPC_ID in $(ECS_CTX) and $(EKS_CTX)"
 
-set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk.json
+set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk-ecs.json
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	EFS_ID=$$(aws cloudformation describe-stacks --stack-name NceStack --region $$REGION \
 	  --query 'Stacks[0].Outputs[?OutputKey==`EfsId`].OutputValue' --output text) && \
@@ -41,17 +49,18 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 	   --arg api "$$AP_INTERACTIVE" \
 	   --arg apq "$$AP_QUARTO" \
 	   '.context.efs_id = $$eid | .context.efs_sg_id = $$esg | .context.efs_ap_config = $$apc | .context.efs_ap_reports = $$apr | .context.efs_ap_interactive = $$api | .context.efs_ap_quarto = $$apq' \
-	   cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
-	echo "EFS config written to cdk.json (efs_id=$$EFS_ID, efs_sg_id=$$EFS_SG_ID)"
+	   $(ECS_CTX) > cdk-ecs.json.tmp && mv cdk-ecs.json.tmp $(ECS_CTX) && \
+	echo "EFS config written to $(ECS_CTX) (efs_id=$$EFS_ID, efs_sg_id=$$EFS_SG_ID)"
 
 ##@ ECS / Fargate
 ecs-diff: ## Show what ECS CDK stack will change without deploying
-	cdk diff NceStack --app "python ecs_app.py" --output cdk-ecs.out
+	cp -f $(ECS_CTX) cdk.json && cdk diff NceStack --app "python ecs_app.py" --output cdk-ecs.out
 
 ecs-deploy: ## Deploy (or update) the ECS stack
-	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	@cp -f $(ECS_CTX) cdk.json && \
+	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(ECS_CTX)) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
 	IMAGE_COUNT=$$(aws ecr list-images --repository-name $$APP_NAME --region $$REGION --query 'length(imageIds)' --output text 2>/dev/null || echo "0") && \
 	if [ "$$IMAGE_COUNT" = "0" ]; then \
@@ -67,7 +76,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never
 
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
-	cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
+	cp -f $(ECS_CTX) cdk.json && cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
 
 ##@ Shared
 eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)
@@ -117,9 +126,9 @@ ecs-logs: ## Tail live ECS container logs
 	aws logs tail /ecs/nce-safe-simulator --follow
 
 ecs-exec: ## Open an interactive shell in the running Fargate task via ECS Exec
-	@CLUSTER=$$(jq -r '.context.cluster_name' cdk.json) && \
-	SERVICE=$$(jq -r '.context.app_name' cdk.json) && \
-	CONTAINER=$$(jq -r '.context.container_name' cdk.json) && \
+	@CLUSTER=$$(jq -r '.context.cluster_name' $(ECS_CTX)) && \
+	SERVICE=$$(jq -r '.context.app_name' $(ECS_CTX)) && \
+	CONTAINER=$$(jq -r '.context.container_name' $(ECS_CTX)) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	TASK=$$(aws ecs list-tasks --cluster $$CLUSTER --service-name $$SERVICE \
 	  --region $$REGION --query 'taskArns[0]' --output text) && \
@@ -129,7 +138,7 @@ ecs-exec: ## Open an interactive shell in the running Fargate task via ECS Exec
 grafana-setup: ## Create Grafana Admin API key and store in SSM (idempotent)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
-	  --query "workspaces[?name=='$$(jq -r '.context.app_name' cdk.json)'].id" \
+	  --query "workspaces[?name=='$$(jq -r '.context.app_name' $(ECS_CTX))'].id" \
 	  --output text) && \
 	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make deploy first"; exit 1; } && \
 	echo "==> Rotating Grafana Admin API key in workspace $$WORKSPACE_ID..." && \
@@ -142,18 +151,18 @@ grafana-setup: ## Create Grafana Admin API key and store in SSM (idempotent)
 	  --workspace-id $$WORKSPACE_ID \
 	  --region $$REGION \
 	  --query 'key' --output text) && \
-	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' $(ECS_CTX)) && \
 	aws ssm put-parameter --name $$PARAM --type SecureString --overwrite \
 	  --value "$$KEY" --region $$REGION && \
 	echo "==> API key stored in SSM at $$PARAM (valid 90 days). Run 'make ecs-grafana-deploy' or 'make eks-grafana-deploy' to push dashboards."
 
 ecs-grafana-deploy: ## Install Infinity plugin, configure ECS datasource, and deploy all dashboards (idempotent)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(ECS_CTX)) && \
 	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
 	  --query "workspaces[?name=='$$APP_NAME'].id" --output text) && \
 	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found — run make ecs-deploy first"; exit 1; } && \
-	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' $(ECS_CTX)) && \
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
@@ -199,15 +208,15 @@ ecs-grafana-deploy: ## Install Infinity plugin, configure ECS datasource, and de
 	done && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
-grafana-add-user: ## Assign Grafana Admin role to the SSO user defined in cdk.json (idempotent)
+grafana-add-user: ## Assign Grafana Admin role to the SSO user defined in cdk-ecs.json (idempotent)
 	bash scripts/add-grafana-user.sh
 
 ecs-full-deploy: ## Deploy ECS CDK stack; configure Grafana end-to-end when enable_grafana=true (fresh stack after ecs-destroy)
 	@$(MAKE) --no-print-directory ecs-deploy
-	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' cdk.json) && \
+	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' $(ECS_CTX)) && \
 	if [ "$$ENABLE_GRAFANA" = "true" ]; then \
 	  REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	  APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	  APP_NAME=$$(jq -r '.context.app_name' $(ECS_CTX)) && \
 	  echo "==> Waiting for Grafana workspace to reach ACTIVE (up to 20 min)..." && \
 	  STATUS="" && i=0 && \
 	  while [ $$i -lt 40 ]; do \
@@ -238,14 +247,15 @@ eks-install: ## Download and create LB Controller IAM policy (once per AWS accou
 	echo "AWSLoadBalancerControllerIAMPolicy created."
 
 eks-deploy: ## Deploy EKS CDK stack (cluster, node group, LB controller, EFS CSI driver)
-	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	@cp -f $(EKS_CTX) cdk.json && \
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
 	cdk deploy NceEksStack --app "python eks_app.py" --output cdk-eks.out --require-approval never
 
 eks-tag-subnets: ## Tag VPC public subnets so the LB controller can provision internet-facing ALBs
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	VPC_ID=$$(jq -r '.context.vpc_id' cdk.json) && \
+	VPC_ID=$$(jq -r '.context.vpc_id' $(EKS_CTX)) && \
 	SUBNETS=$$(aws ec2 describe-subnets --region $$REGION \
 	  --filters "Name=vpc-id,Values=$$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
 	  --query 'Subnets[*].SubnetId' --output text) && \
@@ -256,13 +266,13 @@ eks-tag-subnets: ## Tag VPC public subnets so the LB controller can provision in
 
 eks-kubeconfig: ## Configure kubectl to talk to the EKS cluster
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	CLUSTER=$$(jq -r '.context.eks_cluster_name' cdk.json) && \
+	CLUSTER=$$(jq -r '.context.eks_cluster_name' $(EKS_CTX)) && \
 	aws eks update-kubeconfig --name $$CLUSTER --region $$REGION
 
 eks-lb-controller: ## Install AWS Load Balancer Controller via Helm (run after eks-kubeconfig)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	CLUSTER=$$(jq -r '.context.eks_cluster_name' cdk.json) && \
-	VPC_ID=$$(jq -r '.context.vpc_id' cdk.json) && \
+	CLUSTER=$$(jq -r '.context.eks_cluster_name' $(EKS_CTX)) && \
+	VPC_ID=$$(jq -r '.context.vpc_id' $(EKS_CTX)) && \
 	helm repo add eks https://aws.github.io/eks-charts 2>/dev/null || true && \
 	helm repo update eks && \
 	helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
@@ -277,8 +287,8 @@ eks-lb-controller: ## Install AWS Load Balancer Controller via Helm (run after e
 eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from NceEksStack outputs)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
-	NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
 	OUTPUTS=$$(aws cloudformation describe-stacks --stack-name NceEksStack --region $$REGION \
 	  --query 'Stacks[0].Outputs' --output json) && \
@@ -303,13 +313,13 @@ eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from
 	echo "Helm release installed in namespace $$NAMESPACE."
 
 eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for image updates)
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE
 
-eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json (polls up to 15 min)
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk-eks.json (polls up to 15 min)
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	echo "==> Waiting for ALB to be provisioned (up to 15 min)..." && \
 	ALB_DNS="" && \
 	for i in $$(seq 1 90); do \
@@ -320,13 +330,13 @@ eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json (polls up to
 	  sleep 10; \
 	done && \
 	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS still not available after 15 min"; exit 1; } && \
-	jq --arg v "$$ALB_DNS" '.context.eks_alb_dns = $$v' cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
-	echo "==> eks_alb_dns set to $$ALB_DNS"
+	jq --arg v "$$ALB_DNS" '.context.eks_alb_dns = $$v' $(EKS_CTX) > cdk-eks.json.tmp && mv cdk-eks.json.tmp $(EKS_CTX) && \
+	echo "==> eks_alb_dns set to $$ALB_DNS in $(EKS_CTX)"
 
 eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of EKS ALB
-	@ALB_DNS=$$(jq -r '.context.eks_alb_dns // empty' cdk.json) && \
+	@ALB_DNS=$$(jq -r '.context.eks_alb_dns // empty' $(EKS_CTX)) && \
 	[ -n "$$ALB_DNS" ] || { echo "ERROR: eks_alb_dns not set — run make eks-set-alb first"; exit 1; } && \
-	EXISTING_ID=$$(jq -r '.context.eks_cf_distribution_id // empty' cdk.json) && \
+	EXISTING_ID=$$(jq -r '.context.eks_cf_distribution_id // empty' $(EKS_CTX)) && \
 	DIST_CONFIG=$$(jq -nc --arg alb "$$ALB_DNS" \
 	  '{"CallerReference":"nce-eks-alb","Comment":"NCE Safe Simulator EKS","DefaultCacheBehavior":{"TargetOriginId":"nce-eks-alb","ViewerProtocolPolicy":"https-only","CachePolicyId":"4135ea2d-6df8-44a3-9df3-4b5a84be39ad","OriginRequestPolicyId":"b689b0a8-53d0-40ab-baf2-68738e2966ac","AllowedMethods":{"Quantity":7,"Items":["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"],"CachedMethods":{"Quantity":2,"Items":["GET","HEAD"]}},"Compress":true},"Origins":{"Quantity":1,"Items":[{"Id":"nce-eks-alb","DomainName":$alb,"CustomOriginConfig":{"HTTPPort":80,"HTTPSPort":443,"OriginProtocolPolicy":"http-only"}}]},"Enabled":true,"HttpVersion":"http2"}') && \
 	if [ -n "$$EXISTING_ID" ]; then \
@@ -343,17 +353,17 @@ eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of E
 	  CF_DOMAIN=$$(echo "$$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Distribution']['DomainName'])") && \
 	  jq --arg id "$$CF_ID" --arg url "https://$$CF_DOMAIN" \
 	    '.context.eks_cf_distribution_id = $$id | .context.eks_cf_url = $$url' \
-	    cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
+	    $(EKS_CTX) > cdk-eks.json.tmp && mv cdk-eks.json.tmp $(EKS_CTX) && \
 	  echo "==> Distribution created: https://$$CF_DOMAIN (may take ~5 min to become active)"; \
 	fi
 
 eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and deploy all dashboards (idempotent)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
 	  --query "workspaces[?name=='$$APP_NAME'].id" --output text) && \
 	[ -n "$$WORKSPACE_ID" ] || { echo "ERROR: Grafana workspace not found"; exit 1; } && \
-	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
+	PARAM=$$(jq -r '.context.grafana_api_key_param' $(EKS_CTX)) && \
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
@@ -397,24 +407,24 @@ eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and de
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
 	echo "==> Injecting GRAFANA_URL into Helm release..." && \
-	NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
+	NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
 	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE --reuse-values \
 	  --set config.grafanaUrl="$$GRAFANA_URL" && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
 eks-redeploy: ## Restart pod to pick up a freshly pushed image
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	kubectl rollout restart deployment/$$APP_NAME -n $$NAMESPACE
 
 eks-logs: ## Tail live pod logs
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	kubectl logs -f deployment/$$APP_NAME -n $$NAMESPACE
 
 eks-exec: ## Open an interactive shell in the running pod
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
 eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to re-run
@@ -425,9 +435,9 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	@echo "==> Waiting for LB Controller webhook to be ready..."
 	@kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=120s
 	@$(MAKE) --no-print-directory eks-helm-install  # deploy app + Ingress (LBC provisions ALB)
-	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk.json
+	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk-eks.json
 	@$(MAKE) --no-print-directory eks-deploy        # CDK again: update CloudFront origin to real ALB DNS
-	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' cdk.json) && \
+	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' $(EKS_CTX)) && \
 	if [ "$$ENABLE_GRAFANA" = "true" ]; then \
 	  $(MAKE) --no-print-directory grafana-setup && \
 	  $(MAKE) --no-print-directory grafana-add-user && \
@@ -438,10 +448,15 @@ eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended 
 	bash scripts/redeploy-eks.sh
 
 eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
-	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	helm uninstall $$APP_NAME --namespace $$NAMESPACE || true && \
+	cp -f $(EKS_CTX) cdk.json && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
 	cdk destroy NceEksStack --app "python eks_app.py" --output cdk-eks.out --force
+
+##@ Audit
+audit: ## Audit deployed AWS resources for both ECS and EKS stacks
+	python3 scripts/audit.py

@@ -1,0 +1,18 @@
+{
+  "app": "python eks_app.py",
+  "context": {
+    "vpc_id": "vpc-06c1d6ba7f71a217f",
+    "app_name": "nce-safe-simulator",
+    "config_param": "/nce/config",
+    "enable_grafana": false,
+    "grafana_api_key_param": "/nce/grafana-api-key",
+    "grafana_admin_sso_user_id": "68f15380-f0d1-70fa-314b-b561ab686952",
+    "eks_cluster_name": "nce-eks",
+    "eks_namespace": "nce",
+    "eks_node_instance": "t4g.small",
+    "eks_alb_dns": "nce-eks-alb-252432914.us-east-1.elb.amazonaws.com",
+    "eks_cf_distribution_id": "",
+    "eks_cf_url": "",
+    "eks_admin_iam_user": "powerja"
+  }
+}
