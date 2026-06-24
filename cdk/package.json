@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "cdk-dia": "^0.12.3"
+  }
+}

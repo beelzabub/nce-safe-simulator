@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram help
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -70,6 +70,18 @@ ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --app "python ecs_app.py" --force
 
 ##@ Shared
+eks-diagram: ## Regenerate EKS architecture PNG from cdk.out/tree.json (requires cdk synth to have run)
+	@mkdir -p ../public/architecture
+	@npx --prefix . cdk-dia --stacks NceEksStack \
+	  --target-path $$(pwd)/../public/architecture/eks-architecture.png
+	@echo "==> ../public/architecture/eks-architecture.png"
+
+ecs-diagram: ## Regenerate ECS architecture PNG from cdk-ecs.out/tree.json
+	@mkdir -p ../public/architecture
+	@npx --prefix . cdk-dia --cdk-tree-path cdk-ecs.out/tree.json --stacks NceStack \
+	  --target-path $$(pwd)/../public/architecture/ecs-architecture.png
+	@echo "==> ../public/architecture/ecs-architecture.png"
+
 seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
 	@echo "Storing config.json in SSM as SecureString /nce/config..."
 	aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$(cat ../config.json)"
