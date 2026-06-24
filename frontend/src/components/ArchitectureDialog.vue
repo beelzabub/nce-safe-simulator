@@ -21,13 +21,20 @@
           <p>No architecture diagram available.</p>
           <p class="hint">Run <code>make eks-diagram</code> or <code>make ecs-diagram</code> in <code>cdk/</code>, then rebuild the container.</p>
         </div>
-        <div v-else class="img-viewport" ref="viewport">
+        <div
+          v-else
+          class="img-viewport"
+          ref="viewport"
+          :class="{ dragging }"
+          @mousedown="onDragStart"
+        >
           <img
             :key="imgUrl"
             :src="imgUrl"
             :alt="`${activeTab.toUpperCase()} architecture diagram`"
             class="arch-img"
             :style="{ width: `${zoom * 100}%` }"
+            draggable="false"
           />
         </div>
       </div>
@@ -71,13 +78,31 @@ const MIN_ZOOM  = 0.25
 const MAX_ZOOM  = 4.0
 const ZOOM_STEP = 0.25
 const zoom      = ref(1.0)
+const dragging  = ref(false)
+let dragStart   = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 }
 
-const imgUrl   = computed(() => `/architecture/${activeTab.value}-architecture.png`)
+const imgUrl    = computed(() => `/architecture/${activeTab.value}-architecture.png`)
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
 
 function zoomIn()    { zoom.value = Math.min(MAX_ZOOM, +(zoom.value + ZOOM_STEP).toFixed(2)) }
 function zoomOut()   { zoom.value = Math.max(MIN_ZOOM, +(zoom.value - ZOOM_STEP).toFixed(2)) }
-function zoomReset() { zoom.value = 1.0; if (viewport.value) { viewport.value.scrollTop = 0; viewport.value.scrollLeft = 0 } }
+function zoomReset() {
+  zoom.value = 1.0
+  if (viewport.value) { viewport.value.scrollTop = 0; viewport.value.scrollLeft = 0 }
+}
+
+function onDragStart(e) {
+  if (e.button !== 0) return
+  dragging.value = true
+  dragStart = { x: e.clientX, y: e.clientY, scrollLeft: viewport.value.scrollLeft, scrollTop: viewport.value.scrollTop }
+  e.preventDefault()
+}
+function onDragMove(e) {
+  if (!dragging.value || !viewport.value) return
+  viewport.value.scrollLeft = dragStart.scrollLeft - (e.clientX - dragStart.x)
+  viewport.value.scrollTop  = dragStart.scrollTop  - (e.clientY - dragStart.y)
+}
+function onDragEnd() { dragging.value = false }
 
 function onKey(e) {
   if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn() }
@@ -96,6 +121,8 @@ async function probe(key) {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
 
   // If we know the deployment type, only probe that one diagram.
   const candidates = props.deploymentType
@@ -107,7 +134,11 @@ onMounted(async () => {
   if (availableTabs.value.length) activeTab.value = availableTabs.value[0].key
 })
 
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
+})
 </script>
 
 <style scoped>
@@ -197,6 +228,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   align-items: flex-start;
   justify-content: center;
   padding: 0.75rem;
+  cursor: grab;
+  user-select: none;
+}
+.img-viewport.dragging {
+  cursor: grabbing;
 }
 
 .arch-img {
@@ -204,6 +240,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   height: auto;
   border-radius: 4px;
   transition: width 0.15s ease;
+  pointer-events: none;
 }
 
 .no-diagram {
