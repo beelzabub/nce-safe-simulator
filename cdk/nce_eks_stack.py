@@ -31,6 +31,8 @@ class NceEksStack(Stack):
         eks_node_instance = ctx("eks_node_instance")
         eks_alb_dns       = ctx("eks_alb_dns")
         eks_admin_iam_user = ctx("eks_admin_iam_user")
+        _grafana_ctx      = ctx("enable_grafana")
+        enable_grafana    = str(_grafana_ctx).lower() in ("true", "1") if _grafana_ctx is not None else False
 
         # ── VPC ───────────────────────────────────────────────────────────────
         if vpc_id:
@@ -240,20 +242,24 @@ class NceEksStack(Stack):
         )
 
         # ── Amazon Managed Grafana ────────────────────────────────────────────
-        grafana_role = iam.Role(
-            self, "GrafanaRole",
-            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
-        )
-        workspace = grafana.CfnWorkspace(
-            self, "GrafanaWorkspace",
-            name=app_name,
-            account_access_type="CURRENT_ACCOUNT",
-            authentication_providers=["AWS_SSO"],
-            permission_type="SERVICE_MANAGED",
-            role_arn=grafana_role.role_arn,
-            grafana_version="10.4",
-            plugin_admin_enabled=True,
-        )
+        if enable_grafana:
+            grafana_role = iam.Role(
+                self, "GrafanaRole",
+                assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+            )
+            workspace = grafana.CfnWorkspace(
+                self, "GrafanaWorkspace",
+                name=app_name,
+                account_access_type="CURRENT_ACCOUNT",
+                authentication_providers=["AWS_SSO"],
+                permission_type="SERVICE_MANAGED",
+                role_arn=grafana_role.role_arn,
+                grafana_version="10.4",
+                plugin_admin_enabled=True,
+            )
+            CfnOutput(self, "GrafanaWorkspaceId", value=workspace.ref,
+                      description="AMG workspace ID — used by make grafana-setup and eks-grafana-deploy")
+            CfnOutput(self, "GrafanaUrl",         value=f"https://{workspace.attr_endpoint}")
 
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "EksClusterName",    value=cluster.cluster_name)
@@ -266,6 +272,3 @@ class NceEksStack(Stack):
         CfnOutput(self, "EfsApQuartoSite",   value=ap_quarto.access_point_id)
         CfnOutput(self, "AlbSgId",           value=alb_sg.security_group_id)
         CfnOutput(self, "CloudFrontUrl",     value=f"https://{distribution.domain_name}")
-        CfnOutput(self, "GrafanaWorkspaceId",value=workspace.ref,
-                  description="AMG workspace ID — used by make grafana-setup and eks-grafana-deploy")
-        CfnOutput(self, "GrafanaUrl",        value=f"https://{workspace.attr_endpoint}")

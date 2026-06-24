@@ -92,92 +92,97 @@ aws ecs wait services-stable \
 log "ECS service is stable."
 
 # ── Step 5: Grafana ───────────────────────────────────────────────────────────
-log ""
-log "--- [5/5] Setting up Grafana ---"
-WORKSPACE_ID=$(aws grafana list-workspaces --region "${REGION}" \
-  --query "workspaces[?name=='${APP_NAME}'].id" --output text)
-[ -n "${WORKSPACE_ID}" ] || fail "Grafana workspace not found — CDK deploy may have failed."
-log "Workspace: ${WORKSPACE_ID}"
+ENABLE_GRAFANA=$(jq -r '.context.enable_grafana // false' cdk.json)
+if [ "${ENABLE_GRAFANA}" = "true" ]; then
+  log ""
+  log "--- [5/5] Setting up Grafana ---"
+  WORKSPACE_ID=$(aws grafana list-workspaces --region "${REGION}" \
+    --query "workspaces[?name=='${APP_NAME}'].id" --output text)
+  [ -n "${WORKSPACE_ID}" ] || fail "Grafana workspace not found — CDK deploy may have failed."
+  log "Workspace: ${WORKSPACE_ID}"
 
-GRAFANA_API_KEY_PARAM=$(jq -r '.context.grafana_api_key_param' cdk.json)
+  GRAFANA_API_KEY_PARAM=$(jq -r '.context.grafana_api_key_param' cdk.json)
 
-log "==> Creating Grafana Admin API key..."
-KEY=$(aws grafana create-workspace-api-key \
-  --key-name "nce-deploy" \
-  --key-role "ADMIN" \
-  --seconds-to-live 2592000 \
-  --workspace-id "${WORKSPACE_ID}" \
-  --region "${REGION}" \
-  --query 'key' --output text)
-aws ssm put-parameter \
-  --name "${GRAFANA_API_KEY_PARAM}" \
-  --type SecureString \
-  --overwrite \
-  --value "${KEY}" \
-  --region "${REGION}"
-log "API key stored at ${GRAFANA_API_KEY_PARAM}."
+  log "==> Creating Grafana Admin API key..."
+  KEY=$(aws grafana create-workspace-api-key \
+    --key-name "nce-deploy" \
+    --key-role "ADMIN" \
+    --seconds-to-live 2592000 \
+    --workspace-id "${WORKSPACE_ID}" \
+    --region "${REGION}" \
+    --query 'key' --output text)
+  aws ssm put-parameter \
+    --name "${GRAFANA_API_KEY_PARAM}" \
+    --type SecureString \
+    --overwrite \
+    --value "${KEY}" \
+    --region "${REGION}"
+  log "API key stored at ${GRAFANA_API_KEY_PARAM}."
 
-log "==> Deploying dashboards..."
-GRAFANA_URL="https://${WORKSPACE_ID}.grafana-workspace.${REGION}.amazonaws.com"
-DATA_URL=$(aws cloudformation describe-stacks \
-  --stack-name NceStack \
-  --region "${REGION}" \
-  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
-  --output text)
-[ -n "${DATA_URL}" ] || fail "CloudFrontUrl not found in NceStack outputs."
+  log "==> Deploying dashboards..."
+  GRAFANA_URL="https://${WORKSPACE_ID}.grafana-workspace.${REGION}.amazonaws.com"
+  DATA_URL=$(aws cloudformation describe-stacks \
+    --stack-name NceStack \
+    --region "${REGION}" \
+    --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
+    --output text)
+  [ -n "${DATA_URL}" ] || fail "CloudFrontUrl not found in NceStack outputs."
 
-log "Grafana URL: ${GRAFANA_URL}"
-log "Data URL:    ${DATA_URL}"
+  log "Grafana URL: ${GRAFANA_URL}"
+  log "Data URL:    ${DATA_URL}"
 
-# Install Infinity plugin
-PLUGIN_VER=$(curl -sf "${GRAFANA_URL}/api/plugins/yesoreyeram-infinity-datasource/settings" \
-  -H "Authorization: Bearer ${KEY}" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null || echo "")
-if [ -n "${PLUGIN_VER}" ]; then
-  log "  Infinity plugin already installed (v${PLUGIN_VER})"
-else
-  INSTALL_CODE=$(curl -sf -o /dev/null -w "%{http_code}" -X POST \
-    "${GRAFANA_URL}/api/plugins/yesoreyeram-infinity-datasource/install" \
-    -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
-    -d '{"version":"2.11.0"}')
-  [ "${INSTALL_CODE}" = "200" ] || fail "Plugin install returned HTTP ${INSTALL_CODE}"
-  log "  Installed yesoreyeram-infinity-datasource 2.11.0"
-fi
-
-# Configure datasource (access: direct — browser fetches CloudFront directly)
-DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"${DATA_URL}\",\"jsonData\":{}}"
-EXISTING_DS=$(curl -sf "${GRAFANA_URL}/api/datasources/name/Infinity" \
-  -H "Authorization: Bearer ${KEY}" 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
-if [ -n "${EXISTING_DS}" ]; then
-  curl -sf -X PUT "${GRAFANA_URL}/api/datasources/${EXISTING_DS}" \
-    -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
-    -d "${DS_PAYLOAD}" > /dev/null
-  log "  Updated datasource (id=${EXISTING_DS})"
-else
-  curl -sf -X POST "${GRAFANA_URL}/api/datasources" \
-    -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
-    -d "${DS_PAYLOAD}" > /dev/null
-  log "  Created datasource"
-fi
-
-# Deploy dashboards
-find ../grafana -name '*.json' | sort | while read -r DASH; do
-  PATCHED=$(sed "s|__BASE_URL__|${DATA_URL}|g" "${DASH}")
-  TITLE=$(echo "${PATCHED}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))")
-  RESULT=$(echo "{\"dashboard\":${PATCHED},\"overwrite\":true,\"folderId\":0}" | \
-    curl -sf -X POST "${GRAFANA_URL}/api/dashboards/import" \
+  # Install Infinity plugin
+  PLUGIN_VER=$(curl -sf "${GRAFANA_URL}/api/plugins/yesoreyeram-infinity-datasource/settings" \
+    -H "Authorization: Bearer ${KEY}" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null || echo "")
+  if [ -n "${PLUGIN_VER}" ]; then
+    log "  Infinity plugin already installed (v${PLUGIN_VER})"
+  else
+    INSTALL_CODE=$(curl -sf -o /dev/null -w "%{http_code}" -X POST \
+      "${GRAFANA_URL}/api/plugins/yesoreyeram-infinity-datasource/install" \
       -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
-      -d @- 2>&1) && \
-    log "  ✓ ${TITLE}" || log "  ✗ ${TITLE}: ${RESULT}"
-done
+      -d '{"version":"2.11.0"}')
+    [ "${INSTALL_CODE}" = "200" ] || fail "Plugin install returned HTTP ${INSTALL_CODE}"
+    log "  Installed yesoreyeram-infinity-datasource 2.11.0"
+  fi
 
-log "==> Assigning Grafana Admin to SSO user..."
-bash "${SCRIPT_DIR}/add-grafana-user.sh"
+  # Configure datasource (access: direct — browser fetches CloudFront directly)
+  DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"${DATA_URL}\",\"jsonData\":{}}"
+  EXISTING_DS=$(curl -sf "${GRAFANA_URL}/api/datasources/name/Infinity" \
+    -H "Authorization: Bearer ${KEY}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+  if [ -n "${EXISTING_DS}" ]; then
+    curl -sf -X PUT "${GRAFANA_URL}/api/datasources/${EXISTING_DS}" \
+      -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
+      -d "${DS_PAYLOAD}" > /dev/null
+    log "  Updated datasource (id=${EXISTING_DS})"
+  else
+    curl -sf -X POST "${GRAFANA_URL}/api/datasources" \
+      -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
+      -d "${DS_PAYLOAD}" > /dev/null
+    log "  Created datasource"
+  fi
+
+  # Deploy dashboards
+  find ../grafana -name '*.json' | sort | while read -r DASH; do
+    PATCHED=$(sed "s|__BASE_URL__|${DATA_URL}|g" "${DASH}")
+    TITLE=$(echo "${PATCHED}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','unknown'))")
+    RESULT=$(echo "{\"dashboard\":${PATCHED},\"overwrite\":true,\"folderId\":0}" | \
+      curl -sf -X POST "${GRAFANA_URL}/api/dashboards/import" \
+        -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \
+        -d @- 2>&1) && \
+      log "  ✓ ${TITLE}" || log "  ✗ ${TITLE}: ${RESULT}"
+  done
+
+  log "==> Assigning Grafana Admin to SSO user..."
+  bash "${SCRIPT_DIR}/add-grafana-user.sh"
+else
+  log "--- [5/5] Grafana skipped (enable_grafana=false) ---"
+fi
 
 log ""
 log "========================================="
 log " Redeploy complete."
 log " App:     https://$(aws cloudformation describe-stacks --stack-name NceStack --region "${REGION}" --query 'Stacks[0].Outputs[?OutputKey==`AlbDnsName`].OutputValue' --output text 2>/dev/null || echo '<see ALB in console>')"
-log " Grafana: ${GRAFANA_URL}"
+[ "${ENABLE_GRAFANA}" = "true" ] && log " Grafana: ${GRAFANA_URL}" || true
 log "========================================="
