@@ -1,5 +1,5 @@
 <template>
-  <button class="arch-fab" title="Architecture" @click="$emit('open')">
+  <button class="arch-fab" title="AWS Architecture" @click="$emit('open')">
     <!-- AWS wordmark + smile-arrow, faithful to the actual logo -->
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 32" width="42" height="23" aria-hidden="true">
       <!-- "aws" lettering -->
