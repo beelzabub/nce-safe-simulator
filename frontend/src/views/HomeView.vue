@@ -33,7 +33,7 @@
 
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
-    <ArchitectureDialog v-if="showArchitecture" @close="showArchitecture = false" />
+    <ArchitectureDialog v-if="showArchitecture" :deployment-type="deploymentType" @close="showArchitecture = false" />
     <ArchitectureButton @open="showArchitecture = true" />
   </div>
 </template>
@@ -56,8 +56,9 @@ const showStatus       = ref(false)
 const showConfig       = ref(false)
 const showHelp         = ref(false)
 const showArchitecture = ref(false)
-const gitlabWikiUrl = ref('')
-const grafanaUrl    = ref('')
+const gitlabWikiUrl  = ref('')
+const grafanaUrl     = ref('')
+const deploymentType = ref('')
 
 onMounted(async () => {
   loadDiskHistory()
@@ -65,8 +66,9 @@ onMounted(async () => {
     const r = await fetch('/api/config')
     if (r.ok) {
       const data = await r.json()
-      gitlabWikiUrl.value = data.wiki_url    || ''
-      grafanaUrl.value    = data.grafana_url || ''
+      gitlabWikiUrl.value  = data.wiki_url        || ''
+      grafanaUrl.value     = data.grafana_url     || ''
+      deploymentType.value = data.deployment_type || ''
     }
   } catch { /* server not yet ready */ }
 })
