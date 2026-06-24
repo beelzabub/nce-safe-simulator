@@ -186,7 +186,7 @@ class NceEksStack(Stack):
         alb_sg = ec2.SecurityGroup(
             self, "AlbSg",
             vpc=vpc,
-            description="ALB — allow HTTP inbound only from CloudFront",
+            description="ALB - allow HTTP inbound only from CloudFront",
             allow_all_outbound=True,
         )
         alb_sg.add_ingress_rule(
