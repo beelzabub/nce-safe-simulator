@@ -61,6 +61,7 @@ class NceEksStack(Stack):
             default_capacity=0,
             output_cluster_name=True,
             output_config_command=True,
+            endpoint_access=eks.EndpointAccess.PUBLIC,
         )
 
         # ARM64 managed node group
@@ -105,10 +106,8 @@ class NceEksStack(Stack):
         # be used as a map key (synth-time interpolation fails with KeyMustResolveToString).
         oidc_issuer = cluster.cluster_open_id_connect_issuer
         efs_csi_conditions = CfnJson(self, "EfsCsiOidcConditions", value={
-            "StringEquals": {
-                f"{oidc_issuer}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
-                f"{oidc_issuer}:aud": "sts.amazonaws.com",
-            }
+            f"{oidc_issuer}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
+            f"{oidc_issuer}:aud": "sts.amazonaws.com",
         })
         efs_csi_role = iam.Role(
             self, "EfsCsiRole",
