@@ -70,16 +70,20 @@ ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --app "python ecs_app.py" --force
 
 ##@ Shared
-eks-diagram: ## Regenerate EKS architecture PNG from cdk.out/tree.json (requires cdk synth to have run)
+eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)
 	@mkdir -p ../public/architecture
-	@npx --prefix . cdk-dia --stacks NceEksStack \
-	  --target-path $$(pwd)/../public/architecture/eks-architecture.png
+	@EKS_CF=$$(aws cloudformation describe-stacks --stack-name NceEksStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
+	python3 ../diagrams/eks_architecture.py ../public/architecture/eks-architecture.png
 	@echo "==> ../public/architecture/eks-architecture.png"
 
-ecs-diagram: ## Regenerate ECS architecture PNG from cdk-ecs.out/tree.json
+ecs-diagram: ## Regenerate ECS architecture PNG (queries live CloudFormation stack for labels)
 	@mkdir -p ../public/architecture
-	@npx --prefix . cdk-dia --cdk-tree-path cdk-ecs.out/tree.json --stacks NceStack \
-	  --target-path $$(pwd)/../public/architecture/ecs-architecture.png
+	@ECS_CF=$$(aws cloudformation describe-stacks --stack-name NceStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$ECS_CF" > ../diagrams/cf-outputs-ecs.json && \
+	python3 ../diagrams/ecs_architecture.py ../public/architecture/ecs-architecture.png
 	@echo "==> ../public/architecture/ecs-architecture.png"
 
 seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
@@ -91,6 +95,13 @@ ecr-push: ## Build and push :latest to ECR (follow with ecs-redeploy or eks-rede
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	echo "Fetching CloudFormation outputs for architecture diagrams..." && \
+	EKS_CF=$$(aws cloudformation describe-stacks --stack-name NceEksStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	ECS_CF=$$(aws cloudformation describe-stacks --stack-name NceStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
+	printf '%s' "$$ECS_CF" > ../diagrams/cf-outputs-ecs.json && \
 	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
 	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
 	docker tag nce-safe-simulator:latest "$$REPO:latest" && \

@@ -858,6 +858,18 @@ make seed-config        # store config.json in SSM
 | `make grafana-setup` | Create/rotate the Grafana Admin API key, store in SSM |
 | `make grafana-add-user` | Assign Grafana Admin role to the SSO user defined in `cdk.json` |
 
+### Architecture diagram
+
+The web UI includes an **AWS** button (visible on ECS and EKS deployments) that opens a zoomable, pannable architecture diagram for the active deployment. The diagram is generated at image build time by `diagrams/ecs_architecture.py` and `diagrams/eks_architecture.py` using the Python [`diagrams`](https://diagrams.mingrammer.com/) library.
+
+If the relevant CloudFormation stack is deployed, `make ecr-push` automatically queries live CF outputs (CloudFront domain, EFS ID, EKS cluster name) to label nodes, and conditionally includes the Amazon Managed Grafana node when `GrafanaUrl` is present in the stack outputs. To regenerate diagrams locally without a full push:
+
+```bash
+cd cdk
+make eks-diagram   # writes public/architecture/eks-architecture.png
+make ecs-diagram   # writes public/architecture/ecs-architecture.png
+```
+
 ### Grafana dashboards
 
 Amazon Managed Grafana is provisioned automatically by the CDK stack. Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, served by the app from the most recent complete report snapshot on EFS. Data refreshes automatically each time reports are run from the web UI.
