@@ -383,6 +383,10 @@ eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and de
 	      -d @- 2>&1) && \
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
+	echo "==> Injecting GRAFANA_URL into Helm release..." && \
+	NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
+	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE --reuse-values \
+	  --set config.grafanaUrl="$$GRAFANA_URL" && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
 eks-redeploy: ## Restart pod to pick up a freshly pushed image
