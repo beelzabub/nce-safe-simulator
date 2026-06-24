@@ -309,8 +309,9 @@ eks-grafana-deploy: ## Point Grafana Infinity datasource at EKS CloudFront URL a
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
-	DATA_URL=$$(jq -r '.context.eks_cf_url // empty' cdk.json) && \
-	[ -n "$$DATA_URL" ] || { echo "ERROR: eks_cf_url not set — run make eks-cloudfront-deploy first"; exit 1; } && \
+	DATA_URL=$$(aws cloudformation describe-stacks --stack-name NceEksStack --region $$REGION \
+	  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' --output text) && \
+	[ -n "$$DATA_URL" ] || { echo "ERROR: CloudFrontUrl not in NceEksStack outputs — run make eks-deploy first"; exit 1; } && \
 	echo "==> Updating Infinity datasource to $$DATA_URL..." && \
 	DS_PAYLOAD="{\"uid\":\"ffon28bht91c0b\",\"name\":\"Infinity\",\"type\":\"yesoreyeram-infinity-datasource\",\"access\":\"direct\",\"isDefault\":true,\"url\":\"$$DATA_URL\",\"jsonData\":{}}" && \
 	EXISTING_DS=$$(curl -sf "$$GRAFANA_URL/api/datasources/name/Infinity" \
