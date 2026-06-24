@@ -65,7 +65,7 @@ class NceEksStack(Stack):
         )
 
         # ARM64 managed node group
-        cluster.add_nodegroup_capacity(
+        nodegroup = cluster.add_nodegroup_capacity(
             "NceNodes",
             instance_types=[ec2.InstanceType(eks_node_instance)],
             ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
@@ -166,6 +166,9 @@ class NceEksStack(Stack):
             )
         )
         filesystem.grant_read_write(app_sa.role)
+        # Node group role performs NFS mounts; it needs ClientMount in addition to
+        # the app SA role grant above (which only covers the pod's IRSA identity).
+        filesystem.grant_read_write(nodegroup.role)
 
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "EksClusterName",   value=cluster.cluster_name)
