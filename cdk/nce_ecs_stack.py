@@ -203,6 +203,19 @@ class NceEcsStack(Stack):
             max_healthy_percent=100,
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
             enable_execute_command=True,
+            # Prevent CDK from opening 0.0.0.0/0 on port 80; we add the
+            # CloudFront prefix list rule explicitly below instead.
+            open_listener=False,
+        )
+
+        # Allow HTTP inbound only from CloudFront edge nodes.
+        cf_prefix_list = ec2.PrefixList.from_lookup(
+            self, "CfPrefixList",
+            prefix_list_name="com.amazonaws.global.cloudfront.origin-facing",
+        )
+        service.load_balancer.connections.allow_from(
+            ec2.Peer.prefix_list(cf_prefix_list.prefix_list_id),
+            ec2.Port.tcp(80),
         )
 
         # CDK L2 rejects desired_count=0, but CloudFormation accepts it.
