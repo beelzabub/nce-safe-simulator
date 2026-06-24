@@ -312,7 +312,7 @@ eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of E
 	  echo "==> Distribution created: https://$$CF_DOMAIN (may take ~5 min to become active)"; \
 	fi
 
-eks-grafana-deploy: ## Point Grafana Infinity datasource at EKS CloudFront URL and redeploy dashboards
+eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and deploy all dashboards (idempotent)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	WORKSPACE_ID=$$(aws grafana list-workspaces --region $$REGION \
@@ -322,6 +322,19 @@ eks-grafana-deploy: ## Point Grafana Infinity datasource at EKS CloudFront URL a
 	API_KEY=$$(aws ssm get-parameter --name $$PARAM --with-decryption \
 	  --region $$REGION --query 'Parameter.Value' --output text) && \
 	GRAFANA_URL="https://$$WORKSPACE_ID.grafana-workspace.$$REGION.amazonaws.com" && \
+	echo "==> Installing Infinity plugin..." && \
+	PLUGIN_STATUS=$$(curl -s "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/settings" \
+	  -H "Authorization: Bearer $$API_KEY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('info',{}).get('version',''))" 2>/dev/null) && \
+	if [ -n "$$PLUGIN_STATUS" ]; then \
+	  echo "  Infinity plugin already installed (v$$PLUGIN_STATUS)"; \
+	else \
+	  INSTALL_CODE=$$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+	    "$$GRAFANA_URL/api/plugins/yesoreyeram-infinity-datasource/install" \
+	    -H "Authorization: Bearer $$API_KEY" -H "Content-Type: application/json" \
+	    -d '{"version":"2.11.0"}') && \
+	  [ "$$INSTALL_CODE" = "200" ] || { echo "ERROR: plugin install returned HTTP $$INSTALL_CODE"; exit 1; } && \
+	  echo "  Installed yesoreyeram-infinity-datasource 2.11.0"; \
+	fi && \
 	DATA_URL=$$(aws cloudformation describe-stacks --stack-name NceEksStack --region $$REGION \
 	  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' --output text) && \
 	[ -n "$$DATA_URL" ] || { echo "ERROR: CloudFrontUrl not in NceEksStack outputs — run make eks-deploy first"; exit 1; } && \
