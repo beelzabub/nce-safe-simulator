@@ -65,7 +65,6 @@ class NceEksStack(Stack):
             vpc_subnets=[public_subnets],
             default_capacity=0,
             output_cluster_name=True,
-            output_config_command=True,
             endpoint_access=eks.EndpointAccess.PUBLIC,
         )
 

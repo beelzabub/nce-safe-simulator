@@ -215,6 +215,17 @@ eks-deploy: ## Deploy EKS CDK stack (cluster, node group, LB controller, EFS CSI
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
 	cdk deploy NceEksStack --app "python eks_app.py" --require-approval never
 
+eks-tag-subnets: ## Tag VPC public subnets so the LB controller can provision internet-facing ALBs
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	VPC_ID=$$(jq -r '.context.vpc_id' cdk.json) && \
+	SUBNETS=$$(aws ec2 describe-subnets --region $$REGION \
+	  --filters "Name=vpc-id,Values=$$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
+	  --query 'Subnets[*].SubnetId' --output text) && \
+	[ -n "$$SUBNETS" ] || { echo "ERROR: no public subnets found in $$VPC_ID"; exit 1; } && \
+	aws ec2 create-tags --region $$REGION --resources $$SUBNETS \
+	  --tags Key=kubernetes.io/role/elb,Value=1 && \
+	echo "Tagged subnets: $$SUBNETS"
+
 eks-kubeconfig: ## Configure kubectl to talk to the EKS cluster
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	CLUSTER=$$(jq -r '.context.eks_cluster_name' cdk.json) && \
@@ -354,13 +365,13 @@ eks-exec: ## Open an interactive shell in the running pod
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
-eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + LB controller + helm + ALB + CloudFront + Grafana
+eks-full-deploy: ## End-to-end EKS setup: CDK + kubeconfig + subnet tags + LB controller + helm + ALB + Grafana
 	@$(MAKE) --no-print-directory eks-deploy
 	@$(MAKE) --no-print-directory eks-kubeconfig
+	@$(MAKE) --no-print-directory eks-tag-subnets
 	@$(MAKE) --no-print-directory eks-lb-controller
 	@$(MAKE) --no-print-directory eks-helm-install
 	@$(MAKE) --no-print-directory eks-set-alb
-	@$(MAKE) --no-print-directory eks-cloudfront-deploy
 	@$(MAKE) --no-print-directory eks-grafana-deploy
 
 eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
