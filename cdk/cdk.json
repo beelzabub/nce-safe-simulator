@@ -25,6 +25,7 @@
     "hc_healthy_count": 2,
     "hc_unhealthy_count": 3,
     "desired_count": 1,
+    "enable_grafana": false,
     "grafana_api_key_param": "/nce/grafana-api-key",
     "grafana_admin_sso_user_id": "68f15380-f0d1-70fa-314b-b561ab686952",
     "eks_cluster_name": "nce-eks",

@@ -50,6 +50,8 @@ class NceEcsStack(Stack):
         hc_unhealthy     = ctx("hc_unhealthy_count")
         _desired_count   = ctx("desired_count")
         desired_count    = int(_desired_count) if _desired_count is not None else None
+        _grafana_ctx     = ctx("enable_grafana")
+        enable_grafana   = str(_grafana_ctx).lower() in ("true", "1") if _grafana_ctx is not None else False
 
         # ── VPC ──────────────────────────────────────────────────────────────
         if vpc_id:
@@ -289,37 +291,33 @@ class NceEcsStack(Stack):
         )
 
         # ── Amazon Managed Grafana ────────────────────────────────────────────
-        grafana_role = iam.Role(
-            self,
-            "GrafanaRole",
-            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
-        )
-
-        workspace = grafana.CfnWorkspace(
-            self,
-            "GrafanaWorkspace",
-            name=app_name,
-            account_access_type="CURRENT_ACCOUNT",
-            authentication_providers=["AWS_SSO"],
-            permission_type="SERVICE_MANAGED",
-            role_arn=grafana_role.role_arn,
-            grafana_version="10.4",
-            plugin_admin_enabled=True,
-        )
-
-        container.add_environment("GRAFANA_URL", f"https://{workspace.attr_endpoint}")
-
-        CfnOutput(
-            self,
-            "GrafanaWorkspaceId",
-            value=workspace.ref,
-            description="AMG workspace ID — used by make grafana-setup and grafana-deploy",
-        )
-        CfnOutput(
-            self,
-            "GrafanaUrl",
-            value=f"https://{workspace.attr_endpoint}",
-            description="Grafana dashboard URL",
-        )
-
-        container.add_environment("GRAFANA_URL", f"https://{workspace.attr_endpoint}")
+        if enable_grafana:
+            grafana_role = iam.Role(
+                self,
+                "GrafanaRole",
+                assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+            )
+            workspace = grafana.CfnWorkspace(
+                self,
+                "GrafanaWorkspace",
+                name=app_name,
+                account_access_type="CURRENT_ACCOUNT",
+                authentication_providers=["AWS_SSO"],
+                permission_type="SERVICE_MANAGED",
+                role_arn=grafana_role.role_arn,
+                grafana_version="10.4",
+                plugin_admin_enabled=True,
+            )
+            container.add_environment("GRAFANA_URL", f"https://{workspace.attr_endpoint}")
+            CfnOutput(
+                self,
+                "GrafanaWorkspaceId",
+                value=workspace.ref,
+                description="AMG workspace ID — used by make grafana-setup and grafana-deploy",
+            )
+            CfnOutput(
+                self,
+                "GrafanaUrl",
+                value=f"https://{workspace.attr_endpoint}",
+                description="Grafana dashboard URL",
+            )
