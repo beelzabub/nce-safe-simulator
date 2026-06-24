@@ -1,0 +1,35 @@
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+
+serviceAccount:
+  # Set to true only when deploying without CDK (CDK creates the SA with IRSA by default)
+  create: false
+  name: nce-app
+  roleArn: ""
+
+config:
+  param: /nce/config
+  awsRegion: us-east-1
+
+efs:
+  fileSystemId: ""
+  accessPoints:
+    config: ""
+    reports: ""
+    interactive: ""
+    quartoSite: ""
+
+ingress:
+  albSgId: ""

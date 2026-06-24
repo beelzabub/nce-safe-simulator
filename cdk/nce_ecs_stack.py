@@ -18,7 +18,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class NceStack(Stack):
+class NceEcsStack(Stack):
     def __init__(self, scope: Construct, id: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
@@ -203,6 +203,19 @@ class NceStack(Stack):
             max_healthy_percent=100,
             circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
             enable_execute_command=True,
+            # Prevent CDK from opening 0.0.0.0/0 on port 80; we add the
+            # CloudFront prefix list rule explicitly below instead.
+            open_listener=False,
+        )
+
+        # Allow HTTP inbound only from CloudFront edge nodes.
+        cf_prefix_list = ec2.PrefixList.from_lookup(
+            self, "CfPrefixList",
+            prefix_list_name="com.amazonaws.global.cloudfront.origin-facing",
+        )
+        service.load_balancer.connections.allow_from(
+            ec2.Peer.prefix_list(cf_prefix_list.prefix_list_id),
+            ec2.Port.tcp(80),
         )
 
         # CDK L2 rejects desired_count=0, but CloudFormation accepts it.
@@ -234,7 +247,7 @@ class NceStack(Stack):
                     service.load_balancer.load_balancer_dns_name,
                     protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
                 ),
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                 # Forward all viewer headers (including Sec-WebSocket-Key/Version) so

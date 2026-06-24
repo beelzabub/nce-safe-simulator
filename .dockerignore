@@ -12,4 +12,8 @@ logs
 config.json
 .server.pid
 cdk/
+!cdk/cdk.out/tree.json
+!cdk/cdk-ecs.out/tree.json
+!cdk/package.json
+!cdk/package-lock.json
 cdk.out/

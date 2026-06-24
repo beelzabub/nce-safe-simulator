@@ -31,8 +31,10 @@
 
     </div>
 
-    <ConfigDialog v-if="showConfig" @close="showConfig = false" />
-    <HelpDialog   v-if="showHelp"   @close="showHelp = false" />
+    <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
+    <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
+    <ArchitectureDialog v-if="showArchitecture" @close="showArchitecture = false" />
+    <ArchitectureButton @open="showArchitecture = true" />
   </div>
 </template>
 
@@ -42,15 +44,18 @@ import NavBar        from '../components/NavBar.vue'
 import JobPicker     from '../components/JobPicker.vue'
 import JobRunner     from './JobRunner.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
-import HelpDialog    from '../components/HelpDialog.vue'
-import ConfigDialog  from '../components/ConfigDialog.vue'
-import { useJobs }   from '../composables/useJobs.js'
+import HelpDialog          from '../components/HelpDialog.vue'
+import ConfigDialog        from '../components/ConfigDialog.vue'
+import ArchitectureButton  from '../components/ArchitectureButton.vue'
+import ArchitectureDialog  from '../components/ArchitectureDialog.vue'
+import { useJobs }         from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
 
-const showStatus    = ref(false)
-const showConfig    = ref(false)
-const showHelp      = ref(false)
+const showStatus       = ref(false)
+const showConfig       = ref(false)
+const showHelp         = ref(false)
+const showArchitecture = ref(false)
 const gitlabWikiUrl = ref('')
 const grafanaUrl    = ref('')
 
