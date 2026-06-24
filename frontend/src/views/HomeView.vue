@@ -11,14 +11,14 @@
           <a href="/quarto/" target="_blank" rel="noopener" class="reports-link">
             Quarto&thinsp;↗
           </a>
-          <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
-            Wiki&thinsp;↗
-          </a>
           <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="reports-link">
             GitLab&thinsp;↗
           </a>
           <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="reports-link">
             Grafana&thinsp;↗
+          </a>
+          <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
+            Raw&thinsp;↗
           </a>
         </div>
       </aside>
