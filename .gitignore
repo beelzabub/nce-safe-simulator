@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 .env
 cdk/cdk.out/
+cdk/cdk-ecs.out/
+cdk/cdk-eks.out/
 cdk/.venv/
 
 /.quarto/
