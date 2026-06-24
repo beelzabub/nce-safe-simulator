@@ -46,7 +46,7 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 
 ##@ ECS / Fargate
 ecs-diff: ## Show what ECS CDK stack will change without deploying
-	cdk diff NceStack --app "python ecs_app.py"
+	cdk diff NceStack --app "python ecs_app.py" --output cdk-ecs.out
 
 ecs-deploy: ## Deploy (or update) the ECS stack
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
@@ -56,7 +56,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	IMAGE_COUNT=$$(aws ecr list-images --repository-name $$APP_NAME --region $$REGION --query 'length(imageIds)' --output text 2>/dev/null || echo "0") && \
 	if [ "$$IMAGE_COUNT" = "0" ]; then \
 	  echo "==> No image in ECR — deploying infra with service scaled to 0..." && \
-	  cdk deploy NceStack --app "python ecs_app.py" --require-approval never --context desired_count=0 && \
+	  cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never --context desired_count=0 && \
 	  echo "==> Building and pushing initial image..." && \
 	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
 	  docker build --platform linux/arm64 -t $$APP_NAME ../ && \
@@ -64,10 +64,10 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	  docker push "$$REPO:latest" && \
 	  echo "==> Image ready — scaling service up..."; \
 	fi && \
-	cdk deploy NceStack --app "python ecs_app.py" --require-approval never
+	cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never
 
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
-	cdk destroy NceStack --app "python ecs_app.py" --force
+	cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
 
 ##@ Shared
 eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)
@@ -241,7 +241,7 @@ eks-deploy: ## Deploy EKS CDK stack (cluster, node group, LB controller, EFS CSI
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
-	cdk deploy NceEksStack --app "python eks_app.py" --require-approval never
+	cdk deploy NceEksStack --app "python eks_app.py" --output cdk-eks.out --require-approval never
 
 eks-tag-subnets: ## Tag VPC public subnets so the LB controller can provision internet-facing ALBs
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
@@ -444,4 +444,4 @@ eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
-	cdk destroy NceEksStack --app "python eks_app.py" --force
+	cdk destroy NceEksStack --app "python eks_app.py" --output cdk-eks.out --force
