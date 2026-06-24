@@ -872,7 +872,14 @@ make ecs-diagram   # writes public/architecture/ecs-architecture.png
 
 ### Grafana dashboards
 
-Amazon Managed Grafana is provisioned automatically by the CDK stack. Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, served by the app from the most recent complete report snapshot on EFS. Data refreshes automatically each time reports are run from the web UI.
+Amazon Managed Grafana is **optional and off by default** (~$9/editor/month regardless of usage). Enable it at deploy time:
+
+```bash
+cdk deploy -c enable_grafana=true   # ECS
+cdk deploy -c enable_grafana=true --app "python eks_app.py"   # EKS
+```
+
+Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, served by the app from the most recent complete report snapshot on EFS. Data refreshes automatically each time reports are run from the web UI.
 
 > **AMG prerequisite:** AWS IAM Identity Center must be enabled in the account (one-time setup, no ongoing cost). Browser login uses SSO; all automation uses an Admin API key stored in SSM at `/nce/grafana-api-key`.
 
