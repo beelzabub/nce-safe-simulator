@@ -70,16 +70,20 @@ ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --app "python ecs_app.py" --force
 
 ##@ Shared
-eks-diagram: ## Regenerate EKS architecture PNG from cdk.out/tree.json (requires cdk synth to have run)
+eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)
 	@mkdir -p ../public/architecture
-	@npx --prefix . cdk-dia --stacks NceEksStack \
-	  --target-path $$(pwd)/../public/architecture/eks-architecture.png
+	@EKS_CF=$$(aws cloudformation describe-stacks --stack-name NceEksStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
+	python3 ../diagrams/eks_architecture.py ../public/architecture/eks-architecture.png
 	@echo "==> ../public/architecture/eks-architecture.png"
 
-ecs-diagram: ## Regenerate ECS architecture PNG from cdk-ecs.out/tree.json
+ecs-diagram: ## Regenerate ECS architecture PNG (queries live CloudFormation stack for labels)
 	@mkdir -p ../public/architecture
-	@npx --prefix . cdk-dia --cdk-tree-path cdk-ecs.out/tree.json --stacks NceStack \
-	  --target-path $$(pwd)/../public/architecture/ecs-architecture.png
+	@ECS_CF=$$(aws cloudformation describe-stacks --stack-name NceStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$ECS_CF" > ../diagrams/cf-outputs-ecs.json && \
+	python3 ../diagrams/ecs_architecture.py ../public/architecture/ecs-architecture.png
 	@echo "==> ../public/architecture/ecs-architecture.png"
 
 seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
@@ -91,6 +95,13 @@ ecr-push: ## Build and push :latest to ECR (follow with ecs-redeploy or eks-rede
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	echo "Fetching CloudFormation outputs for architecture diagrams..." && \
+	EKS_CF=$$(aws cloudformation describe-stacks --stack-name NceEksStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	ECS_CF=$$(aws cloudformation describe-stacks --stack-name NceStack \
+	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \
+	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
+	printf '%s' "$$ECS_CF" > ../diagrams/cf-outputs-ecs.json && \
 	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
 	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
 	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
@@ -294,14 +305,21 @@ eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for 
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE
 
-eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json
+eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json (polls up to 15 min)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
-	ALB_DNS=$$(kubectl get ingress -n $$NAMESPACE $$APP_NAME \
-	  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}') && \
-	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS not available — wait for LB controller to provision"; exit 1; } && \
+	echo "==> Waiting for ALB to be provisioned (up to 15 min)..." && \
+	ALB_DNS="" && \
+	for i in $$(seq 1 90); do \
+	  ALB_DNS=$$(kubectl get ingress -n $$NAMESPACE $$APP_NAME \
+	    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true) && \
+	  [ -n "$$ALB_DNS" ] && break; \
+	  echo "  [$$i/90] Not ready yet, waiting 10s..."; \
+	  sleep 10; \
+	done && \
+	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS still not available after 15 min"; exit 1; } && \
 	jq --arg v "$$ALB_DNS" '.context.eks_alb_dns = $$v' cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
-	echo "eks_alb_dns set to $$ALB_DNS"
+	echo "==> eks_alb_dns set to $$ALB_DNS"
 
 eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of EKS ALB
 	@ALB_DNS=$$(jq -r '.context.eks_alb_dns // empty' cdk.json) && \
@@ -376,6 +394,10 @@ eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and de
 	      -d @- 2>&1) && \
 	  echo "  ✓ $$TITLE" || echo "  ✗ $$TITLE: $$RESULT"; \
 	done && \
+	echo "==> Injecting GRAFANA_URL into Helm release..." && \
+	NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
+	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE --reuse-values \
+	  --set config.grafanaUrl="$$GRAFANA_URL" && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
 eks-redeploy: ## Restart pod to pick up a freshly pushed image

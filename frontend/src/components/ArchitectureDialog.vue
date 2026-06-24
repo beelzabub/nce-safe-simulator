@@ -9,7 +9,7 @@
             <button
               v-for="t in availableTabs" :key="t.key"
               class="tab-btn" :class="{ active: activeTab === t.key }"
-              @click="activeTab = t.key"
+              @click="activeTab = t.key; zoomReset()"
             >{{ t.label }}</button>
           </div>
           <button class="dialog-close" @click="$emit('close')" aria-label="Close">×</button>
@@ -21,22 +21,36 @@
           <p>No architecture diagram available.</p>
           <p class="hint">Run <code>make eks-diagram</code> or <code>make ecs-diagram</code> in <code>cdk/</code>, then rebuild the container.</p>
         </div>
-        <img
+        <div
           v-else
-          :key="imgUrl"
-          :src="imgUrl"
-          :alt="`${activeTab.toUpperCase()} architecture diagram`"
-          class="arch-img"
-          :class="{ zoomed }"
-          @click="zoomed = !zoomed"
-        />
+          class="img-viewport"
+          ref="viewport"
+          :class="{ dragging }"
+          @mousedown="onDragStart"
+        >
+          <img
+            :key="imgUrl"
+            :src="imgUrl"
+            :alt="`${activeTab.toUpperCase()} architecture diagram`"
+            class="arch-img"
+            :style="{ width: `${zoom * 100}%` }"
+            draggable="false"
+          />
+        </div>
       </div>
 
       <div class="dialog-footer">
-        <a v-if="availableTabs.length" :href="imgUrl" :download="`${activeTab}-architecture.png`" class="dl-btn">
-          ↓ Download
-        </a>
-        <button class="close-btn" @click="$emit('close')">Close</button>
+        <div v-if="availableTabs.length" class="zoom-controls">
+          <button class="zoom-btn" :disabled="zoom <= MIN_ZOOM" @click="zoomOut" title="Zoom out">−</button>
+          <button class="zoom-reset" @click="zoomReset" title="Reset zoom">{{ zoomLabel }}</button>
+          <button class="zoom-btn" :disabled="zoom >= MAX_ZOOM" @click="zoomIn" title="Zoom in">+</button>
+        </div>
+        <div class="footer-actions">
+          <a v-if="availableTabs.length" :href="imgUrl" :download="`${activeTab}-architecture.png`" class="dl-btn">
+            ↓ Download
+          </a>
+          <button class="close-btn" @click="$emit('close')">Close</button>
+        </div>
       </div>
 
     </div>
@@ -44,8 +58,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 
+const props = defineProps({
+  deploymentType: { type: String, default: '' },
+})
 defineEmits(['close'])
 
 const ALL_TABS = [
@@ -55,9 +72,66 @@ const ALL_TABS = [
 
 const availableTabs = ref([])
 const activeTab     = ref('')
-const zoomed        = ref(false)
+const viewport      = ref(null)
 
-const imgUrl = computed(() => `/architecture/${activeTab.value}-architecture.png`)
+const MIN_ZOOM  = 0.25
+const MAX_ZOOM  = 4.0
+const ZOOM_STEP = 0.25
+const zoom      = ref(1.0)
+const dragging  = ref(false)
+let dragStart   = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 }
+
+const imgUrl    = computed(() => `/architecture/${activeTab.value}-architecture.png`)
+const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
+
+function zoomIn()    { zoom.value = Math.min(MAX_ZOOM, +(zoom.value + ZOOM_STEP).toFixed(2)) }
+function zoomOut()   { zoom.value = Math.max(MIN_ZOOM, +(zoom.value - ZOOM_STEP).toFixed(2)) }
+function zoomReset() {
+  zoom.value = 1.0
+  if (viewport.value) { viewport.value.scrollTop = 0; viewport.value.scrollLeft = 0 }
+}
+
+function onDragStart(e) {
+  if (e.button !== 0) return
+  dragging.value = true
+  dragStart = { x: e.clientX, y: e.clientY, scrollLeft: viewport.value.scrollLeft, scrollTop: viewport.value.scrollTop }
+  e.preventDefault()
+}
+function onDragMove(e) {
+  if (!dragging.value || !viewport.value) return
+  viewport.value.scrollLeft = dragStart.scrollLeft - (e.clientX - dragStart.x)
+  viewport.value.scrollTop  = dragStart.scrollTop  - (e.clientY - dragStart.y)
+}
+function onDragEnd() { dragging.value = false }
+
+function onWheel(e) {
+  e.preventDefault()
+  const vp       = viewport.value
+  const oldZoom  = zoom.value
+  const delta    = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+  const newZoom  = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +(oldZoom + delta).toFixed(2)))
+  if (newZoom === oldZoom) return
+
+  // Keep the point under the cursor fixed during zoom.
+  const rect  = vp.getBoundingClientRect()
+  const cx    = e.clientX - rect.left   // cursor x relative to viewport
+  const cy    = e.clientY - rect.top    // cursor y relative to viewport
+  const ratio = newZoom / oldZoom
+  zoom.value  = newZoom
+
+  // After the DOM updates width, adjust scroll so cursor stays over the same image point.
+  // nextTick isn't imported — use a microtask instead.
+  Promise.resolve().then(() => {
+    vp.scrollLeft = (vp.scrollLeft + cx) * ratio - cx
+    vp.scrollTop  = (vp.scrollTop  + cy) * ratio - cy
+  })
+}
+
+function onKey(e) {
+  if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn() }
+  if (e.key === '-')                  { e.preventDefault(); zoomOut() }
+  if (e.key === '0')                  { e.preventDefault(); zoomReset() }
+}
 
 async function probe(key) {
   try {
@@ -68,12 +142,31 @@ async function probe(key) {
   }
 }
 
+// viewport is inside v-else — it doesn't exist until availableTabs is populated.
+// Watch the ref and attach/detach the wheel listener when it mounts/unmounts.
+watch(viewport, (el, prev) => {
+  if (prev) prev.removeEventListener('wheel', onWheel)
+  if (el)   el.addEventListener('wheel', onWheel, { passive: false })
+})
+
 onMounted(async () => {
-  const results = await Promise.all(ALL_TABS.map(t => probe(t.key)))
-  availableTabs.value = ALL_TABS.filter((_, i) => results[i])
-  if (availableTabs.value.length) {
-    activeTab.value = availableTabs.value[0].key
-  }
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
+
+  const candidates = props.deploymentType
+    ? ALL_TABS.filter(t => t.key === props.deploymentType)
+    : ALL_TABS
+
+  const results = await Promise.all(candidates.map(t => probe(t.key)))
+  availableTabs.value = candidates.filter((_, i) => results[i])
+  if (availableTabs.value.length) activeTab.value = availableTabs.value[0].key
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
 })
 </script>
 
@@ -92,8 +185,8 @@ onMounted(async () => {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: min(92vw, 1100px);
-  max-height: 90vh;
+  width: 85vw;
+  height: 85vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -136,7 +229,7 @@ onMounted(async () => {
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.tab-btn:hover { background: var(--surface-raised); color: var(--text-1); }
+.tab-btn:hover  { background: var(--surface-raised); color: var(--text-1); }
 .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .dialog-close {
@@ -152,25 +245,29 @@ onMounted(async () => {
 
 .dialog-body {
   flex: 1;
-  overflow: auto;
-  padding: 1rem;
+  overflow: hidden;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+}
+
+.img-viewport {
+  flex: 1;
+  overflow: auto;
+  padding: 0.75rem;
+  cursor: grab;
+  user-select: none;
+}
+.img-viewport.dragging {
+  cursor: grabbing;
 }
 
 .arch-img {
-  max-width: 100%;
+  display: block;
   height: auto;
-  cursor: zoom-in;
-  transition: transform 0.2s;
+  margin: 0 auto;
   border-radius: 4px;
-}
-.arch-img.zoomed {
-  max-width: none;
-  cursor: zoom-out;
-  transform: scale(1.5);
-  transform-origin: top left;
+  transition: width 0.15s ease;
+  pointer-events: none;
 }
 
 .no-diagram {
@@ -178,9 +275,9 @@ onMounted(async () => {
   color: var(--text-2);
   padding: 3rem 1rem;
 }
-.no-diagram p { margin: 0.5rem 0; }
+.no-diagram p     { margin: 0.5rem 0; }
 .no-diagram .hint { font-size: 0.85rem; color: var(--text-3); }
-.no-diagram code {
+.no-diagram code  {
   background: var(--surface-raised);
   padding: 0.1rem 0.35rem;
   border-radius: 3px;
@@ -189,12 +286,56 @@ onMounted(async () => {
 
 .dialog-footer {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  gap: 0.75rem;
+  justify-content: space-between;
   padding: 0.6rem 1rem;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  gap: 0.75rem;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-1);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+.zoom-btn:hover:not(:disabled) { background: var(--surface-active); }
+.zoom-btn:disabled { opacity: 0.35; cursor: default; }
+
+.zoom-reset {
+  min-width: 52px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  text-align: center;
+}
+.zoom-reset:hover { background: var(--surface-raised); color: var(--text-1); }
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .dl-btn {

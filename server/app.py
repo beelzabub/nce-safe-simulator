@@ -113,11 +113,19 @@ def list_tools(request: Request):
     return [_tool_payload(t, gl) for t in TOOLS]
 
 
+def _deployment_type() -> str:
+    if os.environ.get("ECS_CONTAINER_METADATA_URI_V4") or os.environ.get("ECS_CONTAINER_METADATA_URI"):
+        return "ecs"
+    if os.environ.get("KUBERNETES_SERVICE_HOST"):
+        return "eks"
+    return ""
+
+
 @app.get("/api/config")
 def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
     if gl is None:
-        return {"target_group": "", "wiki_url": "", "grafana_url": ""}
+        return {"target_group": "", "wiki_url": "", "grafana_url": "", "deployment_type": _deployment_type()}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
@@ -135,9 +143,10 @@ def get_config(request: Request):
         request.app.state._wiki_url_group = grp
 
     return {
-        "target_group": f"{ns}/{grp}" if ns else grp,
-        "wiki_url":     getattr(request.app.state, "_wiki_url", ""),
-        "grafana_url":  os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
+        "target_group":   f"{ns}/{grp}" if ns else grp,
+        "wiki_url":       getattr(request.app.state, "_wiki_url", ""),
+        "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
+        "deployment_type": _deployment_type(),
     }
 
 
