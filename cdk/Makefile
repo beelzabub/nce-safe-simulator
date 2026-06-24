@@ -294,19 +294,19 @@ eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for 
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
 	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE
 
-eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json (polls up to 5 min)
+eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk.json (polls up to 15 min)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' cdk.json) && \
 	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
-	echo "==> Waiting for ALB to be provisioned (up to 5 min)..." && \
+	echo "==> Waiting for ALB to be provisioned (up to 15 min)..." && \
 	ALB_DNS="" && \
-	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do \
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90; do \
 	  ALB_DNS=$$(kubectl get ingress -n $$NAMESPACE $$APP_NAME \
 	    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true) && \
 	  [ -n "$$ALB_DNS" ] && break; \
-	  echo "  [$$i/30] Not ready yet, waiting 10s..."; \
+	  echo "  [$$i/90] Not ready yet, waiting 10s..."; \
 	  sleep 10; \
 	done && \
-	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS still not available after 5 min"; exit 1; } && \
+	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS still not available after 15 min"; exit 1; } && \
 	jq --arg v "$$ALB_DNS" '.context.eks_alb_dns = $$v' cdk.json > cdk.json.tmp && mv cdk.json.tmp cdk.json && \
 	echo "==> eks_alb_dns set to $$ALB_DNS"
 
