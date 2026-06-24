@@ -202,25 +202,27 @@ ecs-grafana-deploy: ## Install Infinity plugin, configure ECS datasource, and de
 grafana-add-user: ## Assign Grafana Admin role to the SSO user defined in cdk.json (idempotent)
 	bash scripts/add-grafana-user.sh
 
-ecs-full-deploy: ## Deploy ECS CDK stack then configure Grafana end-to-end (fresh stack after ecs-destroy)
+ecs-full-deploy: ## Deploy ECS CDK stack; configure Grafana end-to-end when enable_grafana=true (fresh stack after ecs-destroy)
 	@$(MAKE) --no-print-directory ecs-deploy
-	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
-	APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
-	PARAM=$$(jq -r '.context.grafana_api_key_param' cdk.json) && \
-	echo "==> Waiting for Grafana workspace to reach ACTIVE (up to 20 min)..." && \
-	STATUS="" && i=0 && \
-	while [ $$i -lt 40 ]; do \
-	  STATUS=$$(aws grafana list-workspaces --region $$REGION \
-	    --query "workspaces[?name=='$$APP_NAME'].status" --output text 2>/dev/null); \
-	  [ "$$STATUS" = "ACTIVE" ] && break; \
-	  i=$$((i+1)); \
-	  printf "  [%02d/40] %-12s — waiting 30s...\n" $$i "$${STATUS:-pending}"; \
-	  sleep 30; \
-	done && \
-	[ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
-	$(MAKE) --no-print-directory grafana-setup
-	@$(MAKE) --no-print-directory ecs-grafana-deploy
-	@$(MAKE) --no-print-directory grafana-add-user
+	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' cdk.json) && \
+	if [ "$$ENABLE_GRAFANA" = "true" ]; then \
+	  REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	  APP_NAME=$$(jq -r '.context.app_name' cdk.json) && \
+	  echo "==> Waiting for Grafana workspace to reach ACTIVE (up to 20 min)..." && \
+	  STATUS="" && i=0 && \
+	  while [ $$i -lt 40 ]; do \
+	    STATUS=$$(aws grafana list-workspaces --region $$REGION \
+	      --query "workspaces[?name=='$$APP_NAME'].status" --output text 2>/dev/null); \
+	    [ "$$STATUS" = "ACTIVE" ] && break; \
+	    i=$$((i+1)); \
+	    printf "  [%02d/40] %-12s — waiting 30s...\n" $$i "$${STATUS:-pending}"; \
+	    sleep 30; \
+	  done && \
+	  [ "$$STATUS" = "ACTIVE" ] || { echo "ERROR: workspace did not become ACTIVE after 20 min"; exit 1; } && \
+	  $(MAKE) --no-print-directory grafana-setup && \
+	  $(MAKE) --no-print-directory ecs-grafana-deploy && \
+	  $(MAKE) --no-print-directory grafana-add-user; \
+	fi
 
 ecs-full-redeploy: ## Full ECS teardown and redeploy — safe to run unattended (nohup make ecs-full-redeploy > redeploy-ecs.log 2>&1 &)
 	bash scripts/redeploy-ecs.sh
@@ -416,7 +418,7 @@ eks-exec: ## Open an interactive shell in the running pod
 	kubectl exec -it deployment/$$APP_NAME -n $$NAMESPACE -- /bin/sh
 
 eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to re-run
-	@$(MAKE) --no-print-directory eks-deploy        # CDK: cluster + EFS + IAM + AlbSg + Grafana workspace (CloudFront created with placeholder origin if eks_alb_dns is empty)
+	@$(MAKE) --no-print-directory eks-deploy        # CDK: cluster + EFS + IAM + AlbSg (CloudFront created with placeholder origin if eks_alb_dns is empty)
 	@$(MAKE) --no-print-directory eks-kubeconfig    # configure kubectl
 	@$(MAKE) --no-print-directory eks-tag-subnets   # tag public subnets for LBC
 	@$(MAKE) --no-print-directory eks-lb-controller # install AWS Load Balancer Controller via Helm
@@ -425,9 +427,12 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	@$(MAKE) --no-print-directory eks-helm-install  # deploy app + Ingress (LBC provisions ALB)
 	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk.json
 	@$(MAKE) --no-print-directory eks-deploy        # CDK again: update CloudFront origin to real ALB DNS
-	@$(MAKE) --no-print-directory grafana-setup     # create/rotate Grafana API key in SSM
-	@$(MAKE) --no-print-directory grafana-add-user  # assign SSO user as Grafana admin
-	@$(MAKE) --no-print-directory eks-grafana-deploy # install plugin, configure datasource, push dashboards
+	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' cdk.json) && \
+	if [ "$$ENABLE_GRAFANA" = "true" ]; then \
+	  $(MAKE) --no-print-directory grafana-setup && \
+	  $(MAKE) --no-print-directory grafana-add-user && \
+	  $(MAKE) --no-print-directory eks-grafana-deploy; \
+	fi
 
 eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
 	bash scripts/redeploy-eks.sh
