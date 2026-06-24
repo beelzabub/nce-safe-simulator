@@ -58,7 +58,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   deploymentType: { type: String, default: '' },
@@ -142,12 +142,17 @@ async function probe(key) {
   }
 }
 
+// viewport is inside v-else — it doesn't exist until availableTabs is populated.
+// Watch the ref and attach/detach the wheel listener when it mounts/unmounts.
+watch(viewport, (el, prev) => {
+  if (prev) prev.removeEventListener('wheel', onWheel)
+  if (el)   el.addEventListener('wheel', onWheel, { passive: false })
+})
+
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
-  // passive:false required so we can preventDefault and block page scroll.
-  viewport.value.addEventListener('wheel', onWheel, { passive: false })
 
   const candidates = props.deploymentType
     ? ALL_TABS.filter(t => t.key === props.deploymentType)
@@ -162,7 +167,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', onDragEnd)
-  viewport.value?.removeEventListener('wheel', onWheel)
 })
 </script>
 
