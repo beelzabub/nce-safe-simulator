@@ -30,3 +30,6 @@ efs:
     reports: ""
     interactive: ""
     quartoSite: ""
+
+ingress:
+  albSgId: ""

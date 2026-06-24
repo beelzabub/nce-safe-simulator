@@ -250,6 +250,7 @@ eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from
 	AP_REPORTS=$$(_out EfsApReports) && \
 	AP_INTERACTIVE=$$(_out EfsApInteractive) && \
 	AP_QUARTO=$$(_out EfsApQuartoSite) && \
+	ALB_SG_ID=$$(_out AlbSgId) && \
 	helm upgrade --install $$APP_NAME ../helm/nce-safe-simulator \
 	  --namespace $$NAMESPACE --create-namespace \
 	  --set image.repository=$$REPO \
@@ -258,7 +259,8 @@ eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from
 	  --set efs.accessPoints.config=$$AP_CONFIG \
 	  --set efs.accessPoints.reports=$$AP_REPORTS \
 	  --set efs.accessPoints.interactive=$$AP_INTERACTIVE \
-	  --set efs.accessPoints.quartoSite=$$AP_QUARTO && \
+	  --set efs.accessPoints.quartoSite=$$AP_QUARTO \
+	  --set ingress.albSgId=$$ALB_SG_ID && \
 	echo "Helm release installed in namespace $$NAMESPACE."
 
 eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for image updates)

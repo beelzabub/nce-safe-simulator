@@ -175,6 +175,25 @@ class NceEksStack(Stack):
         # the app SA role grant above (which only covers the pod's IRSA identity).
         filesystem.grant_read_write(nodegroup.role)
 
+        # ── ALB security group (CloudFront-only ingress) ──────────────────────
+        # The LBC creates its own default SG; specifying this one via the
+        # security-groups Ingress annotation replaces that default, so the ALB
+        # only accepts traffic from CloudFront edge nodes.
+        cf_prefix_list = ec2.PrefixList.from_lookup(
+            self, "CfPrefixList",
+            prefix_list_name="com.amazonaws.global.cloudfront.origin-facing",
+        )
+        alb_sg = ec2.SecurityGroup(
+            self, "AlbSg",
+            vpc=vpc,
+            description="ALB — allow HTTP inbound only from CloudFront",
+            allow_all_outbound=True,
+        )
+        alb_sg.add_ingress_rule(
+            ec2.Peer.prefix_list(cf_prefix_list.prefix_list_id),
+            ec2.Port.tcp(80),
+        )
+
         # ── CloudFront distribution ───────────────────────────────────────────
         # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
         # can run in browser/direct mode without mixed-content or allowedHosts issues.
@@ -217,6 +236,7 @@ class NceEksStack(Stack):
         CfnOutput(self, "EfsApReports",      value=ap_reports.access_point_id)
         CfnOutput(self, "EfsApInteractive",  value=ap_interactive.access_point_id)
         CfnOutput(self, "EfsApQuartoSite",   value=ap_quarto.access_point_id)
+        CfnOutput(self, "AlbSgId",           value=alb_sg.security_group_id)
         CfnOutput(self, "CloudFrontUrl",     value=f"https://{distribution.domain_name}")
         CfnOutput(self, "GrafanaWorkspaceId",value=workspace.ref,
                   description="AMG workspace ID — used by make grafana-setup and eks-grafana-deploy")
