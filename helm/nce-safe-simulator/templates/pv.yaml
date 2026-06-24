@@ -18,6 +18,8 @@ spec:
   csi:
     driver: efs.csi.aws.com
     volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.config }}"
+    volumeAttributes:
+      encryptInTransit: "false"
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -37,6 +39,8 @@ spec:
   csi:
     driver: efs.csi.aws.com
     volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.reports }}"
+    volumeAttributes:
+      encryptInTransit: "false"
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -56,6 +60,8 @@ spec:
   csi:
     driver: efs.csi.aws.com
     volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.interactive }}"
+    volumeAttributes:
+      encryptInTransit: "false"
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -75,3 +81,5 @@ spec:
   csi:
     driver: efs.csi.aws.com
     volumeHandle: "{{ $fsId }}::{{ .Values.efs.accessPoints.quartoSite }}"
+    volumeAttributes:
+      encryptInTransit: "false"

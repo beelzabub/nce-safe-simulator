@@ -386,6 +386,8 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	@$(MAKE) --no-print-directory eks-kubeconfig    # configure kubectl
 	@$(MAKE) --no-print-directory eks-tag-subnets   # tag public subnets for LBC
 	@$(MAKE) --no-print-directory eks-lb-controller # install AWS Load Balancer Controller via Helm
+	@echo "==> Waiting for LB Controller webhook to be ready..."
+	@kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=120s
 	@$(MAKE) --no-print-directory eks-helm-install  # deploy app + Ingress (LBC provisions ALB)
 	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk.json
 	@$(MAKE) --no-print-directory eks-deploy        # CDK again: update CloudFront origin to real ALB DNS
