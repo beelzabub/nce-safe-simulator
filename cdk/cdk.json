@@ -30,7 +30,7 @@
     "eks_cluster_name": "nce-eks",
     "eks_namespace": "nce",
     "eks_node_instance": "t4g.small",
-"eks_alb_dns": "",
+"eks_alb_dns": "nce-eks-alb-1002280916.us-east-1.elb.amazonaws.com",
     "eks_cf_distribution_id": "",
     "eks_cf_url": ""
   }

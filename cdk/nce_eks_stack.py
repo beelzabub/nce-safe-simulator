@@ -4,9 +4,12 @@ from aws_cdk import (
     RemovalPolicy,
     CfnJson,
     CfnOutput,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_ec2 as ec2,
     aws_efs as efs,
     aws_eks as eks,
+    aws_grafana as grafana,
     aws_iam as iam,
     aws_logs as logs,
 )
@@ -20,11 +23,13 @@ class NceEksStack(Stack):
 
         ctx = self.node.try_get_context
 
+        app_name          = ctx("app_name")
         vpc_id            = ctx("vpc_id")
         config_param      = ctx("config_param")
         eks_cluster_name  = ctx("eks_cluster_name")
         eks_namespace     = ctx("eks_namespace")
         eks_node_instance = ctx("eks_node_instance")
+        eks_alb_dns       = ctx("eks_alb_dns")
 
         # ── VPC ───────────────────────────────────────────────────────────────
         if vpc_id:
@@ -170,12 +175,49 @@ class NceEksStack(Stack):
         # the app SA role grant above (which only covers the pod's IRSA identity).
         filesystem.grant_read_write(nodegroup.role)
 
+        # ── CloudFront distribution ───────────────────────────────────────────
+        # Provides HTTPS in front of the HTTP ALB so Grafana's Infinity datasource
+        # can run in browser/direct mode without mixed-content or allowedHosts issues.
+        distribution = cloudfront.Distribution(
+            self, "DataDistribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.HttpOrigin(
+                    eks_alb_dns,
+                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+                ),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            ),
+        )
+
+        # ── Amazon Managed Grafana ────────────────────────────────────────────
+        grafana_role = iam.Role(
+            self, "GrafanaRole",
+            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),
+        )
+        workspace = grafana.CfnWorkspace(
+            self, "GrafanaWorkspace",
+            name=app_name,
+            account_access_type="CURRENT_ACCOUNT",
+            authentication_providers=["AWS_SSO"],
+            permission_type="SERVICE_MANAGED",
+            role_arn=grafana_role.role_arn,
+            grafana_version="10.4",
+            plugin_admin_enabled=True,
+        )
+
         # ── Outputs ───────────────────────────────────────────────────────────
-        CfnOutput(self, "EksClusterName",   value=cluster.cluster_name)
-        CfnOutput(self, "EksLbSaRoleArn",   value=lb_sa.role.role_arn)
-        CfnOutput(self, "EksAppSaRoleArn",  value=app_sa.role.role_arn)
-        CfnOutput(self, "EfsId",            value=filesystem.file_system_id)
-        CfnOutput(self, "EfsApConfig",      value=ap_config.access_point_id)
-        CfnOutput(self, "EfsApReports",     value=ap_reports.access_point_id)
-        CfnOutput(self, "EfsApInteractive", value=ap_interactive.access_point_id)
-        CfnOutput(self, "EfsApQuartoSite",  value=ap_quarto.access_point_id)
+        CfnOutput(self, "EksClusterName",    value=cluster.cluster_name)
+        CfnOutput(self, "EksLbSaRoleArn",    value=lb_sa.role.role_arn)
+        CfnOutput(self, "EksAppSaRoleArn",   value=app_sa.role.role_arn)
+        CfnOutput(self, "EfsId",             value=filesystem.file_system_id)
+        CfnOutput(self, "EfsApConfig",       value=ap_config.access_point_id)
+        CfnOutput(self, "EfsApReports",      value=ap_reports.access_point_id)
+        CfnOutput(self, "EfsApInteractive",  value=ap_interactive.access_point_id)
+        CfnOutput(self, "EfsApQuartoSite",   value=ap_quarto.access_point_id)
+        CfnOutput(self, "CloudFrontUrl",     value=f"https://{distribution.domain_name}")
+        CfnOutput(self, "GrafanaWorkspaceId",value=workspace.ref,
+                  description="AMG workspace ID — used by make grafana-setup and eks-grafana-deploy")
+        CfnOutput(self, "GrafanaUrl",        value=f"https://{workspace.attr_endpoint}")
