@@ -34,7 +34,7 @@
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
     <ArchitectureDialog v-if="showArchitecture" :deployment-type="deploymentType" @close="showArchitecture = false" />
-    <ArchitectureButton @open="showArchitecture = true" />
+    <ArchitectureButton v-if="deploymentType" @open="showArchitecture = true" />
   </div>
 </template>
 
