@@ -1639,29 +1639,35 @@ class ReportsMixin:
             return " / ".join(reversed(parts)) if parts else group.name
 
         # ── ROAM risk issues (primary) ────────────────────────────────── #
-        # Build {risk_iid: (risk_dict, [epic_dict, ...])} — one entry per unique risk issue.
+        # Build {risk_key: (risk_dict, [epic_dict, ...])} — one entry per unique risk issue.
         # A risk may relate to multiple epics; we collect all of them.
-        risk_map: dict = {}        # iid → (risk_dict, [epic_dicts])
-        inherited_by_risk: dict = {}   # iid → [epic_dicts impacted via a child] (Refs #95)
+        # Key on web_url (globally unique), NOT iid — issue iids are only unique per
+        # project, so two risks in different backlog projects can share an iid and
+        # would otherwise be merged into one row (Refs #101).
+        def _risk_key(risk):
+            return risk.get("web_url") or risk["iid"]
+
+        risk_map: dict = {}        # key → (risk_dict, [epic_dicts])
+        inherited_by_risk: dict = {}   # key → [epic_dicts impacted via a child] (Refs #95)
         roam_epics_seen: set = set()
         for epic in self._rd_epics_all:
             for risk in epic.get("roam_risks") or []:
-                iid = risk["iid"]
-                if iid not in risk_map:
-                    risk_map[iid] = (risk, [])
-                risk_map[iid][1].append(epic)
+                key = _risk_key(risk)
+                if key not in risk_map:
+                    risk_map[key] = (risk, [])
+                risk_map[key][1].append(epic)
                 roam_epics_seen.add(epic["id"])
             # Parents (e.g. a Capability) impacted by a descendant Feature's risk
             for risk in epic.get("inherited_roam_risks") or []:
-                iid = risk["iid"]
-                if iid not in risk_map:
-                    risk_map[iid] = (risk, [])
-                inherited_by_risk.setdefault(iid, []).append(epic)
+                key = _risk_key(risk)
+                if key not in risk_map:
+                    risk_map[key] = (risk, [])
+                inherited_by_risk.setdefault(key, []).append(epic)
                 roam_epics_seen.add(epic["id"])
 
         # Bucket by ROAM status — one entry per unique risk issue
         roam_buckets: dict = {lbl: [] for lbl in ROAM_ORDER}
-        for iid, (risk, epics) in risk_map.items():
+        for key, (risk, epics) in risk_map.items():
             status = risk.get("roam_status") or "roam::owned"
             roam_buckets.setdefault(status, []).append((risk, epics))
 
@@ -1862,7 +1868,7 @@ class ReportsMixin:
                     threatened = [_mlink(e['title'], e['web_url']) for e in epics]
                     threatened += [
                         f"{_mlink(e['title'], e['web_url'])} _(via child)_"
-                        for e in inherited_by_risk.get(risk["iid"], [])
+                        for e in inherited_by_risk.get(_risk_key(risk), [])
                     ]
                     epic_links = ", ".join(threatened)
                     md.append(f"| {risk_link} | {assignee} | {epic_links} |")

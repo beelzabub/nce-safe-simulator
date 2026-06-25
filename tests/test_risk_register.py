@@ -125,6 +125,51 @@ class TestInheritedRisk:
 
 
 # ---------------------------------------------------------------------------
+# Risks that share an iid across projects must not merge (Refs #101)
+# ---------------------------------------------------------------------------
+
+class TestRiskIidCollision:
+    def test_same_iid_different_urls_render_as_two_rows(self):
+        # Two unrelated risks in different backlog projects happen to share iid 7.
+        risk_a = make_risk(iid=7, title="Risk A — sandbox limits",
+                           web_url="https://gitlab.com/test/team-a/issues/7")
+        risk_b = make_risk(iid=7, title="Risk B — collector OOM",
+                           web_url="https://gitlab.com/test/team-b/issues/7")
+        epic_a = make_epic(id=1, title="Epic Alpha",
+                           web_url="https://gitlab.com/groups/test/-/epics/1",
+                           roam_risks=[risk_a])
+        epic_b = make_epic(id=2, title="Epic Beta",
+                           web_url="https://gitlab.com/groups/test/-/epics/2",
+                           roam_risks=[risk_b])
+        md = _render([epic_a, epic_b])
+        # Both distinct risks survive as their own rows (not collapsed into one).
+        assert "Risk A — sandbox limits" in md
+        assert "Risk B — collector OOM" in md
+        # Both are counted as linked risks, not merged into a single one.
+        assert "<strong>Total</strong></td><td><strong>0</strong></td><td><strong>2</strong>" in md
+
+    def test_inherited_via_child_attaches_despite_iid_collision(self):
+        # A Feature's risk inherited by its parent Capability must keep working even
+        # when an unrelated risk elsewhere shares the same iid.
+        feat_risk  = make_risk(iid=7, title="Feature risk",
+                               web_url="https://gitlab.com/test/team-a/issues/7")
+        other_risk = make_risk(iid=7, title="Unrelated risk",
+                               web_url="https://gitlab.com/test/team-b/issues/7")
+        feature    = make_epic(id=2, title="Feature Beta", etype="Feature",
+                               roam_risks=[feat_risk])
+        capability = make_epic(id=1, title="Capability Alpha", etype="Capability",
+                               inherited_roam_risks=[feat_risk])
+        other      = make_epic(id=3, title="Other Feature", etype="Feature",
+                               roam_risks=[other_risk])
+        md = _render([capability, feature, other])
+        assert "Capability Alpha" in md
+        assert "_(via child)_" in md
+        assert "Unrelated risk" in md
+        # Three epics threatened across the two distinct risks → 2 linked risks total.
+        assert "<strong>Total</strong></td><td><strong>0</strong></td><td><strong>2</strong>" in md
+
+
+# ---------------------------------------------------------------------------
 # Child Overdue section (Refs #8)
 # ---------------------------------------------------------------------------
 
