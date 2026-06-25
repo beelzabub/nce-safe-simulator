@@ -546,7 +546,7 @@ Data snapshot → reports/20260525/143022/
   projects.json (8 projects)
 ```
 
-**`epics.json` fields:** `id`, `iid`, `type`, `title`, `description`, `state`, `labels`, `parent_id`, `group_id`, `planned_weight`, `actual_weight`, `pct_complete`, `pct_through_pi`, `piid`, `business_value`, `blocked_by_count`, `blocks_count`, `start_date`, `due_date`, `created_at`, `updated_at`, `web_url`, `work_item_id`, `roam_risks`
+**`epics.json` fields:** `id`, `iid`, `type`, `title`, `description`, `state`, `labels`, `parent_id`, `group_id`, `planned_weight`, `actual_weight`, `pct_complete`, `pct_through_pi`, `piid`, `business_value`, `blocked_by_count`, `blocks_count`, `start_date`, `due_date`, `created_at`, `updated_at`, `web_url`, `work_item_id`, `roam_risks`, `inherited_roam_risks` (active ROAM risks bubbled up from descendant epics — Refs #95)
 
 **`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
@@ -611,7 +611,7 @@ The deployed site is published at the project's GitLab Pages URL and mirrors the
 | `piid-project` | T2 | `01 Program Management/Program × PI Matrix` | Project label vs PI quarter cross-tab with status and weights |
 | `piid-project-detail` | T2 | `01 Program Management/Program PI Detail` | Per-PI section view of program workload and status |
 | `pi-predictability` | T2 | `01 Program Management/PI Predictability Scorecard` | % of committed Features/Capabilities delivered per PI, trended by ART |
-| `risk-register` | T2 | `01 Program Management/Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART |
+| `risk-register` | T2 | `01 Program Management/Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART. ROAM risks linked to a Feature also bubble up the hierarchy: each ancestor Capability/Epic is listed as threatened, tagged _(via child)_, and flagged **⚠️ Child at risk** |
 | `art-capacity-balance` | T2 | `01 Program Management/ART Capacity Balance` | Per-team planned vs actual weight per PI — spot over/under-capacity *(index → VS → ART)* |
 | `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown *(index → VS)* |
 | `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next |
