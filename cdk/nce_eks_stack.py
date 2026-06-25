@@ -156,7 +156,7 @@ class NceEksStack(Stack):
             )
         )
         # ── App namespace ─────────────────────────────────────────────────────
-        cluster.add_manifest(
+        ns_manifest = cluster.add_manifest(
             "NceNamespace",
             {
                 "apiVersion": "v1",
@@ -171,6 +171,8 @@ class NceEksStack(Stack):
             name="nce-app",
             namespace=eks_namespace,
         )
+        # Namespace must exist before the service account can be created in it
+        app_sa.node.add_dependency(ns_manifest)
         app_sa.role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
