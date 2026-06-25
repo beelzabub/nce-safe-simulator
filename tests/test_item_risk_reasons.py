@@ -119,6 +119,40 @@ class TestRoamRisks:
 
 
 # ---------------------------------------------------------------------------
+# ⚠️ Child at risk — inherited from a descendant epic (Refs #95)
+# ---------------------------------------------------------------------------
+
+class TestInheritedRoamRisks:
+    def test_single_inherited_risk_shows_child_at_risk(self):
+        epic = make_epic(inherited_roam_risks=[make_risk()])
+        assert "⚠️ Child at risk (1)" in _item_risk_reasons(epic, TODAY)
+
+    def test_multiple_inherited_risks_shows_correct_count(self):
+        epic = make_epic(inherited_roam_risks=[make_risk(iid=1), make_risk(iid=2)])
+        assert "⚠️ Child at risk (2)" in _item_risk_reasons(epic, TODAY)
+
+    def test_no_inherited_risks_no_indicator(self):
+        epic = make_epic(inherited_roam_risks=[])
+        assert "Child at risk" not in _item_risk_reasons(epic, TODAY)
+
+    def test_active_inherited_statuses_trigger_flag(self):
+        for status in ("roam::owned", "roam::accepted", "roam::mitigated"):
+            epic = make_epic(inherited_roam_risks=[make_risk(roam_status=status)])
+            assert "⚠️ Child at risk (1)" in _item_risk_reasons(epic, TODAY), f"Failed for {status}"
+
+    def test_resolved_inherited_risk_does_not_trigger_flag(self):
+        epic = make_epic(inherited_roam_risks=[make_risk(roam_status="roam::resolved")])
+        assert "Child at risk" not in _item_risk_reasons(epic, TODAY)
+
+    def test_direct_and_inherited_both_shown(self):
+        epic = make_epic(roam_risks=[make_risk(iid=1)],
+                         inherited_roam_risks=[make_risk(iid=2)])
+        reason = _item_risk_reasons(epic, TODAY)
+        assert "⚠️ 1 risk(s)" in reason
+        assert "⚠️ Child at risk (1)" in reason
+
+
+# ---------------------------------------------------------------------------
 # No risk → returns "—"
 # ---------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from mixins.utils import UtilitiesMixin
 
 
-def _make_epic_obj(id, iid, labels, work_item_id, state="opened"):
+def _make_epic_obj(id, iid, labels, work_item_id, state="opened", parent_id=None):
     e = MagicMock()
     e.id           = id
     e.iid          = iid
@@ -19,7 +19,7 @@ def _make_epic_obj(id, iid, labels, work_item_id, state="opened"):
     e.labels       = labels
     e.web_url      = f"https://gitlab.com/groups/test/-/epics/{iid}"
     e.work_item_id = work_item_id
-    e.parent_id    = None
+    e.parent_id    = parent_id
     e.group_id     = 10
     e.start_date   = None
     e.due_date     = None
@@ -122,3 +122,69 @@ class TestPortfolioMetricsRoamWiring:
         by_id = {e["id"]: e for e in result["Feature"]}
         assert by_id[1]["roam_risks"] == [risk_a]
         assert by_id[2]["roam_risks"] == [risk_b]
+
+
+# ---------------------------------------------------------------------------
+# Risk propagates upward through the hierarchy (Refs #95)
+# ---------------------------------------------------------------------------
+
+def _risk(iid, status="roam::owned"):
+    return {"iid": iid, "title": f"Risk {iid}", "roam_status": status,
+            "assignee": "Alice", "web_url": f"u{iid}", "state": "opened"}
+
+
+class TestInheritedRoamRiskPropagation:
+    def _cap_feature(self, roam_by_epic):
+        """Capability(id=1) ← Feature(id=2); risks per roam_by_epic."""
+        epics = [
+            _make_epic_obj(id=1, iid=1, labels=["Capability", "PIID::2026Q1"], work_item_id=10),
+            _make_epic_obj(id=2, iid=2, labels=["Feature", "PIID::2026Q1"], work_item_id=20, parent_id=1),
+        ]
+        utils = ConcreteUtils(epics=epics, roam_by_epic=roam_by_epic)
+        result = utils.calculate_portfolio_metrics("test/portfolio")
+        cap = result["Capability"][0]
+        feat = result["Feature"][0]
+        return cap, feat
+
+    def test_parent_inherits_child_risk(self):
+        risk = _risk(9)
+        cap, feat = self._cap_feature({2: [risk]})
+        # Feature carries the risk directly; Capability inherits it.
+        assert feat["roam_risks"] == [risk]
+        assert feat["inherited_roam_risks"] == []
+        assert cap["roam_risks"] == []
+        assert cap["inherited_roam_risks"] == [risk]
+
+    def test_leaf_has_no_inherited_risks(self):
+        cap, feat = self._cap_feature({2: [_risk(9)]})
+        assert feat["inherited_roam_risks"] == []
+
+    def test_parent_with_no_child_risk_has_empty_inherited(self):
+        cap, feat = self._cap_feature({})
+        assert cap["inherited_roam_risks"] == []
+
+    def test_direct_risk_not_duplicated_into_inherited(self):
+        # Same risk iid on both parent and child → parent keeps it only as direct.
+        risk = _risk(9)
+        epics = [
+            _make_epic_obj(id=1, iid=1, labels=["Capability", "PIID::2026Q1"], work_item_id=10),
+            _make_epic_obj(id=2, iid=2, labels=["Feature", "PIID::2026Q1"], work_item_id=20, parent_id=1),
+        ]
+        utils = ConcreteUtils(epics=epics, roam_by_epic={1: [risk], 2: [risk]})
+        result = utils.calculate_portfolio_metrics("test/portfolio")
+        cap = result["Capability"][0]
+        assert cap["roam_risks"] == [risk]
+        assert cap["inherited_roam_risks"] == []
+
+    def test_risk_propagates_two_levels(self):
+        # Epic(1) ← Capability(2) ← Feature(3); the top Epic inherits the leaf risk.
+        risk = _risk(9)
+        epics = [
+            _make_epic_obj(id=1, iid=1, labels=["Epic", "PIID::2026Q1"], work_item_id=10),
+            _make_epic_obj(id=2, iid=2, labels=["Capability", "PIID::2026Q1"], work_item_id=20, parent_id=1),
+            _make_epic_obj(id=3, iid=3, labels=["Feature", "PIID::2026Q1"], work_item_id=30, parent_id=2),
+        ]
+        utils = ConcreteUtils(epics=epics, roam_by_epic={3: [risk]})
+        result = utils.calculate_portfolio_metrics("test/portfolio")
+        assert result["Capability"][0]["inherited_roam_risks"] == [risk]
+        assert result["Epic"][0]["inherited_roam_risks"] == [risk]
