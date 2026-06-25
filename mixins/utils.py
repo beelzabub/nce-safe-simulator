@@ -759,6 +759,7 @@ class UtilitiesMixin:
                 "updated_at":       getattr(epic, 'updated_at', None),
                 "work_item_id":     getattr(epic, 'work_item_id', None),
                 "roam_risks":       [],
+                "inherited_roam_risks": [],
             }
 
             epic_type = self._epic_type_display(epic.labels)
@@ -831,6 +832,34 @@ class UtilitiesMixin:
         roam_by_epic = self._fetch_roam_risks(group, all_epics_raw)
         for e in all_epics_raw:
             e["roam_risks"] = roam_by_epic.get(e["id"], [])
+
+        # Propagate ROAM risk upward through the hierarchy (Refs #95).
+        # A parent epic (e.g. a Capability) is impacted by any risk attached to
+        # one of its descendant epics (e.g. an at-risk Feature).  These inherited
+        # risks are stored separately from `roam_risks` so the parent is flagged
+        # as impacted without being treated as the risk's direct owner.
+        def _descendant_risks(epic_id):
+            """Deduped {iid: risk_dict} for ROAM risks on all descendants of epic_id."""
+            acc, seen = {}, set()
+            stack = list(hierarchy.get(epic_id, []))
+            while stack:
+                child = stack.pop()
+                if child["id"] in seen:
+                    continue
+                seen.add(child["id"])
+                for r in child.get("roam_risks") or []:
+                    acc[r["iid"]] = r
+                stack.extend(hierarchy.get(child["id"], []))
+            return acc
+
+        for e in all_epics_raw:
+            if not hierarchy.get(e["id"]):
+                continue  # leaf — nothing below it to inherit from
+            direct_iids = {r["iid"] for r in (e.get("roam_risks") or [])}
+            e["inherited_roam_risks"] = [
+                r for iid, r in _descendant_risks(e["id"]).items()
+                if iid not in direct_iids
+            ]
 
         if not hasattr(self, '_metrics_cache'):
             self._metrics_cache = {}

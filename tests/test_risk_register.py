@@ -90,6 +90,41 @@ class TestRoamSection:
 
 
 # ---------------------------------------------------------------------------
+# Inherited risk — parent shown as threatened "via child" (Refs #95)
+# ---------------------------------------------------------------------------
+
+class TestInheritedRisk:
+    def test_parent_listed_via_child_in_threatened_column(self):
+        risk = make_risk(iid=7)
+        feature = make_epic(id=2, title="Feature Beta", etype="Feature",
+                            roam_risks=[risk])
+        capability = make_epic(id=1, title="Capability Alpha", etype="Capability",
+                               inherited_roam_risks=[risk])
+        md = _render([capability, feature])
+        # The directly-linked Feature and the inheriting Capability both appear,
+        # with the Capability tagged as impacted via a child.
+        assert "Feature Beta" in md
+        assert "Capability Alpha" in md
+        assert "_(via child)_" in md
+
+    def test_no_via_child_tag_without_inherited_risk(self):
+        feature = make_epic(id=2, title="Feature Beta", etype="Feature",
+                            roam_risks=[make_risk(iid=7)])
+        md = _render([feature])
+        assert "_(via child)_" not in md
+
+    def test_parent_only_via_inherited_still_appears(self):
+        # Risk lives on a Feature outside the rendered set; only the parent carries
+        # it as inherited — the parent is still surfaced as threatened.
+        risk = make_risk(iid=7)
+        capability = make_epic(id=1, title="Capability Alpha", etype="Capability",
+                               inherited_roam_risks=[risk])
+        md = _render([capability])
+        assert "Capability Alpha" in md
+        assert "_(via child)_" in md
+
+
+# ---------------------------------------------------------------------------
 # Child Overdue section (Refs #8)
 # ---------------------------------------------------------------------------
 
