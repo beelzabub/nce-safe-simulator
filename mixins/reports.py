@@ -234,6 +234,7 @@ def _item_risk_reasons(item, today=None):
       ⏱️ Behind Schedule — active PI, % done < % PI elapsed
       📅 Past Due        — due_date in the past, not Closed
       ⚠️ N risk(s)       — has linked active ROAM risk issues (Refs #10)
+      ⚠️ Child at risk   — a descendant epic has an active ROAM risk (Refs #95)
     Returns "—" when no risk applies, or when work and PI are both 100% complete.
     """
     if today is None:
@@ -264,6 +265,11 @@ def _item_risk_reasons(item, today=None):
                    if (r.get("roam_status") or "roam::owned") in _ACTIVE_ROAM]
     if active_roam:
         reasons.append(f"⚠️ {len(active_roam)} risk(s)")
+
+    inherited_roam = [r for r in (item.get("inherited_roam_risks") or [])
+                      if (r.get("roam_status") or "roam::owned") in _ACTIVE_ROAM]
+    if inherited_roam:
+        reasons.append(f"⚠️ Child at risk ({len(inherited_roam)})")
 
     return " · ".join(reasons) if reasons else "—"
 
@@ -1636,6 +1642,7 @@ class ReportsMixin:
         # Build {risk_iid: (risk_dict, [epic_dict, ...])} — one entry per unique risk issue.
         # A risk may relate to multiple epics; we collect all of them.
         risk_map: dict = {}        # iid → (risk_dict, [epic_dicts])
+        inherited_by_risk: dict = {}   # iid → [epic_dicts impacted via a child] (Refs #95)
         roam_epics_seen: set = set()
         for epic in self._rd_epics_all:
             for risk in epic.get("roam_risks") or []:
@@ -1643,6 +1650,13 @@ class ReportsMixin:
                 if iid not in risk_map:
                     risk_map[iid] = (risk, [])
                 risk_map[iid][1].append(epic)
+                roam_epics_seen.add(epic["id"])
+            # Parents (e.g. a Capability) impacted by a descendant Feature's risk
+            for risk in epic.get("inherited_roam_risks") or []:
+                iid = risk["iid"]
+                if iid not in risk_map:
+                    risk_map[iid] = (risk, [])
+                inherited_by_risk.setdefault(iid, []).append(epic)
                 roam_epics_seen.add(epic["id"])
 
         # Bucket by ROAM status — one entry per unique risk issue
@@ -1845,9 +1859,12 @@ class ReportsMixin:
                 for risk, epics in sorted(rows, key=lambda x: x[0].get("title", "")):
                     risk_link  = _mlink(risk['title'], risk['web_url'])
                     assignee   = risk.get("assignee") or "—"
-                    epic_links = ", ".join(
-                        _mlink(e['title'], e['web_url']) for e in epics
-                    )
+                    threatened = [_mlink(e['title'], e['web_url']) for e in epics]
+                    threatened += [
+                        f"{_mlink(e['title'], e['web_url'])} _(via child)_"
+                        for e in inherited_by_risk.get(risk["iid"], [])
+                    ]
+                    epic_links = ", ".join(threatened)
                     md.append(f"| {risk_link} | {assignee} | {epic_links} |")
                 md.append("")
         else:
@@ -1923,6 +1940,7 @@ class ReportsMixin:
             "| Indicator | Meaning |",
             "|-----------|---------|",
             "| ⚠️ N risk(s)       | Item has N linked ROAM risk issues |",
+            "| ⚠️ Child at risk   | A descendant epic (e.g. a Feature) has an active ROAM risk |",
             "| ⏱️ Behind Schedule | Active PI: % Done is less than % of PI elapsed |",
             "| 📅 Past Due        | Item's due date has passed and it is not Closed |",
             "| 📅 Child Overdue   | A child Feature has passed its due date and is not Closed |",
@@ -3232,6 +3250,8 @@ class ReportsMixin:
                 1 for e in all_vs_epics_raw
                 if any(r.get("roam_status") in _active_roam
                        for r in (e.get("roam_risks") or []))
+                or any(r.get("roam_status") in _active_roam
+                       for r in (e.get("inherited_roam_risks") or []))
             )
             tl_risk,  risk_detail  = _tl_risk(vs_roam_count)
 
