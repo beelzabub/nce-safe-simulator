@@ -2,9 +2,10 @@
 .DEFAULT_GOAL := help
 
 # Separate CDK config files for ECS and EKS stacks.
-# CDK always looks for a file literally named "cdk.json", so each group of
-# commands copies the right source into place first.  The generated cdk.json
-# is transient (listed in .git/info/exclude, never committed).
+# Each app (ecs_app.py / eks_app.py) loads its own config file directly and
+# injects the context, so no shared cdk.json is needed — the --app flag is
+# always passed explicitly on the command line.  This keeps ECS and EKS
+# operations fully isolated and safe to run simultaneously.
 ECS_CTX := cdk-ecs.json
 EKS_CTX := cdk-eks.json
 
@@ -17,7 +18,7 @@ install: ## Install CDK CLI and Python CDK dependencies (run once)
 	pip install -r requirements.txt
 
 bootstrap: ## Bootstrap CDK for this AWS account/region (run once per account+region)
-	cp -f $(ECS_CTX) cdk.json && cdk bootstrap
+	cdk bootstrap
 
 set-vpc: ## Discover the VPC from the 'powers-dev' EC2 instance and save it to cdk-ecs.json and cdk-eks.json
 	@VPC_ID=$$(aws ec2 describe-instances --filters "Name=tag:Name,Values=powers-dev" "Name=instance-state-name,Values=running,stopped" --query 'Reservations[0].Instances[0].VpcId' --output text) && \
@@ -54,11 +55,10 @@ set-efs: ## Read EFS ID, SG, and access-point IDs from NceStack and write to cdk
 
 ##@ ECS / Fargate
 ecs-diff: ## Show what ECS CDK stack will change without deploying
-	cp -f $(ECS_CTX) cdk.json && cdk diff NceStack --app "python ecs_app.py" --output cdk-ecs.out
+	cdk diff NceStack --app "python ecs_app.py" --output cdk-ecs.out
 
 ecs-deploy: ## Deploy (or update) the ECS stack
-	@cp -f $(ECS_CTX) cdk.json && \
-	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	APP_NAME=$$(jq -r '.context.app_name' $(ECS_CTX)) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
@@ -76,7 +76,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never
 
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
-	cp -f $(ECS_CTX) cdk.json && cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
+	cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
 
 ##@ Shared
 eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)
@@ -247,8 +247,7 @@ eks-install: ## Download and create LB Controller IAM policy (once per AWS accou
 	echo "AWSLoadBalancerControllerIAMPolicy created."
 
 eks-deploy: ## Deploy EKS CDK stack (cluster, node group, LB controller, EFS CSI driver)
-	@cp -f $(EKS_CTX) cdk.json && \
-	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
 	cdk deploy NceEksStack --app "python eks_app.py" --output cdk-eks.out --require-approval never
@@ -451,7 +450,6 @@ eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
 	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	helm uninstall $$APP_NAME --namespace $$NAMESPACE || true && \
-	cp -f $(EKS_CTX) cdk.json && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \

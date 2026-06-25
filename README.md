@@ -859,6 +859,17 @@ make seed-config        # store config.json in SSM
 | `make grafana-add-user` | Assign Grafana Admin role to the SSO user defined in `cdk-ecs.json` |
 | `make audit` | Audit AWS resources for both ECS and EKS stacks — shows what is deployed, missing, or orphaned |
 
+> **CDK config** — ECS and EKS each read their own config file (`cdk-ecs.json` / `cdk-eks.json`), loaded directly by `ecs_app.py` / `eks_app.py`. Values can be overridden per-command with `--context key=value`. The two stacks share no state and can be deployed, diffed, or destroyed simultaneously.
+
+### Deploy/validate loop
+
+`cdk/scripts/deploy-validate-loop.sh` exercises both stacks end-to-end — teardown → deploy ECS → validate ECS → deploy EKS → validate EKS → destroy — repeated `MAX_ITERATIONS` times (default 3). Each iteration checks CloudFormation status, ECS service / EKS pod health, and ALB HTTP response, failing fast on any error. Useful for confirming a clean deploy/destroy cycle after infrastructure changes.
+
+```bash
+cd cdk
+MAX_ITERATIONS=1 nohup bash scripts/deploy-validate-loop.sh > deploy-validate-loop.log 2>&1 &
+```
+
 ### Architecture diagram
 
 The web UI includes an **AWS** button (visible on ECS and EKS deployments) that opens a zoomable, pannable architecture diagram for the active deployment. The diagram is generated at image build time by `diagrams/ecs_architecture.py` and `diagrams/eks_architecture.py` using the Python [`diagrams`](https://diagrams.mingrammer.com/) library.
