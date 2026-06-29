@@ -150,9 +150,12 @@ keep serving plain HTTP behind their own TLS layer and are unaffected.
    SERVE_TLS=1 \
    SERVE_TLS_CERTFILE=certs/server.crt \
    SERVE_TLS_KEYFILE=certs/server.key \
+   SERVE_PORT=443 \
      python3 NceGitLab.py --serve
    ```
-   or in `config.json` under `defaults.serve`:
+   (or just `make serve-tls`, which sets these for you — `PORT=8443` to override the port.)
+   The bind port defaults to `80`; set `SERVE_PORT` (env) or `defaults.serve.port` (config).
+   Alternatively, configure it in `config.json` under `defaults.serve`:
    ```json
    "serve": {
      "port": 443,
