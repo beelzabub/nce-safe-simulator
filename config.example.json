@@ -165,11 +165,15 @@
       "direct_feature_ratio": 0.85,
       "history_close_rate_min": 0.7,
       "history_close_rate_max": 0.95,
-      "current_pi_issue_close_pct": 0.5
+      "current_pi_issue_close_pct": 0.5,
+      "seed_blocks": true,
+      "epic_block_percent": 12,
+      "issue_block_percent": 8
     },
     "tools": {
       "close_percent": 30.0,
       "generate_epic_blocks_count": 10,
+      "generate_issue_blocks_count": 10,
       "simulate_pi_progress_percent": 50.0,
       "generate_issues_count": 5,
       "weight_drift_threshold": 20.0,
