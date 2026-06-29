@@ -95,10 +95,12 @@ ecs-diagram: ## Regenerate ECS architecture PNG (queries live CloudFormation sta
 	python3 ../diagrams/ecs_architecture.py ../public/architecture/ecs-architecture.png
 	@echo "==> ../public/architecture/ecs-architecture.png"
 
-seed-config: ## Store config.json in SSM as a SecureString (re-run to update)
-	@echo "Storing config.json in SSM as SecureString /nce/config..."
-	aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$(cat ../config.json)"
-	@echo "Done. Run 'make ecs-redeploy' to pick up the new config."
+seed-config: ## Store config.json in SSM as a SecureString, token injected from $GITLAB_TOKEN (re-run to update)
+	@[ -n "$$GITLAB_TOKEN" ] || { echo "ERROR: GITLAB_TOKEN is not set. Export it (e.g. in ~/.bashrc) before seeding."; exit 1; }
+	@echo "Storing config.json in SSM as SecureString /nce/config (token from \$$GITLAB_TOKEN)..."
+	@CONFIG_JSON=$$(python3 -c "import json,os; d=json.load(open('../config.json')); d['private_token']=os.environ['GITLAB_TOKEN']; print(json.dumps(d))") && \
+	  aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$CONFIG_JSON" >/dev/null
+	@echo "Done. Run 'make ecs-deploy' (or 'make ecs-redeploy') to pick up the new config."
 
 ecr-push: ## Build and push :latest to ECR (follow with ecs-redeploy or eks-redeploy)
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \

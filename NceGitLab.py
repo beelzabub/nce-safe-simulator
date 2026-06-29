@@ -130,11 +130,21 @@ class NceGitLab(
         self.parent_group     = os.getenv("GROUP_NAME") or config.get("parent_group", "")
         self.gitlab_namespace = config.get("gitlab_namespace", "")
 
-        access_token_env = os.getenv("ACCESS_TOKEN")
-        if access_token_env:
+        # Token precedence: GITLAB_TOKEN env > config.json > ACCESS_TOKEN (deprecated).
+        # Keeps the secret out of the tracked config.json — see issue #110. Locally,
+        # export GITLAB_TOKEN; in CI set it as a masked variable; in the cloud the
+        # seed step injects it into the SSM-stored config.
+        gitlab_token_env = os.getenv("GITLAB_TOKEN")
+        access_token_env = os.getenv("ACCESS_TOKEN")   # deprecated alias
+        if gitlab_token_env:
+            self.private_token = gitlab_token_env
+        elif config.get("private_token"):
+            self.private_token = config.get("private_token", "")
+        elif access_token_env:
+            print("WARNING: ACCESS_TOKEN is deprecated; set GITLAB_TOKEN instead.", file=sys.stderr)
             self.private_token = access_token_env
         else:
-            self.private_token = config.get("private_token", "")
+            self.private_token = ""
 
         self.api_timeout     = config.get("api_timeout",    300)
         self.delete_workers  = config.get("delete_workers",  5)
