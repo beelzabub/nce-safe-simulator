@@ -3903,10 +3903,31 @@ class ReportsMixin:
             blocked  = rel["blocked_epic"]
             blockers = rel.get("blocked_by", [])
             ancs     = rel.get("at_risk_portfolio_epics", [])
+            # A non-Portfolio-Epic blocked item with no Portfolio Epic ancestor
+            # (orphaned data) keeps its row but leaves "Epic at Risk" blank and is
+            # excluded from the BV rollup, rather than collapsing the column onto the
+            # blocked item (Refs #108). See the WSJF markdown renderer for the mirror.
             pe_candidates = (
-                ([blocked] + ancs) if blocked.get("type") == self.EPIC_TYPE_DISPLAY_NAMES[0] else (ancs or [blocked])
+                ([blocked] + ancs) if blocked.get("type") == self.EPIC_TYPE_DISPLAY_NAMES[0] else ancs
             )
             b_type = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
+            blocker_list = [
+                {"title": b["title"], "url": b.get("web_url", "")} for b in blockers
+            ]
+
+            if not pe_candidates:
+                detail_rows.append({
+                    "pe_title":      "",
+                    "pe_url":        "",
+                    "pe_bv":         None,
+                    "blocked_title": blocked["title"],
+                    "blocked_url":   blocked.get("web_url", ""),
+                    "blocked_type":  b_type,
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blockers":      blocker_list,
+                })
+                continue
+
             for pe in pe_candidates:
                 pe_id  = pe.get("id") or pe.get("id_int")
                 pe_bv  = bv_by_id.get(pe_id)
@@ -3919,9 +3940,7 @@ class ReportsMixin:
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
                     "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
-                    "blockers": [
-                        {"title": b["title"], "url": b.get("web_url", "")} for b in blockers
-                    ],
+                    "blockers":      blocker_list,
                 })
                 if pe_id not in seen_pe_bv:
                     seen_pe_bv[pe_id] = pe_bv
@@ -5816,9 +5835,19 @@ class ReportsMixin:
             blockers = rel.get("blocked_by", [])
             ancs     = rel.get("at_risk_portfolio_epics", [])
 
-            # If the blocked item is itself a Portfolio Epic, treat it as its own ancestor
+            # Resolve the "Epic at Risk" (Portfolio Epic) distinctly from the
+            # "Blocked Item" (Capability/Feature). Expected hierarchy: the blocked
+            # Cap/Feature rolls up to a Portfolio Epic, so `ancs` carries the at-risk
+            # Portfolio Epic(s) and the columns stay distinct (Refs #108).
+            #   • Blocked item IS a Portfolio Epic → it is its own at-risk epic.
+            #   • Otherwise → use the resolved ancestors.
+            # If a non-Portfolio-Epic blocked item has NO Portfolio Epic ancestor
+            # (orphaned data), keep the row but leave "Epic at Risk"/BV blank and
+            # exclude it from the BV rollup rather than collapsing the column onto
+            # the blocked item (Refs #108). The data generator avoids creating such
+            # blocks, so this only surfaces genuinely orphaned real-world data.
             _t0 = self.EPIC_TYPE_DISPLAY_NAMES[0]
-            pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else (ancs or [blocked])
+            pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else ancs
 
             blocker_str  = ", ".join(
                 _mlink(b['title'], b['web_url']) if b.get("web_url") else b["title"]
@@ -5828,6 +5857,12 @@ class ReportsMixin:
             b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
             bl_link = (_mlink(blocked['title'], blocked['web_url'])
                        if blocked.get("web_url") else blocked["title"])
+
+            if not pe_candidates:
+                # Orphan: no Portfolio Epic at risk — blank "Epic at Risk"/BV and
+                # omit from the rollup (pe_id None keeps it out of seen_pe_*).
+                bv_rows.append((None, "", None, bl_link, f"{b_icon} {b_type}", blocker_str))
+                continue
 
             for pe in pe_candidates:
                 pe_id   = pe.get("id") or pe.get("id_int")
@@ -6758,6 +6793,7 @@ class ReportsMixin:
 
         relationships = []
         total_rels    = 0
+        fetch_failed  = set()   # epic ids whose /related_epics call failed (Refs #107)
 
         for epic in all_epics_raw:
             grp_id = epic.get("group_id")
@@ -6770,8 +6806,10 @@ class ReportsMixin:
             try:
                 resp = session.get(url)
             except Exception:
+                fetch_failed.add(eid)
                 continue
             if not resp.ok:
+                fetch_failed.add(eid)
                 continue
 
             blockers = []
@@ -6817,6 +6855,35 @@ class ReportsMixin:
             })
 
         at_risk = len({a["id"] for r in relationships for a in r["at_risk_portfolio_epics"]})
+
+        # Reconcile blocked_by_count with this graph (Refs #107).
+        # The /related_epics graph above is the authoritative source for the blocking
+        # report detail (blocking.json).  calculate_portfolio_metrics derives
+        # blocked_by_count from the legacy GraphQL blockedByCount (plus a work-items
+        # widget fallback), which can disagree with the REST related_epics view — most
+        # notably for blocking links set through the GitLab 17+ work-items UI.  Recompute
+        # blocked_by_count here from the same relationships so the summary tables and the
+        # blocking detail can never diverge.  These epic dicts are shared by object
+        # identity with the _metrics_cache buckets, so the update propagates to every
+        # report that reads blocked_by_count.
+        #
+        # Epics whose /related_epics call failed are left untouched: keep their
+        # provisional GraphQL count rather than overwriting it with 0, so a transient
+        # API error can't silently mark a genuinely-blocked epic as unblocked.
+        blocked_by_counts = {
+            r["blocked_epic"]["id"]: len(r["blocked_by"]) for r in relationships
+        }
+        for e in all_epics_raw:
+            eid = e["id"]
+            if eid in fetch_failed and eid not in blocked_by_counts:
+                continue
+            e["blocked_by_count"] = blocked_by_counts.get(eid, 0)
+
+        if fetch_failed:
+            print(
+                f"Warning: {len(fetch_failed)} epic(s) had a failed /related_epics "
+                f"fetch; blocked_by_count left at the provisional value (may be stale)."
+            )
 
         return {
             "summary": {
@@ -7014,6 +7081,12 @@ class ReportsMixin:
         print("  Collecting data snapshot...")
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 
+        # Build the blocking graph up front so each epic's blocked_by_count is reconciled
+        # against the /related_epics detail before epics.json is serialized (Refs #107).
+        blocking = self._fetch_blocking_graph(group)
+        blocking["generated_at"] = ts
+        blocking["group"]        = self.parent_group
+
         # Epics: typed + untyped
         typed_epics = [e for bucket in metrics.values() for e in bucket]
         all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, typed_epics)
@@ -7042,9 +7115,6 @@ class ReportsMixin:
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
 
-        blocking = self._fetch_blocking_graph(group)
-        blocking["generated_at"] = ts
-        blocking["group"]        = self.parent_group
         (data_dir / "blocking.json").write_text(
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )

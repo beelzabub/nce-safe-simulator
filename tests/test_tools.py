@@ -166,6 +166,60 @@ def test_generate_epic_blocks_does_not_block_resolved_epics():
     session.post.assert_not_called()
 
 
+def _safe_hierarchy_epics(grp):
+    """A correctly-labelled SAFe slice: Epic → Capability → Feature (+ a blocker Feature)."""
+    pe    = _make_epic_mock(id=1, iid=1, title="Portfolio Epic",  labels=["Epic"], parent_id=None)
+    cap   = _make_epic_mock(id=2, iid=2, title="Capability",      labels=["Capability"], parent_id=1)
+    feat  = _make_epic_mock(id=3, iid=3, title="Feature",         labels=["Feature"], parent_id=2)
+    # Orphan Feature with no Portfolio Epic ancestor — must never be the blocked side
+    orphan = _make_epic_mock(id=4, iid=4, title="Orphan Feature", labels=["Feature"], parent_id=None)
+    return [(grp, pe), (grp, cap), (grp, feat), (grp, orphan)]
+
+
+def test_generate_epic_blocks_targets_only_items_with_portfolio_ancestor():
+    """The *blocked* side must be a Capability/Feature that rolls up to a Portfolio
+    Epic — never the Portfolio Epic itself — so the WSJF 'Epic at Risk' column stays
+    distinct from the 'Blocked Item' column (Refs #108)."""
+    h = ToolsHarness()
+    session = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 201
+    session.post.return_value = resp
+
+    grp = h._root_group
+    all_epics = _safe_hierarchy_epics(grp)
+
+    h._create_epic_blocks(session, all_epics, count=3, dry_run=False)
+
+    assert session.post.call_count >= 1
+    for c in session.post.call_args_list:
+        url  = c[0][0]
+        body = c[1]["json"]
+        # blocked side comes from the URL path /epics/{iid}/related_epics
+        blocked_iid = int(url.split("/epics/")[1].split("/")[0])
+        # Portfolio Epic (iid=1) must never be the blocked side
+        assert blocked_iid in (2, 3), f"blocked side iid={blocked_iid} is not a Cap/Feature"
+        assert body["link_type"] == "is_blocked_by"
+
+
+def test_generate_epic_blocks_falls_back_when_no_portfolio_ancestor():
+    """With a flat/unlabelled group (no Portfolio Epic ancestors) the generator
+    still creates blocks rather than producing nothing."""
+    h = ToolsHarness()
+    session = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 201
+    session.post.return_value = resp
+
+    grp = h._root_group
+    epics = [_make_epic_mock(id=i, iid=i, title=f"Epic {i}") for i in range(1, 4)]
+    all_epics = [(grp, e) for e in epics]
+
+    h._create_epic_blocks(session, all_epics, count=2, dry_run=False)
+
+    assert session.post.call_count == 2
+
+
 # ─── simulate-pi-progress ───────────────────────────────────────────────────
 
 def test_simulate_pi_progress_closes_issues_proportional_to_elapsed():
