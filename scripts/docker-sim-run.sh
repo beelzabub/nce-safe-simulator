@@ -11,10 +11,13 @@ if docker inspect nce &>/dev/null; then
   docker rm -f nce
 fi
 
+: "${GITLAB_TOKEN:?Set GITLAB_TOKEN before running (the mounted config.json no longer carries the token)}"
+
 echo "Starting nce-safe-simulator..."
 docker run -d --rm \
   --name nce \
   -p 80:80 \
+  -e GITLAB_TOKEN="$GITLAB_TOKEN" \
   -v "$PROJECT_ROOT/config.json:/app/config.json" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   nce-safe-simulator

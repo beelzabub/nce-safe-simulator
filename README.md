@@ -103,16 +103,27 @@ This compiles the Vue app into `public/app/`.
 
 ### 4 — Configure
 
-Edit `config.json` and set at minimum:
+Copy the template, then edit your local copy (which stays out of git):
+
+```bash
+cp config.example.json config.json
+```
+
+Set at minimum:
 
 | Field | Description |
 |---|---|
 | `url` | GitLab instance URL (default `https://gitlab.com`) |
-| `private_token` | Personal Access Token with `api` scope |
 | `parent_group` | Display name of the SAFe portfolio root group |
 | `gitlab_namespace` | URL slug of the namespace that will contain the root group |
 
-All other settings can be edited in-browser via the ⚙ Config button once the server is running.
+**The GitLab token is supplied via the `GITLAB_TOKEN` environment variable, not the config file** — `config.json` is git-ignored and ships with a blank `private_token` so the secret never lands in the repo. Export a Personal Access Token with `api` scope:
+
+```bash
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx   # add to ~/.bashrc to persist
+```
+
+Token resolution precedence: `GITLAB_TOKEN` env → `config.json` `private_token` → `ACCESS_TOKEN` (deprecated). All other settings can be edited in-browser via the ⚙ Config button once the server is running.
 
 ### 5 — Start the web server
 
@@ -135,12 +146,12 @@ Run the same command again to stop it.
 
 ## Configuration
 
-Copy and edit `config.json`:
+Start from the template (`cp config.example.json config.json`) and edit your local copy. Leave `private_token` blank and supply the token via the `GITLAB_TOKEN` environment variable (see [Configure](#4--configure)):
 
 ```json
 {
     "url": "https://gitlab.com",
-    "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
+    "private_token": "",
     "parent_group": "my-portfolio-group",
     "gitlab_namespace": "my-top-level-namespace",
     "project_labels": ["project::DO", "project::RTSO", "project::DCGS"],
@@ -257,7 +268,8 @@ Any config value can be overridden at runtime without editing the file:
 
 | Variable | Overrides |
 |---|---|
-| `ACCESS_TOKEN` | `private_token` |
+| `GITLAB_TOKEN` | `private_token` (preferred — keeps the secret out of `config.json`) |
+| `ACCESS_TOKEN` | `private_token` (**deprecated** — use `GITLAB_TOKEN`) |
 | `GROUP_NAME` | `parent_group` |
 | `PROJECT_LABELS` | `project_labels` (comma-separated) |
 | `PIID_LABELS` | `piid_labels` (comma-separated) |
@@ -268,7 +280,7 @@ Any config value can be overridden at runtime without editing the file:
 | `ROAM_LABELS` | `roam_labels` (comma-separated) |
 | `FIBONACCI_WEIGHTS` | `fibonacci_weights` (comma-separated integers) |
 
-In a GitLab pipeline, set these as [CI/CD variables](https://docs.gitlab.com/ee/ci/variables/) under **Settings → CI/CD → Variables**. Mark `ACCESS_TOKEN` as **Masked** to keep the token out of job logs. `ACCESS_TOKEN` and `GROUP_NAME` are the minimum required for the `generate-reports` job.
+In a GitLab pipeline, set these as [CI/CD variables](https://docs.gitlab.com/ee/ci/variables/) under **Settings → CI/CD → Variables**. Mark `GITLAB_TOKEN` as **Masked** (and **Protected**) to keep the token out of job logs. `GITLAB_TOKEN` and `GROUP_NAME` are the minimum required for the report jobs.
 
 ---
 
