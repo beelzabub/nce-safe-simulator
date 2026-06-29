@@ -555,6 +555,8 @@ Data snapshot → reports/20260525/143022/
 
 **`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
 
+> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
+
 **`issue_blocking.json` structure:** `summary` (total blocked, total relationships) + `relationships` array where each entry has `blocked_issue` (`id`, `iid`, `title`, `web_url`, `project_path`, `state`, `epic_iid`, `epic_title`) and a `blocked_by` list (each `id`, `iid`, `title`, `web_url`, `project_path`). Blocked issues are flagged via a bulk GraphQL `Issue.blocked` query; only flagged issues are then REST-fetched (`GET /projects/:id/issues/:iid/links`, keeping `is_blocked_by` links).
 
 **`groups.json` fields:** `id`, `name`, `path`, `full_path`, `parent_id`, `web_url`, `level` (portfolio / vs / art / team)
@@ -620,7 +622,7 @@ The deployed site is published at the project's GitLab Pages URL and mirrors the
 | `art-capacity-balance` | T2 | `01 Program Management/ART Capacity Balance` | Per-team planned vs actual weight per PI — spot over/under-capacity *(index → VS → ART)* |
 | `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown *(index → VS)* |
 | `issue-blocking` | T2 | `01 Program Management/Issue Blocking` | Issue-to-issue `is_blocked_by` relationships, with owning project and parent epic |
-| `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next |
+| `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next. The **Blocking Detail** keeps _Epic at Risk_ (the at-risk Portfolio Epic) distinct from the _Blocked Item_ (the blocked Capability/Feature); a blocked item with no Portfolio Epic ancestor keeps its row but leaves _Epic at Risk_ blank and is excluded from the Business-Value-at-risk total (Refs #108) |
 | `art-feature-status` | T3 | `02 Operational Detail/ART Feature Status` | Features per ART grouped by Team with completion and risk *(index → VS → ART)* |
 | `vs-capability-dashboard` | T3 | `02 Operational Detail/VS Capability Dashboard` | Capabilities by PI with per-ART breakdown per VS *(index → VS)* |
 | `team-backlog` | T3 | `02 Operational Detail/Team Backlogs` | Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |
@@ -685,7 +687,7 @@ The same diagnostic output is automatically appended as a collapsible **🔧 Env
 | Key | Description |
 |---|---|
 | `generate-issues` | Create issues in team backlog projects linked to Feature epics |
-| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
+| `generate-epic-blocks` | Create or remove blocking relationships between epics. The blocked side is restricted to Capabilities/Features that roll up to a Portfolio Epic (link direction `is_blocked_by`), so the WSJF _Epic at Risk_ column resolves to a distinct ancestor rather than collapsing onto the blocked item (Refs #108) |
 | `generate-roam-risks` | Create ROAM risk issues, each related to a random number of epics |
 | `generate-risk-reasons` | Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics |
 | `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
