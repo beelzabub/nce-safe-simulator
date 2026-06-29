@@ -44,6 +44,19 @@ class ServeMixin:
     def _serve_port(self) -> int:
         return getattr(self, "serve_port", _DEFAULT_PORT)
 
+    def _serve_tls_paths(self) -> Optional[Tuple[str, str]]:
+        """Return (certfile, keyfile) when TLS is enabled and both are set, else None."""
+        if not getattr(self, "serve_tls", False):
+            return None
+        cert = getattr(self, "serve_tls_certfile", "") or ""
+        key  = getattr(self, "serve_tls_keyfile", "") or ""
+        if cert and key:
+            return cert, key
+        return None
+
+    def _serve_scheme(self) -> str:
+        return "https" if self._serve_tls_paths() else "http"
+
     def _serve_status(self) -> Tuple[bool, Optional[int]]:
         """Return (is_running, pid). Cleans up stale PID file if process is gone."""
         if not _PID_FILE.exists():
@@ -59,9 +72,20 @@ class ServeMixin:
     def _serve_start(self) -> int:
         """Start the uvicorn server in a detached background process. Returns PID."""
         port = self._serve_port()
+        cmd = [sys.executable, "-m", "uvicorn", "server.app:app",
+               "--port", str(port), "--host", "0.0.0.0"]
+        tls = self._serve_tls_paths()
+        if tls:
+            cert, key = tls
+            for label, path in (("certfile", cert), ("keyfile", key)):
+                if not Path(path).is_file():
+                    raise FileNotFoundError(
+                        f"TLS enabled but {label} not found: {path}\n"
+                        f"  Generate one with: scripts/gen-selfsigned-cert.sh"
+                    )
+            cmd += ["--ssl-certfile", cert, "--ssl-keyfile", key]
         proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "server.app:app",
-             "--port", str(port), "--host", "0.0.0.0"],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,   # detach: survives NceGitLab exit
@@ -228,15 +252,16 @@ class ServeMixin:
         while True:
             _clear()
             running, pid = self._serve_status()
-            port = self._serve_port()
-            ip   = _local_ip()
+            port   = self._serve_port()
+            ip     = _local_ip()
+            scheme = self._serve_scheme()
 
             print("Site")
             print("=" * 50)
             if running:
                 print(f"  Server : RUNNING  (pid {pid})")
-                print(f"           http://localhost:{port}")
-                print(f"           http://{ip}:{port}")
+                print(f"           {scheme}://localhost:{port}")
+                print(f"           {scheme}://{ip}:{port}")
             else:
                 print(f"  Server : stopped")
             print()
@@ -305,8 +330,8 @@ class ServeMixin:
                     try:
                         new_pid = self._serve_start()
                         print(f"  Server started  (pid {new_pid})")
-                        print(f"  http://localhost:{port}")
-                        print(f"  http://{ip}:{port}")
+                        print(f"  {scheme}://localhost:{port}")
+                        print(f"  {scheme}://{ip}:{port}")
                     except FileNotFoundError as exc:
                         print(f"  {exc}")
                 _pause()
@@ -315,8 +340,8 @@ class ServeMixin:
                 try:
                     new_pid = self._serve_start()
                     print(f"  Server restarted  (pid {new_pid})")
-                    print(f"  http://localhost:{port}")
-                    print(f"  http://{ip}:{port}")
+                    print(f"  {scheme}://localhost:{port}")
+                    print(f"  {scheme}://{ip}:{port}")
                 except FileNotFoundError as exc:
                     print(f"  {exc}")
                 _pause()

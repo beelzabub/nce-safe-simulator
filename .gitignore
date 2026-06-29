@@ -15,4 +15,10 @@ cdk/.venv/
 /logs/
 /reports/
 
+# Local TLS material for `--serve` over HTTPS — never commit private keys.
+/certs/
+*.crt
+*.key
+*.pem
+
 **/*.quarto_ipynb
