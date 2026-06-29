@@ -57,6 +57,21 @@ class ServeMixin:
     def _serve_scheme(self) -> str:
         return "https" if self._serve_tls_paths() else "http"
 
+    def _serve_tls_validated(self) -> Optional[Tuple[str, str]]:
+        """Like _serve_tls_paths but raises FileNotFoundError if a file is missing.
+        Shared by the menu's background server and the `--serve` CLI entrypoint."""
+        tls = self._serve_tls_paths()
+        if not tls:
+            return None
+        cert, key = tls
+        for label, path in (("certfile", cert), ("keyfile", key)):
+            if not Path(path).is_file():
+                raise FileNotFoundError(
+                    f"TLS enabled but {label} not found: {path}\n"
+                    f"  Generate one with: scripts/gen-selfsigned-cert.sh"
+                )
+        return cert, key
+
     def _serve_status(self) -> Tuple[bool, Optional[int]]:
         """Return (is_running, pid). Cleans up stale PID file if process is gone."""
         if not _PID_FILE.exists():
@@ -74,15 +89,9 @@ class ServeMixin:
         port = self._serve_port()
         cmd = [sys.executable, "-m", "uvicorn", "server.app:app",
                "--port", str(port), "--host", "0.0.0.0"]
-        tls = self._serve_tls_paths()
+        tls = self._serve_tls_validated()
         if tls:
             cert, key = tls
-            for label, path in (("certfile", cert), ("keyfile", key)):
-                if not Path(path).is_file():
-                    raise FileNotFoundError(
-                        f"TLS enabled but {label} not found: {path}\n"
-                        f"  Generate one with: scripts/gen-selfsigned-cert.sh"
-                    )
             cmd += ["--ssl-certfile", cert, "--ssl-keyfile", key]
         proc = subprocess.Popen(
             cmd,

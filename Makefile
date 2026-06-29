@@ -4,6 +4,8 @@
 CERT      ?= certs/server.crt
 KEY       ?= certs/server.key
 TLS_HOSTS ?=
+# HTTPS bind port. 443 is privileged (needs sudo/setcap); use e.g. PORT=8443 locally.
+PORT      ?= 443
 
 ## Run the full pipeline: fetch data, export notebooks, render static site
 build: data interactive static
@@ -26,7 +28,8 @@ serve:
 	python -m http.server 4645 --directory public
 
 ## Serve the app over HTTPS with a self-signed cert (generates one if missing).
-## Bind port comes from config.json defaults.serve.port; SAN hosts: make serve-tls TLS_HOSTS="host 1.2.3.4"
+## Override: make serve-tls PORT=8443 TLS_HOSTS="host 1.2.3.4"
 serve-tls:
 	@test -f $(CERT) -a -f $(KEY) || scripts/gen-selfsigned-cert.sh $(TLS_HOSTS)
-	SERVE_TLS=1 SERVE_TLS_CERTFILE=$(CERT) SERVE_TLS_KEYFILE=$(KEY) python NceGitLab.py --serve
+	SERVE_TLS=1 SERVE_TLS_CERTFILE=$(CERT) SERVE_TLS_KEYFILE=$(KEY) SERVE_PORT=$(PORT) \
+		python NceGitLab.py --serve

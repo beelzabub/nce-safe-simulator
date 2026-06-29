@@ -227,7 +227,8 @@ class NceGitLab(
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         _sd = config.get("defaults", {}).get("serve", {})
-        self.serve_port = _sd.get("port", 80)
+        _env_port = os.getenv("SERVE_PORT")
+        self.serve_port = int(_env_port) if _env_port else _sd.get("port", 80)
 
         # Optional TLS for the local `--serve` path (self-signed cert on e.g. :443).
         # Default OFF so cloud deployments keep serving plain HTTP:80 behind their
@@ -557,7 +558,16 @@ def main():
         _fastapi_app.state.gl = gl
         gl._serve_build_frontend()
 
-        uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
+        try:
+            tls = gl._serve_tls_validated()
+        except FileNotFoundError as exc:
+            print(exc)
+            sys.exit(1)
+        ssl_kwargs = {"ssl_certfile": tls[0], "ssl_keyfile": tls[1]} if tls else {}
+
+        scheme = "https" if tls else "http"
+        print(f"Serving on {scheme}://0.0.0.0:{port}")
+        uvicorn.run(_fastapi_app, host="0.0.0.0", port=port, **ssl_kwargs)
         return
 
     phases = []
