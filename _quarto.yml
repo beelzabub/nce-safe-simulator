@@ -8,6 +8,7 @@ project:
     - quarto/wsjf.qmd
     - quarto/portfolio.qmd
     - quarto/blocking.qmd
+    - quarto/issue-blocking.qmd
     - quarto/epic-lifecycle.qmd
     - quarto/pi-predictability.qmd
     - quarto/art-capacity-balance.qmd
@@ -47,6 +48,8 @@ website:
         menu:
           - href: quarto/blocking.qmd
             text: "Blocking & Cross-ART Risk"
+          - href: quarto/issue-blocking.qmd
+            text: "Issue Blocking"
           - href: quarto/epic-lifecycle.qmd
             text: "Epic Lifecycle"
           - href: quarto/pi-predictability.qmd

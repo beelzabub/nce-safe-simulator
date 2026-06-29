@@ -505,6 +505,7 @@ home  (Portfolio Home index)
 │   ├── Risk Register
 │   ├── ART Capacity Balance
 │   ├── Blocking & Cross-ART Risk
+│   ├── Issue Blocking
 │   └── WSJF Priority Board
 ├── 02 Operational Detail      — on demand, team leads
 │   ├── ART Feature Status
@@ -531,6 +532,7 @@ reports/
       epics.json      # typed epics (full fields + rollups) + all_epics_raw (includes untyped)
       issues.json     # all issues: full fields including assignees, milestone, epic link
       blocking.json   # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+      issue_blocking.json # issue→issue blocking graph: blocked issues, blockers, parent epic
       groups.json     # SAFe group hierarchy: portfolio → VS → ART → Team, each with level tag
       projects.json   # Team Backlog projects with namespace_id, path, and issues_enabled flag
 ```
@@ -542,6 +544,7 @@ Data snapshot → reports/20260525/143022/
   epics.json    (47 typed + 2 untyped)
   issues.json   (312 issues)
   blocking.json (5 blocked epics)
+  issue_blocking.json (3 blocked issues)
   groups.json   (15 groups)
   projects.json (8 projects)
 ```
@@ -551,6 +554,10 @@ Data snapshot → reports/20260525/143022/
 **`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
 **`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
+
+> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
+
+**`issue_blocking.json` structure:** `summary` (total blocked, total relationships) + `relationships` array where each entry has `blocked_issue` (`id`, `iid`, `title`, `web_url`, `project_path`, `state`, `epic_iid`, `epic_title`) and a `blocked_by` list (each `id`, `iid`, `title`, `web_url`, `project_path`). Blocked issues are flagged via a bulk GraphQL `Issue.blocked` query; only flagged issues are then REST-fetched (`GET /projects/:id/issues/:iid/links`, keeping `is_blocked_by` links).
 
 **`groups.json` fields:** `id`, `name`, `path`, `full_path`, `parent_id`, `web_url`, `level` (portfolio / vs / art / team)
 
@@ -614,7 +621,8 @@ The deployed site is published at the project's GitLab Pages URL and mirrors the
 | `risk-register` | T2 | `01 Program Management/Risk Register` | All risk-flagged epics grouped by level (High → Medium → Low) with PI and owning ART. ROAM risks linked to a Feature also bubble up the hierarchy: each ancestor Capability/Epic is listed as threatened, tagged _(via child)_, and flagged **⚠️ Child at risk** |
 | `art-capacity-balance` | T2 | `01 Program Management/ART Capacity Balance` | Per-team planned vs actual weight per PI — spot over/under-capacity *(index → VS → ART)* |
 | `blocking` | T2 | `01 Program Management/Blocking & Cross-ART Risk` | Blocked epics, ancestor risk propagation, and per-VS cross-ART dependency breakdown *(index → VS)* |
-| `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next |
+| `issue-blocking` | T2 | `01 Program Management/Issue Blocking` | Issue-to-issue `is_blocked_by` relationships, with owning project and parent epic |
+| `wsjf` | T2 | `01 Program Management/WSJF Priority Board` | Portfolio backlog ranked by `(Value + Urgency + Risk) ÷ Job Size` — shows what to work on next. The **Blocking Detail** keeps _Epic at Risk_ (the at-risk Portfolio Epic) distinct from the _Blocked Item_ (the blocked Capability/Feature); a blocked item with no Portfolio Epic ancestor keeps its row but leaves _Epic at Risk_ blank and is excluded from the Business-Value-at-risk total (Refs #108) |
 | `art-feature-status` | T3 | `02 Operational Detail/ART Feature Status` | Features per ART grouped by Team with completion and risk *(index → VS → ART)* |
 | `vs-capability-dashboard` | T3 | `02 Operational Detail/VS Capability Dashboard` | Capabilities by PI with per-ART breakdown per VS *(index → VS)* |
 | `team-backlog` | T3 | `02 Operational Detail/Team Backlogs` | Issues grouped by Feature per Team *(index; detail pages on each team wiki)* |
@@ -679,7 +687,7 @@ The same diagnostic output is automatically appended as a collapsible **🔧 Env
 | Key | Description |
 |---|---|
 | `generate-issues` | Create issues in team backlog projects linked to Feature epics |
-| `generate-epic-blocks` | Randomly create or remove blocking relationships between epics |
+| `generate-epic-blocks` | Create or remove blocking relationships between epics. The blocked side is restricted to Capabilities/Features that roll up to a Portfolio Epic (link direction `is_blocked_by`), so the WSJF _Epic at Risk_ column resolves to a distinct ancestor rather than collapsing onto the blocked item (Refs #108) |
 | `generate-roam-risks` | Create ROAM risk issues, each related to a random number of epics |
 | `generate-risk-reasons` | Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics |
 | `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
@@ -933,7 +941,7 @@ Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/sai
 
 **Job timing** — Each phase (clean, create, individual reports, all) logs start/stop times and elapsed duration via `_print_timing_table()` in `mixins/utils.py`. `--all` aggregates all phases into a consolidated summary table.
 
-**Data snapshots** — Every report run writes five files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
+**Data snapshots** — Every report run writes six files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking.json`, `issue_blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
 
 ---
 
