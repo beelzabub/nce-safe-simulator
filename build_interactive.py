@@ -18,6 +18,7 @@ from pathlib import Path
 
 NOTEBOOKS = [
     "health-dashboard",
+    "issue-blocking",
     "pi-predictability",
     "flow-metrics",
     "art-capacity-balance",

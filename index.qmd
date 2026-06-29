@@ -189,6 +189,11 @@ format:
       <td><a href="quarto/flow-metrics.html">Flow Metrics</a></td>
       <td class="empty">—</td>
     </tr>
+    <tr>
+      <td class="empty">—</td>
+      <td><a href="quarto/issue-blocking.html">Issue Blocking</a></td>
+      <td class="empty">—</td>
+    </tr>
   </tbody>
 </table>
 </div>

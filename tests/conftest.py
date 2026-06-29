@@ -143,6 +143,7 @@ class ReportsHarness(ReportsMixin, UtilitiesMixin):
         self._rd_issues_by_epic    = defaultdict(list)
         self._rd_issues_by_project = defaultdict(list)
         self._rd_blocking          = {"relationships": [], "summary": {}}
+        self._rd_issue_blocking    = {"relationships": [], "summary": {}}
         self._rd_piid_labels       = piid_labels       or []
         self._rd_lifecycle_labels  = lifecycle_labels  or []
         self._rd_project_labels    = project_labels    or []

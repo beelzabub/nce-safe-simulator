@@ -1,0 +1,81 @@
+---
+title: "Issue Blocking"
+format:
+  html:
+    page-layout: full
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+from IPython.display import HTML, display
+
+_candidates = [Path("quarto-data/issue-blocking.json"), Path("../quarto-data/issue-blocking.json")]
+data_file = next((p for p in _candidates if p.exists()), None)
+if data_file is None:
+    raise FileNotFoundError(
+        "quarto-data/issue-blocking.json not found. "
+        "Run: python NceGitLab.py --report issue-blocking"
+    )
+
+d       = json.loads(data_file.read_text())
+group   = d["group"]
+summary = d["summary"]
+```
+
+```{python}
+HTML(f"""
+<p>
+  <strong>Report Date:</strong> {d['report_date']} &nbsp;|&nbsp;
+  <strong>Group:</strong> <a href="{group['url']}" target="_blank">{group['name']}</a>
+</p>
+""")
+```
+
+## Summary
+
+```{python}
+s = summary
+html = '<table class="table table-sm table-striped" style="max-width:480px"><thead><tr><th>Metric</th><th>Count</th></tr></thead><tbody>'
+html += f"<tr><td>Blocked issues</td><td><strong>{s['total_blocked']}</strong></td></tr>"
+html += f"<tr><td>Total blocking relationships</td><td><strong>{s['total_relationships']}</strong></td></tr>"
+html += "</tbody></table>"
+HTML(html)
+```
+
+## Blocked Issues
+
+```{python}
+blocked_items = d["blocked_items"]
+if not blocked_items:
+    display(HTML("<p>✅ No blocked issues found.</p>"))
+else:
+    html = "<p>Issues with one or more active <code>is_blocked_by</code> links:</p>"
+    html += '<table class="table table-sm table-bordered"><thead><tr>'
+    html += "<th>Blocked Issue</th><th>Project</th><th>Epic</th><th>Blocked By</th>"
+    html += "</tr></thead><tbody>"
+    for item in blocked_items:
+        ilink = f'<a href="{item["url"]}" target="_blank">⛔ {item["title"]}</a>' if item["url"] else f'⛔ {item["title"]}'
+        proj  = item.get("project_path") or "—"
+        epic  = item.get("epic_title") or "—"
+        blockers = item.get("blockers", [])
+        blocked_by = "<br>".join(
+            f'🔒 <a href="{b["url"]}" target="_blank">{b["title"]}</a>' if b["url"] else f'🔒 {b["title"]}'
+            for b in blockers
+        ) or "—"
+        html += f"<tr><td>{ilink}</td><td>{proj}</td><td>{epic}</td><td>{blocked_by}</td></tr>"
+    html += "</tbody></table>"
+    display(HTML(html))
+```
+
+::: {.callout-note collapse="true"}
+## Legend
+
+| Icon | Meaning |
+|------|---------|
+| ⛔ | Blocked — issue has at least one active blocker |
+| 🔒 | Blocker — directly blocking this issue |
+:::
