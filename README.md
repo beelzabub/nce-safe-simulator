@@ -131,6 +131,46 @@ Run the same command again to stop it.
 
 > **Port override:** the default port is `4645`. To use a different port, pass `--port NNNN` on the command line or set `"port": NNNN` in `config.json`.
 
+#### Serve over HTTPS with a self-signed certificate
+
+For running directly from the command line on a host that must be reached over
+HTTPS (e.g. an EC2 instance on a network that blocks plain HTTP), `--serve` can
+terminate TLS itself. This is **opt-in and off by default** — cloud deployments
+keep serving plain HTTP behind their own TLS layer and are unaffected.
+
+1. Generate a self-signed certificate (valid 365 days). Pass every hostname or IP
+   clients will use — they go into the certificate's SAN:
+   ```bash
+   scripts/gen-selfsigned-cert.sh ec2-1-2-3-4.compute.amazonaws.com 10.0.4.21
+   ```
+   This writes `certs/server.crt` and `certs/server.key` (both git-ignored).
+
+2. Enable TLS and bind the HTTPS port, either via environment variables:
+   ```bash
+   SERVE_TLS=1 \
+   SERVE_TLS_CERTFILE=certs/server.crt \
+   SERVE_TLS_KEYFILE=certs/server.key \
+     python3 NceGitLab.py --serve
+   ```
+   or in `config.json` under `defaults.serve`:
+   ```json
+   "serve": {
+     "port": 443,
+     "tls": { "enabled": true, "certfile": "certs/server.crt", "keyfile": "certs/server.key" }
+   }
+   ```
+   The server is then reachable at `https://<host>/app/`.
+
+> **Binding port 443** requires elevated privileges (ports below 1024 are
+> privileged). Either run with `sudo`, or grant the interpreter the capability
+> once: `sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v python3)")"`.
+> Also open inbound 443 in the instance's security group.
+
+> **Self-signed = untrusted.** Browsers will show a certificate warning until the
+> `.crt` is imported into the client's trust store. If the network performs TLS
+> inspection it may reject an untrusted certificate outright — in that case use a
+> certificate issued by a CA the network already trusts.
+
 ---
 
 ## Configuration

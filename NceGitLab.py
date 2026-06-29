@@ -229,6 +229,19 @@ class NceGitLab(
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
 
+        # Optional TLS for the local `--serve` path (self-signed cert on e.g. :443).
+        # Default OFF so cloud deployments keep serving plain HTTP:80 behind their
+        # own TLS layer (CloudFront/ALB). Env vars override config for CLI use.
+        _tls = _sd.get("tls", {})
+        _env_tls = os.getenv("SERVE_TLS")
+        if _env_tls is not None:
+            _tls_enabled = _env_tls.strip().lower() not in ("false", "0", "no", "")
+        else:
+            _tls_enabled = bool(_tls.get("enabled", False))
+        self.serve_tls = _tls_enabled
+        self.serve_tls_certfile = os.getenv("SERVE_TLS_CERTFILE") or _tls.get("certfile", "")
+        self.serve_tls_keyfile  = os.getenv("SERVE_TLS_KEYFILE")  or _tls.get("keyfile", "")
+
         self.grafana_url = os.getenv("GRAFANA_URL") or config.get("grafana_url", "")
 
 
