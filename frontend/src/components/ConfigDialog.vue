@@ -132,6 +132,11 @@
                 <input v-model.number="form.bootstrap[f.key]" type="number" :step="f.step ?? 1" :min="f.min ?? 0" :max="f.max" class="field-input field-input--sm" />
               </label>
             </div>
+            <div class="subsection-label" style="margin-top:0.5rem">Block Seeding</div>
+            <label class="field field--row">
+              <span class="field-label">Seed Blocks</span>
+              <input v-model="form.bootstrap.seed_blocks" type="checkbox" class="field-check" />
+            </label>
           </div>
 
           <!-- ── Tools ── -->
@@ -225,11 +230,14 @@ const BOOTSTRAP_SCALAR_FIELDS = [
   { key: 'history_close_rate_min',     label: 'History Close Rate Min',   step: 0.01, min: 0, max: 1, help: 'Minimum fraction of past-PI issues that will be closed when generating historical PI data. Actual rate is randomised between min and max.' },
   { key: 'history_close_rate_max',     label: 'History Close Rate Max',   step: 0.01, min: 0, max: 1, help: 'Maximum fraction of past-PI issues closed during history generation. Keep above History Close Rate Min.' },
   { key: 'current_pi_issue_close_pct', label: 'Current PI Issue Close %', step: 0.01, min: 0, max: 1, help: 'Fraction of current-PI issues to close when simulating PI progress mid-increment. Represents how far through the PI the simulation is set.' },
+  { key: 'epic_block_percent',         label: 'Epic Block %',            step: 1, min: 0, max: 100, help: 'Percent of epics to block when seeding blocks during --create (only used when Seed Blocks is on).' },
+  { key: 'issue_block_percent',        label: 'Issue Block %',           step: 1, min: 0, max: 100, help: 'Percent of open issues to block when seeding blocks during --create (only used when Seed Blocks is on).' },
 ]
 
 const TOOLS_FIELDS = [
   { key: 'close_percent',                label: 'Close Percent',             min: 0, max: 100, help: 'Default percentage of open issues to close when running the Close Issues tool. Can be overridden per run.' },
   { key: 'generate_epic_blocks_count',   label: 'Generate Epic Blocks',      min: 1,           help: 'Number of blocking relationships to create between epics when running the Generate Epic Blocks tool.' },
+  { key: 'generate_issue_blocks_count',  label: 'Generate Issue Blocks',     min: 1,           help: 'Number of blocking relationships to create between issues when running the Generate Issue Blocks tool.' },
   { key: 'simulate_pi_progress_percent', label: 'Simulate PI Progress %',    min: 0, max: 100, help: 'Default PI completion percentage used by the Simulate PI Progress tool. Drives how many issues are closed and weight progress applied.' },
   { key: 'generate_issues_count',        label: 'Generate Issues Count',     min: 1,           help: 'Number of child issues to generate per epic when running the Generate Issues tool.' },
   { key: 'weight_drift_threshold',       label: 'Weight Drift Threshold',    min: 0,           help: 'Maximum percentage deviation between planned and actual weights before an epic is flagged as drifted in reports.' },
@@ -327,10 +335,14 @@ const form = reactive({
     history_close_rate_min:     0.7,
     history_close_rate_max:     0.95,
     current_pi_issue_close_pct: 0.5,
+    seed_blocks:                true,
+    epic_block_percent:         12,
+    issue_block_percent:        8,
   },
   tools: {
     close_percent:                30,
     generate_epic_blocks_count:   10,
+    generate_issue_blocks_count:  10,
     simulate_pi_progress_percent: 50,
     generate_issues_count:        5,
     weight_drift_threshold:       20,
@@ -388,10 +400,14 @@ function populateForm(cfg) {
   form.bootstrap.history_close_rate_min     = bs.history_close_rate_min     ?? 0.7
   form.bootstrap.history_close_rate_max     = bs.history_close_rate_max     ?? 0.95
   form.bootstrap.current_pi_issue_close_pct = bs.current_pi_issue_close_pct ?? 0.5
+  form.bootstrap.seed_blocks                = bs.seed_blocks                ?? true
+  form.bootstrap.epic_block_percent         = bs.epic_block_percent         ?? 12
+  form.bootstrap.issue_block_percent        = bs.issue_block_percent        ?? 8
 
   const tl = cfg.defaults?.tools ?? {}
   form.tools.close_percent                = tl.close_percent                ?? 30
   form.tools.generate_epic_blocks_count   = tl.generate_epic_blocks_count   ?? 10
+  form.tools.generate_issue_blocks_count  = tl.generate_issue_blocks_count  ?? 10
   form.tools.simulate_pi_progress_percent = tl.simulate_pi_progress_percent ?? 50
   form.tools.generate_issues_count        = tl.generate_issues_count        ?? 5
   form.tools.weight_drift_threshold       = tl.weight_drift_threshold       ?? 20
@@ -472,11 +488,15 @@ function buildConfig() {
   bootstrap.history_close_rate_min     = form.bootstrap.history_close_rate_min
   bootstrap.history_close_rate_max     = form.bootstrap.history_close_rate_max
   bootstrap.current_pi_issue_close_pct = form.bootstrap.current_pi_issue_close_pct
+  bootstrap.seed_blocks                = form.bootstrap.seed_blocks
+  bootstrap.epic_block_percent         = form.bootstrap.epic_block_percent
+  bootstrap.issue_block_percent        = form.bootstrap.issue_block_percent
 
   const tools = {
     ...(rawConfig.defaults?.tools ?? {}),
     close_percent:                form.tools.close_percent,
     generate_epic_blocks_count:   form.tools.generate_epic_blocks_count,
+    generate_issue_blocks_count:  form.tools.generate_issue_blocks_count,
     simulate_pi_progress_percent: form.tools.simulate_pi_progress_percent,
     generate_issues_count:        form.tools.generate_issues_count,
     weight_drift_threshold:       form.tools.weight_drift_threshold,
