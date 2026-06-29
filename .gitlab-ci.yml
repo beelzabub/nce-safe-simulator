@@ -13,7 +13,10 @@ test:
 pages:
   stage: pages
   image: ghcr.io/quarto-dev/quarto:latest
+  # Requires a GITLAB_TOKEN CI/CD variable (masked + protected) in project settings —
+  # config.json no longer carries the token. NceGitLab.py reads GITLAB_TOKEN from env.
   before_script:
+    - test -n "$GITLAB_TOKEN" || { echo "GITLAB_TOKEN CI/CD variable is not set"; exit 1; }
     - apt-get update -qq && apt-get install -y python3-pip -qq
     - pip3 install -r requirements.txt
   script:
