@@ -49,6 +49,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "issue-blocking",
+        "description": "Issue Blocking — issue-to-issue is_blocked_by relationships, with project and parent epic",
+        "method":      "generate_issue_blocking_report",
+        "needs_group": False,
+    },
+    {
         "key":         "epic-lifecycle",
         "description": "Epic Lifecycle / Portfolio Kanban — epics by SAFe lifecycle state with bottleneck and age analysis",
         "method":      "generate_epic_lifecycle_report",
@@ -1334,6 +1340,81 @@ class ReportsMixin:
 
         self.upload_to_wiki(group, f"{self._wiki_t2}/Blocking & Cross-ART Risk", "\n".join(md))
         print(f"  → Wiki: {self._wiki_t2}/Blocking & Cross-ART Risk")
+
+    def generate_issue_blocking_report(self):
+        """Issue Blocking — issue→issue ``is_blocked_by`` relationships.
+
+        Sibling of the epic-level *Blocking & Cross-ART Risk* report.  Surfaces
+        the issue-to-issue blocking links the tool generates but never reported,
+        as a flat table of Blocked Issue | Project | Epic | Blocked By.
+        """
+        group = self._rd_root_obj
+        today = date.today()
+
+        rels = self._rd_issue_blocking.get("relationships", [])
+        summ = self._rd_issue_blocking.get("summary", {})
+        total_relationships = summ.get("total_relationships", 0)
+
+        def link(title, url):
+            if not url:
+                return title
+            return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
+
+        md = []
+        md.append(f"# Issue Blocking — {group.name}")
+        md.append(
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  "
+            f"**Group:** {link(group.name, group.web_url)}"
+        )
+        md.append("")
+
+        # ── Summary bar ────────────────────────────────────────────────────── #
+        md.append("## Summary")
+        md.append("")
+        md.append("| Metric | Count |")
+        md.append("|--------|-------|")
+        md.append(f"| Blocked issues | **{len(rels)}** |")
+        md.append(f"| Total blocking relationships | **{total_relationships}** |")
+        md.append("")
+
+        # ── Blocked issues table ───────────────────────────────────────────── #
+        if not rels:
+            md.append("## Blocked Issues")
+            md.append("")
+            md.append("_No blocked issues found._")
+            md.append("")
+        else:
+            md.append("## Blocked Issues")
+            md.append("")
+            md.append("Issues with one or more active `is_blocked_by` links:")
+            md.append("")
+            md.append("| Blocked Issue | Project | Epic | Blocked By |")
+            md.append("|---------------|---------|------|------------|")
+            for rel in rels:
+                issue   = rel["blocked_issue"]
+                proj    = issue.get("project_path", "") or "—"
+                etitle  = issue.get("epic_title")
+                epic_md = etitle if etitle else "—"
+                blockers = rel.get("blocked_by", [])
+                blocked_by_md = "<br>".join(
+                    f"🔒 {link(b.get('title', ''), b.get('web_url', ''))}"
+                    for b in blockers
+                ) or "—"
+                md.append(
+                    f"| ⛔ {link(issue.get('title', ''), issue.get('web_url', ''))} "
+                    f"| {proj} | {epic_md} | {blocked_by_md} |"
+                )
+            md.append("")
+
+        md.extend(_LEGEND_OPEN + [
+            _side_by_side(
+                ("Blocking Status", [("⛔", "Blocked — has at least one active blocker"),
+                                     ("🔒", "Blocker — directly blocking this issue")]),
+            ),
+        ] + _LEGEND_CLOSE)
+
+        self.upload_to_wiki(group, f"{self._wiki_t2}/Issue Blocking", "\n".join(md))
+        print(f"  → Wiki: {self._wiki_t2}/Issue Blocking")
 
     def generate_orphan_epics_report(self):
         group = self._rd_root_obj
@@ -4011,6 +4092,44 @@ class ReportsMixin:
             "blocked_items":  blocked_items,
         }
 
+    def _data_issue_blocking(self) -> dict:
+        group = self._rd_root_obj
+        today = date.today()
+        rels  = self._rd_issue_blocking.get("relationships", [])
+        summ  = self._rd_issue_blocking.get("summary", {})
+
+        blocked_items = []
+        for rel in rels:
+            issue = rel["blocked_issue"]
+            blocked_items.append({
+                "title":        issue.get("title", ""),
+                "url":          issue.get("web_url", ""),
+                "iid":          issue.get("iid"),
+                "project_path": issue.get("project_path", ""),
+                "state":        (issue.get("state", "") or "").capitalize(),
+                "epic_iid":     issue.get("epic_iid"),
+                "epic_title":   issue.get("epic_title"),
+                "blockers": [
+                    {
+                        "title":        b.get("title", ""),
+                        "url":          b.get("web_url", ""),
+                        "iid":          b.get("iid"),
+                        "project_path": b.get("project_path", ""),
+                    }
+                    for b in rel.get("blocked_by", [])
+                ],
+            })
+
+        return {
+            "report_date": today.isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "summary": {
+                "total_blocked":       len(rels),
+                "total_relationships": summ.get("total_relationships", 0),
+            },
+            "blocked_items": blocked_items,
+        }
+
     def _data_epic_lifecycle(self) -> dict:
         group = self._rd_root_obj
         today = date.today()
@@ -6181,6 +6300,10 @@ class ReportsMixin:
             f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |"
         )
         md.append(
+            f"| {_wl(f'{self._wiki_t2}/Issue Blocking', 'Issue Blocking')} "
+            f"| Issue-to-issue `is_blocked_by` relationships, with owning project and parent epic |"
+        )
+        md.append(
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
             f"| Portfolio backlog epics ranked by (Value + Urgency + Risk) ÷ Job Size |"
         )
@@ -6377,6 +6500,8 @@ class ReportsMixin:
             f"| Per-team planned vs actual weight per PI — spot over/under-capacity early |",
             f"| {_wl(f'{self._wiki_t2}/Blocking & Cross-ART Risk', 'Blocking & Cross-ART Risk')} "
             f"| Blocked epics, ancestor risk propagation, and cross-ART dependencies per VS *(index → VS)* |",
+            f"| {_wl(f'{self._wiki_t2}/Issue Blocking', 'Issue Blocking')} "
+            f"| Issue-to-issue `is_blocked_by` relationships, with owning project and parent epic |",
             f"| {_wl(f'{self._wiki_t2}/WSJF Priority Board', 'WSJF Priority Board')} "
             f"| Portfolio backlog ranked by (Value + Urgency + Risk) ÷ Job Size |",
             "",
@@ -6702,6 +6827,128 @@ class ReportsMixin:
             "relationships": relationships,
         }
 
+    def _fetch_issue_blocking_graph(self, group):
+        """Return the raw issue→issue blocking relationship graph.
+
+        Two-step strategy that mirrors the epic blocking path but stays cheap at
+        issue scale:
+          1. A single bulk GraphQL query FLAGS which issues are blocked (the
+             GitLab ``Issue`` GraphQL type exposes ``blocked`` / ``blockedByCount``).
+          2. The REST ``GET /projects/:id/issues/:iid/links`` endpoint is then
+             queried ONLY for those flagged issues, keeping links whose
+             ``link_type == "is_blocked_by"``.
+
+        Unblocked issues are never REST-fetched, so the cost scales with the
+        (small) number of blocked issues rather than the whole backlog.  Every
+        network call is wrapped in try/except + ``resp.ok`` so one failed fetch
+        can never abort the run.
+        """
+        issues = getattr(self, '_issues_cache', {}).get(self.parent_group, [])
+        if not issues:
+            print("  WARNING: issue cache empty — cannot collect issue blocking data.")
+            return {"relationships": [], "summary": {"total_blocked": 0, "total_relationships": 0}}
+
+        # ── 1. Bulk GraphQL flag: which issues are blocked? ──────────────── #
+        # Keyed by web_url (stable across REST + GraphQL).  If the field isn't
+        # available on this schema the query simply returns nothing and we fall
+        # back to flagging via blockedByCount, then to an empty result — we do
+        # NOT REST-fetch links for every issue.
+        blocked_urls: set = set()
+        try:
+            gql_data = self.graphql_query(
+                """
+                query IssueBlockStatus($fullPath: ID!) {
+                  group(fullPath: $fullPath) {
+                    issues(includeSubgroups: true) {
+                      nodes { iid webUrl blocked blockedByCount }
+                    }
+                  }
+                }
+                """,
+                variables={"fullPath": group.full_path},
+            )
+            if gql_data and gql_data.get("group", {}).get("issues"):
+                for n in gql_data["group"]["issues"]["nodes"]:
+                    if n.get("blocked") or (n.get("blockedByCount") or 0) > 0:
+                        if n.get("webUrl"):
+                            blocked_urls.add(n["webUrl"])
+        except Exception:
+            pass
+
+        if not blocked_urls:
+            return {"relationships": [], "summary": {"total_blocked": 0, "total_relationships": 0}}
+
+        # ── 2. REST detail fetch ONLY for flagged issues ─────────────────── #
+        session         = self._make_session()
+        issue_by_url    = {i.get("web_url"): i for i in issues}
+        all_epics_raw   = getattr(self, '_all_epics_cache', {}).get(self.parent_group, [])
+        epic_title_by_iid = {e.get("iid"): e.get("title") for e in all_epics_raw}
+
+        relationships = []
+        total_rels    = 0
+
+        for url in sorted(blocked_urls):
+            issue = issue_by_url.get(url)
+            if not issue:
+                continue
+            proj = issue.get("project_path")
+            iid  = issue.get("iid")
+            if not (proj and iid):
+                continue
+
+            enc       = quote(str(proj), safe="")
+            links_url = f"{self.url}/api/v4/projects/{enc}/issues/{iid}/links"
+            try:
+                resp = session.get(links_url)
+            except Exception:
+                continue
+            if not resp.ok:
+                continue
+
+            blockers = []
+            for link in resp.json():
+                if link.get("link_type") != "is_blocked_by":
+                    continue
+                refs = link.get("references", {}) or {}
+                full = refs.get("full", "") or ""
+                bp   = full.split("#")[0] if "#" in full else link.get("project_path", "")
+                blockers.append({
+                    "id":           link.get("id"),
+                    "iid":          link.get("iid"),
+                    "title":        link.get("title", ""),
+                    "web_url":      link.get("web_url", ""),
+                    "project_path": bp,
+                })
+
+            if not blockers:
+                continue
+
+            total_rels += len(blockers)
+            epic_iid = issue.get("epic_iid")
+            relationships.append({
+                "blocked_issue": {
+                    "id":           issue.get("id"),
+                    "iid":          iid,
+                    "title":        issue.get("title", ""),
+                    "web_url":      url,
+                    "project_path": proj,
+                    "state":        issue.get("state", ""),
+                    "epic_iid":     epic_iid,
+                    "epic_title":   epic_title_by_iid.get(epic_iid),
+                },
+                "blocked_by": blockers,
+            })
+
+        relationships.sort(key=lambda r: r["blocked_issue"]["title"])
+
+        return {
+            "summary": {
+                "total_blocked":       len(relationships),
+                "total_relationships": total_rels,
+            },
+            "relationships": relationships,
+        }
+
     def _collect_snapshot_groups_projects(self, root_group):
         """Traverse the SAFe hierarchy once and return (groups_list, projects_list) as plain dicts."""
         all_groups   = []
@@ -6802,6 +7049,13 @@ class ReportsMixin:
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
 
+        issue_blocking = self._fetch_issue_blocking_graph(group)
+        issue_blocking["generated_at"] = ts
+        issue_blocking["group"]        = self.parent_group
+        (data_dir / "issue_blocking.json").write_text(
+            json.dumps(issue_blocking, indent=2, default=str), encoding="utf-8"
+        )
+
         print("  Collecting group/project hierarchy...")
         all_groups, all_projects = self._collect_snapshot_groups_projects(group)
         groups_payload = {
@@ -6823,11 +7077,13 @@ class ReportsMixin:
             json.dumps(projects_payload, indent=2, default=str), encoding="utf-8"
         )
 
-        n_blocked = blocking["summary"].get("total_blocked", 0)
+        n_blocked     = blocking["summary"].get("total_blocked", 0)
+        n_iss_blocked = issue_blocking["summary"].get("total_blocked", 0)
         print(f"\n  Data snapshot → {data_dir}/")
         print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
         print(f"    blocking.json ({n_blocked} blocked epics)")
+        print(f"    issue_blocking.json ({n_iss_blocked} blocked issues)")
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
 
@@ -7215,6 +7471,7 @@ class ReportsMixin:
             ("risk-register",            self._data_risk_register),
             ("wsjf",                     self._data_wsjf),
             ("blocking",                 self._data_blocking),
+            ("issue-blocking",           self._data_issue_blocking),
             ("epic-lifecycle",           self._data_epic_lifecycle),
             ("pi-predictability",        self._data_pi_predictability),
             ("art-capacity-balance",     self._data_art_capacity_balance),
@@ -7273,6 +7530,13 @@ class ReportsMixin:
 
         # Blocking
         self._rd_blocking: dict = blocking_data
+
+        # Issue-to-issue blocking (optional — older snapshots may not have it)
+        _ib_path = data_dir / "issue_blocking.json"
+        if _ib_path.exists():
+            self._rd_issue_blocking: dict = json.loads(_ib_path.read_text(encoding="utf-8"))
+        else:
+            self._rd_issue_blocking = {"relationships": [], "summary": {}}
 
         # Derive active label sets from snapshot — not from config
         all_epic_labels = [lbl for e in self._rd_epics_all for lbl in e.get("labels", [])]
