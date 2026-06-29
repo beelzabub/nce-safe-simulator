@@ -6633,6 +6633,7 @@ class ReportsMixin:
 
         relationships = []
         total_rels    = 0
+        fetch_failed  = set()   # epic ids whose /related_epics call failed (Refs #107)
 
         for epic in all_epics_raw:
             grp_id = epic.get("group_id")
@@ -6645,8 +6646,10 @@ class ReportsMixin:
             try:
                 resp = session.get(url)
             except Exception:
+                fetch_failed.add(eid)
                 continue
             if not resp.ok:
+                fetch_failed.add(eid)
                 continue
 
             blockers = []
@@ -6692,6 +6695,35 @@ class ReportsMixin:
             })
 
         at_risk = len({a["id"] for r in relationships for a in r["at_risk_portfolio_epics"]})
+
+        # Reconcile blocked_by_count with this graph (Refs #107).
+        # The /related_epics graph above is the authoritative source for the blocking
+        # report detail (blocking.json).  calculate_portfolio_metrics derives
+        # blocked_by_count from the legacy GraphQL blockedByCount (plus a work-items
+        # widget fallback), which can disagree with the REST related_epics view — most
+        # notably for blocking links set through the GitLab 17+ work-items UI.  Recompute
+        # blocked_by_count here from the same relationships so the summary tables and the
+        # blocking detail can never diverge.  These epic dicts are shared by object
+        # identity with the _metrics_cache buckets, so the update propagates to every
+        # report that reads blocked_by_count.
+        #
+        # Epics whose /related_epics call failed are left untouched: keep their
+        # provisional GraphQL count rather than overwriting it with 0, so a transient
+        # API error can't silently mark a genuinely-blocked epic as unblocked.
+        blocked_by_counts = {
+            r["blocked_epic"]["id"]: len(r["blocked_by"]) for r in relationships
+        }
+        for e in all_epics_raw:
+            eid = e["id"]
+            if eid in fetch_failed and eid not in blocked_by_counts:
+                continue
+            e["blocked_by_count"] = blocked_by_counts.get(eid, 0)
+
+        if fetch_failed:
+            print(
+                f"Warning: {len(fetch_failed)} epic(s) had a failed /related_epics "
+                f"fetch; blocked_by_count left at the provisional value (may be stale)."
+            )
 
         return {
             "summary": {
@@ -6767,6 +6799,12 @@ class ReportsMixin:
         print("  Collecting data snapshot...")
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 
+        # Build the blocking graph up front so each epic's blocked_by_count is reconciled
+        # against the /related_epics detail before epics.json is serialized (Refs #107).
+        blocking = self._fetch_blocking_graph(group)
+        blocking["generated_at"] = ts
+        blocking["group"]        = self.parent_group
+
         # Epics: typed + untyped
         typed_epics = [e for bucket in metrics.values() for e in bucket]
         all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, typed_epics)
@@ -6795,9 +6833,6 @@ class ReportsMixin:
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
 
-        blocking = self._fetch_blocking_graph(group)
-        blocking["generated_at"] = ts
-        blocking["group"]        = self.parent_group
         (data_dir / "blocking.json").write_text(
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
