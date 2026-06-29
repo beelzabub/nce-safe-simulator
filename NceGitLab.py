@@ -223,10 +223,16 @@ class NceGitLab(
         self.default_history_close_rate_min     = _bd.get("history_close_rate_min",     0.70)
         self.default_history_close_rate_max     = _bd.get("history_close_rate_max",     0.95)
         self.default_current_pi_issue_close_pct = _bd.get("current_pi_issue_close_pct", 0.50)
+        # Seed a realistic amount of blocking during lorem bootstrap. Toggle off via
+        # config; percentages reflect a normal portfolio mid-PI (not block-heavy).
+        self.default_seed_blocks          = _bd.get("seed_blocks",          True)
+        self.default_epic_block_percent   = _bd.get("epic_block_percent",   12)
+        self.default_issue_block_percent  = _bd.get("issue_block_percent",  8)
 
         _td = config.get("defaults", {}).get("tools", {})
         self.default_close_percent             = _td.get("close_percent",                30.0)
         self.default_generate_blocks_count     = _td.get("generate_epic_blocks_count",   10)
+        self.default_generate_issue_blocks_count = _td.get("generate_issue_blocks_count", 10)
         self.default_simulate_pi_percent       = _td.get("simulate_pi_progress_percent", 50.0)
         self.default_generate_issues_count     = _td.get("generate_issues_count",        5)
         self.default_weight_drift_threshold    = _td.get("weight_drift_threshold",       20.0)
