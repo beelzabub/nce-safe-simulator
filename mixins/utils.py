@@ -741,6 +741,11 @@ class UtilitiesMixin:
                 "title":            epic.title,
                 "description":      getattr(epic, 'description', None),
                 "state":            epic.state.capitalize(),
+                # Provisional blocked_by_count from the legacy GraphQL blockedByCount
+                # (plus a work-items widget fallback).  When a data snapshot is built,
+                # _fetch_blocking_graph reconciles this against the REST /related_epics
+                # graph so the summary counts and the blocking report detail agree
+                # (Refs #107).
                 "blocked_by_count": gql.get("blockedByCount") or (1 if (gql.get("blocked") or wi_blk.get("blocked")) else 0),
                 "blocks_count":     gql.get("blockingCount", 0) or wi_blk.get("blockingCount", 0),
                 "web_url":          epic.web_url,

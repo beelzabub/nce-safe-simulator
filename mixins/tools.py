@@ -1229,7 +1229,45 @@ class ToolsMixin:
             print("Not enough epics to create blocking relationships (need at least 2).")
             return
 
-        link_types   = ["blocks", "is_blocked_by"]
+        # Keep the WSJF "Epic at Risk" column distinct from the "Blocked Item"
+        # column (Refs #108). The blocked side is always a Capability/Feature that
+        # rolls up to a correctly-labelled Portfolio Epic, so the report's ancestor
+        # walk (_portfolio_ancestors) resolves a real Portfolio Epic instead of
+        # silently collapsing the blocked item into its own "Epic at Risk".
+        pe_type    = self.EPIC_TYPE_DISPLAY_NAMES[0]
+        epic_by_id = {epic.id: epic for _, epic in all_epics}
+        parent_of  = {epic.id: epic.parent_id for _, epic in all_epics
+                      if getattr(epic, "parent_id", None)}
+
+        def _etype(epic):
+            labels = getattr(epic, "labels", []) or []
+            for t in self.EPIC_TYPE_DISPLAY_NAMES:
+                if t in labels:
+                    return t
+            return "Unknown"
+
+        def _has_portfolio_ancestor(epic):
+            cur, seen = epic.id, set()
+            while cur in parent_of:
+                cur = parent_of[cur]
+                if cur in seen:
+                    break
+                seen.add(cur)
+                node = epic_by_id.get(cur)
+                if node is not None and _etype(node) == pe_type:
+                    return True
+            return False
+
+        # Eligible "blocked" items: non-Portfolio-Epic items that roll up to a
+        # Portfolio Epic. Fall back to the full set when the hierarchy has none
+        # (e.g. a flat or unlinked group) so the tool still produces blocks.
+        blockable = [(grp, epic) for grp, epic in all_epics
+                     if _etype(epic) != pe_type and _has_portfolio_ancestor(epic)]
+        if not blockable:
+            print("  Warning: no Capability/Feature with a Portfolio Epic ancestor found — "
+                  "falling back to random blocking targets (WSJF 'Epic at Risk' may collapse).")
+            blockable = list(all_epics)
+
         created      = 0
         skipped      = 0
         errors       = 0
@@ -1240,22 +1278,23 @@ class ToolsMixin:
         while created < count and attempts < max_attempts:
             attempts += 1
 
-            source_grp, source_epic = random.choice(all_epics)
-            target_grp, target_epic = random.choice(all_epics)
+            blocked_grp, blocked_epic = random.choice(blockable)
+            blocker_grp, blocker_epic = random.choice(all_epics)
 
-            if source_epic.id == target_epic.id:
+            if blocked_epic.id == blocker_epic.id:
                 continue
-            pair = tuple(sorted([source_epic.id, target_epic.id]))
+            pair = tuple(sorted([blocked_epic.id, blocker_epic.id]))
             if pair in linked_pairs:
                 skipped += 1
                 continue
 
             linked_pairs.add(pair)
-            link_type = random.choice(link_types)
+            # Direction is fixed: the eligible Capability/Feature is blocked *by*
+            # the other epic, so the blocked side never lands on a Portfolio Epic.
             label = (
-                f"Epic #{source_epic.iid} '{source_epic.title[:40]}' ({source_grp.full_path})"
-                f"  --[{link_type}]-->  "
-                f"Epic #{target_epic.iid} '{target_epic.title[:40]}' ({target_grp.full_path})"
+                f"Epic #{blocked_epic.iid} '{blocked_epic.title[:40]}' ({blocked_grp.full_path})"
+                f"  --[is_blocked_by]-->  "
+                f"Epic #{blocker_epic.iid} '{blocker_epic.title[:40]}' ({blocker_grp.full_path})"
             )
 
             if dry_run:
@@ -1263,11 +1302,11 @@ class ToolsMixin:
                 created += 1
                 continue
 
-            url  = f"{self.url}/api/v4/groups/{source_grp.id}/epics/{source_epic.iid}/related_epics"
+            url  = f"{self.url}/api/v4/groups/{blocked_grp.id}/epics/{blocked_epic.iid}/related_epics"
             resp = session.post(url, json={
-                "target_group_id": target_grp.id,
-                "target_epic_iid": target_epic.iid,
-                "link_type":       link_type,
+                "target_group_id": blocker_grp.id,
+                "target_epic_iid": blocker_epic.iid,
+                "link_type":       "is_blocked_by",
             })
 
             if resp.status_code in (200, 201):
