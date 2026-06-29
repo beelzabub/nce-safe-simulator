@@ -538,6 +538,8 @@ class BootstrapMixin:
         extra = list(all_portfolio_epics) + list(all_vs_caps)
         self._simulate_history(art_items_map, extra_epics=extra)
 
+        self._seed_lorem_blocks()
+
     def _simulate_history(self, art_items_map, extra_epics=None):
         """Close past-PI epics per ART at a realistic reliability rate; partially close current-PI issues.
         Then apply lifecycle:: labels to every epic based on its final state and PI bucket."""
@@ -662,6 +664,36 @@ class BootstrapMixin:
         # immediately useful after a fresh create.
         print("\n--- WSJF label seeding ---")
         self._tool_set_wsjf_labels(percent=70)
+
+    def _seed_lorem_blocks(self, dry_run=False):
+        """Seed a realistic amount of epic→epic and issue→issue blocking after a lorem
+        create, so the blocking and WSJF 'at risk' reports have data out of the box.
+
+        Gated by the ``defaults.bootstrap.seed_blocks`` config flag (default True);
+        volumes are a percentage of the seeded population to mimic a normal portfolio
+        mid-PI rather than a block-heavy one.
+        """
+        if not getattr(self, "default_seed_blocks", True):
+            print("\n--- Block seeding skipped (seed_blocks=false) ---")
+            return
+
+        print("\n--- Block seeding (epic + issue) ---")
+        group   = self.get_group_by_name(self.parent_group)
+        session = self._make_session()
+
+        all_epics = self._collect_all_epics(group)
+        epic_pct  = getattr(self, "default_epic_block_percent", 12)
+        epic_n    = max(1, round(len(all_epics) * epic_pct / 100)) if all_epics else 0
+        print(f"\nEpic blocks: targeting {epic_n} ({epic_pct}% of {len(all_epics)} epics)")
+        if epic_n:
+            self._create_epic_blocks(session, all_epics, epic_n, dry_run)
+
+        all_issues = self._collect_open_issues(group)
+        issue_pct  = getattr(self, "default_issue_block_percent", 8)
+        issue_n    = max(1, round(len(all_issues) * issue_pct / 100)) if all_issues else 0
+        print(f"\nIssue blocks: targeting {issue_n} ({issue_pct}% of {len(all_issues)} open issues)")
+        if issue_n:
+            self._create_issue_blocks(session, all_issues, issue_n, dry_run)
 
     def create_safe_hierarchy(self, target_path=None):
         if target_path is None:
