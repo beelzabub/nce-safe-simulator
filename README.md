@@ -179,11 +179,15 @@ Start from the template (`cp config.example.json config.json`) and edit your loc
             "vs_caps_per_vs":       {"min": 2, "max": 5, "desired": 3},
             "art_caps_per_art":     {"min": 2, "max": 6, "desired": 4},
             "features_per_team":    {"min": 3, "max": 6, "desired": 4},
-            "direct_feature_ratio": 0.70
+            "direct_feature_ratio": 0.70,
+            "seed_blocks":          true,
+            "epic_block_percent":   12,
+            "issue_block_percent":  8
         },
         "tools": {
             "close_percent":                30.0,
             "generate_epic_blocks_count":   10,
+            "generate_issue_blocks_count":  10,
             "simulate_pi_progress_percent": 50.0,
             "generate_issues_count":        5,
             "weight_drift_threshold":       20.0,
@@ -249,6 +253,9 @@ At run time `--create` and `--scaffold` resolve each range to a single integer a
 | `art_caps_per_art` | `{"min":2,"max":6,"desired":4}` | Capabilities per ART |
 | `features_per_team` | `{"min":3,"max":6,"desired":4}` | Features per Team |
 | `direct_feature_ratio` | `0.70` | Fraction of Features linked directly to Portfolio Epics; remainder link via Capability chain |
+| `seed_blocks` | `true` | Seed epic→epic and issue→issue blocking during `--create` so the blocking and WSJF _at risk_ reports have data out of the box |
+| `epic_block_percent` | `12` | Percent of epics to block when `seed_blocks` is on (a normal-portfolio level, not block-heavy) |
+| `issue_block_percent` | `8` | Percent of open issues to block when `seed_blocks` is on |
 
 #### `defaults.tools`
 
@@ -256,6 +263,7 @@ At run time `--create` and `--scaffold` resolve each range to a single integer a
 |---|---|---|
 | `close_percent` | `30.0` | Default % for `close-percent` tool |
 | `generate_epic_blocks_count` | `10` | Default block count for `generate-epic-blocks` |
+| `generate_issue_blocks_count` | `10` | Default block count for `generate-issue-blocks` |
 | `simulate_pi_progress_percent` | `50.0` | Default % closure for `simulate-pi-progress` |
 | `generate_issues_count` | `5` | Default issues per Feature for `generate-issues` |
 | `weight_drift_threshold` | `20.0` | Default drift % for `weight-drift-check` |
@@ -464,6 +472,15 @@ After the close pass, `lifecycle::` labels are applied deterministically to ever
 | Open epic, no PI label | `lifecycle::funnel` |
 
 This means the Epic Lifecycle / Portfolio Kanban report shows meaningful data immediately after `--create` without needing to run `set-lifecycle-labels` separately.
+
+### Block seeding
+
+Finally, when `defaults.bootstrap.seed_blocks` is `true` (the default), `--create` seeds a realistic amount of dependency data so the blocking and WSJF _at risk_ reports are populated out of the box:
+
+- **Epic→epic** blocks on `epic_block_percent` (default 12%) of epics, and
+- **Issue→issue** `is_blocked_by` links on `issue_block_percent` (default 8%) of open issues.
+
+Percentages mimic a normal portfolio mid-PI rather than a block-heavy one. Set `seed_blocks` to `false` to skip this pass, or use the `generate-epic-blocks` / `generate-issue-blocks` tools to add or remove blocks afterward.
 
 ---
 
@@ -700,6 +717,7 @@ The same diagnostic output is automatically appended as a collapsible **🔧 Env
 |---|---|
 | `generate-issues` | Create issues in team backlog projects linked to Feature epics |
 | `generate-epic-blocks` | Create or remove blocking relationships between epics. The blocked side is restricted to Capabilities/Features that roll up to a Portfolio Epic (link direction `is_blocked_by`), so the WSJF _Epic at Risk_ column resolves to a distinct ancestor rather than collapsing onto the blocked item (Refs #108) |
+| `generate-issue-blocks` | Create or remove `is_blocked_by` blocking relationships between issues (positive count creates, negative removes). Feeds the Issue Blocking report (Refs #113) |
 | `generate-roam-risks` | Create ROAM risk issues, each related to a random number of epics |
 | `generate-risk-reasons` | Create Behind Schedule / Past Due / Child Overdue / Blocked conditions on a random % of open epics |
 | `close-percent` | Randomly close N% of open epics and issues (simulate PI progress) |
