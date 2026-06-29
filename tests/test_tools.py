@@ -166,6 +166,50 @@ def test_generate_epic_blocks_does_not_block_resolved_epics():
     session.post.assert_not_called()
 
 
+def _issue_pairs(n):
+    """Build n (project, issue) pairs with distinct project ids and issue iids."""
+    pairs = []
+    for i in range(1, n + 1):
+        proj = MagicMock()
+        proj.id = 500 + i
+        proj.path = f"team-{i}"
+        iss = _make_issue_mock(id=200 + i, iid=i, title=f"Issue {i}")
+        pairs.append((proj, iss))
+    return pairs
+
+
+def test_generate_issue_blocks_creates_blocking_relationships():
+    h = ToolsHarness()
+    session = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 201
+    session.post.return_value = resp
+
+    created = h._create_issue_blocks(session, _issue_pairs(4), count=2, dry_run=False)
+
+    assert session.post.call_count == 2
+    assert created == 2
+
+
+def test_generate_issue_blocks_dry_run_makes_no_calls():
+    h = ToolsHarness()
+    session = MagicMock()
+
+    h._create_issue_blocks(session, _issue_pairs(4), count=2, dry_run=True)
+
+    session.post.assert_not_called()
+
+
+def test_generate_issue_blocks_needs_at_least_two_issues():
+    h = ToolsHarness()
+    session = MagicMock()
+
+    created = h._create_issue_blocks(session, _issue_pairs(1), count=3, dry_run=False)
+
+    assert created == 0
+    session.post.assert_not_called()
+
+
 def _safe_hierarchy_epics(grp):
     """A correctly-labelled SAFe slice: Epic → Capability → Feature (+ a blocker Feature)."""
     pe    = _make_epic_mock(id=1, iid=1, title="Portfolio Epic",  labels=["Epic"], parent_id=None)

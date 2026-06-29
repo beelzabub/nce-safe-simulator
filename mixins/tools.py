@@ -95,6 +95,15 @@ TOOLS = [
         ],
     },
     {
+        "key":         "generate-issue-blocks",
+        "description": "Randomly create or remove blocking relationships between issues (negative count = remove)",
+        "method":      "_tool_generate_issue_blocks",
+        "params": [
+            {"name": "count",   "prompt": "Relationships to create (positive) or remove (negative)", "type": int,  "default": 10},
+            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False},
+        ],
+    },
+    {
         "key":         "generate-issues",
         "description": "Create issues in team backlog projects linked to Feature epics",
         "method":      "_tool_generate_issues",
@@ -459,7 +468,7 @@ TOOL_CATEGORIES = [
         "name":        "Seed Data",
         "description": "Generate and simulate realistic test conditions",
         "tools": [
-            "generate-issues", "generate-epic-blocks", "generate-roam-risks",
+            "generate-issues", "generate-epic-blocks", "generate-issue-blocks", "generate-roam-risks",
             "generate-risk-reasons", "close-percent", "simulate-pi-progress",
             "set-epic-states", "orphan-epics", "orphan-issues",
         ],
@@ -1191,6 +1200,161 @@ class ToolsMixin:
 
         print(f"\nOverall: {'PASS ✓' if all_pass else 'FAIL ✗'}")
         return all_pass
+
+    def _collect_all_epics(self, group):
+        """Walk the group hierarchy → [(group_obj, epic_obj), ...] owned by each group."""
+        all_epics = []
+
+        def _walk(grp):
+            for epic in grp.epics.list(all=True):
+                if getattr(epic, 'group_id', grp.id) == grp.id:
+                    all_epics.append((grp, epic))
+            for sg in grp.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id))
+
+        _walk(group)
+        return all_epics
+
+    def _collect_open_issues(self, group):
+        """Return [(project_obj, issue_obj), ...] for all open issues across the group's projects."""
+        issues = []
+        for proj in group.projects.list(all=True, include_subgroups=True):
+            try:
+                full_p = self.gl.projects.get(proj.id)
+                for iss in full_p.issues.list(all=True, state="opened"):
+                    issues.append((full_p, iss))
+            except Exception as exc:
+                print(f"  WARNING: {proj.path}: {exc}")
+        return issues
+
+    def _tool_generate_issue_blocks(self, count=None, dry_run=False):
+        """Create (positive count) or remove (negative count) blocking relationships between issues."""
+        if count is None:
+            count = self.default_generate_issue_blocks_count
+
+        group   = self.get_group_by_name(self.parent_group)
+        session = self._make_session()
+
+        print(f"Group: {group.full_path}")
+        if dry_run:
+            print("(dry-run — no changes will be saved)")
+
+        print("\nCollecting open issues...")
+        all_issues = self._collect_open_issues(group)
+        print(f"  Found {len(all_issues)} open issues")
+
+        if count < 0:
+            self._remove_issue_blocks(session, all_issues, abs(count), dry_run)
+        else:
+            self._create_issue_blocks(session, all_issues, count, dry_run)
+
+    def _create_issue_blocks(self, session, all_issues, count, dry_run):
+        """Create up to `count` random issue→issue ``is_blocked_by`` links. Returns number created.
+
+        Shared by the ``generate-issue-blocks`` tool, the ``generate-risk-reasons``
+        Blocked condition, and lorem bootstrap seeding.
+        """
+        if count <= 0:
+            return 0
+        if len(all_issues) < 2:
+            print("  Not enough issues to create blocking relationships (need at least 2).")
+            return 0
+
+        created = skipped = errors = 0
+        linked_pairs = set()
+        attempts     = 0
+        max_attempts = count * 10
+
+        while created < count and attempts < max_attempts:
+            attempts += 1
+            target_proj,  target_issue  = random.choice(all_issues)
+            blocker_proj, blocker_issue = random.choice(all_issues)
+
+            if target_proj.id == blocker_proj.id and target_issue.iid == blocker_issue.iid:
+                continue
+            pair = tuple(sorted([(target_proj.id, target_issue.iid),
+                                 (blocker_proj.id, blocker_issue.iid)]))
+            if pair in linked_pairs:
+                skipped += 1
+                continue
+            linked_pairs.add(pair)
+
+            label = (f"#{target_issue.iid} '{target_issue.title[:45]}'"
+                     f"  <--[blocked by]--  "
+                     f"#{blocker_issue.iid} '{blocker_issue.title[:45]}'")
+
+            if dry_run:
+                print(f"  DRY  {label}")
+                created += 1
+                continue
+
+            url  = f"{self.url}/api/v4/projects/{target_proj.id}/issues/{target_issue.iid}/links"
+            resp = session.post(url, json={
+                "target_project_id": blocker_proj.id,
+                "target_issue_iid":  blocker_issue.iid,
+                "link_type":         "is_blocked_by",
+            })
+            if resp.status_code in (200, 201):
+                print(f"  BLOCKED  {label}")
+                created += 1
+            elif resp.status_code in (409, 422):
+                # 409 = duplicate link; 422 = invalid target — retry a different pair
+                linked_pairs.discard(pair)
+            else:
+                print(f"  ERROR  [{resp.status_code}] #{target_issue.iid}: {resp.text[:120]}")
+                errors += 1
+
+        print(f"\n  Issues blocked: {created}  Skipped (duplicate): {skipped}  Errors: {errors}")
+        if dry_run:
+            print("  (dry-run — no changes saved)")
+        return created
+
+    def _remove_issue_blocks(self, session, all_issues, count, dry_run):
+        """Remove up to `count` existing issue→issue ``is_blocked_by`` links. Returns number removed."""
+        print(f"\nCollecting existing issue blocking relationships (to remove {count})...")
+        seen_link_ids = set()
+        links = []  # (proj_id, issue_iid, link_id, label)
+
+        for proj, iss in all_issues:
+            url  = f"{self.url}/api/v4/projects/{proj.id}/issues/{iss.iid}/links"
+            resp = session.get(url)
+            if not resp.ok:
+                continue
+            for link in resp.json():
+                if link.get("link_type") != "is_blocked_by":
+                    continue
+                link_id = link.get("issue_link_id")
+                if not link_id or link_id in seen_link_ids:
+                    continue
+                seen_link_ids.add(link_id)
+                label = (f"Issue #{iss.iid} '{iss.title[:40]}'"
+                         f"  --[is_blocked_by]-->  "
+                         f"#{link.get('iid', '?')} '{link.get('title', '')[:40]}'")
+                links.append((proj.id, iss.iid, link_id, label))
+
+        print(f"  Found {len(links)} issue blocking relationship(s)")
+        if not links:
+            print("Nothing to remove.")
+            return 0
+
+        sample = random.sample(links, min(count, len(links)))
+        if dry_run:
+            for _, _, _, label in sample:
+                print(f"  DRY   REMOVE {label}")
+            print(f"\nDry run — {len(sample)} relationship(s) would be removed.")
+            return len(sample)
+
+        def _delete_link(link):
+            proj_id, issue_iid, link_id, label = link
+            url  = f"{self.url}/api/v4/projects/{proj_id}/issues/{issue_iid}/links/{link_id}"
+            resp = session.delete(url)
+            if resp.status_code not in (200, 204):
+                raise RuntimeError(f"[{resp.status_code}] {resp.text[:120]}")
+            print(f"  REMOVED {label}")
+
+        removed, errors = self._parallel_delete(sample, _delete_link)
+        print(f"\nDone.  Removed: {removed}  Errors: {errors}")
+        return removed
 
     def _tool_generate_epic_blocks(self, count=None, dry_run=False):
         """Create (positive count) or remove (negative count) blocking relationships between epics."""
@@ -3333,46 +3497,12 @@ class ToolsMixin:
                         errors += 1
             print(f"\n  Epics blocked: {updated}  Errors: {errors}")
 
-            # Issues: sample open issues and add "blocked by" a random other issue
+            # Issues: create blocks on ~percent of open issues (shared helper)
             issue_eligible = list(all_open_issues)
-            k      = max(0, round(len(issue_eligible) * percent / 100))
-            sample = random.sample(issue_eligible, min(k, len(issue_eligible)))
+            k = max(0, round(len(issue_eligible) * percent / 100))
             print(f"  Eligible issues: {len(issue_eligible)}")
-            print(f"  Targeting {len(sample)}\n")
-            updated = errors = 0
-            for target_proj, target_issue in sample:
-                valid_issue_blockers = [
-                    (p, iss) for p, iss in issue_eligible
-                    if not (p.id == target_proj.id and iss.iid == target_issue.iid)
-                ]
-                if not valid_issue_blockers:
-                    print(f"  SKIP  #{target_issue.iid} (no valid blocker)")
-                    continue
-                blocker_proj, blocker_issue = random.choice(valid_issue_blockers)
-                label = (
-                    f"#{target_issue.iid} '{target_issue.title[:45]}'"
-                    f"  <--[blocked by]--  "
-                    f"#{blocker_issue.iid} '{blocker_issue.title[:45]}'"
-                )
-                if dry_run:
-                    print(f"  DRY  {label}")
-                    updated += 1
-                else:
-                    url  = f"{self.url}/api/v4/projects/{target_proj.id}/issues/{target_issue.iid}/links"
-                    resp = session.post(url, json={
-                        "target_project_id": blocker_proj.id,
-                        "target_issue_iid":  blocker_issue.iid,
-                        "link_type":         "is_blocked_by",
-                    })
-                    if resp.status_code in (200, 201):
-                        print(f"  BLOCKED  {label}")
-                        updated += 1
-                    elif resp.status_code == 409:
-                        print(f"  SKIP (already linked)  #{target_issue.iid}")
-                    else:
-                        print(f"  ERROR [{resp.status_code}] #{target_issue.iid}: {resp.text[:120]}")
-                        errors += 1
-            print(f"\n  Issues blocked: {updated}  Errors: {errors}")
+            print(f"  Targeting {k}")
+            self._create_issue_blocks(session, issue_eligible, k, dry_run)
 
         print("\nDone.")
         if dry_run:
