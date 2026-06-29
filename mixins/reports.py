@@ -3822,10 +3822,31 @@ class ReportsMixin:
             blocked  = rel["blocked_epic"]
             blockers = rel.get("blocked_by", [])
             ancs     = rel.get("at_risk_portfolio_epics", [])
+            # A non-Portfolio-Epic blocked item with no Portfolio Epic ancestor
+            # (orphaned data) keeps its row but leaves "Epic at Risk" blank and is
+            # excluded from the BV rollup, rather than collapsing the column onto the
+            # blocked item (Refs #108). See the WSJF markdown renderer for the mirror.
             pe_candidates = (
-                ([blocked] + ancs) if blocked.get("type") == self.EPIC_TYPE_DISPLAY_NAMES[0] else (ancs or [blocked])
+                ([blocked] + ancs) if blocked.get("type") == self.EPIC_TYPE_DISPLAY_NAMES[0] else ancs
             )
             b_type = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
+            blocker_list = [
+                {"title": b["title"], "url": b.get("web_url", "")} for b in blockers
+            ]
+
+            if not pe_candidates:
+                detail_rows.append({
+                    "pe_title":      "",
+                    "pe_url":        "",
+                    "pe_bv":         None,
+                    "blocked_title": blocked["title"],
+                    "blocked_url":   blocked.get("web_url", ""),
+                    "blocked_type":  b_type,
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blockers":      blocker_list,
+                })
+                continue
+
             for pe in pe_candidates:
                 pe_id  = pe.get("id") or pe.get("id_int")
                 pe_bv  = bv_by_id.get(pe_id)
@@ -3838,9 +3859,7 @@ class ReportsMixin:
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
                     "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
-                    "blockers": [
-                        {"title": b["title"], "url": b.get("web_url", "")} for b in blockers
-                    ],
+                    "blockers":      blocker_list,
                 })
                 if pe_id not in seen_pe_bv:
                     seen_pe_bv[pe_id] = pe_bv
@@ -5697,9 +5716,19 @@ class ReportsMixin:
             blockers = rel.get("blocked_by", [])
             ancs     = rel.get("at_risk_portfolio_epics", [])
 
-            # If the blocked item is itself a Portfolio Epic, treat it as its own ancestor
+            # Resolve the "Epic at Risk" (Portfolio Epic) distinctly from the
+            # "Blocked Item" (Capability/Feature). Expected hierarchy: the blocked
+            # Cap/Feature rolls up to a Portfolio Epic, so `ancs` carries the at-risk
+            # Portfolio Epic(s) and the columns stay distinct (Refs #108).
+            #   • Blocked item IS a Portfolio Epic → it is its own at-risk epic.
+            #   • Otherwise → use the resolved ancestors.
+            # If a non-Portfolio-Epic blocked item has NO Portfolio Epic ancestor
+            # (orphaned data), keep the row but leave "Epic at Risk"/BV blank and
+            # exclude it from the BV rollup rather than collapsing the column onto
+            # the blocked item (Refs #108). The data generator avoids creating such
+            # blocks, so this only surfaces genuinely orphaned real-world data.
             _t0 = self.EPIC_TYPE_DISPLAY_NAMES[0]
-            pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else (ancs or [blocked])
+            pe_candidates = ([blocked] + ancs) if blocked.get("type") == _t0 else ancs
 
             blocker_str  = ", ".join(
                 _mlink(b['title'], b['web_url']) if b.get("web_url") else b["title"]
@@ -5709,6 +5738,12 @@ class ReportsMixin:
             b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
             bl_link = (_mlink(blocked['title'], blocked['web_url'])
                        if blocked.get("web_url") else blocked["title"])
+
+            if not pe_candidates:
+                # Orphan: no Portfolio Epic at risk — blank "Epic at Risk"/BV and
+                # omit from the rollup (pe_id None keeps it out of seen_pe_*).
+                bv_rows.append((None, "", None, bl_link, f"{b_icon} {b_type}", blocker_str))
+                continue
 
             for pe in pe_candidates:
                 pe_id   = pe.get("id") or pe.get("id_int")
