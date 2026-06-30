@@ -26,7 +26,7 @@ import requests
 # Helpers
 # ---------------------------------------------------------------------------
 
-CDK_JSON = Path(__file__).parent.parent / "cdk" / "cdk.json"
+CDK_JSON = Path(__file__).parent.parent / "cdk" / "cdk-eks.json"
 
 
 def _ctx():
@@ -58,6 +58,8 @@ def _kubectl(*args, check=True):
 
 @pytest.fixture(scope="session")
 def ctx():
+    if not CDK_JSON.exists():
+        pytest.skip(f"{CDK_JSON.name} not present — no deployed stack")
     return _ctx()
 
 
@@ -66,10 +68,18 @@ def eks_kubeconfig(ctx):
     """Ensure kubectl is pointed at the right cluster before any test runs."""
     cluster = ctx.get("eks_cluster_name", "nce-eks")
     region = _region()
-    subprocess.run(
-        ["aws", "eks", "update-kubeconfig", "--name", cluster, "--region", region],
-        capture_output=True, check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["aws", "eks", "update-kubeconfig", "--name", cluster, "--region", region],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        pytest.skip("aws CLI not available — no deployed stack")
+    if result.returncode != 0:
+        pytest.skip(
+            f"could not configure kubectl for cluster '{cluster}' — "
+            "no AWS credentials or no deployed stack"
+        )
 
 
 # ---------------------------------------------------------------------------
