@@ -191,6 +191,54 @@ class BootstrapMixin:
         chosen = random.choices(populations, weights=[w / total for w in weights])[0]
         return random.choice(chosen)
 
+    def _piid_lifecycle_buckets(self):
+        """Map PIID labels to lifecycle buckets (cached per run). Mirrors the
+        bucketing in _simulate_history's lifecycle-label pass so an epic's
+        created_at dating and its later lifecycle:: label agree."""
+        cached = getattr(self, "_pi_lifecycle_buckets_cache", None)
+        if cached is not None:
+            return cached
+        today = date.today()
+        past, current = [], []
+        for p in self.PIID_LABELS:
+            s, e = self._pi_dates_from_label(p)
+            if e is not None and e < today:
+                past.append(p)
+            elif s is not None and s <= today <= e:
+                current.append(p)
+        future        = [p for p in self.PIID_LABELS if p not in past and p not in current]
+        future_sorted = sorted(future, key=lambda p: (self._pi_dates_from_label(p)[0] or date.min))
+        buckets = {
+            "past":      set(past),
+            "current":   set(current),
+            "backlog":   set(future_sorted[:1]),    # nearest future PI
+            "analyzing": set(future_sorted[1:]),    # farther-out future PIs
+        }
+        self._pi_lifecycle_buckets_cache = buckets
+        return buckets
+
+    def _lorem_created_at(self, piid_label):
+        """Return a lifecycle-aware random created_at (ISO8601) so generated epics
+        populate the Epic Lifecycle stuck-item thresholds and Flow Metrics age
+        distributions (Refs #82). The age range is picked from the epic's PIID
+        bucket; for the threshold-bearing states (funnel/analyzing/backlog) the
+        range is 2x the configured stuck threshold, so ~half of those epics land
+        past it and exercise both the stuck and not-stuck render paths."""
+        st = getattr(self, "STUCK_THRESHOLDS", {})
+        b  = self._piid_lifecycle_buckets()
+        if piid_label in b["past"]:
+            max_days = 365                                       # done/implementing — no threshold
+        elif piid_label in b["current"]:
+            max_days = 120                                       # implementing — no threshold
+        elif piid_label in b["backlog"]:
+            max_days = 2 * st.get("lifecycle::backlog",   60)
+        elif piid_label in b["analyzing"]:
+            max_days = 2 * st.get("lifecycle::analyzing", 30)
+        else:
+            max_days = 2 * st.get("lifecycle::funnel",    90)
+        age = random.randint(0, max_days)
+        return (date.today() - timedelta(days=age)).isoformat() + "T12:00:00Z"
+
     def _lorem_epics_in_group(self, group, count, allowed_types=None):
         def next_monday_on_or_after(d):
             while d.weekday() != 0:
@@ -229,6 +277,7 @@ class BootstrapMixin:
             epic = group.epics.create({
                 'title':       lorem_title,
                 'description': lorem.paragraph(),
+                'created_at':  self._lorem_created_at(piid_label),
                 'start_date':  start.isoformat(),
                 'due_date':    due.isoformat(),
                 'labels':      [project_label, piid_label, epic_label],
