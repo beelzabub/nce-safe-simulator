@@ -806,6 +806,61 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ---
 
+## Single-Box Deployment (nce-safe-sim.com)
+
+The lightest deployment runs the simulator on a single EC2 instance and serves it
+straight from the public domain. It is the cheapest option and doubles as the
+development box.
+
+```
+nce-safe-sim.com / www  ──Route 53 A──▶  Elastic IP
+        │
+        ▼
+   EC2 instance ── host :80/:443 ──▶  caddy container
+                                          │  reverse_proxy over the nce-net network
+                                          ▼
+                                     nce-safe-sim container :80 (uvicorn / FastAPI)
+```
+
+[Caddy](https://caddyserver.com/) terminates TLS, automatically provisioning and
+renewing a real **Let's Encrypt** certificate (90-day, auto-renewed) for the apex
+and `www`. The app container is internal-only — it is never published on a host
+port; all traffic reaches it through Caddy. Both containers run with
+`--restart unless-stopped`, so they return after a reboot.
+
+> **Cost control.** The instance is governed by an EventBridge start/stop schedule.
+> While it is running the domain serves the simulator; while it is stopped the site
+> is simply unavailable — there is no always-on standby, by design.
+
+### Prerequisites
+
+- DNS: Route 53 A records for `nce-safe-sim.com` and `www` pointing at the instance's Elastic IP.
+- Security group: inbound `80` and `443` open (80 is required for Let's Encrypt's HTTP-01 challenge).
+- `config.json` present in the project root (carries `private_token`), or `GITLAB_TOKEN` exported.
+
+### First-time bring-up
+
+```bash
+make deploy-local        # builds the image, starts app + Caddy, issues certs
+```
+
+### Iterative development workflow
+
+Edit code, then push the change to the live site with a single command:
+
+```bash
+make redeploy            # rebuild image + swap the app container in place
+```
+
+`redeploy.sh` rebuilds the image (Docker layer cache keeps backend-only changes
+fast) and recreates **only** the app container — Caddy, the issued certificates,
+and the domain binding are left untouched, so the site at
+`https://nce-safe-sim.com` reflects the new code within about a minute with no
+TLS churn. Use `make deploy-local` only for a full bring-up or after changing the
+Caddy config (`deploy/Caddyfile`).
+
+---
+
 ## AWS Deployment
 
 The simulator runs on AWS in two configurations. **EKS (Kubernetes)** is recommended for production — managed node group, EFS persistent storage, CloudFront in front of the ALB. **ECS (Fargate)** is the simpler option for lower-traffic or short-lived deployments. Both share the same CDK project (`cdk/`), ECR image, SSM-stored config, EFS layout, and Grafana workspace.
