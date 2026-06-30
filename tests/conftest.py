@@ -120,6 +120,7 @@ class ReportsHarness(ReportsMixin, UtilitiesMixin):
     LIFECYCLE_LABELS        = ["Funnel", "Reviewing", "Analyzing", "Portfolio Backlog", "Implementing", "Done"]
     PIID_LABELS             = ["PIID::2025Q1", "PIID::2025Q2"]
     PROJECT_LABELS          = ["project::alpha", "project::beta"]
+    STUCK_THRESHOLDS        = {"lifecycle::funnel": 90, "lifecycle::analyzing": 30, "lifecycle::backlog": 60}
 
     def __init__(
         self,
