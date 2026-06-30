@@ -248,13 +248,22 @@ class BootstrapMixin:
         type_pool   = allowed_types or self.EPIC_TYPE_LABELS
         weight_pool = self.EPIC_TYPE_PLANNED_WEIGHTS
 
+        funnel_ratio = getattr(self, "default_funnel_ratio", 0.12)
         created = []
         for _ in range(count):
             piid_label    = self._weighted_piid_label()
             epic_label    = random.choice(type_pool)
             project_label = random.choice(self.PROJECT_LABELS)
 
-            pi_start, pi_end = self._pi_dates_from_label(piid_label)
+            # A fraction of epics are unplanned "funnel" ideas with no PIID — these
+            # are the only epics that reach lifecycle::funnel (Refs #82): the
+            # lifecycle pass routes a missing PIID to funnel, and _lorem_created_at
+            # dates them in the funnel range. Funnel is the SAFe pre-PI state, so a
+            # missing PIID is the correct model.
+            if random.random() < funnel_ratio:
+                piid_label = None
+
+            pi_start, pi_end = self._pi_dates_from_label(piid_label) if piid_label else (None, None)
             if pi_start:
                 pi_days = (pi_end - pi_start).days
                 start   = next_monday_on_or_after(
@@ -280,7 +289,7 @@ class BootstrapMixin:
                 'created_at':  self._lorem_created_at(piid_label),
                 'start_date':  start.isoformat(),
                 'due_date':    due.isoformat(),
-                'labels':      [project_label, piid_label, epic_label],
+                'labels':      [project_label, epic_label] + ([piid_label] if piid_label else []),
             })
             group.epics.update(epic.iid, {'title': f"{epic.iid} - {lorem_title}"})
             self._set_epic_weight(epic, weight)
