@@ -49,6 +49,25 @@
                 </div>
               </template>
 
+              <!-- file widget → file picker (uploaded before launch) -->
+              <template v-else-if="param.widget === 'file'">
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span v-if="!param.optional" class="required-mark">*</span>
+                  <span v-else class="optional-tag">optional</span>
+                </label>
+                <input
+                  type="file"
+                  class="field-input file-input"
+                  accept=".csv,.json"
+                  @change="onFileChange($event, param)"
+                />
+                <span v-if="values[param.name]" class="field-hint">
+                  Selected: {{ values[param.name] }}
+                </span>
+                <span v-else class="field-hint">Choose a .csv or .json file to upload</span>
+              </template>
+
               <!-- bool → toggle -->
               <template v-else-if="param.type === 'bool'">
                 <label class="toggle-label">
@@ -107,10 +126,12 @@
             class="dialog-conflict"
           />
 
+          <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
+
           <div class="dialog-footer">
             <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
-            <button class="btn-launch" :disabled="!isValid || blockers.length > 0" @click="submit">
-              Launch {{ formatKey(tool.key) }}
+            <button class="btn-launch" :disabled="!isValid || blockers.length > 0 || uploading" @click="submit">
+              {{ uploading ? 'Uploading…' : `Launch ${formatKey(tool.key)}` }}
             </button>
           </div>
         </template>
@@ -145,6 +166,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
+import { upload } from '../api.js'
 
 const props = defineProps({
   tool:     { type: Object, default: null },
@@ -154,6 +176,9 @@ const props = defineProps({
 const emit = defineEmits(['launch', 'cancel'])
 
 const values      = ref({})
+const fileObjects  = ref({})   // file-widget param name → chosen File (not persisted)
+const uploading    = ref(false)
+const uploadError  = ref('')
 const groupLocked = ref(true)
 const overlayDown = ref(false)
 const confirming  = ref(false)
@@ -162,11 +187,15 @@ const confirming  = ref(false)
 watch(() => props.tool, tool => {
   groupLocked.value = true
   confirming.value  = false
+  fileObjects.value = {}
+  uploading.value   = false
+  uploadError.value = ''
   if (!tool) { values.value = {}; return }
   const stored = loadStored(`nce-tool-params:${tool.key}`, {})
   const init = {}
   for (const p of tool.params) {
-    init[p.name] = Object.prototype.hasOwnProperty.call(stored, p.name)
+    // File widgets can't be persisted/pre-filled — always start empty.
+    init[p.name] = (p.widget !== 'file' && Object.prototype.hasOwnProperty.call(stored, p.name))
       ? stored[p.name]
       : _initValue(p)
   }
@@ -177,6 +206,7 @@ watch(() => props.tool, tool => {
 // so the dialog shows exactly what the config contains.
 function _initValue(p) {
   if (p.widget === 'group')                        return p.default ?? ''
+  if (p.widget === 'file')                         return ''
   if (p.type === 'bool')                           return p.default ?? false
   if (p.default !== null && p.default !== undefined) return p.default
   if (p.optional)                                  return null
@@ -192,11 +222,23 @@ const isValid = computed(() => {
   if (!props.tool) return false
   for (const p of props.tool.params) {
     if (p.optional || p.type === 'bool' || p.widget === 'group') continue
+    if (p.widget === 'file') {
+      if (!fileObjects.value[p.name]) return false
+      continue
+    }
     const v = values.value[p.name]
     if (v === '' || v === null || v === undefined) return false
   }
   return true
 })
+
+// Record the chosen File for a file-widget param (and show its name).
+function onFileChange(event, param) {
+  uploadError.value = ''
+  const file = event.target.files?.[0] || null
+  fileObjects.value[param.name] = file
+  values.value[param.name] = file ? file.name : ''
+}
 
 function formatKey(key) {
   const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
@@ -260,9 +302,36 @@ function submit() {
   doLaunch()
 }
 
-function doLaunch() {
-  saveStored(`nce-tool-params:${props.tool.key}`, values.value)
-  emit('launch', props.tool, _buildParams())
+async function doLaunch() {
+  const params = _buildParams()
+
+  // Upload any file-widget params first, then pass the saved server path along.
+  for (const p of props.tool.params) {
+    if (p.widget !== 'file') continue
+    const file = fileObjects.value[p.name]
+    if (!file) { delete params[p.name]; continue }
+    uploading.value = true
+    uploadError.value = ''
+    try {
+      const { path } = await upload(file)
+      params[p.name] = path
+    } catch (err) {
+      uploadError.value = `Upload failed: ${err.message || err}`
+      uploading.value = false
+      confirming.value = false
+      return
+    }
+    uploading.value = false
+  }
+
+  // Persist everything except non-serialisable file selections.
+  const toStore = { ...values.value }
+  for (const p of props.tool.params) {
+    if (p.widget === 'file') delete toStore[p.name]
+  }
+  saveStored(`nce-tool-params:${props.tool.key}`, toStore)
+
+  emit('launch', props.tool, params)
 }
 </script>
 
@@ -468,6 +537,29 @@ function doLaunch() {
 }
 .field-input:focus        { border-color: var(--action); }
 .field-input::placeholder { color: var(--text-3); }
+
+/* ── File picker ── */
+.file-input {
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.file-input::file-selector-button {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 4px;
+  padding: 3px 10px;
+  margin-right: 0.6rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.file-input::file-selector-button:hover { border-color: var(--action); color: var(--action); }
+
+.upload-error {
+  margin: 0 1.25rem 0.25rem;
+  color: #ef4444;
+  font-size: 0.8rem;
+}
 
 /* ── No-params message ── */
 .no-params {

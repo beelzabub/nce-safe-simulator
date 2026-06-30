@@ -143,7 +143,7 @@ TOOLS = [
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",
         "params": [
-            {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "optional": False},
+            {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "widget": "file", "optional": False},
             {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
             {"name": "dry_run",            "prompt": "Dry run? (validate and preview only)",                                    "type": bool, "default": False},
         ],
@@ -153,7 +153,7 @@ TOOLS = [
         "description": "Import issues from a CSV or JSON file with pre-flight validation",
         "method":      "import_issues",
         "params": [
-            {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "optional": False},
+            {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "widget": "file", "optional": False},
             {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
             {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
         ],
