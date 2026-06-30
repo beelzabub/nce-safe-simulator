@@ -735,6 +735,25 @@ def latest_data(filename: str):
         raise HTTPException(status_code=404, detail=f"{filename} not found in latest snapshot")
     return FileResponse(str(f), media_type="application/json")
 
+
+# ---------------------------------------------------------------------------
+# Export download endpoint — serves files written to public/exports by the
+# export-epics / export-issues tools as proper browser downloads (attachment),
+# so the web UI works on any host instead of a hardcoded localhost link.
+
+@app.get("/api/download/{filename}")
+def download_export(filename: str):
+    # Basename only — reject anything with path separators or traversal.
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename:
+        raise HTTPException(status_code=404, detail="Not found")
+    exports_dir = Path("public/exports").resolve()
+    target = (exports_dir / safe_name).resolve()
+    if target.parent != exports_dir or not target.is_file():
+        raise HTTPException(status_code=404, detail=f"{safe_name} not found")
+    media_type = "application/json" if target.suffix.lower() == ".json" else "text/csv"
+    return FileResponse(str(target), media_type=media_type, filename=safe_name)
+
 # ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
 
