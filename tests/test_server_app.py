@@ -253,6 +253,54 @@ def test_put_config_full_non_dict_returns_400(config_client):
 
 
 # ---------------------------------------------------------------------------
+# GET /api/download/{filename} — export browser download
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def download_client(tmp_path, monkeypatch):
+    """Client with a populated public/exports directory in a temp cwd."""
+    exports = tmp_path / "public" / "exports"
+    exports.mkdir(parents=True)
+    (exports / "demo-epics-export.csv").write_text("title\nHello\n", encoding="utf-8")
+    (exports / "demo-issues-export.json").write_text('[{"title": "Hi"}]', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    app.state.gl = None
+    return TestClient(app)
+
+
+def test_download_csv_sets_attachment_header(download_client):
+    resp = download_client.get("/api/download/demo-epics-export.csv")
+    assert resp.status_code == 200
+    disp = resp.headers["content-disposition"]
+    assert "attachment" in disp
+    assert "demo-epics-export.csv" in disp
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "Hello" in resp.text
+
+
+def test_download_json_media_type(download_client):
+    resp = download_client.get("/api/download/demo-issues-export.json")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.headers["content-type"].startswith("application/json")
+
+
+def test_download_missing_file_returns_404(download_client):
+    resp = download_client.get("/api/download/nope.csv")
+    assert resp.status_code == 404
+
+
+def test_download_rejects_path_traversal(download_client):
+    # A leaked secret one level up from public/exports must not be reachable.
+    from pathlib import Path
+    Path("secret.txt").write_text("top secret", encoding="utf-8")
+    resp = download_client.get("/api/download/..%2F..%2Fsecret.txt")
+    assert resp.status_code == 404
+    assert "top secret" not in resp.text
+
+
+# ---------------------------------------------------------------------------
 # _resolve_reuse_data — sentinel file guards
 # ---------------------------------------------------------------------------
 
