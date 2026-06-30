@@ -1,6 +1,7 @@
 import csv
 import json
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -79,6 +80,66 @@ class ImportExportMixin:
             return f"/api/download/{path.name}"
         except ValueError:
             return None
+
+    # ── Active-group override ──────────────────────────────────────────────────
+
+    @contextmanager
+    def _group_override(self, group):
+        """Temporarily retarget parent_group / gitlab_namespace for one run.
+
+        Accepts an override of the form ``namespace/group`` (URL-slug namespace
+        plus group display-name, e.g. ``saic-study-group/My Portfolio``) or just
+        ``group`` (display-name only — the configured namespace is kept). An
+        empty / None value leaves the configured group untouched.
+
+        The override is per-run only: the original instance state is always
+        restored on exit, so config.json is never mutated and other tools are
+        unaffected. CLI callers that pass no group keep the configured behaviour.
+        """
+        orig_ns  = getattr(self, "gitlab_namespace", None)
+        orig_grp = self.parent_group
+        if group and str(group).strip():
+            parts = str(group).strip().rsplit("/", 1)
+            if len(parts) == 2:
+                self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+            else:
+                self.parent_group = parts[0]
+        try:
+            yield
+        finally:
+            self.gitlab_namespace = orig_ns
+            self.parent_group     = orig_grp
+
+    def _resolve_import_target(self, create_missing, dry_run):
+        """Resolve the import target (root) group, optionally creating it.
+
+        Returns the group object, or None when import cannot proceed (caller
+        should return). With ``create_missing`` False and the group absent, a
+        clear, actionable error is printed. With ``create_missing`` True the
+        group is created via BootstrapMixin._get_or_create_root_group — except
+        under dry run, where the intent is reported but nothing is created.
+        """
+        group = self.get_group_by_name(self.parent_group)
+        if group is not None:
+            return group
+
+        ns     = getattr(self, "gitlab_namespace", None)
+        target = f"{ns}/{self.parent_group}" if ns else self.parent_group
+
+        if not create_missing:
+            print(f"ERROR: target group '{target}' does not exist. "
+                  f"Re-run with 'Create target group if missing' enabled to create "
+                  f"it, or choose an existing group.")
+            return None
+
+        if dry_run:
+            print(f"  [dry run] target group '{target}' does not exist — it would be "
+                  f"created before import. Uncheck 'Dry run' to create it and import.")
+            return None
+
+        print(f"  Target group '{target}' not found — creating it "
+              f"(create-if-missing enabled)...")
+        return self._get_or_create_root_group()
 
     # ── Validation primitives ─────────────────────────────────────────────────
 
@@ -202,7 +263,11 @@ class ImportExportMixin:
 
     # ── Epic export ───────────────────────────────────────────────────────────
 
-    def export_epics(self, output_path=None):
+    def export_epics(self, output_path=None, group=None):
+        with self._group_override(group):
+            return self._export_epics(output_path)
+
+    def _export_epics(self, output_path=None):
         group = self.get_group_by_name(self.parent_group)
         if not group:
             print(f"ERROR: group '{self.parent_group}' not found.")
@@ -417,7 +482,13 @@ class ImportExportMixin:
 
         return parent_map, orphan_rows
 
-    def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False):
+    def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
+                     group=None, create_missing=False):
+        with self._group_override(group):
+            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing)
+
+    def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
+                      create_missing=False):
         """
         Import epics from a CSV or JSON file.
 
@@ -463,7 +534,9 @@ class ImportExportMixin:
         if cleaned is None:
             return
 
-        root_group  = self.get_group_by_name(self.parent_group)
+        root_group = self._resolve_import_target(create_missing, dry_run)
+        if root_group is None:
+            return
         print("\n  Building group cache...")
         group_cache = self._build_group_cache(root_group)
         print(f"  {len(group_cache)} group(s) available as targets")
@@ -570,7 +643,11 @@ class ImportExportMixin:
 
     # ── Issue export ──────────────────────────────────────────────────────────
 
-    def export_issues(self, output_path=None):
+    def export_issues(self, output_path=None, group=None):
+        with self._group_override(group):
+            return self._export_issues(output_path)
+
+    def _export_issues(self, output_path=None):
         group = self.get_group_by_name(self.parent_group)
         if not group:
             print(f"ERROR: group '{self.parent_group}' not found.")
@@ -677,7 +754,13 @@ class ImportExportMixin:
         print(f"  Validation passed — {len(rows)} row(s) ready")
         return rows, 0
 
-    def import_issues(self, input_path=None, target_project_path=None, dry_run=False):
+    def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
+                      group=None, create_missing=False):
+        with self._group_override(group):
+            return self._import_issues(input_path, target_project_path, dry_run, create_missing)
+
+    def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
+                       create_missing=False):
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -704,7 +787,9 @@ class ImportExportMixin:
         if cleaned is None:
             return
 
-        root_group    = self.get_group_by_name(self.parent_group)
+        root_group = self._resolve_import_target(create_missing, dry_run)
+        if root_group is None:
+            return
         print("\n  Building project cache...")
         project_cache = self._build_project_cache(root_group)
         print(f"  {len(project_cache)} project(s) available as targets")
