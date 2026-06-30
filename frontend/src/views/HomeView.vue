@@ -130,6 +130,8 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
 /* ── Main pane ── */
 .main-pane {
   position: relative;
+  isolation: isolate;   /* own stacking context so the z-index:-1 watermark
+                           paints above this pane's --bg fill, not behind it */
   flex: 1;
   overflow: hidden;
   display: flex;
