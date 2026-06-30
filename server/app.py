@@ -11,7 +11,7 @@ from typing import Optional
 
 import markdown as _md
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,11 @@ app.add_middleware(
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
+
+# Browser-uploaded import files land here so the import tools can read them by
+# server path. File extensions are restricted to the formats the importer reads.
+_UPLOADS_DIR = Path("uploads")
+_ALLOWED_UPLOAD_EXT = {".csv", ".json"}
 
 # Set of currently-running job keys (used for conflict checking).
 _running_jobs: set = set()
@@ -186,6 +191,48 @@ async def put_config_full(request: Request):
             pass
 
     return {"status": "ok"}
+
+
+@app.post("/api/upload", status_code=200)
+async def upload_import_file(file: UploadFile = File(...)):
+    """Store a browser-uploaded import file server-side and return its path.
+
+    The web UI's import tools (import-epics / import-issues) need a file that
+    already exists on the server, but a browser user has no way to place one
+    there. The file-picker widget posts the chosen file here first, then passes
+    the returned server path as the tool's input_path. CLI import is unaffected.
+    """
+    raw_name = file.filename or ""
+    # Guard against path traversal — keep only the basename component.
+    safe_name = Path(raw_name).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    ext = Path(safe_name).suffix.lower()
+    if ext not in _ALLOWED_UPLOAD_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext or '(none)'}'. Allowed: .csv, .json",
+        )
+
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    # Timestamp-prefix to avoid collisions between successive uploads.
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    dest = _UPLOADS_DIR / f"{stamp}_{safe_name}"
+
+    try:
+        contents = await file.read()
+        dest.write_bytes(contents)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}")
+    finally:
+        await file.close()
+
+    return {
+        "path":     str(dest.resolve()),
+        "filename": safe_name,
+        "size":     dest.stat().st_size,
+    }
 
 
 @app.get("/api/reports")
