@@ -28,3 +28,17 @@ export async function saveConfig(data) {
   }
   return r.json()
 }
+
+// Upload a file the browser user picked (e.g. an import CSV/JSON). The server
+// stores it and returns { path, filename, size }; the returned server path is
+// then passed to a tool's file param (input_path) for the actual run.
+export async function upload(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await fetch('/api/upload', { method: 'POST', body: form })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.detail || `POST /api/upload: ${r.status}`)
+  }
+  return r.json()
+}

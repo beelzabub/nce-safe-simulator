@@ -17,5 +17,6 @@ cdk/.venv/
 /quarto-data/
 /logs/
 /reports/
+/uploads/
 
 **/*.quarto_ipynb
