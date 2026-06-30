@@ -1,7 +1,7 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
+    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" :download="part.download || null" :target="part.download ? null : '_blank'" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
   </div>
 </template>
 
@@ -28,7 +28,9 @@ watch(() => props.lines.length, async () => {
   if (div) div.scrollTop = div.scrollHeight
 })
 
-const URL_RE = /https?:\/\/\S+/g
+// Absolute http(s) URLs, plus app-relative export download links
+// (e.g. /api/download/foo.csv) emitted by the export tools.
+const URL_RE = /(?:https?:\/\/\S+|\/api\/download\/\S+)/g
 
 const LINE_HINTS = [
   {
@@ -44,7 +46,7 @@ function parseLine(line) {
   let m
   while ((m = URL_RE.exec(line)) !== null) {
     if (m.index > last) parts.push({ type: 'text', value: line.slice(last, m.index) })
-    parts.push({ type: 'url', value: m[0] })
+    parts.push({ type: 'url', value: m[0], download: m[0].startsWith('/api/download/') })
     last = m.index + m[0].length
   }
   if (last < line.length) parts.push({ type: 'text', value: line.slice(last) })
