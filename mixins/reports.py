@@ -4153,10 +4153,11 @@ class ReportsMixin:
         group = self._rd_root_obj
         today = date.today()
 
+        _st = self.STUCK_THRESHOLDS
         STATES = [
-            ("lifecycle::funnel",       "💡 Funnel",            "Ideas submitted, not yet analyzed",       90),
-            ("lifecycle::analyzing",    "🔍 Analyzing",         "Lean Business Case in development",        30),
-            ("lifecycle::backlog",      "📋 Portfolio Backlog", "Approved, awaiting capacity",              60),
+            ("lifecycle::funnel",       "💡 Funnel",            "Ideas submitted, not yet analyzed",       _st.get("lifecycle::funnel")),
+            ("lifecycle::analyzing",    "🔍 Analyzing",         "Lean Business Case in development",        _st.get("lifecycle::analyzing")),
+            ("lifecycle::backlog",      "📋 Portfolio Backlog", "Approved, awaiting capacity",              _st.get("lifecycle::backlog")),
             ("lifecycle::implementing", "⚙️ Implementing",      "Active in a Program Increment",           None),
             ("lifecycle::done",         "✅ Done",              "Delivered",                               None),
         ]
@@ -5170,11 +5171,7 @@ class ReportsMixin:
         ]
         STATE_KEYS = {s[0] for s in STATES}
 
-        STUCK_THRESHOLDS = {
-            "lifecycle::funnel":    90,   # days before flagged
-            "lifecycle::analyzing": 30,
-            "lifecycle::backlog":   60,
-        }
+        STUCK_THRESHOLDS = self.STUCK_THRESHOLDS
 
         def _age_days(epic):
             raw = epic.get("created_at")

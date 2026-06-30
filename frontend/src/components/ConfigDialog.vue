@@ -160,6 +160,17 @@
             </div>
           </div>
 
+          <!-- ── Reports ── -->
+          <div v-if="activeTab === 'reports'" class="section">
+            <div class="subsection-label">Stuck Item Age Thresholds <span class="field-hint">(days)</span></div>
+            <div class="two-col-grid">
+              <label class="field" v-for="f in STUCK_FIELDS" :key="f.key">
+                <span class="field-label">{{ f.label }}</span>
+                <input v-model.number="form.stuck_thresholds[f.key]" type="number" min="1" class="field-input field-input--sm" />
+              </label>
+            </div>
+          </div>
+
           <!-- ── Help reference ── -->
           <div v-if="activeTab === 'help'" class="section help-ref">
             <template v-for="section in HELP_SECTIONS" :key="section.title">
@@ -202,6 +213,7 @@ const TABS = [
   { key: 'weights',    label: 'Weights'    },
   { key: 'bootstrap',  label: 'Bootstrap'  },
   { key: 'tools',      label: 'Tools'      },
+  { key: 'reports',    label: 'Reports'    },
   { key: 'help',       label: 'Help'       },
 ]
 
@@ -241,6 +253,12 @@ const TOOLS_FIELDS = [
   { key: 'simulate_pi_progress_percent', label: 'Simulate PI Progress %',    min: 0, max: 100, help: 'Default PI completion percentage used by the Simulate PI Progress tool. Drives how many issues are closed and weight progress applied.' },
   { key: 'generate_issues_count',        label: 'Generate Issues Count',     min: 1,           help: 'Number of child issues to generate per epic when running the Generate Issues tool.' },
   { key: 'weight_drift_threshold',       label: 'Weight Drift Threshold',    min: 0,           help: 'Maximum percentage deviation between planned and actual weights before an epic is flagged as drifted in reports.' },
+]
+
+const STUCK_FIELDS = [
+  { key: 'lifecycle::funnel',    label: 'Funnel — stale after',    help: 'Epics in lifecycle::funnel older than this many days (measured from created_at) are flagged as stale in the Epic Lifecycle report. Default 90.' },
+  { key: 'lifecycle::analyzing', label: 'Analyzing — stuck after', help: 'Epics in lifecycle::analyzing older than this many days are flagged as stuck (Lean Business Case overdue for a decision). Default 30.' },
+  { key: 'lifecycle::backlog',   label: 'Backlog — stuck after',   help: 'Epics in lifecycle::backlog older than this many days are flagged as stuck (approved work waiting too long for capacity). Default 60.' },
 ]
 
 const HELP_SECTIONS = [
@@ -287,6 +305,10 @@ const HELP_SECTIONS = [
       ...TOOLS_FIELDS,
       { label: 'ROAM Risk Relations', help: 'Number of blocking/linked relationships to generate between ROAM risk epics and their related features or capabilities during simulation.' },
     ],
+  },
+  {
+    title: 'Reports — Stuck Item Thresholds',
+    fields: STUCK_FIELDS,
   },
 ]
 
@@ -347,6 +369,11 @@ const form = reactive({
     generate_issues_count:        5,
     weight_drift_threshold:       20,
     roam_risk_relations:          { min: 1, max: 3 },
+  },
+  stuck_thresholds: {
+    'lifecycle::funnel':    90,
+    'lifecycle::analyzing': 30,
+    'lifecycle::backlog':   60,
   },
 })
 
@@ -414,6 +441,13 @@ function populateForm(cfg) {
   form.tools.roam_risk_relations = {
     min: tl.roam_risk_relations?.min ?? 1,
     max: tl.roam_risk_relations?.max ?? 3,
+  }
+
+  const st = cfg.stuck_thresholds ?? {}
+  form.stuck_thresholds = {
+    'lifecycle::funnel':    st['lifecycle::funnel']    ?? 90,
+    'lifecycle::analyzing': st['lifecycle::analyzing'] ?? 30,
+    'lifecycle::backlog':   st['lifecycle::backlog']   ?? 60,
   }
 }
 
@@ -504,6 +538,11 @@ function buildConfig() {
   }
 
   cfg.defaults = { ...(rawConfig.defaults ?? {}), bootstrap, tools }
+
+  cfg.stuck_thresholds = {
+    ...(rawConfig.stuck_thresholds ?? {}),
+    ...form.stuck_thresholds,
+  }
   return cfg
 }
 

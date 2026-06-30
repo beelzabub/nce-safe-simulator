@@ -125,6 +125,11 @@
       3000
     ]
   },
+  "stuck_thresholds": {
+    "lifecycle::funnel": 90,
+    "lifecycle::analyzing": 30,
+    "lifecycle::backlog": 60
+  },
   "defaults": {
     "bootstrap": {
       "num_value_streams": {

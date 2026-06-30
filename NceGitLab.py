@@ -211,6 +211,15 @@ class NceGitLab(
             "Epic":       [89, 144, 233, 377],
         })
 
+        # Epic Lifecycle "stuck item" age thresholds (days). Per-key fallback to
+        # the historical hardcoded defaults so a missing/partial key is harmless.
+        _stuck = config.get("stuck_thresholds", {})
+        self.STUCK_THRESHOLDS = {
+            "lifecycle::funnel":    _stuck.get("lifecycle::funnel",    90),
+            "lifecycle::analyzing": _stuck.get("lifecycle::analyzing", 30),
+            "lifecycle::backlog":   _stuck.get("lifecycle::backlog",   60),
+        }
+
         _bd = config.get("defaults", {}).get("bootstrap", {})
         self.default_num_value_streams    = _bd.get("num_value_streams",    2)
         self.default_num_arts             = _bd.get("num_arts",             2)
