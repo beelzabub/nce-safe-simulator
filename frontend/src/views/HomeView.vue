@@ -129,10 +129,34 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
 
 /* ── Main pane ── */
 .main-pane {
+  position: relative;
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* Faint NCE emblem watermark, anchored bottom-right behind the content.
+   z-index:-1 paints it above the pane's --bg fill but below .runner content.
+   Theme-swapped: white emblem on dark, navy on light. */
+.main-pane::after {
+  content: '';
+  position: absolute;
+  right: clamp(16px, 3vw, 48px);
+  bottom: clamp(12px, 3vw, 40px);
+  width: clamp(190px, 30%, 360px);
+  aspect-ratio: 264 / 238;
+  background-image: url('../assets/nce-logo-white.png');
+  background-repeat: no-repeat;
+  background-position: bottom right;
+  background-size: contain;
+  opacity: 0.07;
+  pointer-events: none;
+  z-index: -1;
+}
+[data-theme="light"] .main-pane::after {
+  background-image: url('../assets/nce-logo-navy.png');
+  opacity: 0.09;
 }
 </style>
