@@ -147,13 +147,15 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
   position: absolute;
   right: clamp(16px, 3vw, 48px);
   bottom: clamp(12px, 3vw, 40px);
-  width: clamp(190px, 30%, 360px);
+  width: clamp(162px, 25.5%, 306px);
   aspect-ratio: 264 / 238;
   background-image: url('../assets/nce-logo-white.png');
   background-repeat: no-repeat;
   background-position: bottom right;
   background-size: contain;
   opacity: 0.07;
+  transform: rotate(5deg);
+  transform-origin: bottom right;
   pointer-events: none;
   z-index: -1;
 }
