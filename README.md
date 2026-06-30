@@ -832,6 +832,14 @@ port; all traffic reaches it through Caddy. Both containers run with
 > While it is running the domain serves the simulator; while it is stopped the site
 > is simply unavailable — there is no always-on standby, by design.
 
+**Persistent data.** The served, generated directories are bind-mounted from the
+project root so they survive container recreation (`make redeploy`), mirroring the
+cloud EFS layout: `reports/`, `public/interactive/` (Marimo WASM pages), and
+`quarto-site/` (rendered Quarto site). `logs/` is mounted too (box-only — the cloud
+ships logs to CloudWatch). The image-baked `public/app` frontend and
+`public/architecture` diagrams are left in the image; only the `public/interactive`
+subdirectory is mounted, so they stay intact.
+
 ### Prerequisites
 
 - DNS: Route 53 A records for `nce-safe-sim.com` and `www` pointing at the instance's Elastic IP.
