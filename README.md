@@ -213,6 +213,7 @@ Start from the template (`cp config.example.json config.json`) and edit your loc
 | `wsjf_labels` | Fibonacci label sets for WSJF Time Criticality and Risk Reduction — `wsjf-urgency::N`, `wsjf-risk::N` (N from 1–13); Business Value uses the native custom field |
 | `fibonacci_weights` | Valid issue story-point values |
 | `epic_type_planned_weights` | Valid planned-weight pools per epic type |
+| `stuck_thresholds` | Per-lifecycle-state age limits (days) the Epic Lifecycle report uses to flag "stuck" epics (see below) |
 | `defaults.bootstrap` | Default counts and ratios for `--create` (see below) |
 | `defaults.tools` | Default parameter values for utility tools (see below) |
 
@@ -269,6 +270,18 @@ At run time `--create` and `--scaffold` resolve each range to a single integer a
 | `weight_drift_threshold` | `20.0` | Default drift % for `weight-drift-check` |
 | `set_risk_labels_percent` | `15.0` | Default % of open epics to label for `set-risk-labels` |
 | `set_wsjf_labels_percent` | `20.0` | Default % of open epics to label for `set-wsjf-labels` |
+
+#### Stuck Item Thresholds
+
+The Epic Lifecycle / Portfolio Kanban report flags epics that have sat too long in an early lifecycle state. An epic is "stuck" when its age (from `created_at`) **exceeds** the threshold for its `lifecycle::` state. Only the three pre-delivery states are flagged; `implementing` and `done` have no threshold. Edit these in the web UI under **Config → Reports**.
+
+| Key | Default | Description |
+|---|---|---|
+| `lifecycle::funnel` | `90` | Days before a funnel epic is flagged as stale |
+| `lifecycle::analyzing` | `30` | Days before an analyzing epic is flagged as stuck (Lean Business Case overdue) |
+| `lifecycle::backlog` | `60` | Days before a backlog epic is flagged as stuck (awaiting capacity too long) |
+
+Omitting `stuck_thresholds`, or any individual key, falls back to these defaults.
 
 ### Environment Variable Overrides
 
