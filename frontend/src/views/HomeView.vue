@@ -154,8 +154,6 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
   background-position: bottom right;
   background-size: contain;
   opacity: 0.07;
-  transform: rotate(5deg);
-  transform-origin: bottom right;
   pointer-events: none;
   z-index: -1;
 }
