@@ -6919,23 +6919,36 @@ class ReportsMixin:
         # NOT REST-fetch links for every issue.
         blocked_urls: set = set()
         try:
-            gql_data = self.graphql_query(
-                """
-                query IssueBlockStatus($fullPath: ID!) {
-                  group(fullPath: $fullPath) {
-                    issues(includeSubgroups: true) {
-                      nodes { iid webUrl blocked blockedByCount }
-                    }
-                  }
+            # GitLab caps GraphQL connections at 100 nodes/page, so the flag
+            # query MUST page through every issue with first/after — otherwise
+            # blocks on issues past the first 100 are silently missed and the
+            # report under-counts (Refs #120).
+            query = """
+            query IssueBlockStatus($fullPath: ID!, $after: String) {
+              group(fullPath: $fullPath) {
+                issues(includeSubgroups: true, first: 100, after: $after) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { iid webUrl blocked blockedByCount }
                 }
-                """,
-                variables={"fullPath": group.full_path},
-            )
-            if gql_data and gql_data.get("group", {}).get("issues"):
-                for n in gql_data["group"]["issues"]["nodes"]:
+              }
+            }
+            """
+            after = None
+            while True:
+                gql_data = self.graphql_query(
+                    query, variables={"fullPath": group.full_path, "after": after}
+                )
+                conn = (gql_data or {}).get("group", {}).get("issues")
+                if not conn:
+                    break
+                for n in conn.get("nodes", []):
                     if n.get("blocked") or (n.get("blockedByCount") or 0) > 0:
                         if n.get("webUrl"):
                             blocked_urls.add(n["webUrl"])
+                page = conn.get("pageInfo") or {}
+                if not page.get("hasNextPage"):
+                    break
+                after = page.get("endCursor")
         except Exception:
             pass
 
