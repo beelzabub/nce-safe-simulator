@@ -174,3 +174,45 @@ class TestEpicLifecycleAgeAndThresholds:
                          created_at=recent_date)
         content = _run(_harness(features=[epic]))
         assert "15d" in content
+
+
+class TestEpicLifecycleConfigurableThresholds:
+    """Thresholds come from self.STUCK_THRESHOLDS (issue #82), not hardcoded values."""
+
+    def test_report_reads_threshold_from_instance_attribute(self):
+        # 45d funnel epic is NOT stuck at the default 90, but IS once the
+        # threshold is lowered to 30 — proving the report honours the attribute.
+        epic = make_epic(id=1, etype="Feature",
+                         labels=["Feature", "lifecycle::funnel"],
+                         created_at=(date.today() - timedelta(days=45)).isoformat())
+        h = _harness(features=[epic])
+        h.STUCK_THRESHOLDS = {"lifecycle::funnel": 30, "lifecycle::analyzing": 30, "lifecycle::backlog": 60}
+        content = _run(h)
+        assert "Stale in Funnel" in content   # stuck section rendered
+        assert "⚠️" in content
+
+    def test_custom_threshold_value_appears_in_summary_table(self):
+        h = _harness()
+        h.STUCK_THRESHOLDS = {"lifecycle::funnel": 45, "lifecycle::analyzing": 30, "lifecycle::backlog": 60}
+        content = _run(h)
+        assert "45d" in content        # threshold column reflects config
+        assert "90d" not in content    # old default gone
+
+    def test_epic_over_custom_threshold_is_stuck(self):
+        epic = make_epic(id=1, etype="Feature",
+                         labels=["Feature", "lifecycle::backlog"],
+                         created_at=(date.today() - timedelta(days=20)).isoformat())
+        h = _harness(features=[epic])
+        h.STUCK_THRESHOLDS = {"lifecycle::funnel": 90, "lifecycle::analyzing": 30, "lifecycle::backlog": 15}
+        content = _run(h)
+        assert "Stuck in Portfolio Backlog" in content
+
+    def test_epic_at_or_under_custom_threshold_not_stuck(self):
+        # age 15 == threshold 15 → report uses strict ">" so it is NOT stuck.
+        epic = make_epic(id=1, etype="Feature",
+                         labels=["Feature", "lifecycle::backlog"],
+                         created_at=(date.today() - timedelta(days=15)).isoformat())
+        h = _harness(features=[epic])
+        h.STUCK_THRESHOLDS = {"lifecycle::funnel": 90, "lifecycle::analyzing": 30, "lifecycle::backlog": 15}
+        content = _run(h)
+        assert "Stuck in Portfolio Backlog" not in content
