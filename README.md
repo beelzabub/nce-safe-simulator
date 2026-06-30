@@ -802,6 +802,14 @@ Both CSV and JSON are supported. Format is inferred from the file extension (`.j
 
 Both importers run a full validation pass before creating anything — errors are reported upfront and the import aborts if any are found. Pass `dry_run: yes` to validate and preview without creating. When `parent_id` values from an external system don't match live IDs, the importer asks once how to handle them: `ask` (pick a fallback parent interactively), `label` (create without parent and tag `import::needs-parent`, default), or `skip`.
 
+#### Active group + per-run override
+
+All four import/export tools show the **active GitLab group** they act on — the **source** group for exports (what you export *from*) and the **target** group for imports (what you import *into*). The indicator is pre-filled from `config.json` (`gitlab_namespace` / `parent_group`); in the web UI it appears as a read-only field with an **Edit** button.
+
+Each tool also accepts an optional **group override** that retargets that one run only — `config.json` is never modified. The accepted format is `namespace/group` (URL-slug namespace + group display-name, e.g. `saic-study-group/My Portfolio`) or just `group` (display-name only — the configured namespace is kept). Leave it blank to use the configured group, so CLI/automation behaviour is unchanged.
+
+Imports add a **create-if-missing** checkbox: when the (overridden) target group doesn't exist, ticking it creates the group under the configured namespace before importing; leaving it unticked produces a clear, actionable error. Exports have no such option — you can't export from a group that doesn't exist.
+
 ### Test Data Seeding Pattern
 
 The `set-*` and `strip-*` pairs are designed for rapid test-data cycling:

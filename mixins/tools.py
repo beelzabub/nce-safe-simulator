@@ -74,6 +74,7 @@ TOOLS = [
         "description": "Export all epics from the group hierarchy to CSV or JSON",
         "method":      "export_epics",
         "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
             {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
         ],
     },
@@ -82,6 +83,7 @@ TOOLS = [
         "description": "Export all issues from the group hierarchy to CSV or JSON",
         "method":      "export_issues",
         "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
             {"name": "output_path", "prompt": "Output file path (.csv or .json, blank = auto-named)", "type": str, "optional": True},
         ],
     },
@@ -144,6 +146,8 @@ TOOLS = [
         "method":      "import_epics",
         "params": [
             {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "widget": "file", "optional": False},
+            {"name": "group",              "prompt": "Target group (import into)",                                              "type": str,  "widget": "group", "optional": True},
+            {"name": "create_missing",     "prompt": "Create target group if it doesn't exist",                                 "type": bool, "default": False},
             {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
             {"name": "dry_run",            "prompt": "Dry run? (validate and preview only)",                                    "type": bool, "default": False},
         ],
@@ -154,6 +158,8 @@ TOOLS = [
         "method":      "import_issues",
         "params": [
             {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "widget": "file", "optional": False},
+            {"name": "group",               "prompt": "Target group (import into)",                                 "type": str,  "widget": "group", "optional": True},
+            {"name": "create_missing",      "prompt": "Create target group if it doesn't exist",                    "type": bool, "default": False},
             {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
             {"name": "dry_run",             "prompt": "Dry run? (validate and preview only)",                       "type": bool, "default": False},
         ],
