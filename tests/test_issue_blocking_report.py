@@ -1,4 +1,6 @@
 """Tests for generate_issue_blocking_report and _data_issue_blocking (Refs #106)."""
+from unittest.mock import MagicMock
+
 import pytest
 
 from tests.conftest import ReportsHarness
@@ -145,3 +147,56 @@ class TestDataIssueBlocking:
         assert item["state"] == "Opened"
         assert item["blockers"][0]["title"] == "Blocker Nine"
         assert item["blockers"][0]["project_path"] == "grp/dep"
+
+
+class TestIssueBlockingGraphPagination:
+    """_fetch_issue_blocking_graph must page past GitLab's 100-node GraphQL cap (Refs #120)."""
+
+    def test_blocked_issue_beyond_first_page_is_counted(self):
+        h = ReportsHarness()
+        h.parent_group = "TestGroup"
+        h.url = "https://gitlab.test"
+
+        blocked_url = "https://gitlab.test/grp/proj/-/issues/201"
+        h._issues_cache = {"TestGroup": [{
+            "id": 9201, "iid": 201, "title": "Blocked beyond first page",
+            "web_url": blocked_url, "project_path": "grp/proj",
+            "state": "opened", "epic_iid": None,
+        }]}
+        h._all_epics_cache = {"TestGroup": []}
+
+        # Page 1: 100 unblocked issues + hasNextPage. Page 2: the blocked one.
+        page1 = {"group": {"issues": {
+            "pageInfo": {"hasNextPage": True, "endCursor": "CURSOR1"},
+            "nodes": [{"iid": i, "webUrl": f"https://gitlab.test/grp/proj/-/issues/{i}",
+                       "blocked": False, "blockedByCount": 0} for i in range(1, 101)],
+        }}}
+        page2 = {"group": {"issues": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [{"iid": 201, "webUrl": blocked_url,
+                       "blocked": True, "blockedByCount": 1}],
+        }}}
+
+        def fake_gql(query, variables=None, retries=0):
+            return page1 if (variables or {}).get("after") is None else page2
+        h.graphql_query = fake_gql
+
+        # REST links for the flagged issue → one is_blocked_by relationship.
+        resp = MagicMock()
+        resp.ok = True
+        resp.json.return_value = [{
+            "link_type": "is_blocked_by", "id": 1, "iid": 99, "title": "Blocker",
+            "web_url": "https://gitlab.test/grp/other/-/issues/99",
+            "references": {"full": "grp/other#99"},
+        }]
+        session = MagicMock()
+        session.get.return_value = resp
+        h._make_session = lambda: session
+
+        group = MagicMock()
+        group.full_path = "TestGroup"
+        result = h._fetch_issue_blocking_graph(group)
+
+        # Without pagination the page-2 issue is missed → total_blocked would be 0.
+        assert result["summary"]["total_blocked"] == 1
+        assert result["relationships"][0]["blocked_issue"]["iid"] == 201
