@@ -64,10 +64,19 @@ class ImportExportMixin:
         return (_EXPORTS_DIR / filename).resolve()
 
     def _export_url(self, path: Path):
-        """Return a download URL if *path* lives under the public/ static tree."""
+        """Return a host-agnostic download URL for an auto-named export.
+
+        Auto-named exports land in public/exports and are served as browser
+        downloads by the web UI's GET /api/download/<filename> endpoint. The
+        returned link is relative so it resolves against whatever host serves
+        the UI (localhost, the live domain, etc.) instead of a hardcoded URL.
+
+        Explicit CLI output paths live outside the exports dir, so this returns
+        None and the CLI behaviour is unchanged.
+        """
         try:
-            rel = path.relative_to(Path("public").resolve())
-            return f"http://localhost:4645/{rel.as_posix()}"
+            path.resolve().relative_to(_EXPORTS_DIR.resolve())
+            return f"/api/download/{path.name}"
         except ValueError:
             return None
 
