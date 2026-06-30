@@ -4,9 +4,10 @@
     <div class="nav-hero" :style="{ backgroundImage: `url(${heroSrc})` }" aria-hidden="true" />
 
     <div class="brand">
+      <img class="brand-logo" :src="logoSrc" alt="NCE — Navintel Cloud Ecosystem" />
       <span class="brand-tag">PMW 120</span>
       <span class="brand-divider">|</span>
-      <span class="brand-name">NCE Safe Simulator</span>
+      <span class="brand-name">Safe Simulator</span>
     </div>
     <ClockWidget />
     <div class="nav-actions">
@@ -24,11 +25,15 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useTheme } from '../composables/useTheme.js'
 import heroSrc from '../assets/hero-carrier.png'
+import logoWhite from '../assets/nce-logo-white.png'  // white emblem — for dark UI
+import logoNavy from '../assets/nce-logo-navy.png'    // navy emblem — for light UI
 import ClockWidget from './ClockWidget.vue'
 
 const { theme, toggle } = useTheme()
+const logoSrc = computed(() => (theme.value === 'dark' ? logoWhite : logoNavy))
 defineProps({ runningCount: { type: Number, default: 0 } })
 defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
 </script>
@@ -79,6 +84,12 @@ defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+.brand-logo {
+  height: 34px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
 }
 .brand-tag {
   color: var(--accent);
