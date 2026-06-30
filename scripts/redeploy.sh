@@ -22,12 +22,21 @@ docker build -t "$IMAGE" .
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 
 echo "==> Recreating app container ($APP)..."
+# Host dirs for the served/persistent volumes — created on first run so the
+# bind mounts below survive container recreation (mirrors the cloud EFS layout:
+# reports, public/interactive, quarto-site). logs/ is box-only (the cloud ships
+# logs to CloudWatch instead). Only the public/interactive subdir is mounted so
+# the image-baked public/app and public/architecture stay intact.
+mkdir -p reports logs quarto-site public/interactive
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker run -d --name "$APP" --restart unless-stopped \
   --network "$NETWORK" \
   -e GITLAB_TOKEN="${GITLAB_TOKEN:-}" \
   -v "$PROJECT_ROOT/config.json:/app/config.json:ro" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
+  -v "$PROJECT_ROOT/quarto-site:/app/quarto-site" \
+  -v "$PROJECT_ROOT/public/interactive:/app/public/interactive" \
+  -v "$PROJECT_ROOT/logs:/app/logs" \
   "$IMAGE"
 
 docker image prune -f >/dev/null 2>&1 || true
