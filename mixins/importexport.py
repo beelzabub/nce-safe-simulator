@@ -42,6 +42,12 @@ ISSUE_IMPORT_KNOWN = {
 }
 ISSUE_IMPORT_REQUIRED = {"title"}
 
+# Columns unique to each import type (shared reference columns like iid/author
+# cancel out). Their presence in the other importer is a strong signal that the
+# wrong file was supplied — e.g. an issues export fed to the epics importer.
+EPIC_ONLY_COLS  = EPIC_IMPORT_KNOWN  - ISSUE_IMPORT_KNOWN
+ISSUE_ONLY_COLS = ISSUE_IMPORT_KNOWN - EPIC_IMPORT_KNOWN
+
 VALID_DATE_FMT = "%Y-%m-%d"
 VALID_STATES   = {"opened", "open", "closed"}
 
@@ -230,25 +236,36 @@ class ImportExportMixin:
     # ── Group / project caches ────────────────────────────────────────────────
 
     def _build_group_cache(self, root_group):
-        """Return {full_path: group_object} for root and all subgroups."""
-        cache = {root_group.full_path: root_group}
-        for sg in root_group.subgroups.list(all=True, include_subgroups=True):
-            try:
-                full = self.gl.groups.get(sg.id)
-                cache[full.full_path] = full
-            except Exception:
-                pass
+        """Return {full_path: group_object} for root and ALL descendant subgroups.
+
+        Uses the recursive get_all_subgroups walk — the same discovery the web
+        UI's /api/groups picker uses — so any destination the picker offered
+        resolves here too. GitLab's `subgroups` endpoint only returns DIRECT
+        children (it ignores include_subgroups), so a single shallow list misses
+        deep subgroups and a valid deep destination would be wrongly rejected.
+        """
+        cache = {}
+        for g in self.get_all_subgroups(root_group, include_self=True):
+            full_path = getattr(g, "full_path", None)
+            if full_path:
+                cache[full_path] = g
         return cache
 
     def _build_gid_path_map(self, root_group):
-        """Return {group_id: full_path} for root and all subgroups."""
+        """Return {group_id: full_path} for root and ALL descendant subgroups.
+
+        Matches _build_group_cache's depth (the GitLab `subgroups` endpoint only
+        returns DIRECT children and ignores include_subgroups). Without the full
+        walk, epics in deep groups export with a blank group_path and are dropped
+        from fallback-parent selection. Uses the single descendant_groups call —
+        each item already carries id/full_path, so no per-group N+1 fetch.
+        """
         m = {root_group.id: root_group.full_path}
-        for sg in root_group.subgroups.list(all=True, include_subgroups=True):
-            try:
-                full = self.gl.groups.get(sg.id)
-                m[full.id] = full.full_path
-            except Exception:
-                pass
+        for g in self.list_descendant_groups(root_group):
+            gid = getattr(g, "id", None)
+            full_path = getattr(g, "full_path", None)
+            if gid is not None and full_path:
+                m[gid] = full_path
         return m
 
     def _build_project_cache(self, root_group):
@@ -261,6 +278,54 @@ class ImportExportMixin:
             except Exception:
                 pass
         return cache
+
+    # ── Re-import handling (on_existing: create | skip | update) ───────────────
+
+    def _find_issue_by_title(self, project, title):
+        """First issue in `project` with an exact matching title, else None."""
+        try:
+            for iss in project.issues.list(search=title, all=True):
+                if getattr(iss, "title", "") == title:
+                    return iss
+        except Exception:
+            pass
+        return None
+
+    def _find_epic_by_title(self, group, title):
+        """First epic in `group` with an exact matching title, else None."""
+        try:
+            for ep in group.epics.list(search=title, all=True):
+                if getattr(ep, "title", "") == title:
+                    return ep
+        except Exception:
+            pass
+        return None
+
+    def _update_issue(self, issue, payload, state, epic_id):
+        """Apply an import payload to an existing issue (merge — omitted fields
+        are left untouched; matched title is not rewritten)."""
+        for k, v in payload.items():
+            if k == "title":
+                continue
+            setattr(issue, k, v)
+        if epic_id is not None:
+            issue.epic_id = epic_id
+        if state == "closed":
+            issue.state_event = "close"
+        issue.save()
+
+    def _update_epic(self, epic, payload, weight, state):
+        """Apply an import payload to an existing epic (merge semantics)."""
+        for k, v in payload.items():
+            if k == "title":
+                continue
+            setattr(epic, k, v)
+        epic.save()
+        if weight is not None:
+            self._set_epic_weight(epic, weight)
+        if state == "closed":
+            epic.state_event = "close"
+            epic.save()
 
     def _build_pid_path_map(self, root_group):
         """Return {project_id: path_with_namespace}."""
@@ -331,6 +396,18 @@ class ImportExportMixin:
 
     # ── Epic import ───────────────────────────────────────────────────────────
 
+    def _warn_type_unconfirmed(self, kind, other_kind, other_tool, example_cols):
+        """Stand-out pre-flight notice: the file has only columns common to both
+        epics and issues, so it was ACCEPTED but its type can't be confirmed."""
+        bar = "  " + "═" * 64
+        print("\n" + bar)
+        print(f"  ⚠  ACCEPTED — but this file's type could NOT be confirmed.")
+        print(f"     It has only columns common to both epics and issues (no")
+        print(f"     {kind}-specific columns such as {example_cols}).")
+        print(f"     If these rows were meant as {other_kind}, cancel now and use")
+        print(f"     the {other_tool} tool instead.")
+        print(bar)
+
     def _validate_epics(self, rows):
         """
         Pre-flight validation pass.
@@ -349,6 +426,21 @@ class ImportExportMixin:
             print(f"  Optional: title, group_path, description, labels, start_date, due_date,")
             print(f"            parent_id, planned_weight, state")
             return None, 1
+
+        # Wrong-file guard: issue-only columns mean this is almost certainly an
+        # issues export, not epics. title alone would otherwise pass and create
+        # epics from issue rows.
+        issue_markers = columns & ISSUE_ONLY_COLS
+        if issue_markers:
+            print(f"\n  INVALID: this looks like an ISSUES export, not epics — it has "
+                  f"issue-only column(s): {', '.join(sorted(issue_markers))}.")
+            print("  Use the Import Issues tool for this file.")
+            return None, 1
+
+        # No epic-specific columns either → only shared columns → can't confirm type.
+        if not (columns & EPIC_ONLY_COLS):
+            self._warn_type_unconfirmed("epics", "issues", "Import Issues",
+                                        "group_path or planned_weight")
 
         unknown = columns - EPIC_IMPORT_KNOWN
         if unknown:
@@ -493,12 +585,13 @@ class ImportExportMixin:
         return parent_map, orphan_rows
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                     group=None, create_missing=False):
+                     group=None, create_missing=False, dest_group=None, on_existing="skip"):
         with self._group_override(group):
-            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing)
+            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
+                                      dest_group, on_existing)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                      create_missing=False):
+                      create_missing=False, dest_group=None, on_existing="skip"):
         """
         Import epics from a CSV or JSON file.
 
@@ -515,6 +608,9 @@ class ImportExportMixin:
         """
         if unresolved_parent not in ("ask", "label", "skip"):
             print(f"ERROR: unresolved_parent must be 'ask', 'label', or 'skip' (got '{unresolved_parent}')")
+            return
+        if on_existing not in ("create", "skip", "update"):
+            print(f"ERROR: on_existing must be 'create', 'skip', or 'update' (got '{on_existing}')")
             return
         if not input_path:
             print("ERROR: input_path is required.")
@@ -551,6 +647,13 @@ class ImportExportMixin:
         group_cache = self._build_group_cache(root_group)
         print(f"  {len(group_cache)} group(s) available as targets")
 
+        # Placement destination (#138): validate up front and fail loudly — a
+        # bad destination must never silently dump every epic at the root.
+        if dest_group and dest_group not in group_cache:
+            print(f"\n  ERROR: destination group '{dest_group}' not found under "
+                  f"target root '{root_group.full_path}'. Nothing was imported.")
+            return
+
         # ── Pre-flight: parent_id resolution ────────────────────────────────
         print("\n  Checking parent_ids against target hierarchy...")
         valid_epic_ids = self._build_valid_epic_ids(root_group)
@@ -568,7 +671,7 @@ class ImportExportMixin:
         if orphan_rows:
             print(f"  ({len(orphan_rows)} row(s) will receive 'import::needs-parent' label)")
 
-        created = skipped = failed = 0
+        created = skipped = updated = failed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
 
         for i, row in enumerate(cleaned, 1):
@@ -584,7 +687,19 @@ class ImportExportMixin:
             orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            gpath       = str(row.get("group_path", "")).strip() or root_group.full_path
+            # Placement (#138): per-row fallback. Honor the row's own
+            # group_path when it resolves under the target root; otherwise place
+            # the row in the user-picked dest_group (validated above). With
+            # neither, land at the target root — the root is a valid epic
+            # container (unlike issues, where a missing project has no root
+            # fallback and the row is skipped).
+            own = str(row.get("group_path", "")).strip()
+            if own and own in group_cache:
+                gpath = own
+            elif dest_group:
+                gpath = dest_group
+            else:
+                gpath = own or root_group.full_path
 
             target = group_cache.get(gpath)
             if not target:
@@ -608,8 +723,18 @@ class ImportExportMixin:
             if due_date:          payload["end_date"]    = due_date
             if resolved_pid:      payload["parent_id"]   = resolved_pid
 
+            # Re-import handling: match an existing epic by title in the target.
+            existing = self._find_epic_by_title(target, title) if on_existing != "create" else None
+            if existing and on_existing == "skip":
+                print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — epic '{title}' "
+                      f"already exists (#{existing.iid})")
+                skipped += 1
+                continue
+
             if dry_run:
-                parts = [f"'{title}'", f"group={target.full_path}"]
+                action = "update" if (existing and on_existing == "update") else "create"
+                parts = [f"'{title}'", f"group={target.full_path}", f"action={action}"]
+                if existing:      parts.append(f"#{existing.iid}")
                 if labels:        parts.append(f"labels={labels}")
                 if weight:        parts.append(f"weight={weight}")
                 if resolved_pid:  parts.append(f"parent_id={resolved_pid}")
@@ -619,20 +744,24 @@ class ImportExportMixin:
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
-                created += 1
+                if action == "update":  updated += 1
+                else:                   created += 1
                 continue
 
             try:
-                epic = target.epics.create(payload)
-
-                if weight is not None:
-                    self._set_epic_weight(epic, weight)
-                if state == "closed":
-                    epic.state_event = "close"
-                    epic.save()
-
-                print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
-                created += 1
+                if existing and on_existing == "update":
+                    self._update_epic(existing, payload, weight, state)
+                    print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
+                    updated += 1
+                else:
+                    epic = target.epics.create(payload)
+                    if weight is not None:
+                        self._set_epic_weight(epic, weight)
+                    if state == "closed":
+                        epic.state_event = "close"
+                        epic.save()
+                    print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
+                    created += 1
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
 
@@ -640,7 +769,7 @@ class ImportExportMixin:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
                 failed += 1
 
-        print(f"\n  Done — {created} created  |  {skipped} skipped  |  {failed} failed"
+        print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
 
         if orphan_summary:
@@ -727,6 +856,20 @@ class ImportExportMixin:
             print(f"            milestone, assignees, epic_id, state")
             return None, 1
 
+        # Wrong-file guard: epic-only columns mean this is almost certainly an
+        # epics export, not issues.
+        epic_markers = columns & EPIC_ONLY_COLS
+        if epic_markers:
+            print(f"\n  INVALID: this looks like an EPICS export, not issues — it has "
+                  f"epic-only column(s): {', '.join(sorted(epic_markers))}.")
+            print("  Use the Import Epics tool for this file.")
+            return None, 1
+
+        # No issue-specific columns either → only shared columns → can't confirm type.
+        if not (columns & ISSUE_ONLY_COLS):
+            self._warn_type_unconfirmed("issues", "epics", "Import Epics",
+                                        "project_path or epic_id")
+
         if not override_project and "project_path" not in columns:
             print("\n  INVALID: 'project_path' column is required when no target project is specified")
             print("  Either add a project_path column to the file or provide a project path at the prompt.")
@@ -767,14 +910,18 @@ class ImportExportMixin:
         return rows, 0
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                      group=None, create_missing=False):
+                      group=None, create_missing=False, on_existing="skip"):
         with self._group_override(group):
-            return self._import_issues(input_path, target_project_path, dry_run, create_missing)
+            return self._import_issues(input_path, target_project_path, dry_run,
+                                       create_missing, on_existing)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                       create_missing=False):
+                       create_missing=False, on_existing="skip"):
         if not input_path:
             print("ERROR: input_path is required.")
+            return
+        if on_existing not in ("create", "skip", "update"):
+            print(f"ERROR: on_existing must be 'create', 'skip', or 'update' (got '{on_existing}')")
             return
 
         path = self._resolve_path(input_path)
@@ -806,10 +953,17 @@ class ImportExportMixin:
         project_cache = self._build_project_cache(root_group)
         print(f"  {len(project_cache)} project(s) available as targets")
 
+        # Placement destination (#138): validate up front and fail loudly — a
+        # bad target project must never silently skip every row.
+        if target_project_path and target_project_path not in project_cache:
+            print(f"\n  ERROR: target project '{target_project_path}' not found under "
+                  f"target root '{root_group.full_path}'. Nothing was imported.")
+            return
+
         # Username → user ID cache (populated on demand)
         username_cache = {}
 
-        created = skipped = failed = 0
+        created = skipped = updated = failed = 0
 
         for i, row in enumerate(cleaned, 1):
             title       = str(row.get("title", "")).strip()
@@ -821,7 +975,18 @@ class ImportExportMixin:
             assignees   = self._coerce_usernames(row.get("assignees"))
             epic_id     = self._coerce_int(row.get("epic_id"),  "epic_id", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            ppath       = target_project_path or str(row.get("project_path", "")).strip()
+            # Placement (#138): per-row fallback. Honor the row's own
+            # project_path when it resolves under the target root; otherwise
+            # place the row in the user-picked target_project_path (validated
+            # above). Issues have no root fallback, so an unresolvable row with
+            # no destination is skipped.
+            own = str(row.get("project_path", "")).strip()
+            if own and own in project_cache:
+                ppath = own
+            elif target_project_path:
+                ppath = target_project_path
+            else:
+                ppath = own
 
             if not ppath:
                 print(f"  row {i}: SKIP — no project path")
@@ -844,13 +1009,26 @@ class ImportExportMixin:
             if due_date:
                 payload["due_date"] = due_date
 
-            # Milestone by title lookup
+            # Milestone by title lookup. include_ancestors pulls in group-level
+            # milestones inherited from the parent groups (PI milestones live at
+            # the ART/portfolio level, not on the project) — GitLab lets a group
+            # milestone be assigned to an issue in a project under that group.
             if milestone:
-                ms_list = project.milestones.list(search=milestone)
-                if ms_list:
-                    payload["milestone_id"] = ms_list[0].id
+                try:
+                    ms_list = project.milestones.list(
+                        search=milestone, include_ancestors=True, all=True)
+                except Exception:
+                    ms_list = project.milestones.list(search=milestone)
+                # search is a substring match and may return several (e.g. a
+                # project and a group milestone of the same name) — prefer an
+                # exact title match.
+                exact = [m for m in ms_list if getattr(m, "title", "") == milestone]
+                chosen = exact[0] if exact else (ms_list[0] if ms_list else None)
+                if chosen:
+                    payload["milestone_id"] = chosen.id
                 else:
-                    print(f"  row {i}: WARN milestone '{milestone}' not found — skipping")
+                    print(f"  row {i}: WARN milestone '{milestone}' not found "
+                          f"(searched project + ancestor groups) — skipping")
 
             # Assignee username → id lookup
             if assignees:
@@ -872,18 +1050,35 @@ class ImportExportMixin:
                 if ids:
                     payload["assignee_ids"] = ids
 
+            # Re-import handling: match an existing issue by title in the target.
+            existing = self._find_issue_by_title(project, title) if on_existing != "create" else None
+            if existing and on_existing == "skip":
+                print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — issue '{title}' "
+                      f"already exists (#{existing.iid})")
+                skipped += 1
+                continue
+
             if dry_run:
-                parts = [f"'{title}'", f"project={ppath}"]
+                action = "update" if (existing and on_existing == "update") else "create"
+                parts = [f"'{title}'", f"project={ppath}", f"action={action}"]
+                if existing:  parts.append(f"#{existing.iid}")
                 if labels:    parts.append(f"labels={labels}")
                 if weight:    parts.append(f"weight={weight}")
                 if epic_id:   parts.append(f"epic_id={epic_id}")
                 if due_date:  parts.append(f"due={due_date}")
                 if milestone: parts.append(f"milestone={milestone}")
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
-                created += 1
+                if action == "update":  updated += 1
+                else:                   created += 1
                 continue
 
             try:
+                if existing and on_existing == "update":
+                    self._update_issue(existing, payload, state, epic_id)
+                    print(f"  row {i}: updated #{existing.iid} '{title}' → {ppath}")
+                    updated += 1
+                    continue
+
                 issue = project.issues.create(payload)
 
                 if epic_id is not None:
@@ -903,5 +1098,5 @@ class ImportExportMixin:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
                 failed += 1
 
-        print(f"\n  Done — {created} created  |  {skipped} skipped  |  {failed} failed"
+        print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))

@@ -812,6 +812,29 @@ In the web UI the override field is a **populated dropdown** (a datalist-backed 
 
 Imports add a **create-if-missing** checkbox: when the (overridden) target group doesn't exist, ticking it creates the group under the configured namespace before importing; leaving it unticked produces a clear, actionable error. Exports have no such option — you can't export from a group that doesn't exist.
 
+#### Import destination picker
+
+On top of the active-group indicator above, each importer takes an explicit **destination** that controls where the created objects land, so placement is consistent between the two importers:
+
+- **`import-epics`** — a `dest_group` parameter (web UI: a subgroup dropdown, a datalist-backed combobox populated from `GET /api/groups`; CLI: an optional free-text group path prompt). It is the **fallback** for rows whose own `group_path` can't be resolved under the target root — those rows are created in `dest_group` instead of being dumped at the root. Rows whose `group_path` *does* resolve still go there, so any structure the file carried is preserved.
+- **`import-issues`** — the existing `target_project_path` parameter (web UI: a project dropdown, a datalist-backed combobox populated from `GET /api/projects`; CLI: the same optional free-text project-path prompt as before). Same fallback semantics: rows whose own `project_path` resolves go there; rows that don't resolve are created in `target_project_path` instead of being skipped.
+
+Both dropdowns allow free text (so you can type a not-yet-cached path) and fall back to a plain editable text box if the list can't be fetched. Both destination parameters are optional strings, so the interactive CLI and automation are unchanged.
+
+**Placement precedence** (both importers): the row's own path is used when it resolves under the target root; otherwise the chosen destination is used; otherwise epics fall back to the root group and issues are skipped. A destination that is set but doesn't resolve is a **hard error** — the import aborts before anything is created, rather than silently root-dumping (epics) or skipping every row (issues).
+
+The one remaining structural difference only applies when **no destination is chosen** and a row's path can't be resolved: **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group`), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
+
+#### Re-import behaviour (`on_existing`)
+
+Re-running the same file could otherwise create duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics):
+
+- **`skip`** (default) — if a same-title item exists, leave it untouched and report `SKIP — already exists (#iid)`; create it otherwise. Safe to re-run.
+- **`update`** — apply the row's fields to the existing item (merge — omitted fields are left as-is; the matched title is not rewritten); create it if there's no match.
+- **`create`** — always create, never match; the original create-only behaviour (may duplicate on re-import).
+
+The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
+
 ### Test Data Seeding Pattern
 
 The `set-*` and `strip-*` pairs are designed for rapid test-data cycling:

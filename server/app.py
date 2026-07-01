@@ -193,14 +193,14 @@ def list_group_options(request: Request):
         root = gl.get_group_by_name(grp)
         if root is None:
             return []
-        discovered = gl.get_all_subgroups(root, include_self=True)
+        # Single paginated descendant_groups call (root + all depths) instead of
+        # the get_all_subgroups N+1 (one gl.groups.get per subgroup) — this is an
+        # interactive path hit on every import-dialog open, so latency matters.
+        discovered = [root] + gl.list_descendant_groups(root)
 
         groups = []
         seen = set()
         for g in discovered:
-            # get_all_subgroups may include the root as the originally-passed
-            # object (a group object here) plus subgroup objects; be defensive
-            # about types.
             path = getattr(g, "full_path", None) or (g if isinstance(g, str) else None)
             if not path or path in seen:
                 continue
@@ -208,6 +208,48 @@ def list_group_options(request: Request):
             name = getattr(g, "name", None) or getattr(g, "full_name", None) or path
             groups.append({"path": path, "name": name})
         return groups
+    except Exception:
+        # GitLab unreachable, permissions, traversal error, etc. — degrade to [].
+        return []
+
+
+@app.get("/api/projects")
+def list_project_options(request: Request):
+    """Return the projects available under the configured namespace / parent_group.
+
+    Mirrors ``GET /api/groups`` but for projects: each entry has a full ``path``
+    (the namespace-qualified ``path_with_namespace``, e.g. ``ns/team-a/backlog``)
+    and a human ``name``. Discovery is scoped to the configured ``parent_group``
+    and its subgroups (``root_group.projects.list(include_subgroups=True)``, the
+    same source as ``_build_project_cache``). This is a read-only helper the web
+    UI uses to populate the import-issues project picker; it never raises on
+    failure. If the GitLab client is absent/unreachable, no parent_group is
+    configured, the root group isn't found, or GitLab errors, an empty list is
+    returned (HTTP 200) so the UI falls back to free-text entry.
+    """
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        return []
+    grp = getattr(gl, "parent_group", "")
+    if not grp:
+        return []
+
+    try:
+        root = gl.get_group_by_name(grp)
+        if root is None:
+            return []
+        discovered = root.projects.list(all=True, include_subgroups=True)
+
+        projects = []
+        seen = set()
+        for p in discovered:
+            path = getattr(p, "path_with_namespace", None) or (p if isinstance(p, str) else None)
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            name = getattr(p, "name", None) or getattr(p, "name_with_namespace", None) or path
+            projects.append({"path": path, "name": name})
+        return projects
     except Exception:
         # GitLab unreachable, permissions, traversal error, etc. — degrade to [].
         return []

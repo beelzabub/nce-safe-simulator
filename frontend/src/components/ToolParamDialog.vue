@@ -29,21 +29,14 @@
                   <span class="optional-tag">from config</span>
                 </div>
                 <div class="group-field">
-                  <input
-                    type="text"
-                    class="field-input group-input"
-                    :class="{ 'group-input--locked': groupLocked }"
-                    :readonly="groupLocked"
-                    :list="groupOptions.length ? 'group-options' : undefined"
+                  <PathSelect
+                    class="group-input"
                     v-model="values[param.name]"
+                    :options="groupOptions"
+                    :loading="groupLoading"
+                    :disabled="groupLocked"
                     :title="groupLocked ? 'Click Edit to override' : 'Pick a group or type a new one'"
-                    autocomplete="off"
                   />
-                  <datalist v-if="groupOptions.length" id="group-options">
-                    <option v-for="opt in groupOptions" :key="opt.path" :value="opt.path">
-                      {{ opt.name }}
-                    </option>
-                  </datalist>
                   <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
                     Edit
                   </button>
@@ -56,6 +49,44 @@
                   Pick from the {{ groupOptions.length }} discovered group{{ groupOptions.length === 1 ? '' : 's' }}, or type a new group path to create it.
                 </span>
                 <span v-else-if="!groupLocked" class="field-hint">Type the target group path (create-if-missing supported).</span>
+              </template>
+
+              <!-- group-picker → plain datalist combobox (destination group, e.g. import-epics dest_group) -->
+              <template v-else-if="param.widget === 'group-picker'">
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span class="optional-tag">optional</span>
+                </label>
+                <PathSelect
+                  v-model="values[param.name]"
+                  :options="groupOptions"
+                  :loading="groupLoading"
+                  placeholder="Search or pick a group…"
+                />
+                <span v-if="groupLoading" class="field-hint">Loading groups…</span>
+                <span v-else-if="groupOptions.length" class="field-hint">
+                  Pick from {{ groupOptions.length }} discovered group{{ groupOptions.length === 1 ? '' : 's' }}, or type a path. Blank = use each row's group_path.
+                </span>
+                <span v-else class="field-hint">Type a destination group path. Blank = use each row's group_path.</span>
+              </template>
+
+              <!-- project → plain datalist combobox (destination project, e.g. import-issues target_project_path) -->
+              <template v-else-if="param.widget === 'project'">
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span class="optional-tag">optional</span>
+                </label>
+                <PathSelect
+                  v-model="values[param.name]"
+                  :options="projectOptions"
+                  :loading="projectLoading"
+                  placeholder="Search or pick a project…"
+                />
+                <span v-if="projectLoading" class="field-hint">Loading projects…</span>
+                <span v-else-if="projectOptions.length" class="field-hint">
+                  Pick from {{ projectOptions.length }} discovered project{{ projectOptions.length === 1 ? '' : 's' }}, or type a path. Blank = use each row's project_path.
+                </span>
+                <span v-else class="field-hint">Type a destination project path. Blank = use each row's project_path.</span>
               </template>
 
               <!-- file widget → file picker (uploaded before launch) -->
@@ -193,8 +224,9 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
+import PathSelect from './PathSelect.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
-import { upload, getGroups } from '../api.js'
+import { upload, getGroups, getProjects } from '../api.js'
 
 const props = defineProps({
   tool:     { type: Object, default: null },
@@ -211,6 +243,9 @@ const groupLocked = ref(true)
 const groupOptions  = ref([])    // [{ path, name }] discovered under the namespace
 const groupLoading  = ref(false)
 let   groupsFetched = false      // fetch once per dialog instance (cached)
+const projectOptions  = ref([])  // [{ path, name }] projects discovered under the namespace
+const projectLoading  = ref(false)
+let   projectsFetched = false    // fetch once per dialog instance (cached)
 const overlayDown = ref(false)
 const confirming  = ref(false)
 
@@ -232,9 +267,12 @@ watch(() => props.tool, tool => {
   }
   values.value = init
 
-  // Populate the group picker the first time a group-param tool opens. On any
-  // failure the options stay empty and the widget falls back to free-text.
-  if (tool.params.some(p => p.widget === 'group')) fetchGroups()
+  // Populate the group/project pickers the first time a tool that uses them
+  // opens. On any failure the options stay empty and the widget falls back to
+  // free-text. The active-group widget ('group') and the destination
+  // group-picker ('group-picker') share the same /api/groups fetch.
+  if (tool.params.some(p => p.widget === 'group' || p.widget === 'group-picker')) fetchGroups()
+  if (tool.params.some(p => p.widget === 'project')) fetchProjects()
 }, { immediate: true })
 
 async function fetchGroups() {
@@ -251,10 +289,25 @@ async function fetchGroups() {
   }
 }
 
+async function fetchProjects() {
+  if (projectsFetched) return
+  projectsFetched = true
+  projectLoading.value = true
+  try {
+    const list = await getProjects()
+    projectOptions.value = Array.isArray(list) ? list : []
+  } catch {
+    projectOptions.value = []
+  } finally {
+    projectLoading.value = false
+  }
+}
+
 // Pre-fill logic: optional params with a server-resolved default are pre-filled
 // so the dialog shows exactly what the config contains.
 function _initValue(p) {
   if (p.widget === 'group')                        return p.default ?? ''
+  if (p.widget === 'group-picker' || p.widget === 'project') return p.default ?? ''
   if (p.widget === 'file')                         return ''
   if (p.widget === 'select')                       return p.default ?? (p.options?.[0] ?? '')
   if (p.type === 'bool')                           return p.default ?? false
@@ -492,11 +545,7 @@ async function doLaunch() {
 }
 .group-input {
   flex: 1;
-}
-.group-input--locked {
-  color: var(--text-2);
-  background: var(--surface-alt);
-  cursor: default;
+  min-width: 0;
 }
 .group-edit-btn,
 .group-reset-btn {
