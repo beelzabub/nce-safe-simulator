@@ -400,6 +400,15 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 **Run Reports…** — a button pinned at the bottom of the sidebar opens the report picker dialog: choose individual reports or toggle All, select output formats (markdown / plotly / interactive; plotly and interactive require all reports to be selected since site builds are project-wide), and optionally check **Use last available data snapshot** to skip the GitLab API fetch and re-render from the most recent `data/` directory.
 
+#### Equivalent CLI command
+
+Every launch surface shows the **equivalent command line** for the operation, so a run you set up in the browser can be scripted, scheduled, or reproduced on another machine. The CLI accepts operations non-interactively — after `-ut <tool>` (tools) or `-r <report>` (reports), `--param value` / `--flag` tokens are applied as prefills without prompting — so the command the UI displays is a runnable one-liner, not a template:
+
+- **Tool dialogs** and the **report picker** carry a collapsible *Equivalent CLI command* strip (above the footer and on the confirmation step) that rebuilds **live** as you edit parameters, with a **Copy** button. Only set values contribute: a checked boolean becomes `--flag`, text/number values become `--name "value"` (shell-quoted when needed), and blank optionals are omitted so the CLI falls back to its own defaults.
+- **Job rows** that launch directly (no dialog) carry a small **`</>`** icon that pops up the command with a copy button; parameterised rows show the base invocation (the fully specified form appears in the dialog).
+
+The generated flags are contract-tested against the real CLI parser (`tests/test_cli_command_preview.py`) so a command copied from the UI parses back to exactly the parameters it was launched with.
+
 #### Job runner
 
 Each launched job appears as a card in the main pane, stacked vertically. The card header shows a status indicator (spinning while running, ✓ / ✕ / ◼ when done), the job name, and a Stop or × button. Click the header to collapse or expand the log pane.

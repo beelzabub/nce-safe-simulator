@@ -55,6 +55,7 @@
               <span v-if="isRunning(t.key)" class="badge badge-run">● running</span>
               <span v-else-if="t.readonly" class="ro-hint">read-only</span>
               <span v-else-if="t.params?.length" class="cfg-hint">⚙</span>
+              <CliPopover :command="cliFor(t)" class="item-cli" />
             </div>
             <div class="item-desc">{{ t.description }}</div>
           </li>
@@ -98,6 +99,8 @@ import { ref, computed, onMounted } from 'vue'
 import { getTools, getReports } from '../api.js'
 import ToolParamDialog from './ToolParamDialog.vue'
 import ReportPickerDialog from './ReportPickerDialog.vue'
+import CliPopover from './CliPopover.vue'
+import { buildToolCommand } from '../composables/useCliCommand.js'
 
 const props = defineProps({
   runningJobs: { type: Array, default: () => [] },
@@ -209,6 +212,13 @@ function handleClick(tool) {
   } else {
     emit('launch', tool, {})
   }
+}
+
+// CLI command shown in each row's </> popover (#140). No-param tools resolve to
+// a complete command; parameterized tools show the base invocation (the fully
+// specified form, with flags, appears live in the tool dialog).
+function cliFor(tool) {
+  return buildToolCommand(tool, {})
 }
 
 // ── Conflict detection ─────────────────────────────────────────────────────
@@ -374,6 +384,10 @@ function onReportLaunch(selectedReports, formats, useLast) {
 .ro-hint   { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
 .badge-run { background: var(--badge-run-bg); color: var(--badge-run-text); }
 .cfg-hint  { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
+/* CLI-command icon: subtle until the row is hovered (matches the copy-btn
+   reveal pattern), so it doesn't clutter the list at rest. */
+.item-cli { flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
+.job-item:hover .item-cli { opacity: 1; }
 
 /* ── State messages ── */
 .state-msg   { padding: 1.5rem 1rem; color: var(--text-2); font-size: 0.85rem; text-align: center; }
