@@ -438,7 +438,9 @@ def _last_data_dir():
 def _parse_tool_args(extra):
     """Convert leftover CLI tokens into a tool-param prefills dict.
 
-    Handles --flag (bool True) and --param value (string, coerced later).
+    Handles --flag (bool True), --param value, and --param=value (used when the
+    value begins with '-', e.g. a negative count, so it isn't mistaken for the
+    next flag). Values are strings, coerced later.
     Normalises --dry-run style hyphens to underscores.
     """
     result = {}
@@ -446,7 +448,16 @@ def _parse_tool_args(extra):
     while i < len(extra):
         tok = extra[i]
         if tok.startswith("--"):
-            name = tok[2:].replace("-", "_")
+            body = tok[2:]
+            # --name=value: the value is attached, so it is unambiguous even when
+            # it begins with '-' (e.g. a negative count) or is itself a flag-like
+            # string. Split on the first '=' only.
+            if "=" in body:
+                raw_name, value = body.split("=", 1)
+                result[raw_name.replace("-", "_")] = value
+                i += 1
+                continue
+            name = body.replace("-", "_")
             if i + 1 < len(extra) and not extra[i + 1].startswith("-"):
                 result[name] = extra[i + 1]
                 i += 2
