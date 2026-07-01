@@ -42,6 +42,12 @@ ISSUE_IMPORT_KNOWN = {
 }
 ISSUE_IMPORT_REQUIRED = {"title"}
 
+# Columns unique to each import type (shared reference columns like iid/author
+# cancel out). Their presence in the other importer is a strong signal that the
+# wrong file was supplied — e.g. an issues export fed to the epics importer.
+EPIC_ONLY_COLS  = EPIC_IMPORT_KNOWN  - ISSUE_IMPORT_KNOWN
+ISSUE_ONLY_COLS = ISSUE_IMPORT_KNOWN - EPIC_IMPORT_KNOWN
+
 VALID_DATE_FMT = "%Y-%m-%d"
 VALID_STATES   = {"opened", "open", "closed"}
 
@@ -359,6 +365,16 @@ class ImportExportMixin:
             print(f"  Required: {', '.join(sorted(EPIC_IMPORT_REQUIRED))}")
             print(f"  Optional: title, group_path, description, labels, start_date, due_date,")
             print(f"            parent_id, planned_weight, state")
+            return None, 1
+
+        # Wrong-file guard: issue-only columns mean this is almost certainly an
+        # issues export, not epics. title alone would otherwise pass and create
+        # epics from issue rows.
+        issue_markers = columns & ISSUE_ONLY_COLS
+        if issue_markers:
+            print(f"\n  INVALID: this looks like an ISSUES export, not epics — it has "
+                  f"issue-only column(s): {', '.join(sorted(issue_markers))}.")
+            print("  Use the Import Issues tool for this file.")
             return None, 1
 
         unknown = columns - EPIC_IMPORT_KNOWN
@@ -755,6 +771,15 @@ class ImportExportMixin:
             print(f"  Required: {', '.join(sorted(ISSUE_IMPORT_REQUIRED))}")
             print(f"  Optional: project_path, description, labels, weight, due_date,")
             print(f"            milestone, assignees, epic_id, state")
+            return None, 1
+
+        # Wrong-file guard: epic-only columns mean this is almost certainly an
+        # epics export, not issues.
+        epic_markers = columns & EPIC_ONLY_COLS
+        if epic_markers:
+            print(f"\n  INVALID: this looks like an EPICS export, not issues — it has "
+                  f"epic-only column(s): {', '.join(sorted(epic_markers))}.")
+            print("  Use the Import Epics tool for this file.")
             return None, 1
 
         if not override_project and "project_path" not in columns:
