@@ -279,6 +279,54 @@ class ImportExportMixin:
                 pass
         return cache
 
+    # ── Re-import handling (on_existing: create | skip | update) ───────────────
+
+    def _find_issue_by_title(self, project, title):
+        """First issue in `project` with an exact matching title, else None."""
+        try:
+            for iss in project.issues.list(search=title, all=True):
+                if getattr(iss, "title", "") == title:
+                    return iss
+        except Exception:
+            pass
+        return None
+
+    def _find_epic_by_title(self, group, title):
+        """First epic in `group` with an exact matching title, else None."""
+        try:
+            for ep in group.epics.list(search=title, all=True):
+                if getattr(ep, "title", "") == title:
+                    return ep
+        except Exception:
+            pass
+        return None
+
+    def _update_issue(self, issue, payload, state, epic_id):
+        """Apply an import payload to an existing issue (merge — omitted fields
+        are left untouched; matched title is not rewritten)."""
+        for k, v in payload.items():
+            if k == "title":
+                continue
+            setattr(issue, k, v)
+        if epic_id is not None:
+            issue.epic_id = epic_id
+        if state == "closed":
+            issue.state_event = "close"
+        issue.save()
+
+    def _update_epic(self, epic, payload, weight, state):
+        """Apply an import payload to an existing epic (merge semantics)."""
+        for k, v in payload.items():
+            if k == "title":
+                continue
+            setattr(epic, k, v)
+        epic.save()
+        if weight is not None:
+            self._set_epic_weight(epic, weight)
+        if state == "closed":
+            epic.state_event = "close"
+            epic.save()
+
     def _build_pid_path_map(self, root_group):
         """Return {project_id: path_with_namespace}."""
         return {
@@ -537,12 +585,13 @@ class ImportExportMixin:
         return parent_map, orphan_rows
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                     group=None, create_missing=False, dest_group=None):
+                     group=None, create_missing=False, dest_group=None, on_existing="create"):
         with self._group_override(group):
-            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing, dest_group)
+            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
+                                      dest_group, on_existing)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                      create_missing=False, dest_group=None):
+                      create_missing=False, dest_group=None, on_existing="create"):
         """
         Import epics from a CSV or JSON file.
 
@@ -559,6 +608,9 @@ class ImportExportMixin:
         """
         if unresolved_parent not in ("ask", "label", "skip"):
             print(f"ERROR: unresolved_parent must be 'ask', 'label', or 'skip' (got '{unresolved_parent}')")
+            return
+        if on_existing not in ("create", "skip", "update"):
+            print(f"ERROR: on_existing must be 'create', 'skip', or 'update' (got '{on_existing}')")
             return
         if not input_path:
             print("ERROR: input_path is required.")
@@ -619,7 +671,7 @@ class ImportExportMixin:
         if orphan_rows:
             print(f"  ({len(orphan_rows)} row(s) will receive 'import::needs-parent' label)")
 
-        created = skipped = failed = 0
+        created = skipped = updated = failed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
 
         for i, row in enumerate(cleaned, 1):
@@ -671,8 +723,18 @@ class ImportExportMixin:
             if due_date:          payload["end_date"]    = due_date
             if resolved_pid:      payload["parent_id"]   = resolved_pid
 
+            # Re-import handling: match an existing epic by title in the target.
+            existing = self._find_epic_by_title(target, title) if on_existing != "create" else None
+            if existing and on_existing == "skip":
+                print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — epic '{title}' "
+                      f"already exists (#{existing.iid})")
+                skipped += 1
+                continue
+
             if dry_run:
-                parts = [f"'{title}'", f"group={target.full_path}"]
+                action = "update" if (existing and on_existing == "update") else "create"
+                parts = [f"'{title}'", f"group={target.full_path}", f"action={action}"]
+                if existing:      parts.append(f"#{existing.iid}")
                 if labels:        parts.append(f"labels={labels}")
                 if weight:        parts.append(f"weight={weight}")
                 if resolved_pid:  parts.append(f"parent_id={resolved_pid}")
@@ -682,20 +744,24 @@ class ImportExportMixin:
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
-                created += 1
+                if action == "update":  updated += 1
+                else:                   created += 1
                 continue
 
             try:
-                epic = target.epics.create(payload)
-
-                if weight is not None:
-                    self._set_epic_weight(epic, weight)
-                if state == "closed":
-                    epic.state_event = "close"
-                    epic.save()
-
-                print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
-                created += 1
+                if existing and on_existing == "update":
+                    self._update_epic(existing, payload, weight, state)
+                    print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
+                    updated += 1
+                else:
+                    epic = target.epics.create(payload)
+                    if weight is not None:
+                        self._set_epic_weight(epic, weight)
+                    if state == "closed":
+                        epic.state_event = "close"
+                        epic.save()
+                    print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
+                    created += 1
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
 
@@ -703,7 +769,7 @@ class ImportExportMixin:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
                 failed += 1
 
-        print(f"\n  Done — {created} created  |  {skipped} skipped  |  {failed} failed"
+        print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
 
         if orphan_summary:
@@ -844,14 +910,18 @@ class ImportExportMixin:
         return rows, 0
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                      group=None, create_missing=False):
+                      group=None, create_missing=False, on_existing="create"):
         with self._group_override(group):
-            return self._import_issues(input_path, target_project_path, dry_run, create_missing)
+            return self._import_issues(input_path, target_project_path, dry_run,
+                                       create_missing, on_existing)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                       create_missing=False):
+                       create_missing=False, on_existing="create"):
         if not input_path:
             print("ERROR: input_path is required.")
+            return
+        if on_existing not in ("create", "skip", "update"):
+            print(f"ERROR: on_existing must be 'create', 'skip', or 'update' (got '{on_existing}')")
             return
 
         path = self._resolve_path(input_path)
@@ -893,7 +963,7 @@ class ImportExportMixin:
         # Username → user ID cache (populated on demand)
         username_cache = {}
 
-        created = skipped = failed = 0
+        created = skipped = updated = failed = 0
 
         for i, row in enumerate(cleaned, 1):
             title       = str(row.get("title", "")).strip()
@@ -980,18 +1050,35 @@ class ImportExportMixin:
                 if ids:
                     payload["assignee_ids"] = ids
 
+            # Re-import handling: match an existing issue by title in the target.
+            existing = self._find_issue_by_title(project, title) if on_existing != "create" else None
+            if existing and on_existing == "skip":
+                print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — issue '{title}' "
+                      f"already exists (#{existing.iid})")
+                skipped += 1
+                continue
+
             if dry_run:
-                parts = [f"'{title}'", f"project={ppath}"]
+                action = "update" if (existing and on_existing == "update") else "create"
+                parts = [f"'{title}'", f"project={ppath}", f"action={action}"]
+                if existing:  parts.append(f"#{existing.iid}")
                 if labels:    parts.append(f"labels={labels}")
                 if weight:    parts.append(f"weight={weight}")
                 if epic_id:   parts.append(f"epic_id={epic_id}")
                 if due_date:  parts.append(f"due={due_date}")
                 if milestone: parts.append(f"milestone={milestone}")
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
-                created += 1
+                if action == "update":  updated += 1
+                else:                   created += 1
                 continue
 
             try:
+                if existing and on_existing == "update":
+                    self._update_issue(existing, payload, state, epic_id)
+                    print(f"  row {i}: updated #{existing.iid} '{title}' → {ppath}")
+                    updated += 1
+                    continue
+
                 issue = project.issues.create(payload)
 
                 if epic_id is not None:
@@ -1011,5 +1098,5 @@ class ImportExportMixin:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
                 failed += 1
 
-        print(f"\n  Done — {created} created  |  {skipped} skipped  |  {failed} failed"
+        print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
