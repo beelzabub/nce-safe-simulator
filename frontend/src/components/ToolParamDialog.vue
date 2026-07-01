@@ -68,6 +68,21 @@
                 <span v-else class="field-hint">Choose a .csv or .json file to upload</span>
               </template>
 
+              <!-- select → dropdown (explicit enum choice, e.g. CSV/JSON) -->
+              <template v-else-if="param.widget === 'select'">
+                <label class="field-label">
+                  {{ param.prompt }}
+                  <span v-if="!param.optional" class="required-mark">*</span>
+                  <span v-else class="optional-tag">optional</span>
+                </label>
+                <select class="field-input select-input" v-model="values[param.name]">
+                  <option v-for="opt in (param.options || [])" :key="opt" :value="opt">
+                    {{ String(opt).toUpperCase() }}
+                  </option>
+                </select>
+                <span v-if="param.hint" class="field-hint">{{ param.hint }}</span>
+              </template>
+
               <!-- bool → toggle -->
               <template v-else-if="param.type === 'bool'">
                 <label class="toggle-label">
@@ -207,6 +222,7 @@ watch(() => props.tool, tool => {
 function _initValue(p) {
   if (p.widget === 'group')                        return p.default ?? ''
   if (p.widget === 'file')                         return ''
+  if (p.widget === 'select')                       return p.default ?? (p.options?.[0] ?? '')
   if (p.type === 'bool')                           return p.default ?? false
   if (p.default !== null && p.default !== undefined) return p.default
   if (p.optional)                                  return null
@@ -537,6 +553,9 @@ async function doLaunch() {
 }
 .field-input:focus        { border-color: var(--action); }
 .field-input::placeholder { color: var(--text-3); }
+
+/* ── Select (enum) ── */
+.select-input { cursor: pointer; }
 
 /* ── File picker ── */
 .file-input {

@@ -84,6 +84,7 @@ def _tool_payload(tool: dict, gl=None) -> dict:
             "prompt":   p["prompt"],
             "type":     p["type"].__name__,
             "widget":   p.get("widget"),
+            "options":  p.get("options"),
             "section":  p.get("section"),
             "hint":     hint,
             "default":  default,
