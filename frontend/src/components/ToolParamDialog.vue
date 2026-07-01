@@ -34,9 +34,16 @@
                     class="field-input group-input"
                     :class="{ 'group-input--locked': groupLocked }"
                     :readonly="groupLocked"
+                    :list="groupOptions.length ? 'group-options' : undefined"
                     v-model="values[param.name]"
-                    :title="groupLocked ? 'Click Edit to override' : ''"
+                    :title="groupLocked ? 'Click Edit to override' : 'Pick a group or type a new one'"
+                    autocomplete="off"
                   />
+                  <datalist v-if="groupOptions.length" id="group-options">
+                    <option v-for="opt in groupOptions" :key="opt.path" :value="opt.path">
+                      {{ opt.name }}
+                    </option>
+                  </datalist>
                   <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
                     Edit
                   </button>
@@ -44,6 +51,11 @@
                     Reset
                   </button>
                 </div>
+                <span v-if="!groupLocked && groupLoading" class="field-hint">Loading groups…</span>
+                <span v-else-if="!groupLocked && groupOptions.length" class="field-hint">
+                  Pick from the {{ groupOptions.length }} discovered group{{ groupOptions.length === 1 ? '' : 's' }}, or type a new group path to create it.
+                </span>
+                <span v-else-if="!groupLocked" class="field-hint">Type the target group path (create-if-missing supported).</span>
               </template>
 
               <!-- file widget → file picker (uploaded before launch) -->
@@ -182,7 +194,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
-import { upload } from '../api.js'
+import { upload, getGroups } from '../api.js'
 
 const props = defineProps({
   tool:     { type: Object, default: null },
@@ -196,6 +208,9 @@ const fileObjects  = ref({})   // file-widget param name → chosen File (not pe
 const uploading    = ref(false)
 const uploadError  = ref('')
 const groupLocked = ref(true)
+const groupOptions  = ref([])    // [{ path, name }] discovered under the namespace
+const groupLoading  = ref(false)
+let   groupsFetched = false      // fetch once per dialog instance (cached)
 const overlayDown = ref(false)
 const confirming  = ref(false)
 
@@ -216,7 +231,25 @@ watch(() => props.tool, tool => {
       : _initValue(p)
   }
   values.value = init
+
+  // Populate the group picker the first time a group-param tool opens. On any
+  // failure the options stay empty and the widget falls back to free-text.
+  if (tool.params.some(p => p.widget === 'group')) fetchGroups()
 }, { immediate: true })
+
+async function fetchGroups() {
+  if (groupsFetched) return
+  groupsFetched = true
+  groupLoading.value = true
+  try {
+    const list = await getGroups()
+    groupOptions.value = Array.isArray(list) ? list : []
+  } catch {
+    groupOptions.value = []
+  } finally {
+    groupLoading.value = false
+  }
+}
 
 // Pre-fill logic: optional params with a server-resolved default are pre-filled
 // so the dialog shows exactly what the config contains.

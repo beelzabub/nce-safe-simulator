@@ -10,6 +10,19 @@ export async function getReports() {
   return r.json()
 }
 
+// Groups discovered under the configured namespace/parent_group, used to
+// populate the tool group picker. The endpoint degrades to [] on any failure,
+// and we also swallow network errors here so callers can fall back to free-text.
+export async function getGroups() {
+  try {
+    const r = await fetch('/api/groups')
+    if (!r.ok) return []
+    return r.json()
+  } catch {
+    return []
+  }
+}
+
 export async function getFullConfig() {
   const r = await fetch('/api/config/full')
   if (!r.ok) throw new Error(`GET /api/config/full: ${r.status}`)
