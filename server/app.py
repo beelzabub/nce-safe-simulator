@@ -53,6 +53,10 @@ def _tool_payload(tool: dict, gl=None) -> dict:
     key = tool["key"]
     params = []
     for p in tool.get("params", []):
+        # cli_only params (e.g. server-side output_path) are hidden from the web
+        # UI; the CLI still prompts for them from the raw tool def.
+        if p.get("cli_only"):
+            continue
         default = p.get("default")
         hint    = None
 
