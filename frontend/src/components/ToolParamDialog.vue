@@ -29,21 +29,14 @@
                   <span class="optional-tag">from config</span>
                 </div>
                 <div class="group-field">
-                  <input
-                    type="text"
-                    class="field-input group-input"
-                    :class="{ 'group-input--locked': groupLocked }"
-                    :readonly="groupLocked"
-                    :list="groupOptions.length ? 'group-options' : undefined"
+                  <PathSelect
+                    class="group-input"
                     v-model="values[param.name]"
+                    :options="groupOptions"
+                    :loading="groupLoading"
+                    :disabled="groupLocked"
                     :title="groupLocked ? 'Click Edit to override' : 'Pick a group or type a new one'"
-                    autocomplete="off"
                   />
-                  <datalist v-if="groupOptions.length" id="group-options">
-                    <option v-for="opt in groupOptions" :key="opt.path" :value="opt.path">
-                      {{ opt.name }}
-                    </option>
-                  </datalist>
                   <button v-if="groupLocked" class="group-edit-btn" type="button" @click="groupLocked = false">
                     Edit
                   </button>
@@ -64,19 +57,12 @@
                   {{ param.prompt }}
                   <span class="optional-tag">optional</span>
                 </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  :list="groupOptions.length ? 'group-picker-options' : undefined"
+                <PathSelect
                   v-model="values[param.name]"
+                  :options="groupOptions"
+                  :loading="groupLoading"
                   placeholder="blank = use each row's group_path"
-                  autocomplete="off"
                 />
-                <datalist v-if="groupOptions.length" id="group-picker-options">
-                  <option v-for="opt in groupOptions" :key="opt.path" :value="opt.path">
-                    {{ opt.name }}
-                  </option>
-                </datalist>
                 <span v-if="groupLoading" class="field-hint">Loading groups…</span>
                 <span v-else-if="groupOptions.length" class="field-hint">
                   Pick from {{ groupOptions.length }} discovered group{{ groupOptions.length === 1 ? '' : 's' }}, or type a path. Blank = use each row's group_path.
@@ -90,19 +76,12 @@
                   {{ param.prompt }}
                   <span class="optional-tag">optional</span>
                 </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  :list="projectOptions.length ? 'project-picker-options' : undefined"
+                <PathSelect
                   v-model="values[param.name]"
+                  :options="projectOptions"
+                  :loading="projectLoading"
                   placeholder="blank = use each row's project_path"
-                  autocomplete="off"
                 />
-                <datalist v-if="projectOptions.length" id="project-picker-options">
-                  <option v-for="opt in projectOptions" :key="opt.path" :value="opt.path">
-                    {{ opt.name }}
-                  </option>
-                </datalist>
                 <span v-if="projectLoading" class="field-hint">Loading projects…</span>
                 <span v-else-if="projectOptions.length" class="field-hint">
                   Pick from {{ projectOptions.length }} discovered project{{ projectOptions.length === 1 ? '' : 's' }}, or type a path. Blank = use each row's project_path.
@@ -245,6 +224,7 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
+import PathSelect from './PathSelect.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { upload, getGroups, getProjects } from '../api.js'
 
@@ -565,11 +545,7 @@ async function doLaunch() {
 }
 .group-input {
   flex: 1;
-}
-.group-input--locked {
-  color: var(--text-2);
-  background: var(--surface-alt);
-  cursor: default;
+  min-width: 0;
 }
 .group-edit-btn,
 .group-reset-btn {
