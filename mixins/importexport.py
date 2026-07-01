@@ -493,12 +493,12 @@ class ImportExportMixin:
         return parent_map, orphan_rows
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                     group=None, create_missing=False):
+                     group=None, create_missing=False, dest_group=None):
         with self._group_override(group):
-            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing)
+            return self._import_epics(input_path, unresolved_parent, dry_run, create_missing, dest_group)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                      create_missing=False):
+                      create_missing=False, dest_group=None):
         """
         Import epics from a CSV or JSON file.
 
@@ -584,7 +584,17 @@ class ImportExportMixin:
             orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            gpath       = str(row.get("group_path", "")).strip() or root_group.full_path
+            # Placement (Refs #138): if dest_group is set, ALL epics go there
+            # (override — mirrors how target_project_path works for issues). If
+            # blank, use the row's own group_path when it resolves, else fall
+            # back to the target root group. NOTE: the root is a valid epic
+            # container, so a blank/unresolvable placement still lands at root;
+            # this differs structurally from issues, where a missing project is
+            # skipped because the root group is not a project.
+            if dest_group:
+                gpath = dest_group
+            else:
+                gpath = str(row.get("group_path", "")).strip() or root_group.full_path
 
             target = group_cache.get(gpath)
             if not target:
