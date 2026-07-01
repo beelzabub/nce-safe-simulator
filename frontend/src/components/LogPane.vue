@@ -1,12 +1,13 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'url'" :href="part.value" :download="part.download || null" :target="part.download ? null : '_blank'" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
+    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'download'" :href="part.value" :download="part.filename" class="dl-btn" rel="noopener">⤓ Download {{ part.filename }}</a><a v-else-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
   </div>
 </template>
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
+import { downloadFilename } from '../download.js'
 
 const props = defineProps({
   lines: { type: Array, required: true },
@@ -46,7 +47,12 @@ function parseLine(line) {
   let m
   while ((m = URL_RE.exec(line)) !== null) {
     if (m.index > last) parts.push({ type: 'text', value: line.slice(last, m.index) })
-    parts.push({ type: 'url', value: m[0], download: m[0].startsWith('/api/download/') })
+    if (m[0].startsWith('/api/download/')) {
+      // Render a clean "⤓ Download <filename>" button instead of the raw path.
+      parts.push({ type: 'download', value: m[0], filename: downloadFilename(m[0]) })
+    } else {
+      parts.push({ type: 'url', value: m[0] })
+    }
     last = m.index + m[0].length
   }
   if (last < line.length) parts.push({ type: 'text', value: line.slice(last) })
@@ -94,4 +100,18 @@ function parseLine(line) {
   color: var(--text-3, #6e7681);
   font-style: italic;
 }
+/* Clean download button — matches ArchitectureDialog's .dl-btn */
+.dl-btn {
+  display: inline-block;
+  margin: 0.15rem 0;
+  padding: 0.35rem 0.85rem;
+  border-radius: 4px;
+  border: 1px solid var(--border, #30363d);
+  background: var(--surface-raised, #161b22);
+  color: var(--text-1, #e6edf3);
+  font-size: 0.82rem;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.dl-btn:hover { background: var(--surface-active, #21262d); }
 </style>
