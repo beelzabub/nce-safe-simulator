@@ -181,8 +181,8 @@ cd ..</pre>
                 <div class="step-title">Bootstrap</div>
                 <div class="step-desc">
                   Run <strong>Create Lorem Data</strong> (Seed Data group) to build the full SAFe hierarchy.
-                  Always do a <em>Dry Run</em> first to preview the resolved structure without writing anything.
-                  The tool creates subgroups, projects, epics, issues, and labels in one pass.
+                  Review the settings on the confirmation step before launching &mdash; the tool creates
+                  subgroups, projects, epics, issues, and labels in one pass.
                 </div>
               </div>
             </div>
