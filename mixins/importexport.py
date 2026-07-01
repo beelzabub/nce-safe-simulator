@@ -9,14 +9,14 @@ from pathlib import Path
 # ── Field definitions ─────────────────────────────────────────────────────────
 
 EPIC_EXPORT_FIELDS = [
-    "group_path", "iid", "id", "title", "description", "state",
+    "group_path", "source_root", "iid", "id", "title", "description", "state",
     "labels", "start_date", "due_date", "parent_id", "parent_iid",
     "planned_weight", "author", "web_url",
     "created_at", "updated_at", "closed_at",
 ]
 
 ISSUE_EXPORT_FIELDS = [
-    "project_path", "iid", "id", "title", "description", "state",
+    "project_path", "source_root", "iid", "id", "title", "description", "state",
     "labels", "weight", "due_date", "milestone", "assignees",
     "epic_id", "epic_iid", "author", "web_url",
     "created_at", "updated_at", "closed_at",
@@ -30,6 +30,9 @@ EPIC_IMPORT_KNOWN = {
     # read-only / reference columns carried from export — silently ignored
     "iid", "id", "author", "web_url", "created_at", "updated_at",
     "closed_at", "parent_iid", "work_item_id",
+    # source root stamp (#139) — carried across enclaves, consumed for
+    # relative-path reconciliation, not written to the created epic
+    "source_root",
 }
 EPIC_IMPORT_REQUIRED = {"title"}
 
@@ -39,6 +42,8 @@ ISSUE_IMPORT_KNOWN = {
     # read-only reference columns
     "iid", "id", "author", "web_url", "created_at", "updated_at",
     "closed_at", "epic_iid",
+    # source root stamp (#139) — see EPIC_IMPORT_KNOWN
+    "source_root",
 }
 ISSUE_IMPORT_REQUIRED = {"title"}
 
@@ -334,6 +339,94 @@ class ImportExportMixin:
             for p in root_group.projects.list(all=True, include_subgroups=True)
         }
 
+    # ── Relative-path reconciliation across roots (#139) ───────────────────────
+
+    @staticmethod
+    def _strip_source_root(path, source_root):
+        """Return `path` made relative to `source_root`, or None if it isn't under it.
+
+        Paths are matched on whole segments (so a source root of ``ns-a/port``
+        never partially strips ``ns-a/portfolio``). ``path == source_root`` maps
+        to the root itself and returns ``""``.
+        """
+        path = (path or "").strip().strip("/")
+        root = (source_root or "").strip().strip("/")
+        if not path or not root:
+            return None
+        if path == root:
+            return ""
+        prefix = root + "/"
+        if path.startswith(prefix):
+            return path[len(prefix):]
+        return None
+
+    def _infer_source_root(self, rows, path_key, override=None):
+        """Determine the source root to strip from each row's structural path.
+
+        Precedence (Decision 1 in #139):
+          1. an explicit ``override`` (import param) — trusted verbatim
+          2. the ``source_root`` stamp carried in the export (Companion A) —
+             deterministic; the exact root the export was taken from
+          3. longest-common path-prefix of the rows' paths — best-effort fallback
+             for un-stamped (older) files; a guess that can over-strip when every
+             row shares a deeper subtree, which is exactly why the stamp exists.
+
+        Returns ``(source_root, trusted)``: the root string (or None if nothing
+        usable) and whether it came from an authoritative source (override/stamp)
+        vs. the LCP guess. ``trusted`` gates the degenerate reconcile-to-root case
+        so an over-stripping guess can't silently land rows at the bare root.
+        """
+        if override and str(override).strip():
+            return str(override).strip().strip("/"), True
+
+        stamped = {
+            str(r.get("source_root", "")).strip().strip("/")
+            for r in rows
+            if str(r.get("source_root", "")).strip()
+        }
+        if len(stamped) == 1:
+            return next(iter(stamped)), True
+
+        # Longest-common-prefix fallback (segment-wise) over the rows' own paths.
+        segs = [
+            str(r.get(path_key, "")).strip().strip("/").split("/")
+            for r in rows
+            if str(r.get(path_key, "")).strip()
+        ]
+        if not segs:
+            return None, False
+        common = segs[0]
+        for other in segs[1:]:
+            i = 0
+            while i < len(common) and i < len(other) and common[i] == other[i]:
+                i += 1
+            common = common[:i]
+            if not common:
+                return None, False
+        return ("/".join(common) or None), False
+
+    def _reconcile_path(self, own, source_root, target_root_path, cache, allow_root=True):
+        """Resolve `own` (a source-rooted path) under `target_root_path`.
+
+        Strips `source_root` from `own` to get the structural remainder, then
+        looks for ``target_root_path/<remainder>`` in `cache`. Returns the matched
+        cache key (a full target path) or None when it doesn't resolve. Because it
+        matches the whole relative path — not a bare leaf name — it maps to exactly
+        one target container or none, so it can never silently misplace an item.
+
+        ``allow_root`` guards the empty-remainder case (``own == source_root`` →
+        the target root itself): meaningful for a trusted stamp/override, but with
+        a guessed (LCP) root it just means the guess over-stripped, so callers pass
+        ``allow_root=False`` and let the normal root/skip fallback handle the row.
+        """
+        rel = self._strip_source_root(own, source_root)
+        if rel is None:
+            return None
+        if rel == "" and not allow_root:
+            return None
+        candidate = f"{target_root_path}/{rel}" if rel else target_root_path
+        return candidate if candidate in cache else None
+
     # ── Epic export ───────────────────────────────────────────────────────────
 
     def export_epics(self, output_path=None, group=None, fmt="csv"):
@@ -370,6 +463,7 @@ class ImportExportMixin:
         for epic in all_epics:
             rows.append({
                 "group_path":     gid_map.get(getattr(epic, "group_id", None), ""),
+                "source_root":    group.full_path,
                 "iid":            epic.iid,
                 "id":             epic.id,
                 "title":          epic.title or "",
@@ -591,13 +685,15 @@ class ImportExportMixin:
         return parent_map, orphan_rows
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                     group=None, create_missing=False, dest_group=None, on_existing="skip"):
+                     group=None, create_missing=False, dest_group=None, on_existing="skip",
+                     source_root=None):
         with self._group_override(group):
             return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
-                                      dest_group, on_existing)
+                                      dest_group, on_existing, source_root)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                      create_missing=False, dest_group=None, on_existing="skip"):
+                      create_missing=False, dest_group=None, on_existing="skip",
+                      source_root=None):
         """
         Import epics from a CSV or JSON file.
 
@@ -660,6 +756,15 @@ class ImportExportMixin:
                   f"target root '{root_group.full_path}'. Nothing was imported.")
             return
 
+        # Cross-root reconciliation (#139): when a row's own group_path carries a
+        # different (source) root, strip that root and re-resolve the structural
+        # remainder under this target root. src_root comes from the source_root
+        # override, else the export's stamp, else an LCP guess.
+        src_root, src_trusted = self._infer_source_root(cleaned, "group_path", source_root)
+        if src_root and src_root != root_group.full_path:
+            print(f"  Reconciling source root '{src_root}' → '{root_group.full_path}' "
+                  f"for unresolved paths")
+
         # ── Pre-flight: parent_id resolution ────────────────────────────────
         print("\n  Checking parent_ids against target hierarchy...")
         valid_epic_ids = self._build_valid_epic_ids(root_group)
@@ -693,15 +798,23 @@ class ImportExportMixin:
             orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            # Placement (#138): per-row fallback. Honor the row's own
-            # group_path when it resolves under the target root; otherwise place
-            # the row in the user-picked dest_group (validated above). With
-            # neither, land at the target root — the root is a valid epic
-            # container (unlike issues, where a missing project has no root
-            # fallback and the row is skipped).
+            # Placement precedence: (1) the row's own group_path when it resolves
+            # directly under the target root (same-root import); (2) #139 relative
+            # reconcile — strip the source root and re-resolve the structural path
+            # under this target root (cross-enclave); (3) #138 picked dest_group as
+            # the fallback when structure can't be honored; (4) the target root —
+            # a valid epic container (unlike issues, where a missing project has no
+            # root fallback and the row is skipped).
             own = str(row.get("group_path", "")).strip()
+            reconciled = (
+                self._reconcile_path(own, src_root, root_group.full_path, group_cache,
+                                     allow_root=src_trusted)
+                if own and own not in group_cache else None
+            )
             if own and own in group_cache:
                 gpath = own
+            elif reconciled:
+                gpath = reconciled
             elif dest_group:
                 gpath = dest_group
             else:
@@ -820,6 +933,7 @@ class ImportExportMixin:
             epic_attr = getattr(issue, "epic", None) or {}
             rows.append({
                 "project_path": pid_map.get(getattr(issue, "project_id", None), ""),
+                "source_root":  group.full_path,
                 "iid":          issue.iid,
                 "id":           issue.id,
                 "title":        issue.title or "",
@@ -916,13 +1030,14 @@ class ImportExportMixin:
         return rows, 0
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                      group=None, create_missing=False, on_existing="skip"):
+                      group=None, create_missing=False, on_existing="skip",
+                      source_root=None):
         with self._group_override(group):
             return self._import_issues(input_path, target_project_path, dry_run,
-                                       create_missing, on_existing)
+                                       create_missing, on_existing, source_root)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                       create_missing=False, on_existing="skip"):
+                       create_missing=False, on_existing="skip", source_root=None):
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -966,6 +1081,14 @@ class ImportExportMixin:
                   f"target root '{root_group.full_path}'. Nothing was imported.")
             return
 
+        # Cross-root reconciliation (#139): strip the source root from each row's
+        # own project_path and re-resolve the structural remainder under this
+        # target root's projects. src_root: override, else stamp, else LCP guess.
+        src_root, src_trusted = self._infer_source_root(cleaned, "project_path", source_root)
+        if src_root and src_root != root_group.full_path:
+            print(f"  Reconciling source root '{src_root}' → '{root_group.full_path}' "
+                  f"for unresolved paths")
+
         # Username → user ID cache (populated on demand)
         username_cache = {}
 
@@ -981,14 +1104,21 @@ class ImportExportMixin:
             assignees   = self._coerce_usernames(row.get("assignees"))
             epic_id     = self._coerce_int(row.get("epic_id"),  "epic_id", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            # Placement (#138): per-row fallback. Honor the row's own
-            # project_path when it resolves under the target root; otherwise
-            # place the row in the user-picked target_project_path (validated
-            # above). Issues have no root fallback, so an unresolvable row with
-            # no destination is skipped.
+            # Placement precedence: (1) own project_path when it resolves directly
+            # (same-root); (2) #139 relative reconcile under this target root
+            # (cross-enclave); (3) #138 picked target_project_path as the fallback;
+            # (4) skip — issues have no root fallback, so an unresolvable row with
+            # no destination is dropped.
             own = str(row.get("project_path", "")).strip()
+            reconciled = (
+                self._reconcile_path(own, src_root, root_group.full_path, project_cache,
+                                     allow_root=src_trusted)
+                if own and own not in project_cache else None
+            )
             if own and own in project_cache:
                 ppath = own
+            elif reconciled:
+                ppath = reconciled
             elif target_project_path:
                 ppath = target_project_path
             else:
