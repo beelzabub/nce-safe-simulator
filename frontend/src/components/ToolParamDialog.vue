@@ -114,6 +114,7 @@
                   {{ param.prompt }}
                   <span v-if="!param.optional" class="required-mark">*</span>
                   <span v-else class="optional-tag">optional</span>
+                  <HelpTip v-if="param.help" :text="param.help" />
                 </label>
                 <select class="field-input select-input" v-model="values[param.name]">
                   <option v-for="opt in (param.options || [])" :key="opt" :value="opt">
@@ -225,6 +226,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 import PathSelect from './PathSelect.vue'
+import HelpTip from './HelpTip.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { upload, getGroups, getProjects } from '../api.js'
 
