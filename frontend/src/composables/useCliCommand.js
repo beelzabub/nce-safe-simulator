@@ -24,10 +24,19 @@ export function shellQuote(value) {
 
 // Should this param value contribute a token to the command?
 // A blank (null / undefined / '') optional means "not chosen" → omitted (the CLI
-// falls back to its own default / prompt). A false boolean is omitted too: the
-// CLI has no negative flag, and absence is how you express "off".
+// falls back to its own default / prompt).
 function _isSet(value) {
   return value !== null && value !== undefined && value !== ''
+}
+
+// Emit a `--name value` pair, choosing the attached `--name=value` form when the
+// value begins with '-'. The bare form would let the CLI parser mistake a
+// dash-leading value (e.g. a negative count) for the next flag and treat this
+// flag as a valueless boolean; the attached form is unambiguous.
+function _pushValue(tokens, name, value) {
+  const q = shellQuote(value)
+  if (String(value).startsWith('-')) tokens.push(`--${name}=${q}`)
+  else tokens.push(`--${name}`, q)
 }
 
 // Build the token list (flags) for a tool's params from the dialog's values.
@@ -38,11 +47,22 @@ export function toolArgTokens(params, values) {
   for (const p of params || []) {
     const v = values ? values[p.name] : undefined
     if (p.type === 'bool') {
-      if (v === true) tokens.push(`--${p.name}`)
+      // Booleans are expressed relative to the param's default.
+      //   default-off: presence turns it on, absence leaves it off (readable case).
+      //   default-on:  stated explicitly either way — omitting it would drop to the
+      //                CLI's own prompt/default (on) and, when turned off, reproduce
+      //                the opposite value.
+      if (v === undefined || v === null) continue
+      const on = v === true
+      if (p.default === true) {
+        tokens.push(on ? `--${p.name}` : `--${p.name}=false`)
+      } else if (on) {
+        tokens.push(`--${p.name}`)
+      }
       continue
     }
     if (!_isSet(v)) continue
-    tokens.push(`--${p.name}`, shellQuote(v))
+    _pushValue(tokens, p.name, v)
   }
   return tokens
 }

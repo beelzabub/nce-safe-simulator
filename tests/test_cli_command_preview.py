@@ -163,6 +163,41 @@ def test_every_tool_emits_only_valid_param_names(tmp_path):
         assert set(prefills).issubset(valid_names), f"{key}: stray flags {set(prefills) - valid_names}"
 
 
+@requires_node
+def test_negative_int_value_round_trips(tmp_path):
+    """A negative count (generate-epic-blocks removes relationships) must survive
+    as -10, not be swallowed into a valueless boolean flag."""
+    tool = _tool("generate-epic-blocks")
+    values = {"count": -10}
+    scenarios = [{"kind": "tool", "tool": {"key": tool["key"], "params": _web_params_json(tool)}, "values": values}]
+    cmd = _run_builder(scenarios, tmp_path)[0]
+
+    prefills = _parse_tool_args(shlex.split(cmd)[4:])
+    count_param = next(p for p in tool["params"] if p["name"] == "count")
+    assert _coerce_like_cli(count_param, prefills["count"]) == -10
+
+
+@requires_node
+def test_default_true_bool_can_be_turned_off(tmp_path):
+    """set-issue-weights' `fibonacci` defaults True; unchecking it must produce a
+    command that reproduces False, not silently fall back to the on default."""
+    tool = _tool("set-issue-weights")
+    fib = next(p for p in tool["params"] if p["name"] == "fibonacci")
+    assert fib["default"] is True and not fib.get("cli_only")   # guard the premise
+
+    scenarios = [{"kind": "tool", "tool": {"key": tool["key"], "params": _web_params_json(tool)}, "values": {"fibonacci": False}}]
+    cmd = _run_builder(scenarios, tmp_path)[0]
+    prefills = _parse_tool_args(shlex.split(cmd)[4:])
+    assert "fibonacci" in prefills, "off state dropped — command would prompt/default to on"
+    assert _coerce_like_cli(fib, prefills["fibonacci"]) is False
+
+    # And left on, it round-trips to True (non-interactively).
+    scenarios[0]["values"] = {"fibonacci": True}
+    cmd_on = _run_builder(scenarios, tmp_path)[0]
+    prefills_on = _parse_tool_args(shlex.split(cmd_on)[4:])
+    assert _coerce_like_cli(fib, prefills_on["fibonacci"]) is True
+
+
 # ── Report command shape ───────────────────────────────────────────────────────
 
 @requires_node
@@ -206,9 +241,9 @@ def test_shell_quoting_survives_tokenization(tmp_path):
 
 def _web_params_json(tool):
     """The web param list as the /api/tools payload would serialize it (type as a
-    string), which is what the JS builder receives."""
+    string, plus the registry default), which is what the JS builder receives."""
     type_name = {str: "str", bool: "bool", int: "int", float: "float"}
     return [
-        {"name": p["name"], "type": type_name[p["type"]]}
+        {"name": p["name"], "type": type_name[p["type"]], "default": p.get("default")}
         for p in _web_params(tool)
     ]
