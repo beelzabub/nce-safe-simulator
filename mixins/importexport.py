@@ -348,6 +348,18 @@ class ImportExportMixin:
 
     # ── Epic import ───────────────────────────────────────────────────────────
 
+    def _warn_type_unconfirmed(self, kind, other_kind, other_tool, example_cols):
+        """Stand-out pre-flight notice: the file has only columns common to both
+        epics and issues, so it was ACCEPTED but its type can't be confirmed."""
+        bar = "  " + "═" * 64
+        print("\n" + bar)
+        print(f"  ⚠  ACCEPTED — but this file's type could NOT be confirmed.")
+        print(f"     It has only columns common to both epics and issues (no")
+        print(f"     {kind}-specific columns such as {example_cols}).")
+        print(f"     If these rows were meant as {other_kind}, cancel now and use")
+        print(f"     the {other_tool} tool instead.")
+        print(bar)
+
     def _validate_epics(self, rows):
         """
         Pre-flight validation pass.
@@ -376,6 +388,11 @@ class ImportExportMixin:
                   f"issue-only column(s): {', '.join(sorted(issue_markers))}.")
             print("  Use the Import Issues tool for this file.")
             return None, 1
+
+        # No epic-specific columns either → only shared columns → can't confirm type.
+        if not (columns & EPIC_ONLY_COLS):
+            self._warn_type_unconfirmed("epics", "issues", "Import Issues",
+                                        "group_path or planned_weight")
 
         unknown = columns - EPIC_IMPORT_KNOWN
         if unknown:
@@ -781,6 +798,11 @@ class ImportExportMixin:
                   f"epic-only column(s): {', '.join(sorted(epic_markers))}.")
             print("  Use the Import Epics tool for this file.")
             return None, 1
+
+        # No issue-specific columns either → only shared columns → can't confirm type.
+        if not (columns & ISSUE_ONLY_COLS):
+            self._warn_type_unconfirmed("issues", "epics", "Import Epics",
+                                        "project_path or epic_id")
 
         if not override_project and "project_path" not in columns:
             print("\n  INVALID: 'project_path' column is required when no target project is specified")
