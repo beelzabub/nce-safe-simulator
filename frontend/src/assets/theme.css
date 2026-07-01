@@ -22,8 +22,8 @@
 
   --ok: #3fb950;  /* success / copied confirmation */
 
-  /* Terminal-style command block: dark in both themes so a copyable
-     command always reads like a terminal (issue #140). */
+  /* Command block for the "equivalent CLI command" (issue #140). Theme-aware:
+     a dark code surface in dark mode, a light one under [data-theme="light"]. */
   --surface-code: #0d1117;
   --text-code:    #e6edf3;
 
@@ -57,7 +57,9 @@
   --badge-run-text:#15803d;
 
   --ok: #1a7f37;
-  /* --surface-code / --text-code intentionally inherit the dark values. */
+
+  --surface-code: #f6f8fa;   /* light command block, matches --bg */
+  --text-code:    #1f2328;
 
   --conflict-bg:     #fef9c3;
   --conflict-border: #ca8a04;
