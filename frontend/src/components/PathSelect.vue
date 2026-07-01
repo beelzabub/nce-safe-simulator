@@ -6,7 +6,7 @@
       class="field-input ps-input"
       :class="{ 'path-select__input--locked': disabled }"
       :value="modelValue"
-      :placeholder="placeholder"
+      :placeholder="loading ? 'Loading…' : placeholder"
       :readonly="disabled"
       :title="title"
       autocomplete="off"
@@ -18,8 +18,11 @@
       @click="onFocus"
       @keydown="onKeydown"
     />
+    <span v-if="loading" class="ps-caret ps-caret--busy" aria-label="Loading">
+      <span class="ps-spin" aria-hidden="true"></span>
+    </span>
     <button
-      v-if="!disabled"
+      v-else-if="!disabled"
       type="button"
       class="ps-caret"
       :class="{ 'ps-caret--open': open }"
@@ -276,6 +279,17 @@ onBeforeUnmount(() => {
 .ps-caret svg { transition: transform 0.15s; }
 .ps-caret:hover { color: var(--action); }
 .ps-caret--open svg { transform: rotate(180deg); }
+.ps-caret--busy { cursor: default; border-left-color: transparent; }
+
+.ps-spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--action);
+  border-radius: 50%;
+  animation: ps-spin 0.7s linear infinite;
+}
+@keyframes ps-spin { to { transform: rotate(360deg); } }
 
 .ps-panel {
   position: fixed;          /* teleported to <body>; left/width/top|bottom set inline */
