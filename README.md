@@ -808,6 +808,8 @@ All four import/export tools show the **active GitLab group** they act on — th
 
 Each tool also accepts an optional **group override** that retargets that one run only — `config.json` is never modified. The accepted format is `namespace/group` (URL-slug namespace + group display-name, e.g. `saic-study-group/My Portfolio`) or just `group` (display-name only — the configured namespace is kept). Leave it blank to use the configured group, so CLI/automation behaviour is unchanged.
 
+In the web UI the override field is a **populated dropdown** (a datalist-backed combobox): clicking **Edit** unlocks it and offers the groups discovered under the configured namespace (served read-only by `GET /api/groups`), with the active group pre-selected. It stays a free-text field, so you can still type a not-yet-existing group path to use with create-if-missing, and it falls back to a plain editable text box if the group list can't be fetched. The interactive CLI is unchanged — it still accepts a typed group path at the prompt.
+
 Imports add a **create-if-missing** checkbox: when the (overridden) target group doesn't exist, ticking it creates the group under the configured namespace before importing; leaving it unticked produces a clear, actionable error. Exports have no such option — you can't export from a group that doesn't exist.
 
 ### Test Data Seeding Pattern
