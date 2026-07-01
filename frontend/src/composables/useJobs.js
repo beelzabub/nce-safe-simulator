@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { runJob } from '../ws.js'
+import { triggerDownload } from '../download.js'
 
 // Module-level state — singleton shared across all component instances.
 const jobs = ref([])
@@ -7,6 +8,27 @@ const _sessionHistory = ref([])   // permanent; never cleared; lines shared with
 const _scrollToId = ref(null)     // JobRunner watches this to scroll-to and clear
 let _nextId = 1
 let _diskHistoryLoaded = false
+
+// Download URLs we've already auto-started, so a given export file downloads at
+// most once.  Only ever populated from the LIVE onLog path below — restored
+// disk history never routes through onLog, so old links are never auto-fetched.
+const _autoDownloaded = new Set()
+
+// Match the `/api/download/<file>` link the export tools print on completion.
+const _DOWNLOAD_RE = /\/api\/download\/\S+/
+
+// Fired from the live onLog stream only: when an export prints its download
+// link, kick off the browser download once.  The Export button click is the
+// user gesture that authorises this; the LogPane button is the fallback if a
+// browser still blocks the programmatic click.
+function _maybeAutoDownload(text) {
+  const m = _DOWNLOAD_RE.exec(text)
+  if (!m) return
+  const url = m[0]
+  if (_autoDownloaded.has(url)) return
+  _autoDownloaded.add(url)
+  triggerDownload(url)
+}
 
 // Auto-close delays by terminal status.  Errors stay open until manually
 // dismissed — failures need eyes on them.
@@ -69,6 +91,9 @@ function _makeCallbacks(id) {
       const j = jobs.value.find(e => e.id === id)
       // Lines array is shared with sessionHistory entry — one push updates both.
       if (j) j.lines.push(text.trimEnd())
+      // Live path only: restored disk history never calls onLog, so its stale
+      // download links can't trigger this.
+      _maybeAutoDownload(text)
     },
     onDone: () => {
       const j = jobs.value.find(e => e.id === id)
