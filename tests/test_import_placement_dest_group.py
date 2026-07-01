@@ -217,6 +217,31 @@ def test_import_issues_blank_target_unresolvable_project_skips(tmp_path, capsys)
     assert "SKIP" in out
 
 
+# ─── Group cache must match the picker's discovery ─────────────────────────────
+
+class CacheHarness(ImportExportMixin):
+    """Exercises the real _build_group_cache against a controlled subgroup walk."""
+    def __init__(self, groups):
+        self._groups = groups
+
+    def get_all_subgroups(self, root_group, include_self=True):
+        return self._groups
+
+
+def test_build_group_cache_includes_deep_subgroups():
+    # Regression: the cache must use the recursive get_all_subgroups walk (the
+    # same source as the /api/groups picker), not a shallow direct-children
+    # list — otherwise a valid deep destination the picker offered is rejected.
+    root = _grp("ns/root")
+    mid  = _grp("ns/root/vs-02")
+    deep = _grp("ns/root/vs-02/art-04/team-08")
+
+    cache = CacheHarness([root, mid, deep])._build_group_cache(root)
+
+    assert set(cache) == {"ns/root", "ns/root/vs-02", "ns/root/vs-02/art-04/team-08"}
+    assert cache["ns/root/vs-02/art-04/team-08"] is deep
+
+
 # ─── Tool payloads + CLI contract ──────────────────────────────────────────────
 
 def _tool(key):

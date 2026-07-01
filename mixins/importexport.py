@@ -230,14 +230,19 @@ class ImportExportMixin:
     # ── Group / project caches ────────────────────────────────────────────────
 
     def _build_group_cache(self, root_group):
-        """Return {full_path: group_object} for root and all subgroups."""
-        cache = {root_group.full_path: root_group}
-        for sg in root_group.subgroups.list(all=True, include_subgroups=True):
-            try:
-                full = self.gl.groups.get(sg.id)
-                cache[full.full_path] = full
-            except Exception:
-                pass
+        """Return {full_path: group_object} for root and ALL descendant subgroups.
+
+        Uses the recursive get_all_subgroups walk — the same discovery the web
+        UI's /api/groups picker uses — so any destination the picker offered
+        resolves here too. GitLab's `subgroups` endpoint only returns DIRECT
+        children (it ignores include_subgroups), so a single shallow list misses
+        deep subgroups and a valid deep destination would be wrongly rejected.
+        """
+        cache = {}
+        for g in self.get_all_subgroups(root_group, include_self=True):
+            full_path = getattr(g, "full_path", None)
+            if full_path:
+                cache[full_path] = g
         return cache
 
     def _build_gid_path_map(self, root_group):
