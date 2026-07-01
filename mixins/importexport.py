@@ -246,14 +246,20 @@ class ImportExportMixin:
         return cache
 
     def _build_gid_path_map(self, root_group):
-        """Return {group_id: full_path} for root and all subgroups."""
+        """Return {group_id: full_path} for root and ALL descendant subgroups.
+
+        Matches _build_group_cache's depth (the GitLab `subgroups` endpoint only
+        returns DIRECT children and ignores include_subgroups). Without the full
+        walk, epics in deep groups export with a blank group_path and are dropped
+        from fallback-parent selection. Uses the single descendant_groups call —
+        each item already carries id/full_path, so no per-group N+1 fetch.
+        """
         m = {root_group.id: root_group.full_path}
-        for sg in root_group.subgroups.list(all=True, include_subgroups=True):
-            try:
-                full = self.gl.groups.get(sg.id)
-                m[full.id] = full.full_path
-            except Exception:
-                pass
+        for g in self.list_descendant_groups(root_group):
+            gid = getattr(g, "id", None)
+            full_path = getattr(g, "full_path", None)
+            if gid is not None and full_path:
+                m[gid] = full_path
         return m
 
     def _build_project_cache(self, root_group):
