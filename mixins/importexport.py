@@ -562,7 +562,13 @@ class ImportExportMixin:
             skip_rows = {r for r, _, _ in unresolvable}
             return {r: None for r in skip_rows}, set()
 
-        if unresolved_parent == "label":
+        if unresolved_parent == "label" or (unresolved_parent == "ask" and not sys.stdin.isatty()):
+            if unresolved_parent == "ask":
+                # 'ask' is interactive (it prompts on the live hierarchy); in a
+                # non-interactive run (e.g. a web job) there is no stdin, so fall
+                # back to 'label' instead of blocking/crashing on input().
+                print(f"\n  Action: ask requested but this run is non-interactive — "
+                      f"applying 'label' instead.")
             print(f"\n  Action: label — 'import::needs-parent' will be added to these epics.")
         else:
             # "ask" — let user pick a fallback parent from the hierarchy

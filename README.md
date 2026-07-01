@@ -800,7 +800,7 @@ Both CSV and JSON are supported. Format is inferred from the file extension (`.j
 
 `planned_weight` on epics is fetched/set via GraphQL (the REST API does not expose it).
 
-Both importers run a full validation pass before creating anything — errors are reported upfront and the import aborts if any are found. Pass `dry_run: yes` to validate and preview without creating. When `parent_id` values from an external system don't match live IDs, the importer asks once how to handle them: `ask` (pick a fallback parent interactively), `label` (create without parent and tag `import::needs-parent`, default), or `skip`.
+Both importers run a full validation pass before creating anything — errors are reported upfront and the import aborts if any are found. Pass `dry_run: yes` to validate and preview without creating. When `parent_id` values from an external system don't match live IDs, the epic importer's `unresolved_parent` action decides how to handle them: `label` (create without parent and tag `import::needs-parent`, default), `skip` (skip the affected rows), or `ask` (pick one fallback parent interactively). In the web dialog this is a dropdown (offering `label`/`skip`) with a `?` help tooltip describing each option; `ask` is CLI-only because it prompts on the live hierarchy, and a non-interactive run that requests `ask` degrades to `label` with a note rather than blocking.
 
 #### Active group + per-run override
 
