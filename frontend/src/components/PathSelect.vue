@@ -233,16 +233,29 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
 }
+/* The `field-input` class is defined in the parent's scoped CSS, which does not
+   reach into this child component — so style the input fully here. */
+.ps-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-1);
+  padding: 6px 34px 6px 10px;   /* right padding leaves room for the caret */
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ps-input:focus         { border-color: var(--action); }
+.ps-input::placeholder  { color: var(--text-3); }
+.ps-input:read-only     { cursor: default; }
 .path-select__input--locked {
   color: var(--text-2);
   background: var(--surface-alt);
   cursor: default;
 }
-.ps-input {
-  padding-right: 28px;   /* room for the caret */
-  cursor: pointer;
-}
-.ps-input:read-only { cursor: default; }
 
 .ps-caret {
   position: absolute;
