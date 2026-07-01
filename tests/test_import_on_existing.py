@@ -84,11 +84,21 @@ def _issue_setup():
     return root, proj, existing, cache, rows
 
 
-def test_issues_default_creates_even_when_duplicate(tmp_path):
+def test_issues_default_skips_duplicate(tmp_path, capsys):
+    # Default is 'skip' — re-importing a same-title issue does not duplicate it.
     root, proj, existing, cache, rows = _issue_setup()
     IEHarness(rows, root, cache)._import_issues(input_path=_write(tmp_path, rows))
-    proj.issues.create.assert_called_once()   # create-only default → duplicate
+    proj.issues.create.assert_not_called()
     existing.save.assert_not_called()
+    assert "SKIP" in capsys.readouterr().out
+
+
+def test_issues_explicit_create_duplicates(tmp_path):
+    # Opt back in to the old create-only behaviour.
+    root, proj, existing, cache, rows = _issue_setup()
+    IEHarness(rows, root, cache)._import_issues(
+        input_path=_write(tmp_path, rows), on_existing="create")
+    proj.issues.create.assert_called_once()
 
 
 def test_issues_skip_leaves_existing_untouched(tmp_path, capsys):

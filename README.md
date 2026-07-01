@@ -827,11 +827,11 @@ The one remaining structural difference only applies when **no destination is ch
 
 #### Re-import behaviour (`on_existing`)
 
-Both importers are create-only by default, so re-running the same file produces duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics):
+Re-running the same file could otherwise create duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics):
 
-- **`create`** (default) — always create; unchanged behaviour, may duplicate on re-import.
-- **`skip`** — if a same-title item exists, leave it untouched and report `SKIP — already exists (#iid)`.
+- **`skip`** (default) — if a same-title item exists, leave it untouched and report `SKIP — already exists (#iid)`; create it otherwise. Safe to re-run.
 - **`update`** — apply the row's fields to the existing item (merge — omitted fields are left as-is; the matched title is not rewritten); create it if there's no match.
+- **`create`** — always create, never match; the original create-only behaviour (may duplicate on re-import).
 
 The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
 

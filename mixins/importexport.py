@@ -585,13 +585,13 @@ class ImportExportMixin:
         return parent_map, orphan_rows
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                     group=None, create_missing=False, dest_group=None, on_existing="create"):
+                     group=None, create_missing=False, dest_group=None, on_existing="skip"):
         with self._group_override(group):
             return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
                                       dest_group, on_existing)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
-                      create_missing=False, dest_group=None, on_existing="create"):
+                      create_missing=False, dest_group=None, on_existing="skip"):
         """
         Import epics from a CSV or JSON file.
 
@@ -910,13 +910,13 @@ class ImportExportMixin:
         return rows, 0
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                      group=None, create_missing=False, on_existing="create"):
+                      group=None, create_missing=False, on_existing="skip"):
         with self._group_override(group):
             return self._import_issues(input_path, target_project_path, dry_run,
                                        create_missing, on_existing)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                       create_missing=False, on_existing="create"):
+                       create_missing=False, on_existing="skip"):
         if not input_path:
             print("ERROR: input_path is required.")
             return
