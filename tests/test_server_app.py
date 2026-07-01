@@ -63,6 +63,50 @@ def test_tools_readonly_tools_have_null_group(client):
             assert tool["parallelism_group"] is None
 
 
+def test_export_tools_ui_payload_hides_output_path(client):
+    """The server-side output_path field is a CLI-only param and must not be
+    surfaced to the web UI for export-epics / export-issues (issue #130)."""
+    resp = client.get("/api/tools")
+    by_key = {t["key"]: t for t in resp.json()}
+    for key in ("export-epics", "export-issues"):
+        param_names = {p["name"] for p in by_key[key]["params"]}
+        assert "output_path" not in param_names, (
+            f"tool '{key}' still exposes output_path in the UI payload"
+        )
+        # the format selector and group picker must still be present
+        assert "fmt" in param_names
+        assert "group" in param_names
+
+
+def test_cli_only_params_never_reach_ui_payload(client):
+    """No param flagged cli_only in the raw registry should appear in any UI
+    tool payload."""
+    resp = client.get("/api/tools")
+    ui_params = {
+        t["key"]: {p["name"] for p in t["params"]} for t in resp.json()
+    }
+    for tool in TOOLS:
+        for p in tool.get("params", []):
+            if p.get("cli_only"):
+                assert p["name"] not in ui_params.get(tool["key"], set()), (
+                    f"cli_only param '{p['name']}' leaked into UI payload for "
+                    f"'{tool['key']}'"
+                )
+
+
+def test_cli_registry_still_exposes_output_path(client):
+    """HARD CONSTRAINT: the CLI reads the raw TOOLS registry, which must keep
+    output_path (flagged cli_only) for export-epics / export-issues."""
+    by_key = {t["key"]: t for t in TOOLS}
+    for key in ("export-epics", "export-issues"):
+        output = [p for p in by_key[key]["params"] if p["name"] == "output_path"]
+        assert len(output) == 1, f"tool '{key}' lost its output_path param"
+        p = output[0]
+        assert p["cli_only"] is True
+        assert p["optional"] is True
+        assert p["type"] is str
+
+
 # ---------------------------------------------------------------------------
 # GET /api/reports
 # ---------------------------------------------------------------------------
