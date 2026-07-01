@@ -33,8 +33,8 @@ def test_groups_returns_discovered_groups():
     gl.parent_group = "Portfolio"
     root = _group("saic-study-group/portfolio", "Portfolio")
     gl.get_group_by_name.return_value = root
-    gl.get_all_subgroups.return_value = [
-        root,
+    # descendant_groups returns descendants only; the endpoint prepends root.
+    gl.list_descendant_groups.return_value = [
         _group("saic-study-group/portfolio/team-a", "Team A"),
         _group("saic-study-group/portfolio/team-b", "Team B"),
     ]
@@ -50,7 +50,7 @@ def test_groups_returns_discovered_groups():
     ]
     # scoped to the configured group via mixins/groups.py
     gl.get_group_by_name.assert_called_once_with("Portfolio")
-    gl.get_all_subgroups.assert_called_once_with(root, include_self=True)
+    gl.list_descendant_groups.assert_called_once_with(root)
     app.state.gl = None
 
 
@@ -59,7 +59,7 @@ def test_groups_dedupes_repeated_paths():
     gl.parent_group = "Portfolio"
     root = _group("ns/portfolio", "Portfolio")
     gl.get_group_by_name.return_value = root
-    gl.get_all_subgroups.return_value = [root, root]  # include_self + traversal overlap
+    gl.list_descendant_groups.return_value = [root]  # overlaps the prepended root
     app.state.gl = gl
 
     data = TestClient(app).get("/api/groups").json()
@@ -95,7 +95,7 @@ def test_groups_empty_when_root_not_found():
     resp = TestClient(app).get("/api/groups")
     assert resp.status_code == 200
     assert resp.json() == []
-    gl.get_all_subgroups.assert_not_called()
+    gl.list_descendant_groups.assert_not_called()
     app.state.gl = None
 
 

@@ -30,6 +30,17 @@ class GroupsMixin:
             return self.gl.groups.get(groups[0].id)
         return None
 
+    def list_descendant_groups(self, root):
+        """All groups under ``root`` at any depth, in a single paginated call.
+
+        Uses GitLab's ``descendant_groups`` endpoint, which returns every
+        descendant with ``full_path``/``name`` already populated — avoiding the
+        per-subgroup ``gl.groups.get()`` N+1 that ``get_all_subgroups`` incurs.
+        The returned objects are read-only projections (fine for path/name
+        lookups); use ``gl.groups.get(id)`` if you need a writable group.
+        """
+        return list(root.descendant_groups.list(iterator=True))
+
     def get_all_subgroups(self, obj, include_self=True):
         group = self.get_group_by_name(obj) if isinstance(obj, str) else obj
 
