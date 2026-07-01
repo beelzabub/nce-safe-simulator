@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
@@ -29,6 +30,15 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def _prune_temp_files_on_startup():
+    """Sweep aged-out import/export temp files when the server boots (covers
+    accumulation across restarts/redeploys)."""
+    removed = prune_temp_files()
+    if removed:
+        print(f"[retention] pruned {len(removed)} stale import/export temp file(s)")
+
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
 _report_data_lock = threading.Lock()
@@ -221,6 +231,7 @@ async def upload_import_file(file: UploadFile = File(...)):
         )
 
     _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    prune_temp_files()  # keep uploads/ and exports/ from growing unbounded
     # Timestamp-prefix to avoid collisions between successive uploads.
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     dest = _UPLOADS_DIR / f"{stamp}_{safe_name}"
@@ -795,6 +806,7 @@ def latest_data(filename: str):
 
 @app.get("/api/download/{filename}")
 def download_export(filename: str):
+    prune_temp_files()  # opportunistic cleanup of aged-out exports/uploads
     # Basename only — reject anything with path separators or traversal.
     safe_name = Path(filename).name
     if not safe_name or safe_name != filename:
