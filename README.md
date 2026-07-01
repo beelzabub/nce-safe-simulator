@@ -825,6 +825,16 @@ Both dropdowns allow free text (so you can type a not-yet-cached path) and fall 
 
 The one remaining structural difference only applies when **no destination is chosen** and a row's path can't be resolved: **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group`), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
 
+#### Re-import behaviour (`on_existing`)
+
+Both importers are create-only by default, so re-running the same file produces duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics):
+
+- **`create`** (default) — always create; unchanged behaviour, may duplicate on re-import.
+- **`skip`** — if a same-title item exists, leave it untouched and report `SKIP — already exists (#iid)`.
+- **`update`** — apply the row's fields to the existing item (merge — omitted fields are left as-is; the matched title is not rewritten); create it if there's no match.
+
+The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
+
 ### Test Data Seeding Pattern
 
 The `set-*` and `strip-*` pairs are designed for rapid test-data cycling:
