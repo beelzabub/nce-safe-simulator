@@ -63,9 +63,9 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 
 <style scoped>
 .cli-preview {
-  border: 1px solid var(--border, #d0d5dd);
+  border: 1px solid var(--border, #30363d);
   border-radius: 6px;
-  background: var(--surface-2, #f6f8fa);
+  background: var(--surface-alt, #1c2128);
   margin: 0.5rem 0;
   overflow: hidden;
 }
@@ -86,7 +86,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--text-muted, #475467);
+  color: var(--text-2, #8b949e);
 }
 .cli-caret {
   display: inline-block;
@@ -96,7 +96,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 .cli-caret--open { transform: rotate(90deg); }
 .cli-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--action, #1f6feb);
+  color: var(--action, #2563eb);
   font-weight: 700;
 }
 .cli-copy {
@@ -106,14 +106,14 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   padding: 0.15rem 0.5rem;
   cursor: pointer;
   font-size: 0.72rem;
-  color: var(--text-muted, #475467);
+  color: var(--text-2, #8b949e);
 }
-.cli-copy:hover { background: var(--surface-hover, #eaeef2); }
-.cli-copy--done { color: var(--ok, #1a7f37); border-color: var(--ok, #1a7f37); }
+.cli-copy:hover { background: var(--border, #30363d); color: var(--text-1, #e6edf3); }
+.cli-copy--done { color: var(--ok, #3fb950); border-color: var(--ok, #3fb950); }
 .cli-body {
   margin: 0;
   padding: 0.5rem 0.6rem;
-  border-top: 1px solid var(--border, #d0d5dd);
+  border-top: 1px solid var(--border, #30363d);
   background: var(--surface-code, #0d1117);
   color: var(--text-code, #e6edf3);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
