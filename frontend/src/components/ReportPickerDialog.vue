@@ -52,6 +52,8 @@
         </label>
       </div>
 
+      <CliPreview :command="cliCommand" />
+
       <div class="dialog-footer">
         <button class="btn-cancel" @click="$emit('close')">Cancel</button>
         <button
@@ -70,6 +72,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
+import { buildReportCommand } from '../composables/useCliCommand.js'
+import CliPreview from './CliPreview.vue'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -108,6 +112,11 @@ watch([selectedFormats, selectedKeys, useLast], () => {
 
 const allSelected = computed(() => selectedKeys.value.length === props.reports.length)
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
+
+// Equivalent CLI command(s) for the current selection — one `-r` line per
+// chosen report, sharing --formats / --last (#140).
+const cliCommand = computed(() =>
+  buildReportCommand(selectedKeys.value, selectedFormats.value, useLast.value))
 
 // Drop site-build formats when not all reports are selected
 watch(allSelected, (all) => {
