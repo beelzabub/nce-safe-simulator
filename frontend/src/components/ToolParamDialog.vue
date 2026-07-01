@@ -158,6 +158,7 @@
                   {{ param.prompt }}
                   <span v-if="!param.optional" class="required-mark">*</span>
                   <span v-else class="optional-tag">optional</span>
+                  <HelpTip v-if="param.help" :text="param.help" />
                 </label>
                 <input
                   type="text"

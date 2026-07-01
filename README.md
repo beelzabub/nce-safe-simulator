@@ -793,10 +793,10 @@ Both CSV and JSON are supported. Format is inferred from the file extension (`.j
 
 | Key | Scope | Key fields |
 |---|---|---|
-| `export-epics` | All epics across the full group hierarchy | `group_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
-| `export-issues` | All issues across the full group hierarchy | `project_path`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
-| `import-epics` | Create epics from file with pre-flight validation | Required: `title` — Optional: `group_path`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
-| `import-issues` | Create issues from file with pre-flight validation | Required: `title`, `project_path` — Optional: `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
+| `export-epics` | All epics across the full group hierarchy | `group_path`, `source_root`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
+| `export-issues` | All issues across the full group hierarchy | `project_path`, `source_root`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
+| `import-epics` | Create epics from file with pre-flight validation | Required: `title` — Optional: `group_path`, `source_root`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
+| `import-issues` | Create issues from file with pre-flight validation | Required: `title`, `project_path` — Optional: `source_root`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
 
 `planned_weight` on epics is fetched/set via GraphQL (the REST API does not expose it).
 
@@ -821,9 +821,29 @@ On top of the active-group indicator above, each importer takes an explicit **de
 
 Both dropdowns allow free text (so you can type a not-yet-cached path) and fall back to a plain editable text box if the list can't be fetched. Both destination parameters are optional strings, so the interactive CLI and automation are unchanged.
 
-**Placement precedence** (both importers): the row's own path is used when it resolves under the target root; otherwise the chosen destination is used; otherwise epics fall back to the root group and issues are skipped. A destination that is set but doesn't resolve is a **hard error** — the import aborts before anything is created, rather than silently root-dumping (epics) or skipping every row (issues).
+**Placement precedence** (both importers): (1) the row's own path is used when it resolves directly under the target root; (2) otherwise the path is **reconciled across roots** (see below) — the source root is stripped and the structural remainder re-resolved under the target root; (3) otherwise the chosen destination is used; (4) otherwise epics fall back to the root group and issues are skipped. A destination that is set but doesn't resolve is a **hard error** — the import aborts before anything is created, rather than silently root-dumping (epics) or skipping every row (issues).
 
-The one remaining structural difference only applies when **no destination is chosen** and a row's path can't be resolved: **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group`), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
+The one remaining structural difference only applies when **no destination is chosen** and a row's path can't be resolved (or reconciled): **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group`), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
+
+#### Cross-enclave placement (relative-path reconciliation)
+
+Files exported from a **different** group hierarchy — the airgapped enclave-to-enclave case, where the target mirrors the source structure under a different root — carry paths rooted at the *source*, so they never resolve directly under the target root. Rather than root-dump or skip these rows, the importer **reconciles them by structure**: it strips the source root and re-resolves the relative remainder under the target root.
+
+```
+exported group_path : ns-a/portfolio / vs-01/art-02/team-03
+strip source root   (ns-a/portfolio)  ->  vs-01/art-02/team-03
+resolve under target (ns-b/portfolio)  ->  ns-b/portfolio/vs-01/art-02/team-03   ✓ lands here
+```
+
+Matching is on the **whole relative path**, not a bare leaf name (group/project names are only unique within their parent), so a path resolves to exactly one target container or none — an ambiguous leaf name can never cause a silent misplacement. Epics reconcile against the target's subgroups; issues against its projects.
+
+The source root to strip is determined in this order:
+
+1. an explicit **`source_root`** import parameter (web UI: an optional text field with a `?` help tooltip; CLI: an optional prompt) — trusted verbatim, for un-stamped files;
+2. the **`source_root` stamp** that exports now record automatically (the exporting root's full path) — deterministic, so the round-trip needs no source connection;
+3. the **longest common path-prefix** of the file's rows — a best-effort fallback for older, un-stamped files. Because this is a guess that can over-strip when every row shares a deeper subtree, it is used only to reconcile rows with a non-trivial relative remainder and never to silently land a row at the bare target root.
+
+This runs entirely on the target side against the target's live GitLab, so it works across an airgap with only the codebase and the exported CSVs carried across. Same-root imports are unaffected (a row's own path resolves directly and wins). This covers **group/project placement only**; rebuilding parent-epic links within the carried set across enclaves is tracked separately.
 
 #### Re-import behaviour (`on_existing`)
 
