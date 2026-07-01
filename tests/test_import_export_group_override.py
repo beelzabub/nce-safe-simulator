@@ -127,15 +127,15 @@ def test_import_epics_wrapper_threads_override_and_create_missing():
     h = IEHarness()
     captured = {}
 
-    def fake_impl(input_path, unresolved_parent, dry_run, create_missing):
-        captured["args"] = (input_path, unresolved_parent, dry_run, create_missing)
+    def fake_impl(input_path, unresolved_parent, dry_run, create_missing, dest_group):
+        captured["args"] = (input_path, unresolved_parent, dry_run, create_missing, dest_group)
         captured["parent_group"] = h.parent_group
         captured["ns"] = h.gitlab_namespace
 
     h._import_epics = fake_impl
     h.import_epics(input_path="x.json", unresolved_parent="skip", dry_run=True,
-                   group="ns2/Group B", create_missing=True)
-    assert captured["args"] == ("x.json", "skip", True, True)
+                   group="ns2/Group B", create_missing=True, dest_group="ns2/Group B/team")
+    assert captured["args"] == ("x.json", "skip", True, True, "ns2/Group B/team")
     assert captured["parent_group"] == "Group B"      # override active during call
     assert captured["ns"] == "ns2"
     assert h.parent_group == "Configured Group"        # restored after
