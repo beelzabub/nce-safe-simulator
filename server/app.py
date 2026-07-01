@@ -100,6 +100,7 @@ def _tool_payload(tool: dict, gl=None) -> dict:
             "widget":   p.get("widget"),
             "options":  p.get("options"),
             "section":  p.get("section"),
+            "help":     p.get("help"),
             "hint":     hint,
             "default":  default,
             "optional": p.get("optional", False),
