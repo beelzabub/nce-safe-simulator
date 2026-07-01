@@ -855,11 +855,21 @@ port; all traffic reaches it through Caddy. Both containers run with
 
 **Persistent data.** The served, generated directories are bind-mounted from the
 project root so they survive container recreation (`make redeploy`), mirroring the
-cloud EFS layout: `reports/`, `public/interactive/` (Marimo WASM pages), and
-`quarto-site/` (rendered Quarto site). `logs/` is mounted too (box-only — the cloud
-ships logs to CloudWatch). The image-baked `public/app` frontend and
-`public/architecture` diagrams are left in the image; only the `public/interactive`
-subdirectory is mounted, so they stay intact.
+cloud EFS layout: `reports/`, `public/interactive/` (Marimo WASM pages),
+`quarto-site/` (rendered Quarto site), and the UI import/export temp dirs
+`uploads/` (browser-uploaded import files) and `public/exports/` (generated
+export downloads) — mounting the latter two keeps generated exports from being
+lost on every redeploy. `logs/` is mounted too (box-only — the cloud ships logs
+to CloudWatch). The image-baked `public/app` frontend and `public/architecture`
+diagrams are left in the image; only individual `public/` subdirectories are
+mounted, so they stay intact.
+
+**Temp-file retention.** `uploads/` and `public/exports/` are pruned by age so
+they don't grow unbounded on disk/EFS: the server sweeps them on startup and
+opportunistically on each upload/download, deleting files older than
+`TEMP_FILE_RETENTION_HOURS` (default `24`; set to `0` to disable). Only these two
+UI temp dirs are touched — explicit CLI export/import paths live elsewhere and
+are never affected.
 
 ### Prerequisites
 

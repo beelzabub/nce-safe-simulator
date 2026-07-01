@@ -24,10 +24,13 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NET
 echo "==> Recreating app container ($APP)..."
 # Host dirs for the served/persistent volumes — created on first run so the
 # bind mounts below survive container recreation (mirrors the cloud EFS layout:
-# reports, public/interactive, quarto-site). logs/ is box-only (the cloud ships
-# logs to CloudWatch instead). Only the public/interactive subdir is mounted so
-# the image-baked public/app and public/architecture stay intact.
-mkdir -p reports logs quarto-site public/interactive
+# reports, public/interactive, public/exports, quarto-site, uploads). logs/ is
+# box-only (the cloud ships logs to CloudWatch instead). Only individual public/
+# subdirs are mounted so the image-baked public/app and public/architecture stay
+# intact. uploads/ and public/exports hold UI import/export temp files (age-based
+# retention handled in-app); mounting them keeps generated exports from being
+# lost on every redeploy.
+mkdir -p reports logs quarto-site public/interactive public/exports uploads
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker run -d --name "$APP" --restart unless-stopped \
   --network "$NETWORK" \
@@ -36,6 +39,8 @@ docker run -d --name "$APP" --restart unless-stopped \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   -v "$PROJECT_ROOT/quarto-site:/app/quarto-site" \
   -v "$PROJECT_ROOT/public/interactive:/app/public/interactive" \
+  -v "$PROJECT_ROOT/public/exports:/app/public/exports" \
+  -v "$PROJECT_ROOT/uploads:/app/uploads" \
   -v "$PROJECT_ROOT/logs:/app/logs" \
   "$IMAGE"
 
