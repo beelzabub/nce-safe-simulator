@@ -50,7 +50,7 @@ TOOLS = [
         "method":      "_tool_clean_wikis",
         "params": [
             {"name": "scope",   "prompt": "Scope — portfolio / teams / all / <group-path>", "type": str,  "default": "portfolio"},
-            {"name": "dry_run", "prompt": "Dry run?",                                        "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                        "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -58,7 +58,7 @@ TOOLS = [
         "description": "Delete all ROAM risk issues (and their epic links) across the group",
         "method":      "_tool_clean_roam_risks",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -68,7 +68,7 @@ TOOLS = [
         "params": [
             {"name": "percent",  "prompt": "Percent to close",            "type": float, "default": 30.0},
             {"name": "seed",     "prompt": "Random seed (blank = none)",  "type": int,   "optional": True},
-            {"name": "dry_run",  "prompt": "Dry run?",                    "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                    "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -97,7 +97,7 @@ TOOLS = [
         "method":      "_tool_generate_epic_blocks",
         "params": [
             {"name": "count",   "prompt": "Relationships to create (positive) or remove (negative)", "type": int,  "default": 10},
-            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -106,7 +106,7 @@ TOOLS = [
         "method":      "_tool_generate_issue_blocks",
         "params": [
             {"name": "count",   "prompt": "Relationships to create (positive) or remove (negative)", "type": int,  "default": 10},
-            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                 "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -116,7 +116,7 @@ TOOLS = [
         "params": [
             {"name": "count",           "prompt": "Issues to create per Feature (default 5)",              "type": int,   "default": 5},
             {"name": "feature_percent", "prompt": "Percent of Features to target (100 = all, 50 = half)",  "type": float, "default": 100.0},
-            {"name": "dry_run",         "prompt": "Dry run?",                                               "type": bool,  "default": False},
+            {"name": "dry_run",         "prompt": "Dry run?",                                               "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -128,7 +128,7 @@ TOOLS = [
             {"name": "percent",      "prompt": "Percent of eligible epics to target (default 20)",                         "type": float, "default": 20.0},
             {"name": "days_overdue", "prompt": "Days past due to set on due dates (default 7)",                            "type": int,   "default": 7},
             {"name": "piid",         "prompt": "PI label for behind_schedule (blank = auto-detect active PI)",             "type": str,   "optional": True},
-            {"name": "dry_run",      "prompt": "Dry run?",                                                                  "type": bool,  "default": False},
+            {"name": "dry_run",      "prompt": "Dry run?",                                                                  "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -141,31 +141,33 @@ TOOLS = [
             {"name": "relations_max", "prompt": "Max epics related per risk (blank = config default)",        "type": int,  "optional": True},
             {"name": "piid",          "prompt": "Limit to PIID label (blank = all)",                          "type": str,  "optional": True},
             {"name": "seed",          "prompt": "Random seed (blank = none)",                                  "type": int,  "optional": True},
-            {"name": "dry_run",       "prompt": "Dry run?",                                                    "type": bool, "default": False},
+            {"name": "dry_run",       "prompt": "Dry run?",                                                    "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
         "key":         "import-epics",
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",
+        "confirm":     True,
         "params": [
             {"name": "input_path",         "prompt": "Input file path (.csv or .json)",                                        "type": str,  "widget": "file", "optional": False},
             {"name": "group",              "prompt": "Target group (import into)",                                              "type": str,  "widget": "group", "optional": True},
             {"name": "create_missing",     "prompt": "Create target group if it doesn't exist",                                 "type": bool, "default": False},
             {"name": "unresolved_parent",  "prompt": "Unresolvable parent_id action (ask / label / skip)",                     "type": str,  "default": "label"},
-            {"name": "dry_run",            "prompt": "Preview (dry run) — validate and preview only, nothing is created",       "type": bool, "default": False},
+            {"name": "dry_run",            "prompt": "Preview (dry run) — validate and preview only, nothing is created",       "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
         "key":         "import-issues",
         "description": "Import issues from a CSV or JSON file with pre-flight validation",
         "method":      "import_issues",
+        "confirm":     True,
         "params": [
             {"name": "input_path",          "prompt": "Input file path (.csv or .json)",                            "type": str,  "widget": "file", "optional": False},
             {"name": "group",               "prompt": "Target group (import into)",                                 "type": str,  "widget": "group", "optional": True},
             {"name": "create_missing",      "prompt": "Create target group if it doesn't exist",                    "type": bool, "default": False},
             {"name": "target_project_path", "prompt": "Target project path (blank = use project_path column)",      "type": str,  "optional": True},
-            {"name": "dry_run",             "prompt": "Preview (dry run) — validate and preview only, nothing is created", "type": bool, "default": False},
+            {"name": "dry_run",             "prompt": "Preview (dry run) — validate and preview only, nothing is created", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -183,7 +185,7 @@ TOOLS = [
         "params": [
             {"name": "count",   "prompt": "Number of epics to orphan (blank to use percent instead)", "type": int,   "optional": True},
             {"name": "percent", "prompt": "Percent of epics to orphan (used when count is blank)",    "type": float, "default": 10.0},
-            {"name": "dry_run", "prompt": "Dry run?",                                                  "type": bool,  "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                  "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -193,7 +195,7 @@ TOOLS = [
         "params": [
             {"name": "count",   "prompt": "Number of issues to orphan (blank to use percent instead)", "type": int,   "optional": True},
             {"name": "percent", "prompt": "Percent of issues to orphan (used when count is blank)",    "type": float, "default": 10.0},
-            {"name": "dry_run", "prompt": "Dry run?",                                                   "type": bool,  "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                   "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -202,7 +204,7 @@ TOOLS = [
         "method":      "_tool_reset_pi_progress",
         "params": [
             {"name": "piid",    "prompt": "PIID label(s) (e.g. PIID::2026Q3 PIID::2027Q1), blank = all PIs", "type": str,  "optional": True},
-            {"name": "dry_run", "prompt": "Dry run?",                                                          "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                                                          "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -226,7 +228,7 @@ TOOLS = [
             {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
             {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
             {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
-            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True, "cli_only": True},
         ],
     },
     {
@@ -234,7 +236,7 @@ TOOLS = [
         "description": "Create or verify the Business Value custom field at the root namespace (Fibonacci 1–21, applies to Epic / Capability / Feature)",
         "method":      "_tool_setup_bv_field",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -245,7 +247,7 @@ TOOLS = [
             {"name": "state",     "prompt": "State to set (open/close)",                             "type": str,  "default": "close"},
             {"name": "piid",      "prompt": "Limit to PIID label (e.g. PIID::2026Q3, blank = all)",  "type": str,  "optional": True},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -257,7 +259,7 @@ TOOLS = [
             {"name": "min_weight", "prompt": "Minimum weight (blank = no min)",            "type": int,  "optional": True},
             {"name": "max_weight", "prompt": "Maximum weight (blank = no max)",            "type": int,  "optional": True},
             {"name": "reassign",   "prompt": "Replace existing weights too?",              "type": bool, "default": False},
-            {"name": "dry_run",    "prompt": "Dry run?",                                   "type": bool, "default": False},
+            {"name": "dry_run",    "prompt": "Dry run?",                                   "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -265,7 +267,7 @@ TOOLS = [
         "description": "Zero out all issue weights across every team project (clean slate for testing)",
         "method":      "_tool_strip_issue_weights",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -276,7 +278,7 @@ TOOLS = [
             {"name": "percent",   "prompt": "Percent of epics to label (default 20)",          "type": float, "default": 20.0},
             {"name": "reassign",  "prompt": "Replace existing lifecycle:: labels too?",         "type": bool,  "default": False},
             {"name": "open_only", "prompt": "Restrict to open epics only?",                    "type": bool,  "default": False},
-            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -284,7 +286,7 @@ TOOLS = [
         "description": "Remove all lifecycle::* labels from every epic (clean slate for testing)",
         "method":      "_tool_strip_lifecycle_labels",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -294,7 +296,7 @@ TOOLS = [
         "params": [
             {"name": "piid",      "prompt": "PIID label to assign (e.g. PIID::2026Q3)", "type": str,  "optional": False},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                  "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                  "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -305,7 +307,7 @@ TOOLS = [
             {"name": "count",     "prompt": "Number of epics to strip (blank to use percent instead)", "type": int,   "optional": True},
             {"name": "percent",   "prompt": "Percent of epics to strip (used when count is blank)",    "type": float, "default": 20.0},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",    "type": str,   "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                                 "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                                 "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -315,7 +317,7 @@ TOOLS = [
         "params": [
             {"name": "label",     "prompt": "Project label to assign (e.g. project::DO)", "type": str,  "optional": False},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str, "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                    "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                    "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -324,7 +326,7 @@ TOOLS = [
         "method":      "_tool_strip_project_labels",
         "params": [
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)", "type": str,  "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                              "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                              "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -333,7 +335,7 @@ TOOLS = [
         "method":      "_tool_set_risk_labels",
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to label (default 15)", "type": float, "default": 15.0},
-            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                    "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -343,7 +345,7 @@ TOOLS = [
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to label (default 20)", "type": float, "default": 20.0},
             {"name": "reassign", "prompt": "Replace existing type:: labels too?",          "type": bool,  "default": False},
-            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                     "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -351,7 +353,7 @@ TOOLS = [
         "description": "Remove all type::* labels from every epic (clean slate for testing)",
         "method":      "_tool_strip_work_type_labels",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -361,7 +363,7 @@ TOOLS = [
         "params": [
             {"name": "percent",  "prompt": "Percent of open epics to set (default 20)", "type": float, "default": 20.0},
             {"name": "reassign", "prompt": "Replace existing Business Value too?",       "type": bool,  "default": False},
-            {"name": "dry_run",  "prompt": "Dry run?",                                   "type": bool,  "default": False},
+            {"name": "dry_run",  "prompt": "Dry run?",                                   "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -369,7 +371,7 @@ TOOLS = [
         "description": "Clear the Business Value custom field from every epic (clean slate for testing)",
         "method":      "_tool_strip_business_value",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -380,7 +382,7 @@ TOOLS = [
             {"name": "percent",   "prompt": "Percent of epics to label (default 20)",          "type": float, "default": 20.0},
             {"name": "reassign",  "prompt": "Replace existing wsjf labels too?",               "type": bool,  "default": False},
             {"name": "open_only", "prompt": "Restrict to open epics only?",                    "type": bool,  "default": False},
-            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                        "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -388,7 +390,7 @@ TOOLS = [
         "description": "Remove all wsjf-urgency/risk labels from every epic (clean slate for testing)",
         "method":      "_tool_strip_wsjf_labels",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -398,7 +400,7 @@ TOOLS = [
         "params": [
             {"name": "piid",    "prompt": "PIID label (e.g. PIID::2026Q3)", "type": str,   "default": None, "optional": False},
             {"name": "percent", "prompt": "Percent of issues to close",     "type": float, "default": 50.0},
-            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool,  "default": False},
+            {"name": "dry_run", "prompt": "Dry run?",                       "type": bool,  "default": False, "cli_only": True},
         ],
     },
     {
@@ -408,7 +410,7 @@ TOOLS = [
         "params": [
             {"name": "label",     "prompt": "Label to remove",                                       "type": str,  "optional": False},
             {"name": "epic_type", "prompt": "Limit to type (Epic/Capability/Feature, blank = all)",  "type": str,  "optional": True},
-            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                               "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -416,7 +418,7 @@ TOOLS = [
         "description": "Assign planned weights to all epics based on SAFe type label",
         "method":      "_tool_update_epic_weights",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -440,7 +442,7 @@ TOOLS = [
         "method":      "_tool_clean_reports",
         "params": [
             {"name": "keep_days", "prompt": "Keep runs from the last N days (0 = delete all)", "type": int,  "default": 7},
-            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -449,7 +451,7 @@ TOOLS = [
         "method":      "_tool_clean_logs",
         "params": [
             {"name": "keep_days", "prompt": "Keep logs from the last N days (0 = delete all)", "type": int,  "default": 7},
-            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False},
+            {"name": "dry_run",   "prompt": "Dry run?",                                         "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -457,7 +459,7 @@ TOOLS = [
         "description": "Remove all blocking relationships between epics across the group",
         "method":      "_tool_clean_epic_blocks",
         "params": [
-            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
 ]

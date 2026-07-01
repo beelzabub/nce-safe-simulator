@@ -394,7 +394,7 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 Tools are grouped by purpose in collapsible sections, all collapsed by default. A filter input at the top narrows across all groups in real time; × clears it. Each row shows the tool name, a short description, and a status badge (`read-only`, `⚙` for configurable, `● running`).
 
-Clicking a tool with no parameters launches it immediately. Clicking a parameterised tool opens a modal dialog — booleans become toggles (`dry_run` is highlighted amber), integers and floats get number inputs, strings get text inputs, and group-targeting fields pre-fill from the active config. Required fields block Launch until filled. Destructive tools show a confirmation step.
+Clicking a tool with no parameters launches it immediately. Clicking a parameterised tool opens a modal dialog — booleans become toggles, integers and floats get number inputs, strings get text inputs, and group-targeting fields pre-fill from the active config. Required fields block Launch until filled. Mutating tools (including epic/issue imports) show a confirmation step that warns objects will be created in GitLab. The `dry_run` preview toggle is CLI-only and is not shown in the web UI.
 
 Tools that share a `parallelism_group` cannot run concurrently; the dialog disables Launch and lists the blocking jobs if a conflict exists.
 
