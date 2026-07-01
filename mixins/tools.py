@@ -21,6 +21,8 @@ from .utils import _clear, _pause, _tee_to_log
 #   type        – float | int | bool | str
 #   default     – value used when the user presses Enter (omit = required)
 #   optional    – True means blank input → None (only meaningful for int/str)
+#   cli_only     – True hides the param from the web UI tool payload; the CLI
+#                  still prompts for / accepts it (e.g. server-side output_path)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -76,7 +78,7 @@ TOOLS = [
         "params": [
             {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
             {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
-            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
         ],
     },
     {
@@ -86,7 +88,7 @@ TOOLS = [
         "params": [
             {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
             {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
-            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
         ],
     },
     {
