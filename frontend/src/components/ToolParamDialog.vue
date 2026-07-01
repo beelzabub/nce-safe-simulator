@@ -21,10 +21,7 @@
               v-if="param.section && (idx === 0 || tool.params[idx-1].section !== param.section)"
               class="param-section-label"
             >{{ param.section }}</div>
-            <div
-              class="param-row"
-              :class="{ 'param-dryrun': param.name === 'dry_run' }"
-            >
+            <div class="param-row">
               <!-- group widget → locked display with Edit button -->
               <template v-if="param.widget === 'group'">
                 <div class="field-label">
@@ -157,6 +154,10 @@
             Review the settings below, then confirm to start the job.
           </p>
 
+          <div class="confirm-warning">
+            ⚠ This will create objects in GitLab. Existing content is not removed, and the operation cannot be undone.
+          </div>
+
           <div class="confirm-table">
             <div v-for="row in confirmRows" :key="row.label" class="confirm-row">
               <span class="confirm-label">{{ row.label }}</span>
@@ -283,12 +284,7 @@ const confirmRows = computed(() => {
     const v = values.value[p.name]
     let display, cls = ''
     if (p.type === 'bool') {
-      if (p.name === 'dry_run') {
-        display = v ? 'Yes — preview only, no changes' : 'No — will create objects in GitLab'
-        cls = v ? 'confirm-value--warn' : 'confirm-value--danger'
-      } else {
-        display = v ? 'Yes' : 'No'
-      }
+      display = v ? 'Yes' : 'No'
     } else if (p.type === 'float' && v != null && v <= 1) {
       display = `${Math.round(v * 100)}%`
     } else if (v === null || v === undefined || v === '') {
@@ -455,14 +451,6 @@ async function doLaunch() {
   gap: 0.3rem;
 }
 
-/* Dry run gets a subtle amber tint to signal it's a safety toggle */
-.param-dryrun {
-  background: color-mix(in srgb, var(--conflict-bg) 40%, transparent);
-  border: 1px solid var(--conflict-border);
-  border-radius: 5px;
-  padding: 0.5rem 0.75rem;
-}
-
 /* ── Group widget ── */
 .group-field {
   display: flex;
@@ -593,6 +581,16 @@ async function doLaunch() {
   border-bottom: none;
   padding-bottom: 0;
 }
+.confirm-warning {
+  margin: 0.25rem 1.25rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, var(--conflict-bg) 40%, transparent);
+  border: 1px solid var(--conflict-border);
+  border-radius: 5px;
+  color: #d97706;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
 .confirm-table {
   padding: 0.5rem 1.25rem 0.75rem;
   display: flex;
@@ -617,8 +615,6 @@ async function doLaunch() {
 }
 .confirm-value        { color: var(--text-1); font-weight: 500; }
 .confirm-value--dim   { color: var(--text-3); font-weight: 400; font-style: italic; }
-.confirm-value--warn  { color: #d97706; }
-.confirm-value--danger{ color: #ef4444; }
 
 .btn-launch--confirm { background: #16a34a; }
 .btn-launch--confirm:hover:not(:disabled) { background: #15803d; }

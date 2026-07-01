@@ -8,7 +8,8 @@ explicit-path CLI contract is unchanged:
   2. An explicit CSV/JSON format selector (fmt) drives both the auto-named
      extension and the serialization format; explicit CLI output paths still
      take their format from the path extension (fmt is ignored on that path).
-  3. Import dry_run is surfaced as a clearly-labelled "Preview (dry run)" option.
+  3. dry_run is hidden from the web UI (cli_only) but retained for the CLI, and
+     mutating imports keep a confirmation safety net (Refs #132).
 
 Plus the select/enum widget wiring exposed through the tool payload.
 """
@@ -181,13 +182,29 @@ def test_non_select_params_have_null_options():
     assert grp["options"] is None
 
 
-# ─── Deliverable 3: dry_run surfaced as a preview option ──────────────────────
+# ─── #132: dry_run is hidden from the web UI but kept for the CLI ─────────────
+
+def _tools_with_dry_run():
+    return [t["key"] for t in TOOLS
+            if any(p["name"] == "dry_run" for p in t.get("params", []))]
+
+
+@pytest.mark.parametrize("key", _tools_with_dry_run())
+def test_dry_run_absent_from_ui_payload(key):
+    """No tool's UI payload exposes dry_run (#132)."""
+    payload = _tool_payload(_tool(key), _gl_stub())
+    assert all(p["name"] != "dry_run" for p in payload["params"])
+
+
+@pytest.mark.parametrize("key", _tools_with_dry_run())
+def test_dry_run_retained_in_raw_registry_as_cli_only(key):
+    """The raw tool registry (CLI path) still carries dry_run, flagged cli_only."""
+    dry = next(p for p in _tool(key)["params"] if p["name"] == "dry_run")
+    assert dry["type"] is bool
+    assert dry["cli_only"] is True
+
 
 @pytest.mark.parametrize("key", ["import-epics", "import-issues"])
-def test_import_dry_run_labelled_as_preview(key):
-    payload = _tool_payload(_tool(key), _gl_stub())
-    dry = next(p for p in payload["params"] if p["name"] == "dry_run")
-    assert dry["type"] == "bool"
-    assert dry["default"] is False
-    assert "preview" in dry["prompt"].lower()
-    assert "dry run" in dry["prompt"].lower()
+def test_import_tools_require_confirmation(key):
+    """Mutating imports keep a safety net via the confirmation step (#132)."""
+    assert _tool(key).get("confirm") is True
