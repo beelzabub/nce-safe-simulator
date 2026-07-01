@@ -61,7 +61,7 @@
                   v-model="values[param.name]"
                   :options="groupOptions"
                   :loading="groupLoading"
-                  placeholder="blank = use each row's group_path"
+                  placeholder="Search or pick a group…"
                 />
                 <span v-if="groupLoading" class="field-hint">Loading groups…</span>
                 <span v-else-if="groupOptions.length" class="field-hint">
@@ -80,7 +80,7 @@
                   v-model="values[param.name]"
                   :options="projectOptions"
                   :loading="projectLoading"
-                  placeholder="blank = use each row's project_path"
+                  placeholder="Search or pick a project…"
                 />
                 <span v-if="projectLoading" class="field-hint">Loading projects…</span>
                 <span v-else-if="projectOptions.length" class="field-hint">

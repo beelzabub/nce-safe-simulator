@@ -3,7 +3,7 @@
     <input
       ref="inputEl"
       type="text"
-      class="field-input"
+      class="field-input ps-input"
       :class="{ 'path-select__input--locked': disabled }"
       :value="modelValue"
       :placeholder="placeholder"
@@ -11,11 +11,22 @@
       :title="title"
       autocomplete="off"
       role="combobox"
+      aria-haspopup="listbox"
       :aria-expanded="open"
       @input="onInput"
       @focus="onFocus"
+      @click="onFocus"
       @keydown="onKeydown"
     />
+    <button
+      v-if="!disabled"
+      type="button"
+      class="ps-caret"
+      :class="{ 'ps-caret--open': open }"
+      tabindex="-1"
+      aria-label="Toggle options"
+      @mousedown.prevent="toggle"
+    >▾</button>
 
     <div v-if="open && !disabled" class="ps-panel">
       <div v-if="loading" class="ps-msg">Loading…</div>
@@ -102,6 +113,12 @@ function onFocus() {
   if (!props.disabled) open.value = true
 }
 
+function toggle() {
+  if (props.disabled) return
+  open.value = !open.value
+  if (open.value) inputEl.value?.focus()
+}
+
 function choose(opt) {
   emit('update:modelValue', opt.path)
   open.value = false
@@ -143,6 +160,31 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMousedown))
   background: var(--surface-alt);
   cursor: default;
 }
+.ps-input {
+  padding-right: 28px;   /* room for the caret */
+  cursor: pointer;
+}
+.ps-input:read-only { cursor: default; }
+
+.ps-caret {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  transition: transform 0.15s, color 0.15s;
+}
+.ps-caret:hover { color: var(--text-1); }
+.ps-caret--open { transform: rotate(180deg); }
 
 .ps-panel {
   position: absolute;
