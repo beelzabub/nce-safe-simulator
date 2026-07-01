@@ -193,14 +193,14 @@ def list_group_options(request: Request):
         root = gl.get_group_by_name(grp)
         if root is None:
             return []
-        discovered = gl.get_all_subgroups(root, include_self=True)
+        # Single paginated descendant_groups call (root + all depths) instead of
+        # the get_all_subgroups N+1 (one gl.groups.get per subgroup) — this is an
+        # interactive path hit on every import-dialog open, so latency matters.
+        discovered = [root] + gl.list_descendant_groups(root)
 
         groups = []
         seen = set()
         for g in discovered:
-            # get_all_subgroups may include the root as the originally-passed
-            # object (a group object here) plus subgroup objects; be defensive
-            # about types.
             path = getattr(g, "full_path", None) or (g if isinstance(g, str) else None)
             if not path or path in seen:
                 continue
