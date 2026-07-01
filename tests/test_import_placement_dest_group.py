@@ -242,6 +242,39 @@ def test_build_group_cache_includes_deep_subgroups():
     assert cache["ns/root/vs-02/art-04/team-08"] is deep
 
 
+class GidMapHarness(ImportExportMixin):
+    """Exercises the real _build_gid_path_map against a controlled walk."""
+    def __init__(self, descendants):
+        self._descendants = descendants
+
+    def list_descendant_groups(self, root):
+        return self._descendants
+
+
+def _grp_id(full_path, gid):
+    g = MagicMock()
+    g.full_path = full_path
+    g.id = gid
+    return g
+
+
+def test_build_gid_path_map_includes_deep_subgroups():
+    # Must match _build_group_cache's depth: a shallow map leaves deep-group
+    # epics with a blank exported group_path and drops them from fallback-parent
+    # selection. Uses the single descendant_groups walk (id + full_path present).
+    root = _grp_id("ns/root", 1)
+    mid  = _grp_id("ns/root/vs-02", 2)
+    deep = _grp_id("ns/root/vs-02/art-04/team-08", 3)
+
+    m = GidMapHarness([mid, deep])._build_gid_path_map(root)
+
+    assert m == {
+        1: "ns/root",
+        2: "ns/root/vs-02",
+        3: "ns/root/vs-02/art-04/team-08",
+    }
+
+
 # ─── Tool payloads + CLI contract ──────────────────────────────────────────────
 
 def _tool(key):

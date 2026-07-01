@@ -7026,61 +7026,54 @@ class ReportsMixin:
             "relationships": relationships,
         }
 
+    # SAFe level names by depth from the root; hierarchies deeper than this
+    # (arbitrary nesting) keep the deepest name. `level` is informational only —
+    # downstream reports resolve placement by walking parent_id, not by level.
+    _SNAPSHOT_LEVELS = ["portfolio", "vs", "art", "team"]
+
     def _collect_snapshot_groups_projects(self, root_group):
-        """Traverse the SAFe hierarchy once and return (groups_list, projects_list) as plain dicts."""
+        """Traverse the whole group hierarchy (any depth) once and return
+        (groups_list, projects_list) as plain dicts.
+
+        Recurses through every subgroup so no group is dropped, regardless of
+        nesting depth, and collects each group's projects — so deep groups and
+        their issues stay in the snapshot and reports can resolve placement by
+        walking parent_id.
+        """
         all_groups   = []
         all_projects = []
 
-        root_dict = {
-            "id": root_group.id, "name": root_group.name,
-            "path": root_group.path, "full_path": root_group.full_path,
-            "parent_id": None, "web_url": root_group.web_url, "level": "portfolio",
-        }
-        all_groups.append(root_dict)
-
-        for vs_sg in root_group.subgroups.list(all=True):
-            vs = self.gl.groups.get(vs_sg.id)
-            vs_dict = {
-                "id": vs.id, "name": vs.name, "path": vs.path,
-                "full_path": vs.full_path, "parent_id": root_group.id,
-                "web_url": vs.web_url, "level": "vs",
+        def _project_dict(proj):
+            fp = self.gl.projects.get(proj.id)
+            return {
+                "id":                   fp.id,
+                "name":                 fp.name,
+                "path":                 fp.path,
+                "path_with_namespace":  fp.path_with_namespace,
+                "name_with_namespace":  fp.name_with_namespace,
+                "namespace_id":         fp.namespace["id"],
+                "web_url":              fp.web_url,
+                "issues_enabled":       fp.issues_enabled,
             }
-            all_groups.append(vs_dict)
 
-            for art_sg in vs.subgroups.list(all=True):
-                art = self.gl.groups.get(art_sg.id)
-                art_dict = {
-                    "id": art.id, "name": art.name, "path": art.path,
-                    "full_path": art.full_path, "parent_id": vs.id,
-                    "web_url": art.web_url, "level": "art",
-                }
-                all_groups.append(art_dict)
+        def _walk(group, parent_id, depth):
+            level = self._SNAPSHOT_LEVELS[min(depth, len(self._SNAPSHOT_LEVELS) - 1)]
+            all_groups.append({
+                "id": group.id, "name": group.name, "path": group.path,
+                "full_path": group.full_path, "parent_id": parent_id,
+                "web_url": group.web_url, "level": level,
+            })
 
-                for team_sg in art.subgroups.list(all=True):
-                    team = self.gl.groups.get(team_sg.id)
-                    team_dict = {
-                        "id": team.id, "name": team.name, "path": team.path,
-                        "full_path": team.full_path, "parent_id": art.id,
-                        "web_url": team.web_url, "level": "team",
-                    }
-                    all_groups.append(team_dict)
+            for proj in group.projects.list(all=True):
+                try:
+                    all_projects.append(_project_dict(proj))
+                except Exception as e:
+                    print(f"  Failed to fetch project {proj.name}: {e}")
 
-                    for proj in team.projects.list(all=True):
-                        try:
-                            fp = self.gl.projects.get(proj.id)
-                            all_projects.append({
-                                "id":                   fp.id,
-                                "name":                 fp.name,
-                                "path":                 fp.path,
-                                "path_with_namespace":  fp.path_with_namespace,
-                                "name_with_namespace":  fp.name_with_namespace,
-                                "namespace_id":         fp.namespace["id"],
-                                "web_url":              fp.web_url,
-                                "issues_enabled":       fp.issues_enabled,
-                            })
-                        except Exception as e:
-                            print(f"  Failed to fetch project {proj.name}: {e}")
+            for sg in group.subgroups.list(all=True):
+                _walk(self.gl.groups.get(sg.id), group.id, depth + 1)
 
+        _walk(root_group, None, 0)
         return all_groups, all_projects
 
     def _write_report_data(self, data_dir):
