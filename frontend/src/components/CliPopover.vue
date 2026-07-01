@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   padding: 0.35rem 0.5rem;
 }
-.cli-pop-title { font-size: 0.72rem; font-weight: 600; color: var(--text-3); }
+.cli-pop-title { font-size: 0.72rem; font-weight: 600; color: var(--text-2); }
 .cli-pop-copy {
   background: none;
   border: 1px solid var(--border);
@@ -146,10 +146,10 @@ onBeforeUnmount(() => {
   padding: 0.1rem 0.45rem;
   cursor: pointer;
   font-size: 0.7rem;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .cli-pop-copy:hover { border-color: var(--action); color: var(--action); }
-.cli-pop-copy--done { color: var(--ok, #1a7f37); border-color: var(--ok, #1a7f37); }
+.cli-pop-copy--done { color: var(--ok, #3fb950); border-color: var(--ok, #3fb950); }
 .cli-pop-body {
   margin: 0;
   padding: 0.5rem 0.6rem;
