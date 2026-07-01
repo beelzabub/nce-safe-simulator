@@ -60,8 +60,16 @@ class ImportExportMixin:
         return "json" if path.suffix.lower() == ".json" else "csv"
 
     def _default_export_name(self, stem, fmt):
+        """Build a unique, timestamped filename for a UI (auto-named) export.
+
+        UI exports land in public/exports and must not clobber one another, so a
+        UTC timestamp is appended: ``<group>-<stem>-YYYYMMDD-HHMMSS.<ext>``. This
+        path is used only when no explicit output path is supplied; explicit CLI
+        output paths are honoured verbatim and never routed through here.
+        """
         _EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        filename = f"{self.sanitize_name(self.parent_group)}-{stem}.{fmt}"
+        ts       = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        filename = f"{self.sanitize_name(self.parent_group)}-{stem}-{ts}.{fmt}"
         return (_EXPORTS_DIR / filename).resolve()
 
     def _export_url(self, path: Path):
@@ -263,22 +271,24 @@ class ImportExportMixin:
 
     # ── Epic export ───────────────────────────────────────────────────────────
 
-    def export_epics(self, output_path=None, group=None):
+    def export_epics(self, output_path=None, group=None, fmt="csv"):
         with self._group_override(group):
-            return self._export_epics(output_path)
+            return self._export_epics(output_path, fmt)
 
-    def _export_epics(self, output_path=None):
+    def _export_epics(self, output_path=None, fmt="csv"):
         group = self.get_group_by_name(self.parent_group)
         if not group:
             print(f"ERROR: group '{self.parent_group}' not found.")
             return
 
-        fmt  = "csv"
+        # Explicit output path (CLI): the extension drives the format, exactly as
+        # before. Auto-named (UI): the fmt selector drives extension + format.
         if output_path:
             path = self._resolve_path(output_path)
             fmt  = self._detect_format(path)
         else:
-            path = self._default_export_name("epics-export", "csv")
+            fmt  = "json" if str(fmt).lower() == "json" else "csv"
+            path = self._default_export_name("epics-export", fmt)
 
         print(f"\nExporting epics from '{group.full_path}' (all subgroups included)...")
 
@@ -643,22 +653,24 @@ class ImportExportMixin:
 
     # ── Issue export ──────────────────────────────────────────────────────────
 
-    def export_issues(self, output_path=None, group=None):
+    def export_issues(self, output_path=None, group=None, fmt="csv"):
         with self._group_override(group):
-            return self._export_issues(output_path)
+            return self._export_issues(output_path, fmt)
 
-    def _export_issues(self, output_path=None):
+    def _export_issues(self, output_path=None, fmt="csv"):
         group = self.get_group_by_name(self.parent_group)
         if not group:
             print(f"ERROR: group '{self.parent_group}' not found.")
             return
 
-        fmt  = "csv"
+        # Explicit output path (CLI): the extension drives the format, exactly as
+        # before. Auto-named (UI): the fmt selector drives extension + format.
         if output_path:
             path = self._resolve_path(output_path)
             fmt  = self._detect_format(path)
         else:
-            path = self._default_export_name("issues-export", "csv")
+            fmt  = "json" if str(fmt).lower() == "json" else "csv"
+            path = self._default_export_name("issues-export", fmt)
 
         print(f"\nExporting issues from '{group.full_path}' (all subgroups included)...")
 
