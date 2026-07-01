@@ -1,7 +1,7 @@
 <template>
   <div ref="el" class="log-pane" @scroll.passive="onScroll">
     <div v-if="lines.length === 0" class="log-empty">Waiting for output…</div>
-    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'download'" :href="part.value" :download="part.filename" class="dl-btn" rel="noopener">⤓ Download {{ part.filename }}</a><a v-else-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
+    <pre v-else class="log-content"><template v-for="(line, i) in lines" :key="i"><template v-for="part in parseLine(line)" :key="part.value"><a v-if="part.type === 'download'" :href="part.value" :download="part.filename" class="log-download" rel="noopener">⤓ Download {{ part.filename }}</a><a v-else-if="part.type === 'url'" :href="part.value" target="_blank" rel="noopener" class="log-link">{{ part.value }}</a><span v-else-if="part.type === 'hint'" class="log-hint">{{ part.value }}</span><span v-else>{{ part.value }}</span></template>{{ i < lines.length - 1 ? '\n' : '' }}</template></pre>
   </div>
 </template>
 
@@ -100,18 +100,15 @@ function parseLine(line) {
   color: var(--text-3, #6e7681);
   font-style: italic;
 }
-/* Clean download button — matches ArchitectureDialog's .dl-btn */
-.dl-btn {
-  display: inline-block;
-  margin: 0.15rem 0;
-  padding: 0.35rem 0.85rem;
-  border-radius: 4px;
-  border: 1px solid var(--border, #30363d);
-  background: var(--surface-raised, #161b22);
-  color: var(--text-1, #e6edf3);
-  font-size: 0.82rem;
-  text-decoration: none;
-  transition: background 0.15s;
+/* Download affordance — an inline terminal-style link, not a boxed button,
+   so it sits naturally inside the monospace output pane. */
+.log-download {
+  color: var(--action, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
-.dl-btn:hover { background: var(--surface-active, #21262d); }
+.log-download:hover {
+  color: var(--action-hover, #3b82f6);
+}
 </style>
