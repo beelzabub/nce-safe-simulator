@@ -551,6 +551,13 @@ class ImportExportMixin:
         group_cache = self._build_group_cache(root_group)
         print(f"  {len(group_cache)} group(s) available as targets")
 
+        # Placement destination (#138): validate up front and fail loudly — a
+        # bad destination must never silently dump every epic at the root.
+        if dest_group and dest_group not in group_cache:
+            print(f"\n  ERROR: destination group '{dest_group}' not found under "
+                  f"target root '{root_group.full_path}'. Nothing was imported.")
+            return
+
         # ── Pre-flight: parent_id resolution ────────────────────────────────
         print("\n  Checking parent_ids against target hierarchy...")
         valid_epic_ids = self._build_valid_epic_ids(root_group)
@@ -584,17 +591,19 @@ class ImportExportMixin:
             orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            # Placement (Refs #138): if dest_group is set, ALL epics go there
-            # (override — mirrors how target_project_path works for issues). If
-            # blank, use the row's own group_path when it resolves, else fall
-            # back to the target root group. NOTE: the root is a valid epic
-            # container, so a blank/unresolvable placement still lands at root;
-            # this differs structurally from issues, where a missing project is
-            # skipped because the root group is not a project.
-            if dest_group:
+            # Placement (#138): per-row fallback. Honor the row's own
+            # group_path when it resolves under the target root; otherwise place
+            # the row in the user-picked dest_group (validated above). With
+            # neither, land at the target root — the root is a valid epic
+            # container (unlike issues, where a missing project has no root
+            # fallback and the row is skipped).
+            own = str(row.get("group_path", "")).strip()
+            if own and own in group_cache:
+                gpath = own
+            elif dest_group:
                 gpath = dest_group
             else:
-                gpath = str(row.get("group_path", "")).strip() or root_group.full_path
+                gpath = own or root_group.full_path
 
             target = group_cache.get(gpath)
             if not target:
@@ -816,6 +825,13 @@ class ImportExportMixin:
         project_cache = self._build_project_cache(root_group)
         print(f"  {len(project_cache)} project(s) available as targets")
 
+        # Placement destination (#138): validate up front and fail loudly — a
+        # bad target project must never silently skip every row.
+        if target_project_path and target_project_path not in project_cache:
+            print(f"\n  ERROR: target project '{target_project_path}' not found under "
+                  f"target root '{root_group.full_path}'. Nothing was imported.")
+            return
+
         # Username → user ID cache (populated on demand)
         username_cache = {}
 
@@ -831,7 +847,18 @@ class ImportExportMixin:
             assignees   = self._coerce_usernames(row.get("assignees"))
             epic_id     = self._coerce_int(row.get("epic_id"),  "epic_id", i, [])
             state       = str(row.get("state", "")).strip().lower()
-            ppath       = target_project_path or str(row.get("project_path", "")).strip()
+            # Placement (#138): per-row fallback. Honor the row's own
+            # project_path when it resolves under the target root; otherwise
+            # place the row in the user-picked target_project_path (validated
+            # above). Issues have no root fallback, so an unresolvable row with
+            # no destination is skipped.
+            own = str(row.get("project_path", "")).strip()
+            if own and own in project_cache:
+                ppath = own
+            elif target_project_path:
+                ppath = target_project_path
+            else:
+                ppath = own
 
             if not ppath:
                 print(f"  row {i}: SKIP — no project path")

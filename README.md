@@ -816,14 +816,14 @@ Imports add a **create-if-missing** checkbox: when the (overridden) target group
 
 On top of the active-group indicator above, each importer takes an explicit **destination** that controls where the created objects land, so placement is consistent between the two importers:
 
-- **`import-epics`** — a `dest_group` parameter (web UI: a subgroup dropdown, a datalist-backed combobox populated from `GET /api/groups`; CLI: an optional free-text group path prompt). When set, **all** epics are created in that group regardless of each row's `group_path`. When blank, behaviour is unchanged: each row uses its own `group_path` if it resolves, otherwise it falls back to the **target root group**.
-- **`import-issues`** — the existing `target_project_path` parameter (web UI: a project dropdown, a datalist-backed combobox populated from `GET /api/projects`; CLI: the same optional free-text project-path prompt as before). When set, **all** issues are created in that project regardless of each row's `project_path`. When blank, each row uses its own `project_path`.
+- **`import-epics`** — a `dest_group` parameter (web UI: a subgroup dropdown, a datalist-backed combobox populated from `GET /api/groups`; CLI: an optional free-text group path prompt). It is the **fallback** for rows whose own `group_path` can't be resolved under the target root — those rows are created in `dest_group` instead of being dumped at the root. Rows whose `group_path` *does* resolve still go there, so any structure the file carried is preserved.
+- **`import-issues`** — the existing `target_project_path` parameter (web UI: a project dropdown, a datalist-backed combobox populated from `GET /api/projects`; CLI: the same optional free-text project-path prompt as before). Same fallback semantics: rows whose own `project_path` resolves go there; rows that don't resolve are created in `target_project_path` instead of being skipped.
 
 Both dropdowns allow free text (so you can type a not-yet-cached path) and fall back to a plain editable text box if the list can't be fetched. Both destination parameters are optional strings, so the interactive CLI and automation are unchanged.
 
-**Placement precedence** (both importers): if a destination is chosen, everything goes there; otherwise the row's own path is used; otherwise epics fall back to the root group and issues are skipped.
+**Placement precedence** (both importers): the row's own path is used when it resolves under the target root; otherwise the chosen destination is used; otherwise epics fall back to the root group and issues are skipped. A destination that is set but doesn't resolve is a **hard error** — the import aborts before anything is created, rather than silently root-dumping (epics) or skipping every row (issues).
 
-The one structural difference is deliberate and only applies when no destination is chosen and the row path can't be resolved: **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group` instead of relying on the root dump), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
+The one remaining structural difference only applies when **no destination is chosen** and a row's path can't be resolved: **epics** land at the target root group (the root is a valid epic container, so nothing is silently lost — and you can now direct them explicitly with `dest_group`), while **issues** are **skipped** (the root group is not a project, so there's nowhere valid to place them).
 
 ### Test Data Seeding Pattern
 

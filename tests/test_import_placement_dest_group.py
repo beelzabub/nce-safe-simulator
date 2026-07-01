@@ -1,14 +1,16 @@
 """Placement tests for import destination pickers (Refs #138).
 
-Covers the consistent placement rule:
-  * epics — when ``dest_group`` is set, ALL epics are created in that group
-    regardless of their row ``group_path`` (override, mirrors issues);
-  * epics — when ``dest_group`` is blank, an unresolvable ``group_path`` still
-    falls back to the target ROOT group (documents current behaviour — root is a
-    valid epic container);
-  * issues — the existing ``target_project_path`` override is unchanged: when
-    set, every issue targets that project; a blank/unresolvable project is
-    SKIPPED (root is not a project);
+Covers the per-row fallback placement rule:
+  * a row whose own ``group_path`` / ``project_path`` resolves under the target
+    root is created THERE — structure the file carried is preserved;
+  * a row whose path does NOT resolve falls back to the user-picked destination
+    (``dest_group`` / ``target_project_path``) instead of being silently
+    root-dumped (epics) or skipped (issues);
+  * a destination that is set but does not resolve is a HARD ERROR — the import
+    aborts before anything is created (no silent misplacement);
+  * with no destination, an unresolvable epic row still falls back to the target
+    ROOT (a valid epic container) while an unresolvable issue row is SKIPPED
+    (the root is not a project) — the one remaining structural asymmetry;
   * tool payloads expose the new destination widgets while the raw registry
     keeps them as ``type: str, optional: True`` (CLI contract).
 """
@@ -77,18 +79,18 @@ class PlacementHarness(ImportExportMixin, BootstrapMixin):
         return rows, 0
 
 
-# ─── Epics: dest_group override ────────────────────────────────────────────────
+# ─── Epics: dest_group is a fallback, not an override ──────────────────────────
 
-def test_import_epics_dest_group_overrides_all_rows(tmp_path):
+def test_import_epics_dest_group_is_fallback_for_unresolvable_rows(tmp_path):
     root = _grp("ns/root")
     team_a = _grp("ns/root/team-a")
     dest = _grp("ns/root/dest")
     cache = {"ns/root": root, "ns/root/team-a": team_a, "ns/root/dest": dest}
 
     rows = [
-        {"title": "Epic 1", "group_path": "ns/root/team-a"},
-        {"title": "Epic 2", "group_path": ""},
-        {"title": "Epic 3", "group_path": "ns/root/team-a"},
+        {"title": "Epic 1", "group_path": "ns/root/team-a"},   # resolves → team-a
+        {"title": "Epic 2", "group_path": ""},                 # blank      → dest
+        {"title": "Epic 3", "group_path": "ns/root/ghost"},    # unresolved → dest
     ]
     f = tmp_path / "epics.json"
     f.write_text(json.dumps(rows))
@@ -96,8 +98,28 @@ def test_import_epics_dest_group_overrides_all_rows(tmp_path):
     h = PlacementHarness(rows, root, cache)
     h._import_epics(input_path=str(f), dest_group="ns/root/dest")
 
-    # every epic created in dest, none in team-a or root
-    assert dest.epics.create.call_count == 3
+    # resolvable row keeps its own path; only unresolvable rows fall back to dest
+    assert team_a.epics.create.call_count == 1
+    assert dest.epics.create.call_count == 2
+    assert root.epics.create.call_count == 0
+
+
+def test_import_epics_unresolvable_dest_group_aborts(tmp_path, capsys):
+    root = _grp("ns/root")
+    team_a = _grp("ns/root/team-a")
+    cache = {"ns/root": root, "ns/root/team-a": team_a}  # 'ns/root/ghost' absent
+
+    rows = [{"title": "Epic 1", "group_path": "ns/root/team-a"}]
+    f = tmp_path / "epics.json"
+    f.write_text(json.dumps(rows))
+
+    h = PlacementHarness(rows, root, cache)
+    h._import_epics(input_path=str(f), dest_group="ns/root/ghost")
+
+    # a bad destination must fail loudly BEFORE creating anything — no silent
+    # root-dump, and the resolvable row is not created either
+    out = capsys.readouterr().out
+    assert "ERROR: destination group 'ns/root/ghost' not found" in out
     assert team_a.epics.create.call_count == 0
     assert root.epics.create.call_count == 0
 
@@ -136,17 +158,18 @@ def test_import_epics_blank_dest_unresolvable_path_falls_back_to_root(tmp_path, 
     assert "not found — using root group" in out
 
 
-# ─── Issues: target_project_path override is unchanged ─────────────────────────
+# ─── Issues: target_project_path is a fallback, not an override ────────────────
 
-def test_import_issues_target_project_overrides_all_rows(tmp_path):
+def test_import_issues_target_project_is_fallback_for_unresolvable_rows(tmp_path):
     root = _grp("ns/root")
     backlog = _proj("ns/root/team-a/backlog")
     other = _proj("ns/root/team-b/backlog")
     cache = {"ns/root/team-a/backlog": backlog, "ns/root/team-b/backlog": other}
 
     rows = [
-        {"title": "Issue 1", "project_path": "ns/root/team-b/backlog"},
-        {"title": "Issue 2", "project_path": ""},
+        {"title": "Issue 1", "project_path": "ns/root/team-b/backlog"},  # resolves → other
+        {"title": "Issue 2", "project_path": ""},                        # blank    → target
+        {"title": "Issue 3", "project_path": "ns/root/ghost"},           # unresolved → target
     ]
     f = tmp_path / "issues.json"
     f.write_text(json.dumps(rows))
@@ -154,9 +177,28 @@ def test_import_issues_target_project_overrides_all_rows(tmp_path):
     h = PlacementHarness(rows, root, cache)
     h._import_issues(input_path=str(f), target_project_path="ns/root/team-a/backlog")
 
-    # override → every issue lands in backlog, none in the row's own project
+    # resolvable row keeps its own project; only unresolvable rows fall back
+    assert other.issues.create.call_count == 1
     assert backlog.issues.create.call_count == 2
-    assert other.issues.create.call_count == 0
+
+
+def test_import_issues_unresolvable_target_project_aborts(tmp_path, capsys):
+    root = _grp("ns/root")
+    backlog = _proj("ns/root/team-a/backlog")
+    cache = {"ns/root/team-a/backlog": backlog}  # 'ns/root/ghost' absent
+
+    rows = [{"title": "Issue 1", "project_path": "ns/root/team-a/backlog"}]
+    f = tmp_path / "issues.json"
+    f.write_text(json.dumps(rows))
+
+    h = PlacementHarness(rows, root, cache)
+    h._import_issues(input_path=str(f), target_project_path="ns/root/ghost")
+
+    # a bad destination must fail loudly BEFORE creating anything — no silent
+    # skip of every row, and the resolvable row is not created either
+    out = capsys.readouterr().out
+    assert "ERROR: target project 'ns/root/ghost' not found" in out
+    assert backlog.issues.create.call_count == 0
 
 
 def test_import_issues_blank_target_unresolvable_project_skips(tmp_path, capsys):
