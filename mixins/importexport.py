@@ -939,13 +939,26 @@ class ImportExportMixin:
             if due_date:
                 payload["due_date"] = due_date
 
-            # Milestone by title lookup
+            # Milestone by title lookup. include_ancestors pulls in group-level
+            # milestones inherited from the parent groups (PI milestones live at
+            # the ART/portfolio level, not on the project) — GitLab lets a group
+            # milestone be assigned to an issue in a project under that group.
             if milestone:
-                ms_list = project.milestones.list(search=milestone)
-                if ms_list:
-                    payload["milestone_id"] = ms_list[0].id
+                try:
+                    ms_list = project.milestones.list(
+                        search=milestone, include_ancestors=True, all=True)
+                except Exception:
+                    ms_list = project.milestones.list(search=milestone)
+                # search is a substring match and may return several (e.g. a
+                # project and a group milestone of the same name) — prefer an
+                # exact title match.
+                exact = [m for m in ms_list if getattr(m, "title", "") == milestone]
+                chosen = exact[0] if exact else (ms_list[0] if ms_list else None)
+                if chosen:
+                    payload["milestone_id"] = chosen.id
                 else:
-                    print(f"  row {i}: WARN milestone '{milestone}' not found — skipping")
+                    print(f"  row {i}: WARN milestone '{milestone}' not found "
+                          f"(searched project + ancestor groups) — skipping")
 
             # Assignee username → id lookup
             if assignees:
