@@ -49,13 +49,14 @@
               configurable: t.params?.length > 0,
             }"
             @click="handleClick(t)"
+            @mouseenter="setPreview(cliFor(t))"
+            @focusin="setPreview(cliFor(t))"
           >
             <div class="item-top">
               <span class="item-name">{{ formatKey(t.key) }}</span>
               <span v-if="isRunning(t.key)" class="badge badge-run">● running</span>
               <span v-else-if="t.readonly" class="ro-hint">read-only</span>
               <span v-else-if="t.params?.length" class="cfg-hint">⚙</span>
-              <CliPopover :command="cliFor(t)" class="item-cli" />
             </div>
             <div class="item-desc">{{ t.description }}</div>
           </li>
@@ -99,13 +100,15 @@ import { ref, computed, onMounted } from 'vue'
 import { getTools, getReports } from '../api.js'
 import ToolParamDialog from './ToolParamDialog.vue'
 import ReportPickerDialog from './ReportPickerDialog.vue'
-import CliPopover from './CliPopover.vue'
 import { buildToolCommand } from '../composables/useCliCommand.js'
+import { useCommandPreview } from '../composables/useCommandPreview.js'
 
 const props = defineProps({
   runningJobs: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['launch', 'launch-reports'])
+
+const { setPreview } = useCommandPreview()
 
 const tools          = ref([])
 const reports        = ref([])
@@ -214,9 +217,10 @@ function handleClick(tool) {
   }
 }
 
-// CLI command shown in each row's </> popover (#140). No-param tools resolve to
-// a complete command; parameterized tools show the base invocation (the fully
-// specified form, with flags, appears live in the tool dialog).
+// Command previewed in the docked CommandBar when a row is hovered/focused
+// (#140). No-param tools resolve to a complete command; parameterized tools show
+// the base invocation (the fully specified form appears live once the dialog is
+// open and the user edits params).
 function cliFor(tool) {
   return buildToolCommand(tool, {})
 }
@@ -386,8 +390,6 @@ function onReportLaunch(selectedReports, formats, useLast) {
 .cfg-hint  { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
 /* CLI-command icon: subtle until the row is hovered (matches the copy-btn
    reveal pattern), so it doesn't clutter the list at rest. */
-.item-cli { flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
-.job-item:hover .item-cli { opacity: 1; }
 
 /* ── State messages ── */
 .state-msg   { padding: 1.5rem 1rem; color: var(--text-2); font-size: 0.85rem; text-align: center; }

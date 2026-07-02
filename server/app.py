@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import shutil
 import threading
 import time
@@ -746,6 +747,19 @@ async def ws_run(websocket: WebSocket):
         log_fh = log_path.open("w", encoding="utf-8")
         await websocket.send_json({"type": "log_path", "path": str(log_path)})
 
+    # Echo the equivalent CLI command as the first output line(s), so the run
+    # record — recallable from the session/status window — carries the exact
+    # command that reproduces it (issue #140).
+    cli_cmd = build_cli_command(data)
+    if cli_cmd:
+        for line in cli_cmd.splitlines():
+            prefixed = f"$ {line}"
+            await websocket.send_json({"type": "log", "text": prefixed})
+            if log_fh is not None:
+                log_fh.write(prefixed + "\n")
+        if log_fh is not None:
+            log_fh.flush()
+
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
 
@@ -829,6 +843,76 @@ def _resolve_reuse_data(value) -> "Path | None":
         print("No complete snapshot found — fetching fresh data.")
         return None
     return Path(value)
+
+
+CLI_ENTRY = "python3 NceGitLab.py"
+
+
+def _quote(value) -> str:
+    """POSIX-shell-quote a value; empty string becomes ''."""
+    s = str(value)
+    return "''" if s == "" else shlex.quote(s)
+
+
+def _tool_arg_tokens(tool: dict, params: dict) -> list:
+    """Flags for a tool's params, mirroring the frontend builder (useCliCommand.js):
+    booleans expressed relative to their default; dash-leading values use the
+    attached --name=value form so the CLI parser can't mistake them for a flag."""
+    tokens: list = []
+    for p in tool["params"]:
+        if p.get("cli_only"):
+            continue
+        name = p["name"]
+        if name not in params:
+            continue
+        v = params[name]
+        if p["type"] is bool:
+            if v is None:
+                continue
+            on = v is True
+            if p.get("default") is True:
+                tokens.append(f"--{name}" if on else f"--{name}=false")
+            elif on:
+                tokens.append(f"--{name}")
+            continue
+        if v is None or v == "":
+            continue
+        s = str(v)
+        q = _quote(s)
+        if s.startswith("-"):
+            tokens.append(f"--{name}={q}")
+        else:
+            tokens.extend([f"--{name}", q])
+    return tokens
+
+
+def build_cli_command(data: dict) -> str:
+    """The equivalent `NceGitLab.py` command line for a WebSocket job request.
+
+    This is the authoritative, server-side rendering of the command the UI is
+    about to run — echoed into the run's output so every job (tools, reports,
+    and no-param utilities like diagnose alike) carries the exact command that
+    reproduces it (issue #140). Reports yield one `-r` line per selected report.
+    """
+    if "tool" in data:
+        key  = data["tool"]
+        tool = next((t for t in TOOLS if t["key"] == key), None)
+        if tool is None:
+            return ""
+        toks = _tool_arg_tokens(tool, data.get("params") or {})
+        return " ".join([CLI_ENTRY, "-ut", key, *toks])
+
+    keys = data.get("reports") or ([data["report"]] if data.get("report") else [])
+    if not keys:
+        return ""
+    tail: list = []
+    formats = data.get("formats")
+    if formats:
+        tail.extend(["--formats", *[_quote(f) for f in formats]])
+    if data.get("reuse_data") == "last":
+        tail.append("--last")
+    suffix = (" " + " ".join(tail)) if tail else ""
+    return "\n".join(f"{CLI_ENTRY} -r {_quote(k)}{suffix}" for k in keys)
 
 
 def _build_job_fn(gl: object, data: dict):

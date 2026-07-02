@@ -52,8 +52,6 @@
         </label>
       </div>
 
-      <CliPreview :command="cliCommand" />
-
       <div class="dialog-footer">
         <button class="btn-cancel" @click="$emit('close')">Cancel</button>
         <button
@@ -73,7 +71,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { buildReportCommand } from '../composables/useCliCommand.js'
-import CliPreview from './CliPreview.vue'
+import { useCommandPreview } from '../composables/useCommandPreview.js'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -114,9 +112,12 @@ const allSelected = computed(() => selectedKeys.value.length === props.reports.l
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
 
 // Equivalent CLI command(s) for the current selection — one `-r` line per
-// chosen report, sharing --formats / --last (#140).
+// chosen report, sharing --formats / --last (#140) — pushed live to the docked
+// CommandBar while the picker is open.
+const { setPreview, clearPreview } = useCommandPreview()
 const cliCommand = computed(() =>
   buildReportCommand(selectedKeys.value, selectedFormats.value, useLast.value))
+watch(cliCommand, cmd => setPreview(cmd), { immediate: true })
 
 // Drop site-build formats when not all reports are selected
 watch(allSelected, (all) => {
@@ -133,7 +134,10 @@ function onKeydown(e) {
   if (e.key === 'Escape') emit('close')
 }
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  clearPreview()
+})
 
 function launch() {
   const selected = props.reports.filter(r => selectedKeys.value.includes(r.key))
