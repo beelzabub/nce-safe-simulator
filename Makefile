@@ -1,4 +1,4 @@
-.PHONY: build data interactive static serve deploy-local redeploy
+.PHONY: build data interactive static serve deploy-local redeploy deck-screenshots deck
 
 ## Run the full pipeline: fetch data, export notebooks, render static site
 build: data interactive static
@@ -27,3 +27,12 @@ deploy-local:
 ## Iterative redeploy: rebuild image and swap the live app container (Caddy untouched)
 redeploy:
 	bash scripts/redeploy.sh
+
+## Capture sprint-review deck screenshots (Playwright, ~10-15 min). See deck/README.md.
+deck-screenshots:
+	python3 deck/capture_screenshots.py
+
+## Build the sprint-review .pptx from live metrics + screenshots + the SAIC template
+deck:
+	python3 deck/fetch_metrics.py
+	python3 deck/build_deck.py
