@@ -185,8 +185,6 @@
 
           <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
 
-          <CliPreview :command="cliCommand" />
-
           <div class="dialog-footer">
             <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
             <button class="btn-launch" :disabled="!isValid || blockers.length > 0 || uploading" @click="submit">
@@ -212,8 +210,6 @@
             </div>
           </div>
 
-          <CliPreview :command="cliCommand" />
-
           <div class="dialog-footer">
             <button class="btn-cancel" @click="confirming = false">← Back</button>
             <button class="btn-launch btn-launch--confirm" @click="doLaunch">
@@ -232,9 +228,9 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 import PathSelect from './PathSelect.vue'
 import HelpTip from './HelpTip.vue'
-import CliPreview from './CliPreview.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { buildToolCommand } from '../composables/useCliCommand.js'
+import { useCommandPreview } from '../composables/useCommandPreview.js'
 import { upload, getGroups, getProjects } from '../api.js'
 
 const props = defineProps({
@@ -394,8 +390,11 @@ const confirmRows = computed(() => {
 })
 
 // The equivalent CLI one-liner for the current choices — rebuilt live as the
-// user edits params (#140), shown in both the param and confirmation views.
+// user edits params (#140) and pushed to the docked CommandBar while the dialog
+// is open. Cleared when the dialog unmounts.
+const { setPreview, clearPreview } = useCommandPreview()
 const cliCommand = computed(() => buildToolCommand(props.tool, values.value))
+watch(cliCommand, cmd => setPreview(cmd), { immediate: true })
 
 function onKeydown(e) {
   if (e.key === 'Escape' && props.tool) {
@@ -404,7 +403,10 @@ function onKeydown(e) {
   }
 }
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  clearPreview()
+})
 
 // First click: show confirmation step (if tool.confirm); second click: launch.
 function submit() {

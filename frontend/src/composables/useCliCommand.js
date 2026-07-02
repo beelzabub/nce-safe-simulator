@@ -7,7 +7,10 @@
 // So the values already collected in a dialog map straight to a runnable command.
 //
 // These are pure functions (no Vue reactivity) so they can be unit-reasoned and
-// reused across the tool dialog, the report picker, and per-action buttons.
+// reused across the tool dialog, the report picker, and the docked CommandBar.
+// IMPORTANT: keep this module dependency-free (no `vue` import) — the contract
+// test (tests/test_cli_command_preview.py) imports it verbatim into bare Node.
+// The reactive command-preview state lives in useCommandPreview.js.
 
 export const CLI_ENTRY = 'python3 NceGitLab.py'
 

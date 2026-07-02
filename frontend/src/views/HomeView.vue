@@ -31,6 +31,8 @@
 
     </div>
 
+    <CommandBar />
+
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
     <ArchitectureDialog v-if="showArchitecture" :deployment-type="deploymentType" @close="showArchitecture = false" />
@@ -44,6 +46,7 @@ import NavBar        from '../components/NavBar.vue'
 import JobPicker     from '../components/JobPicker.vue'
 import JobRunner     from './JobRunner.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
+import CommandBar    from '../components/CommandBar.vue'
 import HelpDialog          from '../components/HelpDialog.vue'
 import ConfigDialog        from '../components/ConfigDialog.vue'
 import ArchitectureButton  from '../components/ArchitectureButton.vue'

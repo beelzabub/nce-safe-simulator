@@ -402,12 +402,12 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 #### Equivalent CLI command
 
-Every launch surface shows the **equivalent command line** for the operation, so a run you set up in the browser can be scripted, scheduled, or reproduced on another machine. The CLI accepts operations non-interactively — after `-ut <tool>` (tools) or `-r <report>` (reports), `--param value` / `--flag` tokens are applied as prefills without prompting — so the command the UI displays is a runnable one-liner, not a template:
+The UI shows the **equivalent command line** for the operation, so a run you set up in the browser can be scripted, scheduled, or reproduced on another machine. The CLI accepts operations non-interactively — after `-ut <tool>` (tools) or `-r <report>` (reports), `--param value` / `--flag` tokens are applied as prefills without prompting — so the displayed command is a runnable one-liner, not a template. Two surfaces cover every operation:
 
-- **Tool dialogs** and the **report picker** carry a collapsible *Equivalent CLI command* strip (above the footer and on the confirmation step) that rebuilds **live** as you edit parameters, with a **Copy** button. Only set values contribute: a checked boolean becomes `--flag`, text/number values become `--name "value"` (shell-quoted when needed), and blank optionals are omitted so the CLI falls back to its own defaults.
-- **Job rows** that launch directly (no dialog) carry a small **`</>`** icon that pops up the command with a copy button; parameterised rows show the base invocation (the fully specified form appears in the dialog).
+- A **docked command bar** along the bottom of the window shows the command for whatever you are currently looking at — a hovered job row, or a tool dialog / report picker rebuilding **live** as you edit parameters — with a **Copy** button. Only set values contribute: a checked boolean becomes `--flag`, text/number values become `--name "value"` (shell-quoted when needed), and blank optionals are omitted so the CLI falls back to its own defaults. Values that begin with `-` (e.g. a negative count) use the `--name=value` form, and a default-on boolean turned off is stated explicitly (`--flag=false`), so the command always reproduces the exact operation.
+- When a job **launches**, the server echoes the exact command it runs as the first line of that run's output (`$ python3 NceGitLab.py …`). Because the job log is recallable from the session/status window, every run — instant-launch utilities like `diagnose` included — carries the command that reproduces it, permanently.
 
-The generated flags are contract-tested against the real CLI parser (`tests/test_cli_command_preview.py`) so a command copied from the UI parses back to exactly the parameters it was launched with.
+The generated flags are contract-tested against the real CLI parser both from the browser builder (`tests/test_cli_command_preview.py`, via Node) and the server builder (`tests/test_cli_command_server.py`), so a command shown in the UI parses back to exactly the parameters it was launched with.
 
 #### Job runner
 
