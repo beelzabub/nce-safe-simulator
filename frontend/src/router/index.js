@@ -18,10 +18,10 @@ const router = createRouter({
 })
 
 // Front-door gate (epic #135): unauthenticated navigation lands on /login.
-// The gate is a client-side session flag until real AAA exists — see
-// composables/useAuthGate.js.
-router.beforeEach((to) => {
-  if (to.path !== '/login' && !useAuthGate().accepted()) return '/login'
+// The gate consults the server session (or the cosmetic client flag while
+// auth.method is "none") — see composables/useAuthGate.js.
+router.beforeEach(async (to) => {
+  if (to.path !== '/login' && !(await useAuthGate().accepted())) return '/login'
 })
 
 export default router
