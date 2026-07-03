@@ -31,7 +31,7 @@
     "dod_banner_enabled": true,
     "background": {
       "rotation_seconds": 15,
-      "max_images": 8,
+      "max_images": 12,
       "source": "repo",
       "staging_s3": {
         "bucket": "nce-safe-sim-assets",
