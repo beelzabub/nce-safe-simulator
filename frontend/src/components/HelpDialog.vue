@@ -649,4 +649,18 @@ p {
   color: #f85149;
   padding: 1rem;
 }
+
+/* ── Mobile (issue #160): the dialog takes the whole screen ── */
+@media (max-width: 768px) {
+  .overlay { padding: 0; }
+  .dialog {
+    width: 100vw;
+    max-width: none;
+    height: 100vh;    /* fallback for browsers without dvh */
+    height: 100dvh;   /* tracks the real visible height under mobile URL bars */
+    max-height: none;
+    border-radius: 0;
+  }
+}
+
 </style>

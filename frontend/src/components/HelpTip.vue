@@ -87,6 +87,12 @@ onBeforeUnmount(() => {
 .helptip:hover .helptip-icon,
 .helptip:focus .helptip-icon { border-color: var(--action); color: var(--action); }
 
+/* Touch (issue #160): the tip opens via the browser's emulated hover/focus on
+   tap, but a 14px target is too small for a finger */
+@media (pointer: coarse) {
+  .helptip-icon { width: 22px; height: 22px; font-size: 0.75rem; }
+}
+
 /* Teleported to <body>; position is set inline (fixed). */
 .helptip-bubble {
   position: fixed;

@@ -1,2 +1,6 @@
 node_modules/
 dist/
+
+# Playwright artifacts (mobile test suite, issue #160)
+test-results/
+playwright-report/
