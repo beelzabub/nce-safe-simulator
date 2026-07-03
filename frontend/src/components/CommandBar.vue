@@ -96,4 +96,17 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 }
 .cmd-copy:hover { background: var(--border); color: var(--text-1); }
 .cmd-copy--done { color: var(--ok); border-color: var(--ok); }
+
+/* ── Mobile (issue #160): the bar is a hover affordance, and on touch the
+   emulated mouseenter fires mid-tap — the bar popping in reflows the job list
+   between touchend and the synthesized click, eating the tap. Hide it outright
+   below the phone breakpoint; the authoritative command is still echoed into
+   every run's output. ── */
+@media (max-width: 768px) {
+  .cmd-bar { display: none; }
+}
+
+@media (pointer: coarse) {
+  .cmd-copy { padding: 0.4rem 0.8rem; }
+}
 </style>

@@ -1,9 +1,12 @@
 <template>
   <div class="app-shell">
-    <NavBar :running-count="runningJobKeys.length" @toggle-status="showStatus = !showStatus" @toggle-config="showConfig = true" @toggle-help="showHelp = !showHelp" />
+    <NavBar :running-count="runningJobKeys.length" @toggle-jobs="sidebarOpen = !sidebarOpen" @toggle-status="showStatus = !showStatus" @toggle-config="showConfig = true" @toggle-help="showHelp = !showHelp" />
     <div class="workspace">
 
-      <aside class="sidebar">
+      <!-- Mobile only: dims the workspace while the jobs drawer is out -->
+      <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
+
+      <aside class="sidebar" :class="{ 'sidebar--open': sidebarOpen }">
         <div class="sidebar-picker">
           <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
         </div>
@@ -55,6 +58,12 @@ import { useJobs }         from '../composables/useJobs.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
 
+// Below the mobile breakpoint the sidebar is an off-canvas drawer; start it
+// open there so first-time phone users land on the job list, not an empty
+// runner pane. On desktop the flag has no visual effect.
+const isMobile = window.matchMedia('(max-width: 768px)')
+const sidebarOpen = ref(isMobile.matches)
+
 const showStatus       = ref(false)
 const showConfig       = ref(false)
 const showHelp         = ref(false)
@@ -76,15 +85,22 @@ onMounted(async () => {
   } catch { /* server not yet ready */ }
 })
 
-function onLaunch(job, params)          { launch(job, params) }
-function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, useLast) }
+function onLaunch(job, params) {
+  launch(job, params)
+  if (isMobile.matches) sidebarOpen.value = false   // reveal the runner pane
+}
+function onLaunchReports(reports, fmts, useLast) {
+  launchReports(reports, fmts, useLast)
+  if (isMobile.matches) sidebarOpen.value = false
+}
 </script>
 
 <style scoped>
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100vh;   /* fallback for browsers without dvh */
+  height: 100dvh;  /* tracks the real visible height under mobile URL bars */
 }
 
 /* ── Two-column workspace ── */
@@ -163,5 +179,40 @@ function onLaunchReports(reports, fmts, useLast) { launchReports(reports, fmts, 
 [data-theme="light"] .main-pane::after {
   background-image: url('../assets/nce-logo-navy.png');
   opacity: 0.09;
+}
+
+/* ── Mobile: sidebar becomes an off-canvas drawer (issue #160) ── */
+.sidebar-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  .workspace { position: relative; }
+
+  .sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(340px, 85vw);
+    z-index: 50;
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar--open { transform: translateX(0); }
+
+  .sidebar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  /* Keep the watermark out of the way of log output on small screens */
+  .main-pane::after { width: 120px; opacity: 0.05; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
 }
 </style>

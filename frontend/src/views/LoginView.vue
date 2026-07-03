@@ -232,9 +232,12 @@ function onSubmit() {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
+  /* `safe` keeps the card's top reachable (scrollable) when the viewport is
+     shorter than the card — e.g. a phone in landscape */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
 }
 
 .login-card {
@@ -327,5 +330,19 @@ button:hover { background: var(--action-hover, #1d4ed8); }
 @media (prefers-reduced-motion: reduce) {
   .bg-layer { transition-duration: 0.5s; animation: none !important; }
   .login-card { transition: opacity 0.35s ease; transform: none; }
+}
+
+/* ── Touch devices (issue #160): no hover to "reach for" the card, so it
+   starts fully solid instead of waiting for a cursor that never comes. ── */
+@media (pointer: coarse) {
+  .login-card {
+    opacity: 1;
+    background: rgba(9, 13, 22, 0.62);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-card { padding: 28px 22px 24px; }
+  .credit-chip { right: 10px; bottom: 8px; }
 }
 </style>

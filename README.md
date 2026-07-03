@@ -451,6 +451,27 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. The gate i
 | Main pane | Job runner — one tab per launched job with streaming log output |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
+#### Mobile support
+
+The UI is responsive and touch-ready — usable on iPhones, iPads, and Android phones. At phone widths (≤ 768 px):
+
+- The job picker becomes a **slide-in drawer**, toggled with the ☰ button in the nav bar. It starts open so the job list is the first thing you see, and closes automatically when a job launches so the runner output takes the screen.
+- The status panel opens as a **full-width overlay**; all dialogs (tool parameters, report picker, config editor, help, architecture) go **full-screen**.
+- The docked CLI command bar is hidden — it is a hover affordance, and the server still echoes the exact command into every run's output.
+- Touch details: tap targets meet a 40–44 px floor, text fields render at ≥ 16 px so iOS Safari doesn't zoom on focus, log panes and status sections resize via touch drag (pointer events), and the viewport uses dynamic-height units so mobile URL bars don't clip the layout.
+
+**Mobile test suite** — Playwright drives the real UI on emulated device profiles (iPhone SE, iPhone 14 portrait + landscape, iPad, Pixel 7, Galaxy S9+) and asserts the flows above work by touch: no horizontal overflow, DoD banner + login usable, drawer/overlay behavior, dialog fit, tap-target sizes. All `/api` and WebSocket traffic is mocked, so no Python backend or GitLab is needed:
+
+```bash
+cd frontend
+npx playwright install chromium       # once per machine
+npm run test:mobile                   # full device matrix (Chromium emulation)
+
+# Optional true-Safari (WebKit) pass — needs system libraries:
+#   sudo npx playwright install-deps webkit && npx playwright install webkit
+npm run test:mobile:webkit
+```
+
 #### Job picker
 
 Tools are grouped by purpose in collapsible sections, all collapsed by default. A filter input at the top narrows across all groups in real time; × clears it. Each row shows the tool name, a short description, and a status badge (`read-only`, `⚙` for configurable, `● running`).
