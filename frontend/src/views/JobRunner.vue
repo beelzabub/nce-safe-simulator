@@ -60,7 +60,7 @@
         <!-- Log pane -->
         <div v-if="!job.collapsed" class="tab-body" :class="{ 'tab-body--resizable': job.status !== 'running' }">
           <LogPane :lines="job.lines" />
-          <div v-if="job.status !== 'running'" class="resize-handle" @mousedown.prevent.stop="startResize" title="Drag to resize" />
+          <div v-if="job.status !== 'running'" class="resize-handle" @pointerdown.prevent.stop="startResize" title="Drag to resize" />
         </div>
       </div>
     </div>
@@ -84,6 +84,7 @@ watch(scrollToJobId, async (id) => {
   scrollToJobId.value = null
 })
 
+// Pointer events so the handle works with touch (and pen) as well as mouse.
 function startResize(e) {
   const body = e.currentTarget.parentElement
   const startY = e.clientY
@@ -93,11 +94,13 @@ function startResize(e) {
     body.style.height = h + 'px'
   }
   function onUp() {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
   }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 
 const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
@@ -307,5 +310,18 @@ function formatKey(key) {
   flex: 1;
   height: auto;
   min-height: 0;
+}
+
+/* ── Mobile / touch (issue #160) ── */
+@media (max-width: 768px) {
+  /* background-attachment: fixed is unsupported/janky on iOS Safari */
+  .runner-hero { background-attachment: scroll; }
+}
+
+@media (pointer: coarse) {
+  .resize-handle { width: 40px; height: 40px; touch-action: none; }
+  .tab-header { padding-top: 0.7rem; padding-bottom: 0.7rem; }
+  .tab-stop  { padding: 6px 12px; }
+  .tab-close { padding: 6px 12px; font-size: 1.2rem; }
 }
 </style>

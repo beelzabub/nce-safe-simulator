@@ -4,23 +4,26 @@
     <div class="nav-hero" :style="{ backgroundImage: `url(${heroSrc})` }" aria-hidden="true" />
 
     <div class="brand">
+      <button class="jobs-btn" @click="$emit('toggle-jobs')" aria-label="Toggle job list">☰</button>
       <img class="brand-logo" :src="logoSrc" alt="NCE — Navintel Cloud Ecosystem" />
       <span class="brand-tag">PMW 120</span>
       <span class="brand-divider">|</span>
       <span class="brand-name">Safe Simulator</span>
     </div>
-    <ClockWidget />
+    <!-- Wrapper div: ClockWidget is multi-root (widget + Teleport), so a class
+         set on the component itself would be dropped as a fallthrough attr -->
+    <div class="nav-clock"><ClockWidget /></div>
     <div class="nav-actions">
       <button class="status-btn" :class="{ active: runningCount > 0 }" @click="$emit('toggle-status')">
         <span v-if="runningCount > 0" class="status-dot" />
         {{ runningCount > 0 ? `${runningCount} running` : 'Status' }}
       </button>
       <button class="config-btn" @click="$emit('toggle-config')" title="Edit config.json">⚙</button>
-      <button class="help-btn" @click="$emit('toggle-help')">? Help</button>
+      <button class="help-btn" @click="$emit('toggle-help')">?<span class="btn-label"> Help</span></button>
       <button class="theme-btn" @click="toggle">
-        {{ theme === 'dark' ? '☀ Light' : '☾ Dark' }}
+        {{ theme === 'dark' ? '☀' : '☾' }}<span class="btn-label">{{ theme === 'dark' ? ' Light' : ' Dark' }}</span>
       </button>
-      <button class="signout-btn" title="Sign out" @click="signOut">⎋ Sign out</button>
+      <button class="signout-btn" title="Sign out" @click="signOut">⎋<span class="btn-label"> Sign out</span></button>
     </div>
   </header>
 </template>
@@ -38,7 +41,7 @@ import ClockWidget from './ClockWidget.vue'
 const { theme, toggle } = useTheme()
 const logoSrc = computed(() => (theme.value === 'dark' ? logoWhite : logoNavy))
 defineProps({ runningCount: { type: Number, default: 0 } })
-defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
+defineEmits(['toggle-jobs', 'toggle-status', 'toggle-config', 'toggle-help'])
 
 const router = useRouter()
 
@@ -198,5 +201,51 @@ async function signOut() {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
+}
+
+/* ── Jobs drawer toggle — mobile only ── */
+.jobs-btn {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+/* ── Mobile (issue #160) ── */
+@media (max-width: 768px) {
+  .nav-bar { padding: 0 0.6rem; gap: 0.5rem; }
+
+  /* background-attachment: fixed is unsupported/janky on iOS Safari */
+  .nav-hero { background-attachment: scroll; }
+
+  .jobs-btn { display: block; }
+  .nav-clock, .brand-tag, .brand-divider, .brand-name { display: none; }
+  .btn-label { display: none; }
+  .help-btn, .theme-btn, .signout-btn { padding: 4px 8px; }
+}
+
+/* Narrowest phones (320px): shave the leftovers so the bar can't overflow.
+   The logo goes too — with Sign out (#157) in the bar, six 40px touch targets
+   are all a 320px row can hold. */
+@media (max-width: 380px) {
+  .nav-bar { padding: 0 0.35rem; gap: 0.25rem; }
+  .brand { gap: 0.35rem; }
+  .brand-logo { display: none; }
+  .nav-actions { gap: 0.25rem; }
+  .status-btn { font-size: 0.72rem; padding: 4px 6px; }
+}
+
+/* Comfortable tap targets without disturbing the 52px bar */
+@media (pointer: coarse) {
+  .jobs-btn, .status-btn, .config-btn, .help-btn, .theme-btn, .signout-btn {
+    min-height: 40px;
+    min-width: 40px;
+    justify-content: center;
+  }
 }
 </style>

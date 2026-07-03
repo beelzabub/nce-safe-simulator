@@ -132,4 +132,19 @@ button:focus-visible {
   outline: 2px solid #93c5fd;
   outline-offset: 2px;
 }
+
+/* ── Mobile (issue #160): tighter chrome so the mandated text gets the room;
+   dvh keeps the OK button above mobile URL bars. ── */
+@media (max-width: 480px) {
+  .banner-overlay { padding: 12px; }
+  .banner {
+    max-height: min(88vh, 680px);
+    max-height: min(88dvh, 680px);
+    padding: 20px 16px 16px;
+  }
+}
+
+@media (pointer: coarse) {
+  button { min-height: 44px; }
+}
 </style>
