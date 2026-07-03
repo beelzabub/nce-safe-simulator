@@ -43,7 +43,9 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { getAuthBackgrounds, getConfig } from '../api.js'
+import { useAuthGate } from '../composables/useAuthGate.js'
 import DodBanner from '../components/DodBanner.vue'
 import heroSrc from '../assets/hero-carrier.png'
 import sealSrc from '../assets/login-seal.png'
@@ -140,8 +142,15 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibility)
 })
 
+const router = useRouter()
+const gate = useAuthGate()
+
 function onSubmit() {
-  // TODO(#150): session gate — accept + route to '/'; real AAA later still.
+  // Cosmetic acceptance: no credential validation exists yet. Real AAA will
+  // replace this with a POST /api/auth/login round trip (epic #135).
+  if (!username.value.trim() || !password.value) return
+  gate.accept()
+  router.push('/')
 }
 </script>
 
