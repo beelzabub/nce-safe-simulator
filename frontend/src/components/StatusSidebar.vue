@@ -5,7 +5,7 @@
     :style="open ? { width: sidebarWidth + 'px' } : {}"
   >
     <!-- Drag handle on the left edge -->
-    <div class="resize-handle" @mousedown.prevent="startResize" />
+    <div class="resize-handle" @pointerdown.prevent="startResize" />
 
     <div class="status-header">
       <div class="tab-bar">
@@ -125,7 +125,7 @@
       <div
         class="section-resize-handle"
         :class="{ 'section-resize-handle--active': resizingRuns }"
-        @mousedown.prevent="startRunsResize"
+        @pointerdown.prevent="startRunsResize"
         title="Drag to resize"
       />
 
@@ -199,11 +199,13 @@ function startResize(e) {
   }
   function onUp() {
     resizing.value = false
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
   }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 import { useServerStatus } from '../composables/useServerStatus.js'
 import { useJobs } from '../composables/useJobs.js'
@@ -298,11 +300,13 @@ function startRunsResize(e) {
   }
   function onUp() {
     resizingRuns.value = false
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
   }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 
 // ── Inline confirmation ───────────────────────────────────────────────────────
@@ -779,4 +783,26 @@ async function runConfirmed() {
 .btn-action--safe:hover  { background: #15803d; }
 .btn-action--danger { background: #dc2626; }
 .btn-action--danger:hover { background: #b91c1c; }
+
+/* ── Mobile: full-width overlay instead of a squeezed column (issue #160) ── */
+@media (max-width: 768px) {
+  .status-sidebar {
+    position: fixed;
+    top: 52px;            /* below the nav bar */
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    border-left: none;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+  /* Beats the inline width style set by the desktop drag-resize */
+  .status-sidebar.open { width: 100vw !important; }
+  .resize-handle, .section-resize-handle { display: none; }
+}
+
+@media (pointer: coarse) {
+  .section-resize-handle { height: 22px; touch-action: none; }
+  .tab-btn, .close-btn { min-height: 40px; }
+  .stop-btn, .view-btn, .clear-btn, .refresh-btn, .run-link { padding-top: 6px; padding-bottom: 6px; }
+}
 </style>

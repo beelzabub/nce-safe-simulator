@@ -338,9 +338,12 @@ async function onSubmit() {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
+  /* `safe` keeps the card's top reachable (scrollable) when the viewport is
+     shorter than the card — e.g. a phone in landscape */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
 }
 
 /* Extra dim behind the materialized card so it owns the moment. */
@@ -500,5 +503,16 @@ button:hover { background: var(--action-hover, #1d4ed8); }
   .card-enter-active, .card-leave-active { transition: opacity 0.25s ease; }
   .card-enter-from, .card-leave-to { transform: none; filter: none; }
   .focus-dim { transition: none; }
+}
+
+/* ── Touch devices (issue #160): the whisper is the primary tap target for
+   summoning the card (any page tap works too), so give it finger room. ── */
+@media (pointer: coarse) {
+  .whisper { min-height: 44px; padding: 10px 26px; }
+}
+
+@media (max-width: 480px) {
+  .login-card { padding: 28px 22px 24px; }
+  .credit-chip { right: 10px; bottom: 8px; }
 }
 </style>

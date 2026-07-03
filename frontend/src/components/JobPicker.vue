@@ -417,4 +417,12 @@ function onReportLaunch(selectedReports, formats, useLast) {
   border-color: var(--action);
   color: var(--action);
 }
+
+/* ── Touch devices (issue #160): comfortable tap targets ── */
+@media (pointer: coarse) {
+  .group-header { min-height: 44px; }
+  .job-item { padding-top: 0.65rem; padding-bottom: 0.65rem; }
+  .filter-clear { padding: 10px 8px; }
+  .reports-btn { min-height: 44px; }
+}
 </style>
