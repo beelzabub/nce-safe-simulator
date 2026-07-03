@@ -16,7 +16,11 @@
       <p v-if="currentCredit" :key="currentCredit" class="credit-chip">{{ currentCredit }}</p>
     </Transition>
 
-    <main class="card-wrap">
+    <Transition name="banner">
+      <DodBanner v-if="bannerVisible" @accept="acceptBanner" />
+    </Transition>
+
+    <main class="card-wrap" :inert="bannerVisible">
       <form class="login-card" @submit.prevent="onSubmit">
         <img class="seal" :src="sealSrc" alt="PMW-120 seal" />
         <h1>NCE SAFe Simulator</h1>
@@ -39,13 +43,19 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import { getAuthBackgrounds } from '../api.js'
+import { getAuthBackgrounds, getConfig } from '../api.js'
+import DodBanner from '../components/DodBanner.vue'
 import heroSrc from '../assets/hero-carrier.png'
 import sealSrc from '../assets/login-seal.png'
+
+// DoD Notice and Consent acknowledgment is per browser session (DTM 08-060 —
+// the banner must precede authentication and be explicitly acknowledged).
+const BANNER_ACK_KEY = 'nce.auth.dodBannerAccepted'
 
 const layers = ref(['', ''])
 const activeLayer = ref(0)
 const currentCredit = ref('')
+const bannerVisible = ref(false)
 
 const username = ref('')
 const password = ref('')
@@ -89,7 +99,18 @@ function onVisibility() {
   document.hidden ? stopTimer() : startTimer()
 }
 
+function acceptBanner() {
+  sessionStorage.setItem(BANNER_ACK_KEY, '1')
+  bannerVisible.value = false
+}
+
 onMounted(async () => {
+  if (!sessionStorage.getItem(BANNER_ACK_KEY)) {
+    getConfig().then((cfg) => {
+      bannerVisible.value = cfg.dod_banner_enabled !== false
+    })
+  }
+
   const { rotation_seconds, fallback, images } = await getAuthBackgrounds()
   rotationMs = Math.max(3, rotation_seconds || 15) * 1000
 
@@ -192,6 +213,9 @@ function onSubmit() {
 .credit-enter-active, .credit-leave-active { transition: opacity 1.5s ease; }
 .credit-enter-from, .credit-leave-to { opacity: 0; }
 .credit-leave-active { position: absolute; }
+
+.banner-enter-active, .banner-leave-active { transition: opacity 0.4s ease; }
+.banner-enter-from, .banner-leave-to { opacity: 0; }
 
 /* ── Login card: quiet until the user reaches for it ── */
 

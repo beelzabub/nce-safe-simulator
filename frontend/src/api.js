@@ -37,6 +37,19 @@ export async function getProjects() {
   }
 }
 
+// Curated server config (safe subset — never the full config.json). The login
+// page reads dod_banner_enabled from here; on any failure we default to
+// showing the banner, the safe direction for a consent notice.
+export async function getConfig() {
+  try {
+    const r = await fetch('/api/config')
+    if (!r.ok) return { dod_banner_enabled: true }
+    return r.json()
+  } catch {
+    return { dod_banner_enabled: true }
+  }
+}
+
 // Login-page background slideshow (epic #135). The server returns a shuffled
 // list — images[0] is the random initial background, the rest are the lazy
 // rotation pool. Degrades to the fallback shape on any failure so the login
