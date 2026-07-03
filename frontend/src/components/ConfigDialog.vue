@@ -171,6 +171,45 @@
             </div>
           </div>
 
+          <!-- ── Auth (login front door) ── -->
+          <div v-if="activeTab === 'auth'" class="section">
+            <label class="field field--row">
+              <span class="field-label">DoD Consent Banner</span>
+              <input v-model="form.auth.dod_banner_enabled" type="checkbox" class="field-check" />
+            </label>
+            <div class="subsection-label" style="margin-top:0.5rem">Login Backgrounds</div>
+            <div class="two-col-grid">
+              <label class="field">
+                <span class="field-label">Rotation (s)</span>
+                <input v-model.number="form.auth.rotation_seconds" type="number" min="3" class="field-input field-input--sm" />
+              </label>
+              <label class="field">
+                <span class="field-label">Max Images</span>
+                <input v-model.number="form.auth.max_images" type="number" min="1" class="field-input field-input--sm" />
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">Image Source</span>
+              <select v-model="form.auth.source" class="field-input field-input--sm">
+                <option value="repo">repo (committed images)</option>
+                <option value="s3-test">s3-test (staging preview)</option>
+              </select>
+            </label>
+            <div class="subsection-label" style="margin-top:0.5rem">Staging S3 <span class="field-hint">(curation preview only)</span></div>
+            <label class="field">
+              <span class="field-label">Bucket</span>
+              <input v-model="form.auth.staging_bucket" class="field-input" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">Prefix</span>
+              <input v-model="form.auth.staging_prefix" class="field-input" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">Presign TTL (s)</span>
+              <input v-model.number="form.auth.presign_ttl_seconds" type="number" min="60" class="field-input field-input--sm" />
+            </label>
+          </div>
+
           <!-- ── Help reference ── -->
           <div v-if="activeTab === 'help'" class="section help-ref">
             <template v-for="section in HELP_SECTIONS" :key="section.title">
@@ -214,6 +253,7 @@ const TABS = [
   { key: 'bootstrap',  label: 'Bootstrap'  },
   { key: 'tools',      label: 'Tools'      },
   { key: 'reports',    label: 'Reports'    },
+  { key: 'auth',       label: 'Auth'       },
   { key: 'help',       label: 'Help'       },
 ]
 
@@ -310,6 +350,16 @@ const HELP_SECTIONS = [
     title: 'Reports — Stuck Item Thresholds',
     fields: STUCK_FIELDS,
   },
+  {
+    title: 'Auth — Login Front Door',
+    fields: [
+      { label: 'DoD Consent Banner', help: 'Show the standard DoD Notice and Consent banner (DTM 08-060) on the login page before the sign-in card becomes interactive. Acknowledgment is per browser session.' },
+      { label: 'Rotation (s)',       help: 'Seconds between background image crossfades on the login page.' },
+      { label: 'Max Images',         help: 'Maximum number of background images the server returns per login page load.' },
+      { label: 'Image Source',       help: 'repo serves the committed images under media/login-backgrounds (production). s3-test presigns the staging bucket so curation candidates can be previewed live before being committed.' },
+      { label: 'Staging Bucket / Prefix / Presign TTL', help: 'S3 staging area used only by s3-test mode and scripts/sync_login_backgrounds.py. Production never reads S3.' },
+    ],
+  },
 ]
 
 // ── Form state ─────────────────────────────────────────────────────────────
@@ -374,6 +424,15 @@ const form = reactive({
     'lifecycle::funnel':    90,
     'lifecycle::analyzing': 30,
     'lifecycle::backlog':   60,
+  },
+  auth: {
+    dod_banner_enabled:  true,
+    rotation_seconds:    15,
+    max_images:          8,
+    source:              'repo',
+    staging_bucket:      '',
+    staging_prefix:      'login-backgrounds/',
+    presign_ttl_seconds: 3600,
   },
 })
 
@@ -448,6 +507,19 @@ function populateForm(cfg) {
     'lifecycle::funnel':    st['lifecycle::funnel']    ?? 90,
     'lifecycle::analyzing': st['lifecycle::analyzing'] ?? 30,
     'lifecycle::backlog':   st['lifecycle::backlog']   ?? 60,
+  }
+
+  const au = cfg.auth ?? {}
+  const bg = au.background ?? {}
+  const s3 = bg.staging_s3 ?? {}
+  form.auth = {
+    dod_banner_enabled:  au.dod_banner_enabled  ?? true,
+    rotation_seconds:    bg.rotation_seconds    ?? 15,
+    max_images:          bg.max_images          ?? 8,
+    source:              bg.source              ?? 'repo',
+    staging_bucket:      s3.bucket              ?? '',
+    staging_prefix:      s3.prefix              ?? 'login-backgrounds/',
+    presign_ttl_seconds: s3.presign_ttl_seconds ?? 3600,
   }
 }
 
@@ -542,6 +614,23 @@ function buildConfig() {
   cfg.stuck_thresholds = {
     ...(rawConfig.stuck_thresholds ?? {}),
     ...form.stuck_thresholds,
+  }
+
+  cfg.auth = {
+    ...(rawConfig.auth ?? {}),
+    dod_banner_enabled: form.auth.dod_banner_enabled,
+    background: {
+      ...(rawConfig.auth?.background ?? {}),
+      rotation_seconds: Number(form.auth.rotation_seconds),
+      max_images:       Number(form.auth.max_images),
+      source:           form.auth.source,
+      staging_s3: {
+        ...(rawConfig.auth?.background?.staging_s3 ?? {}),
+        bucket:              form.auth.staging_bucket.trim(),
+        prefix:              form.auth.staging_prefix.trim(),
+        presign_ttl_seconds: Number(form.auth.presign_ttl_seconds),
+      },
+    },
   }
   return cfg
 }

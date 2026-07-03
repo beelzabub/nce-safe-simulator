@@ -436,9 +436,11 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 #### Login page
 
-`/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) behind a translucent sign-in card that stays subtle until hovered or focused. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production. Sign-in enforcement arrives with the session gate (epic #135); until then the form is presentational.
+`/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) behind a translucent sign-in card that stays subtle until hovered or focused. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production.
 
 Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment (per browser session). Toggle it with `auth.dod_banner_enabled` in `config.json`.
+
+Unauthenticated navigation anywhere in the app redirects to `/login`. The gate is **cosmetic for now**: any non-empty credentials are accepted and the session lives in a client-side flag (`frontend/src/composables/useAuthGate.js`) — closing the browser re-triggers the front door. It provides no security (API endpoints remain unauthenticated); it establishes the flow that real AAA will replace when an auth method is chosen — the swap is confined to that composable plus a future `POST /api/auth/login`. Login-page settings are editable in the Config dialog's **Auth** tab.
 
 #### Layout
 
