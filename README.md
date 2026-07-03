@@ -1154,6 +1154,20 @@ make eks-diagram   # writes public/architecture/eks-architecture.png
 make ecs-diagram   # writes public/architecture/ecs-architecture.png
 ```
 
+### DoD architecture view set
+
+Beyond the two deployment summaries, `diagrams/` carries a standard set of DoD-style architecture views organized along DoDAF viewpoints — suitable for program reviews and as the skeleton of an assessment package:
+
+| View | DoDAF viewpoint | Script |
+|---|---|---|
+| Operational concept (stakeholders → system → GitLab → reporting) | OV-1 | `ov1_operational_concept.py` |
+| System interfaces (components + every external interface w/ protocol & port) | SV-1 | `sv1_system_interfaces.py` |
+| Deployment topology (EKS trust zones, security groups, ports) | SV-2 | `sv2_deployment_eks.py` |
+| Data flow (sources → snapshot pipeline → EFS stores → egress) | SV-4 | `dataflow_architecture.py` |
+| DevSecOps pipeline (CI + operator deploy paths) | — | `devsecops_pipeline.py` |
+
+[`diagrams/DOD_ARCHITECTURE.md`](diagrams/DOD_ARCHITECTURE.md) is the master document: an AV-1 overview, the view index, a PPSM ports/protocols/services table, the OV-6c logon & consent sequence (Mermaid, renders in GitLab), a security posture summary, and a known-gaps register. The PNGs are generated at container build time (Dockerfile stage 2) and appear as extra tabs in the web UI's **AWS** architecture dialog; regenerate locally with `make dod-diagrams` in `cdk/`.
+
 ### Grafana dashboards
 
 Amazon Managed Grafana is **optional and off by default** (~$9/editor/month regardless of usage). Enable it at deploy time:

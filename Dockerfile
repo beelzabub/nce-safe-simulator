@@ -15,7 +15,12 @@ WORKDIR /build
 COPY diagrams/ ./
 RUN mkdir -p /diagrams \
     && python3 eks_architecture.py /diagrams/eks-architecture.png \
-    && python3 ecs_architecture.py /diagrams/ecs-architecture.png
+    && python3 ecs_architecture.py /diagrams/ecs-architecture.png \
+    && python3 ov1_operational_concept.py /diagrams/ov1-architecture.png \
+    && python3 sv1_system_interfaces.py /diagrams/sv1-architecture.png \
+    && python3 sv2_deployment_eks.py /diagrams/sv2-architecture.png \
+    && python3 dataflow_architecture.py /diagrams/dataflow-architecture.png \
+    && python3 devsecops_pipeline.py /diagrams/devsecops-architecture.png
 
 # Stage 3 — runtime image
 FROM python:3.11-slim
