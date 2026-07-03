@@ -23,13 +23,16 @@
       <button class="theme-btn" @click="toggle">
         {{ theme === 'dark' ? '☀' : '☾' }}<span class="btn-label">{{ theme === 'dark' ? ' Light' : ' Dark' }}</span>
       </button>
+      <button class="signout-btn" title="Sign out" @click="signOut">⎋<span class="btn-label"> Sign out</span></button>
     </div>
   </header>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme.js'
+import { useAuthGate } from '../composables/useAuthGate.js'
 import heroSrc from '../assets/hero-carrier.png'
 import logoWhite from '../assets/nce-logo-white.png'  // white emblem — for dark UI
 import logoNavy from '../assets/nce-logo-navy.png'    // navy emblem — for light UI
@@ -39,6 +42,16 @@ const { theme, toggle } = useTheme()
 const logoSrc = computed(() => (theme.value === 'dark' ? logoWhite : logoNavy))
 defineProps({ runningCount: { type: Number, default: 0 } })
 defineEmits(['toggle-jobs', 'toggle-status', 'toggle-config', 'toggle-help'])
+
+const router = useRouter()
+
+// Re-locks the front door without closing the browser (issue #157). DoD
+// banner acknowledgment survives — consent is per browser session,
+// authentication is not.
+async function signOut() {
+  await useAuthGate().logout()
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -148,6 +161,19 @@ defineEmits(['toggle-jobs', 'toggle-status', 'toggle-config', 'toggle-help'])
 }
 .theme-btn:hover { background: var(--border); }
 
+.signout-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.signout-btn:hover { background: var(--border); color: var(--text-1); }
+
 .status-btn {
   background: transparent;
   border: 1px solid var(--border);
@@ -200,21 +226,23 @@ defineEmits(['toggle-jobs', 'toggle-status', 'toggle-config', 'toggle-help'])
   .jobs-btn { display: block; }
   .nav-clock, .brand-tag, .brand-divider, .brand-name { display: none; }
   .btn-label { display: none; }
-  .help-btn, .theme-btn { padding: 4px 8px; }
+  .help-btn, .theme-btn, .signout-btn { padding: 4px 8px; }
 }
 
-/* Narrowest phones (320px): shave the leftovers so the bar can't overflow */
+/* Narrowest phones (320px): shave the leftovers so the bar can't overflow.
+   The logo goes too — with Sign out (#157) in the bar, six 40px touch targets
+   are all a 320px row can hold. */
 @media (max-width: 380px) {
   .nav-bar { padding: 0 0.35rem; gap: 0.25rem; }
   .brand { gap: 0.35rem; }
-  .brand-logo { height: 28px; }
+  .brand-logo { display: none; }
   .nav-actions { gap: 0.25rem; }
   .status-btn { font-size: 0.72rem; padding: 4px 6px; }
 }
 
 /* Comfortable tap targets without disturbing the 52px bar */
 @media (pointer: coarse) {
-  .jobs-btn, .status-btn, .config-btn, .help-btn, .theme-btn {
+  .jobs-btn, .status-btn, .config-btn, .help-btn, .theme-btn, .signout-btn {
     min-height: 40px;
     min-width: 40px;
     justify-content: center;

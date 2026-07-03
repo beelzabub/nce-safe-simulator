@@ -224,10 +224,11 @@ Settings for the web UI login page (epic #135). All keys are optional — the se
 
 ```json
 "auth": {
+    "method": "none",
     "dod_banner_enabled": true,
     "background": {
         "rotation_seconds": 15,
-        "max_images": 8,
+        "max_images": 12,
         "source": "repo",
         "staging_s3": {
             "bucket": "nce-safe-sim-assets",
@@ -240,6 +241,7 @@ Settings for the web UI login page (epic #135). All keys are optional — the se
 
 | Field | Description |
 |---|---|
+| `method` | Authentication enforcement: `none` (default — no server enforcement, cosmetic front door) or `basic` (dev-only hardcoded credential `asdf`/`asdf`; every request must authenticate). AAA methods (CAC/PKI, OIDC, SAML, LDAP, local) plug in here as they land |
 | `dod_banner_enabled` | Show the standard DoD Notice and Consent banner on the login page (surfaced to the client via `GET /api/config`) |
 | `background.rotation_seconds` | Background slideshow rotation interval |
 | `background.max_images` | Maximum images returned to the client per page load |
@@ -250,6 +252,8 @@ The images themselves are committed to the repo under `media/login-backgrounds/`
 
 - `GET /api/auth/backgrounds` — server-shuffled list: `images[0]` is the random initial background, the rest are the client's lazy-loaded rotation pool. Degrades to `{"fallback": true, "images": []}` (HTTP 200) when no images are available, so the login page always renders.
 - `GET /api/auth/backgrounds/{name}` — serves a single committed image with long-lived cache headers.
+
+With `method: "basic"` the server enforces authentication on **everything** — all other `/api/*` endpoints, `/reports`, `/logs`, `/quarto`, `/data`, and the jobs WebSocket return 401 (`WWW-Authenticate: Basic`) unless the request carries the session cookie from `POST /api/auth/login` or an `Authorization: Basic` header (`curl -u asdf:asdf ...`). The login surface itself (SPA shell and assets, login/session/logout endpoints, background imagery, curated `GET /api/config`) stays open so the front door can render. The dev credential is hardcoded and dev-only; it never appears in config.
 
 ### Label Conventions
 
@@ -408,7 +412,7 @@ python3 scripts/sync_login_backgrounds.py list        # see what's staged
 python3 scripts/sync_login_backgrounds.py promote     # or: promote name.jpg ...
 ```
 
-Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikimedia Commons); every image keeps its credit line, and appearance of DoD visual information does not imply endorsement. The server never reads the staging bucket in production (`auth.background.source: "repo"`).
+Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikimedia Commons); every image keeps its credit line, and appearance of DoD visual information does not imply endorsement. The current set spans classic PMW-120 fleet themes plus NAVCENT-released imagery from Operation Epic Fury (Tomahawk launches, Arabian Gulf strike-group formations, night flight-deck operations). The server never reads the staging bucket in production (`auth.background.source: "repo"`).
 
 ### Web UI
 
@@ -436,11 +440,11 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 #### Login page
 
-`/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) behind a translucent sign-in card that stays subtle until hovered or focused. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production.
+`/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) with the sign-in form fully dissolved at rest — only a faint "Sign in" affordance remains. Any intent signal (hovering or focusing the affordance, clicking the page, Tab, or typing) materializes the card with the username field focused; Escape or ~25 s of inactivity with untouched fields dissolves it back, while typed content keeps it up. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production.
 
 Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment (per browser session). Toggle it with `auth.dod_banner_enabled` in `config.json`.
 
-Unauthenticated navigation anywhere in the app redirects to `/login`. The gate is **cosmetic for now**: any non-empty credentials are accepted and the session lives in a client-side flag (`frontend/src/composables/useAuthGate.js`) — closing the browser re-triggers the front door. It provides no security (API endpoints remain unauthenticated); it establishes the flow that real AAA will replace when an auth method is chosen — the swap is confined to that composable plus a future `POST /api/auth/login`. Login-page settings are editable in the Config dialog's **Auth** tab.
+Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior depends on `auth.method`: with `none` the gate is cosmetic (any non-empty credentials accepted, client-side session flag, no security); with `basic` the sign-in card round-trips to `POST /api/auth/login`, wrong credentials are rejected inline, and the server enforces authentication on every endpoint and the jobs WebSocket (see the Authentication section above). The NavBar's **Sign out** control ends the session and returns to `/login` without closing the browser — the DoD banner acknowledgment survives sign-out (consent is per browser session; authentication is not). Gate logic lives in `frontend/src/composables/useAuthGate.js`, where the AAA methods will plug in. Login-page settings, including the auth method, are editable in the Config dialog's **Auth** tab.
 
 #### Layout
 
