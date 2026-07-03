@@ -1,13 +1,14 @@
 <template>
   <div class="login-page" @click="summonCard">
     <!-- Two stacked layers crossfade; the active one gets the Ken Burns drift.
-         Alternating pan direction per layer keeps consecutive slides from
-         feeling like the same move twice. -->
+         Each transition rolls a fresh pan direction, excluding whichever
+         direction just played, so consecutive slides never repeat the same
+         move. -->
     <div
       v-for="n in [0, 1]"
       :key="n"
       class="bg-layer"
-      :class="{ active: activeLayer === n, 'pan-east': n === 0, 'pan-west': n === 1 }"
+      :class="[`pan-${panDir[n]}`, { active: activeLayer === n }]"
       :style="{ backgroundImage: layers[n] ? `url('${layers[n]}')` : 'none' }"
     />
     <div class="scrim" />
@@ -78,18 +79,22 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAuthBackgrounds, getConfig } from '../api.js'
-import { useAuthGate } from '../composables/useAuthGate.js'
+import { useAuthGate, BANNER_ACK_KEY } from '../composables/useAuthGate.js'
 import DodBanner from '../components/DodBanner.vue'
 import heroSrc from '../assets/hero-carrier.png'
 import sealSrc from '../assets/login-seal.png'
 import brandSrc from '../assets/nce-logo-white.png'
 
-// DoD Notice and Consent acknowledgment is per browser session (DTM 08-060 —
-// the banner must precede authentication and be explicitly acknowledged).
-const BANNER_ACK_KEY = 'nce.auth.dodBannerAccepted'
-
 const layers = ref(['', ''])
 const activeLayer = ref(0)
+
+const PAN_DIRECTIONS = ['east', 'west', 'north', 'south']
+const panDir = ref(['east', 'west'])
+
+function pickPanDirection(exclude) {
+  const choices = PAN_DIRECTIONS.filter((d) => d !== exclude)
+  return choices[Math.floor(Math.random() * choices.length)]
+}
 const currentCredit = ref('')
 const bannerVisible = ref(false)
 
@@ -166,7 +171,7 @@ function onDocKeydown(e) {
 // network can never crossfade to a half-loaded background.
 let pool = []
 let poolIdx = 0
-let rotationMs = 15000
+let rotationMs = 20000
 let timer = null
 
 function preload(img) {
@@ -183,6 +188,7 @@ function showNext() {
   poolIdx = (poolIdx + 1) % pool.length
   const next = pool[poolIdx]
   const hidden = activeLayer.value === 0 ? 1 : 0
+  panDir.value[hidden] = pickPanDirection(panDir.value[activeLayer.value])
   layers.value[hidden] = next.url
   activeLayer.value = hidden
   currentCredit.value = next.credit || ''
@@ -214,7 +220,7 @@ onMounted(async () => {
   }
 
   const { rotation_seconds, fallback, images } = await getAuthBackgrounds()
-  rotationMs = Math.max(3, rotation_seconds || 15) * 1000
+  rotationMs = Math.max(3, rotation_seconds || 20) * 1000
 
   if (fallback || !images.length) {
     layers.value[0] = heroSrc
@@ -284,16 +290,20 @@ async function onSubmit() {
   background-size: cover;
   background-position: center;
   opacity: 0;
-  transition: opacity 1.5s ease;
+  transition: opacity 2.6s ease;
   will-change: opacity, transform;
 }
 
 .bg-layer.active { opacity: 1; }
 
 /* Ken Burns: a slow scale + drift for the lifetime of the slide. Re-adding
-   .active restarts the animation, so every slide gets the full move. */
-.bg-layer.active.pan-east { animation: kb-east 24s ease-out forwards; }
-.bg-layer.active.pan-west { animation: kb-west 24s ease-out forwards; }
+   .active restarts the animation, so every slide gets the full move. Four
+   directions, picked fresh each transition (see pickPanDirection), so the
+   drift doesn't fall into a predictable back-and-forth. */
+.bg-layer.active.pan-east  { animation: kb-east  24s ease-out forwards; }
+.bg-layer.active.pan-west  { animation: kb-west  24s ease-out forwards; }
+.bg-layer.active.pan-north { animation: kb-north 24s ease-out forwards; }
+.bg-layer.active.pan-south { animation: kb-south 24s ease-out forwards; }
 
 @keyframes kb-east {
   from { transform: scale(1.06) translate(-0.8%, 0.4%); }
@@ -303,6 +313,16 @@ async function onSubmit() {
 @keyframes kb-west {
   from { transform: scale(1.06) translate(0.8%, -0.4%); }
   to   { transform: scale(1.14) translate(-1.2%, 0.6%); }
+}
+
+@keyframes kb-north {
+  from { transform: scale(1.06) translate(0.4%, 0.8%); }
+  to   { transform: scale(1.14) translate(-0.6%, -1.2%); }
+}
+
+@keyframes kb-south {
+  from { transform: scale(1.06) translate(-0.4%, -0.8%); }
+  to   { transform: scale(1.14) translate(0.6%, 1.2%); }
 }
 
 .scrim {

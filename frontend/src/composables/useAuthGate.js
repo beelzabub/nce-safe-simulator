@@ -2,10 +2,12 @@
 //
 // Dispatches on the server's auth method (GET /api/auth/session):
 // - "none":  no server enforcement — the cosmetic per-browser-session flag
-//   keeps today's front-door behavior (sessionStorage so closing the browser
-//   re-triggers login + DoD banner).
+//   keeps today's front-door behavior (sessionStorage-scoped).
 // - "basic" (and future AAA methods): the server session is the truth;
 //   login/logout round-trip to /api/auth/*.
+// Either way, logout() clears both the gate flag and the DoD banner ack, so
+// closing the browser OR signing out both re-trigger the banner on the next
+// logon attempt.
 //
 // All gate logic lives here so each new AAA method (#152-#156) lands in the
 // server and this file, never in views or the router.
@@ -13,6 +15,12 @@
 import { getSession, postLogin, postLogout } from '../api.js'
 
 const GATE_KEY = 'nce.auth.accepted'
+
+// DoD Notice and Consent acknowledgment (DTM 08-060) — exported so LoginView
+// can gate the banner on it and logout() can clear it. The banner must be
+// re-acknowledged on every fresh logon attempt, not just once per browser
+// tab: signing out and back in is a new access attempt.
+export const BANNER_ACK_KEY = 'nce.auth.dodBannerAccepted'
 
 export function useAuthGate() {
   return {
@@ -37,6 +45,7 @@ export function useAuthGate() {
 
     async logout() {
       sessionStorage.removeItem(GATE_KEY)
+      sessionStorage.removeItem(BANNER_ACK_KEY)
       await postLogout()
     },
   }
