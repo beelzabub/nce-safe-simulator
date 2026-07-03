@@ -18,6 +18,12 @@ from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
+from server.auth_backgrounds import (
+    list_backgrounds,
+    load_auth_config,
+    media_type_for,
+    resolve_media_file,
+)
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
@@ -145,8 +151,10 @@ def _deployment_type() -> str:
 @app.get("/api/config")
 def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
+    dod_banner = bool(load_auth_config(gl).get("dod_banner_enabled", True))
     if gl is None:
-        return {"target_group": "", "wiki_url": "", "grafana_url": "", "deployment_type": _deployment_type()}
+        return {"target_group": "", "wiki_url": "", "grafana_url": "",
+                "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
@@ -168,6 +176,7 @@ def get_config(request: Request):
         "wiki_url":       getattr(request.app.state, "_wiki_url", ""),
         "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
         "deployment_type": _deployment_type(),
+        "dod_banner_enabled": dod_banner,
     }
 
 
@@ -903,6 +912,33 @@ def download_export(filename: str):
         raise HTTPException(status_code=404, detail=f"{safe_name} not found")
     media_type = "application/json" if target.suffix.lower() == ".json" else "text/csv"
     return FileResponse(str(target), media_type=media_type, filename=safe_name)
+
+
+# ---------------------------------------------------------------------------
+# Login-page backgrounds (epic #135) — rotating imagery for /login. Images are
+# committed under media/login-backgrounds/; S3 is a curation staging preview
+# only. Both endpoints degrade instead of raising: the login page is the
+# front door and must always render.
+
+@app.get("/api/auth/backgrounds")
+def auth_backgrounds(request: Request, limit: Optional[int] = None):
+    """Server-shuffled background list: images[0] is the random initial
+    image, the rest are the client's lazy-loaded rotation pool."""
+    gl = getattr(request.app.state, "gl", None)
+    return list_backgrounds(gl, limit=limit)
+
+
+@app.get("/api/auth/backgrounds/{filename}")
+def auth_background_file(filename: str):
+    target = resolve_media_file(filename)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(
+        str(target),
+        media_type=media_type_for(target),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
 
 # ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
