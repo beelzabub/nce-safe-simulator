@@ -49,6 +49,8 @@
               configurable: t.params?.length > 0,
             }"
             @click="handleClick(t)"
+            @mouseenter="setPreview(cliFor(t))"
+            @focusin="setPreview(cliFor(t))"
           >
             <div class="item-top">
               <span class="item-name">{{ formatKey(t.key) }}</span>
@@ -98,11 +100,15 @@ import { ref, computed, onMounted } from 'vue'
 import { getTools, getReports } from '../api.js'
 import ToolParamDialog from './ToolParamDialog.vue'
 import ReportPickerDialog from './ReportPickerDialog.vue'
+import { buildToolCommand } from '../composables/useCliCommand.js'
+import { useCommandPreview } from '../composables/useCommandPreview.js'
 
 const props = defineProps({
   runningJobs: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['launch', 'launch-reports'])
+
+const { setPreview } = useCommandPreview()
 
 const tools          = ref([])
 const reports        = ref([])
@@ -209,6 +215,14 @@ function handleClick(tool) {
   } else {
     emit('launch', tool, {})
   }
+}
+
+// Command previewed in the docked CommandBar when a row is hovered/focused
+// (#140). No-param tools resolve to a complete command; parameterized tools show
+// the base invocation (the fully specified form appears live once the dialog is
+// open and the user edits params).
+function cliFor(tool) {
+  return buildToolCommand(tool, {})
 }
 
 // ── Conflict detection ─────────────────────────────────────────────────────
@@ -374,6 +388,8 @@ function onReportLaunch(selectedReports, formats, useLast) {
 .ro-hint   { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
 .badge-run { background: var(--badge-run-bg); color: var(--badge-run-text); }
 .cfg-hint  { font-size: 0.7rem; color: var(--text-3); flex-shrink: 0; }
+/* CLI-command icon: subtle until the row is hovered (matches the copy-btn
+   reveal pattern), so it doesn't clutter the list at rest. */
 
 /* ── State messages ── */
 .state-msg   { padding: 1.5rem 1rem; color: var(--text-2); font-size: 0.85rem; text-align: center; }
