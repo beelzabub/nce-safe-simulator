@@ -1,0 +1,142 @@
+# Shot list for deck/capture_screenshots.py.
+#
+# ui_shots: opens a dialog/panel in the web UI and captures it (dark + light by default).
+#   expand: category accordion headers to click first (in order)
+#   select: job-list item text to click (opens its parameter dialog)
+#   click:  a raw Playwright selector to click instead of/in addition to select
+#           (used for chrome elements that aren't job-list items, e.g. "Run Reports…")
+#
+# live_run_shots: like ui_shots, but the selected tool is parameterless and read-only,
+#   so selecting it launches immediately. Captured once (dark only) to avoid running the
+#   live job twice per build. NEVER add a mutating tool here.
+#
+# quarto_shots: a single screenshot of a rendered Quarto report page, no theme toggle
+#   (the Quarto site doesn't follow the app's dark/light toggle).
+
+app_url: "https://nce-safe-sim.com/app/"
+quarto_base_url: "https://nce-safe-sim.com/quarto/"
+
+ui_shots:
+  - out: 00-home
+    title: "Web UI — Home / Job Picker"
+  - out: 01-run-reports-dialog
+    title: "Web UI — Run Reports Dialog"
+    click: "text=Run Reports…"
+  - out: 02-status-panel
+    title: "Web UI — Status Panel"
+    click: "text=Status"
+  - out: 03-clock-settings
+    title: "Web UI — Clock/Timezone Settings"
+    click: "button:has-text('⚙') >> nth=0"
+  - out: 04-scaffolding-generate-issues
+    title: "Scaffolding — Generate Issues"
+    expand: ["SCAFFOLDING"]
+    select: "Generate Issues"
+  - out: 05-import-export-import-epics
+    title: "Import/Export — Import Epics"
+    expand: ["IMPORT / EXPORT"]
+    select: "Import Epics"
+  - out: 06-state-progress-simulate-pi
+    title: "State & Progress — Simulate PI Progress"
+    expand: ["STATE & PROGRESS"]
+    select: "Simulate PI Progress"
+  - out: 07-label-management-set-lifecycle
+    title: "Label Management — Set Lifecycle Labels"
+    expand: ["LABEL MANAGEMENT"]
+    select: "Set Lifecycle Labels"
+  - out: 09-roam-risk-generate
+    title: "ROAM Risk — Generate ROAM Risks"
+    expand: ["ROAM RISK"]
+    select: "Generate ROAM Risks"
+  - out: 10-initial-setup-create-lorem-data
+    title: "Initial Setup — Create Lorem Data"
+    expand: ["INITIAL SETUP"]
+    select: "Create Lorem Data"
+  - out: 11-weights-scoring-business-value
+    title: "Weights & Scoring — Set Business Value"
+    expand: ["WEIGHTS & SCORING"]
+    select: "Set Business Value"
+  - out: 12-wiki-management-list-wikis
+    title: "Wiki Management — List Wikis"
+    expand: ["WIKI MANAGEMENT"]
+    select: "List Wikis"
+  - out: 13-audit-validation-audit-hierarchy
+    title: "Audit & Validation — Audit Hierarchy"
+    expand: ["AUDIT & VALIDATION"]
+    select: "Audit Hierarchy"
+
+# "Other" only has one tool (Diagnose) and it's parameterless/read-only, so it belongs here,
+# not in ui_shots — selecting it launches the job immediately, there's no dialog to screenshot.
+live_run_shots:
+  - out: 14-live-job-diagnose
+    title: "Live Job Demo — Diagnose"
+    expand: ["OTHER"]
+    select: "Diagnose"
+
+quarto_shots:
+  - out: 00-index
+    path: ""
+    title: "Quarto Reports — Home"
+  - out: 01-portfolio-health-dashboard
+    path: "quarto/health-dashboard.html"
+    title: "Executive — Portfolio Health Dashboard"
+  - out: 02-risk-register
+    path: "quarto/risk-register.html"
+    title: "Executive — Risk Register"
+  - out: 03-wsjf-priority-board
+    path: "quarto/wsjf.html"
+    title: "Executive — WSJF Priority Board"
+  - out: 04-safe-portfolio-hierarchy
+    path: "quarto/portfolio.html"
+    title: "Executive — SAFe Portfolio Hierarchy"
+  - out: 05-blocking-cross-art-risk
+    path: "quarto/blocking.html"
+    title: "Program — Blocking & Cross-ART Risk"
+  - out: 06-issue-blocking
+    path: "quarto/issue-blocking.html"
+    title: "Program — Issue Blocking"
+  - out: 07-epic-lifecycle
+    path: "quarto/epic-lifecycle.html"
+    title: "Program — Epic Lifecycle"
+  - out: 08-pi-predictability
+    path: "quarto/pi-predictability.html"
+    title: "Program — PI Predictability"
+  - out: 09-art-capacity-balance
+    path: "quarto/art-capacity-balance.html"
+    title: "Program — ART Capacity Balance"
+  - out: 10-program-pi-matrix
+    path: "quarto/piid-project.html"
+    title: "Program — Program × PI Matrix"
+  - out: 11-program-pi-detail
+    path: "quarto/piid-project-detail.html"
+    title: "Program — Program PI Detail"
+  - out: 12-art-team-workload
+    path: "quarto/workload.html"
+    title: "Program — ART-Team Workload"
+  - out: 13-flow-metrics
+    path: "quarto/flow-metrics.html"
+    title: "Program — Flow Metrics"
+  - out: 14-art-feature-status
+    path: "quarto/art-feature-status.html"
+    title: "Program — ART Feature Status"
+  - out: 15-team-backlogs
+    path: "quarto/team-backlog.html"
+    title: "Program — Team Backlogs"
+  - out: 16-vs-capability-dashboard
+    path: "quarto/vs-capability-dashboard.html"
+    title: "Program — VS Capability Dashboard"
+  - out: 17-unassigned-pi
+    path: "quarto/unassigned-pi.html"
+    title: "Data Quality — Unassigned PI"
+  - out: 18-orphaned-epics
+    path: "quarto/orphan-epics.html"
+    title: "Data Quality — Orphaned Epics"
+  - out: 19-orphaned-issues
+    path: "quarto/orphan-issues.html"
+    title: "Data Quality — Orphaned Issues"
+  - out: 20-premature-closures
+    path: "quarto/premature-closures.html"
+    title: "Data Quality — Premature Closures"
+  - out: 21-diagnostics
+    path: "quarto/diagnostics.html"
+    title: "Data Quality — Diagnostics"
