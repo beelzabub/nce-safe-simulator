@@ -391,6 +391,25 @@ A typical demo cycle:
 python3 NceGitLab.py --all
 ```
 
+### Login background curation
+
+The web UI login page rotates through U.S. Navy imagery committed under `media/login-backgrounds/` (with photographer credit lines in `credits.json`). `scripts/sync_login_backgrounds.py` manages the pipeline that gets images there — an S3 staging bucket (`nce-safe-sim-assets` by default, configurable via `auth.background.staging_s3` in `config.json`) holds candidates so they can be previewed live before being committed:
+
+```bash
+# Optimize (1920px JPEG, EXIF stripped) and upload candidates for preview.
+# Credit lines come from an optional credits.json next to the source images.
+python3 scripts/sync_login_backgrounds.py stage ~/navy-candidates/
+
+python3 scripts/sync_login_backgrounds.py list        # see what's staged
+# Preview staged candidates on the login page: set auth.background.source
+# to "s3-test" in config.json, then reload /login.
+
+# Pull the keepers into media/login-backgrounds/ + merge credits, then commit
+python3 scripts/sync_login_backgrounds.py promote     # or: promote name.jpg ...
+```
+
+Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikimedia Commons); every image keeps its credit line, and appearance of DoD visual information does not imply endorsement. The server never reads the staging bucket in production (`auth.background.source: "repo"`).
+
 ### Web UI
 
 A Vue 3 browser interface provides an alternative to the CLI for running utility tools and viewing reports. The backend is a FastAPI server that exposes the same tools over HTTP/WebSocket.

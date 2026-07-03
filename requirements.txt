@@ -14,6 +14,7 @@ python-multipart
 httpx
 websockets
 markdown
+Pillow
 
 pytest
 pytest-mock
