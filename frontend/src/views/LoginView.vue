@@ -1,5 +1,5 @@
 <template>
-  <div class="login-page">
+  <div class="login-page" @click="summonCard">
     <!-- Two stacked layers crossfade; the active one gets the Ken Burns drift.
          Alternating pan direction per layer keeps consecutive slides from
          feeling like the same move twice. -->
@@ -11,6 +11,7 @@
       :style="{ backgroundImage: layers[n] ? `url('${layers[n]}')` : 'none' }"
     />
     <div class="scrim" />
+    <div class="focus-dim" :class="{ on: cardActive }" />
 
     <Transition name="credit">
       <p v-if="currentCredit" :key="currentCredit" class="credit-chip">{{ currentCredit }}</p>
@@ -21,22 +22,49 @@
     </Transition>
 
     <main class="card-wrap" :inert="bannerVisible">
-      <form class="login-card" @submit.prevent="onSubmit">
-        <img class="seal" :src="sealSrc" alt="PMW-120 seal" />
-        <h1>NCE SAFe Simulator</h1>
-        <p class="tagline">Battlespace Awareness &amp; Information Operations</p>
+      <!-- At rest the imagery owns the page; this whisper is the only trace
+           of the form. Any intent signal — hovering or focusing it, clicking
+           the page, Tab, or just starting to type — materializes the card. -->
+      <Transition name="whisper">
+        <button
+          v-show="!cardActive"
+          class="whisper"
+          type="button"
+          aria-label="Sign in"
+          @mouseenter="onWhisperHover"
+          @focus="summonCard"
+        >
+          <img class="whisper-seal" :src="sealSrc" alt="" />
+          <span>Sign in</span>
+        </button>
+      </Transition>
 
-        <label>
-          <span>Username</span>
-          <input v-model="username" type="text" name="username" autocomplete="username" spellcheck="false" />
-        </label>
-        <label>
-          <span>Password</span>
-          <input v-model="password" type="password" name="password" autocomplete="current-password" />
-        </label>
+      <Transition name="card" @after-enter="focusUsername">
+        <form
+          v-show="cardActive"
+          class="login-card"
+          @submit.prevent="onSubmit"
+          @keydown="onCardActivity"
+          @input="onCardActivity"
+          @focusin="onCardActivity"
+          @mousemove="onCardActivity"
+        >
+          <img class="seal" :src="sealSrc" alt="PMW-120 seal" />
+          <h1>NCE SAFe Simulator</h1>
+          <p class="tagline">Battlespace Awareness &amp; Information Operations</p>
 
-        <button type="submit">Sign in</button>
-      </form>
+          <label>
+            <span>Username</span>
+            <input ref="usernameInput" v-model="username" type="text" name="username" autocomplete="username" spellcheck="false" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input v-model="password" type="password" name="password" autocomplete="current-password" />
+          </label>
+
+          <button type="submit">Sign in</button>
+        </form>
+      </Transition>
     </main>
   </div>
 </template>
@@ -61,6 +89,68 @@ const bannerVisible = ref(false)
 
 const username = ref('')
 const password = ref('')
+
+// Card presence choreography (issue #158): the form stays dissolved until the
+// user signals intent (whisper hover/focus, a click anywhere, Tab, or typing),
+// then materializes with focus. Escape — or idling with untouched fields —
+// dissolves it back to the whisper. Typed content pins the card up.
+const IDLE_RETREAT_MS = 25_000
+
+const cardActive = ref(false)
+const usernameInput = ref(null)
+let idleTimer = null
+
+function focusUsername() {
+  usernameInput.value?.focus()
+}
+
+let suppressHoverUntil = 0
+
+function summonCard(e) {
+  if (bannerVisible.value || cardActive.value) return
+  // Clicks inside the banner (its OK) bubble here after dismissal — the
+  // acknowledgment itself is not sign-in intent.
+  if (e?.target?.closest?.('.banner-overlay')) return
+  cardActive.value = true
+  resetIdleTimer()
+}
+
+// The whisper reappears exactly where the card dissolved from; a stationary
+// cursor over it would re-fire mouseenter and bounce the card straight back.
+function onWhisperHover(e) {
+  if (Date.now() < suppressHoverUntil) return
+  summonCard(e)
+}
+
+function retreatCard() {
+  if (!cardActive.value) return
+  cardActive.value = false
+  suppressHoverUntil = Date.now() + 600
+  clearIdleTimer()
+  document.activeElement?.blur?.()
+}
+
+function clearIdleTimer() {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+}
+
+function resetIdleTimer() {
+  clearIdleTimer()
+  idleTimer = setTimeout(() => {
+    if (!username.value && !password.value) retreatCard()
+    else resetIdleTimer()
+  }, IDLE_RETREAT_MS)
+}
+
+function onCardActivity() {
+  if (cardActive.value) resetIdleTimer()
+}
+
+function onDocKeydown(e) {
+  if (bannerVisible.value) return
+  if (e.key === 'Escape') { retreatCard(); return }
+  if (!cardActive.value && (e.key === 'Enter' || e.key.length === 1)) summonCard()
+}
 
 // Rotation pool: only images whose preload completed are eligible, so a slow
 // network can never crossfade to a half-loaded background.
@@ -137,9 +227,15 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibility)
 })
 
+onMounted(() => {
+  document.addEventListener('keydown', onDocKeydown)
+})
+
 onUnmounted(() => {
   stopTimer()
+  clearIdleTimer()
   document.removeEventListener('visibilitychange', onVisibility)
+  document.removeEventListener('keydown', onDocKeydown)
 })
 
 const router = useRouter()
@@ -226,7 +322,7 @@ function onSubmit() {
 .banner-enter-active, .banner-leave-active { transition: opacity 0.4s ease; }
 .banner-enter-from, .banner-leave-to { opacity: 0; }
 
-/* ── Login card: quiet until the user reaches for it ── */
+/* ── Login card: dissolved until the user signals intent ── */
 
 .card-wrap {
   position: absolute;
@@ -237,6 +333,66 @@ function onSubmit() {
   padding: 24px;
 }
 
+/* Extra dim behind the materialized card so it owns the moment. */
+.focus-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 8, 15, 0.3);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.focus-dim.on { opacity: 1; }
+
+/* Resting whisper — the only trace of the form. */
+.whisper {
+  position: absolute;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 22px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(230, 237, 243, 0.6);
+  background: rgba(5, 8, 15, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: color 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+}
+
+.whisper:hover,
+.whisper:focus-visible {
+  color: rgba(230, 237, 243, 0.95);
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(5, 8, 15, 0.45);
+  outline: none;
+}
+
+.whisper-seal {
+  width: 18px;
+  height: 18px;
+  opacity: 0.85;
+}
+
+.whisper-enter-active, .whisper-leave-active { transition: opacity 0.3s ease; }
+.whisper-enter-from, .whisper-leave-to { opacity: 0; }
+
+/* Materialize / dissolve choreography. */
+.card-enter-active { transition: opacity 0.3s ease, transform 0.3s ease, filter 0.3s ease; }
+.card-leave-active { transition: opacity 0.25s ease, transform 0.25s ease, filter 0.25s ease; }
+.card-enter-from { opacity: 0; transform: scale(0.965) translateY(10px); filter: blur(6px); }
+.card-leave-to   { opacity: 0; transform: scale(0.985); filter: blur(4px); }
+
+/* A materialized card was summoned on purpose — it arrives awake. */
 .login-card {
   width: min(360px, 100%);
   display: flex;
@@ -244,19 +400,16 @@ function onSubmit() {
   gap: 14px;
   padding: 36px 32px 32px;
   border-radius: 16px;
-  background: rgba(9, 13, 22, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 13, 22, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(10px);
-  opacity: 0.78;
-  transition: opacity 0.35s ease, background 0.35s ease, box-shadow 0.35s ease, transform 0.35s ease;
+  transition: background 0.35s ease, box-shadow 0.35s ease;
 }
 
 .login-card:hover,
 .login-card:focus-within {
-  opacity: 1;
-  background: rgba(9, 13, 22, 0.62);
+  background: rgba(9, 13, 22, 0.66);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
-  transform: translateY(-2px);
 }
 
 .seal {
@@ -326,6 +479,8 @@ button:hover { background: var(--action-hover, #1d4ed8); }
 
 @media (prefers-reduced-motion: reduce) {
   .bg-layer { transition-duration: 0.5s; animation: none !important; }
-  .login-card { transition: opacity 0.35s ease; transform: none; }
+  .card-enter-active, .card-leave-active { transition: opacity 0.25s ease; }
+  .card-enter-from, .card-leave-to { transform: none; filter: none; }
+  .focus-dim { transition: none; }
 }
 </style>
