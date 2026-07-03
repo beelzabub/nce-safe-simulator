@@ -68,6 +68,11 @@ defineEmits(['close'])
 const ALL_TABS = [
   { key: 'eks', label: 'EKS' },
   { key: 'ecs', label: 'ECS' },
+  { key: 'ov1', label: 'OV-1' },
+  { key: 'sv1', label: 'SV-1' },
+  { key: 'sv2', label: 'SV-2' },
+  { key: 'dataflow', label: 'Data Flow' },
+  { key: 'devsecops', label: 'DevSecOps' },
 ]
 
 const availableTabs = ref([])
