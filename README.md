@@ -228,7 +228,7 @@ Settings for the web UI login page (epic #135). All keys are optional — the se
     "dod_banner_enabled": true,
     "background": {
         "rotation_seconds": 15,
-        "max_images": 8,
+        "max_images": 12,
         "source": "repo",
         "staging_s3": {
             "bucket": "nce-safe-sim-assets",
@@ -412,7 +412,7 @@ python3 scripts/sync_login_backgrounds.py list        # see what's staged
 python3 scripts/sync_login_backgrounds.py promote     # or: promote name.jpg ...
 ```
 
-Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikimedia Commons); every image keeps its credit line, and appearance of DoD visual information does not imply endorsement. The server never reads the staging bucket in production (`auth.background.source: "repo"`).
+Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikimedia Commons); every image keeps its credit line, and appearance of DoD visual information does not imply endorsement. The current set spans classic PMW-120 fleet themes plus NAVCENT-released imagery from Operation Epic Fury (Tomahawk launches, Arabian Gulf strike-group formations, night flight-deck operations). The server never reads the staging bucket in production (`auth.background.source: "repo"`).
 
 ### Web UI
 
