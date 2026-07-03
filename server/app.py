@@ -1025,6 +1025,24 @@ def auth_background_file(filename: str):
 
 
 # ---------------------------------------------------------------------------
+# SPA history fallback (epic #135): the Vue app uses history-mode routing, so
+# a hard load of a client-side route like /app/login must serve the app shell.
+# Real built files under public/app still win; unknown paths get index.html.
+
+@app.get("/app/{path:path}")
+def spa_fallback(path: str):
+    app_dir = (Path("public") / "app").resolve()
+    if app_dir.is_dir():
+        candidate = (app_dir / path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(app_dir):
+            return FileResponse(str(candidate))
+        index = app_dir / "index.html"
+        if index.is_file():
+            return FileResponse(str(index))
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+# ---------------------------------------------------------------------------
 # Mounted last so all API routes above take precedence.
 
 _reports_dir = Path("reports")

@@ -434,6 +434,10 @@ cd frontend && npm run dev            # Vite dev server on http://localhost:5173
 
 Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all non-app paths to the Python backend, so reports and API calls work without a production build.
 
+#### Login page
+
+`/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) behind a translucent sign-in card that stays subtle until hovered or focused. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production. Sign-in enforcement arrives with the session gate (epic #135); until then the form is presentational.
+
 #### Layout
 
 | Area | Content |
