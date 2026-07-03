@@ -37,6 +37,21 @@ export async function getProjects() {
   }
 }
 
+// Login-page background slideshow (epic #135). The server returns a shuffled
+// list — images[0] is the random initial background, the rest are the lazy
+// rotation pool. Degrades to the fallback shape on any failure so the login
+// page always renders (the client then uses its bundled hero image).
+export async function getAuthBackgrounds() {
+  const fallback = { rotation_seconds: 15, fallback: true, images: [] }
+  try {
+    const r = await fetch('/api/auth/backgrounds')
+    if (!r.ok) return fallback
+    return r.json()
+  } catch {
+    return fallback
+  }
+}
+
 export async function getFullConfig() {
   const r = await fetch('/api/config/full')
   if (!r.ok) throw new Error(`GET /api/config/full: ${r.status}`)
