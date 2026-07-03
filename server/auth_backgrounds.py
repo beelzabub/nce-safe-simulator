@@ -58,7 +58,7 @@ def background_settings(auth):
     s3 = s3 if isinstance(s3, dict) else {}
     return (
         {
-            "rotation_seconds": bg.get("rotation_seconds", 15),
+            "rotation_seconds": bg.get("rotation_seconds", 20),
             "max_images":       bg.get("max_images", 8),
             "source":           bg.get("source", "repo"),
         },
