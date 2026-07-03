@@ -205,6 +205,10 @@ class NceGitLab(
         lifecycle_env = parse_label_env("LIFECYCLE_LABELS")
         self.LIFECYCLE_LABELS = lifecycle_env if lifecycle_env else config.get("lifecycle_labels", [])
 
+        # Auth / front-door settings (epic #135) — optional section consumed by
+        # server/auth_backgrounds.py; future AAA options land here too.
+        self.auth = config.get("auth", {})
+
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],
             "Capability": [21, 34, 55, 89],

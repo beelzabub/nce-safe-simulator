@@ -5,6 +5,8 @@ __pycache__/
 
 # Real config holds the GitLab token — keep it out of git. Commit config.example.json instead.
 /config.json
+# Local Python virtualenv (README installation step 2).
+/.venv/
 cdk/cdk.out/
 cdk/cdk-ecs.out/
 cdk/cdk-eks.out/
