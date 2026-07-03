@@ -14,7 +14,7 @@ import markdown as _md
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mixins.reports import REPORTS
@@ -25,6 +25,16 @@ from server.auth_backgrounds import (
     media_type_for,
     resolve_media_file,
 )
+from server.auth_gate import (
+    SESSION_COOKIE,
+    auth_method,
+    create_session,
+    destroy_session,
+    gate_check,
+    request_authenticated,
+    session_valid,
+    verify_credentials,
+)
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
@@ -34,9 +44,25 @@ app = FastAPI(title="NCE Safe Simulator")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+# Authentication gate (epic #135, issue #157). No-op while auth.method is
+# "none"; with "basic" every HTTP request outside the login page's own
+# surface must carry the session cookie or an Authorization: Basic header.
+# The jobs WebSocket enforces the same check before accepting.
+@app.middleware("http")
+async def auth_gate_middleware(request: Request, call_next):
+    gl = getattr(request.app.state, "gl", None)
+    if not gate_check(gl, request.method, request.url.path, request.cookies, request.headers):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Not authenticated"},
+            headers={"WWW-Authenticate": 'Basic realm="nce-safe-sim"'},
+        )
+    return await call_next(request)
 
 @app.on_event("startup")
 def _prune_temp_files_on_startup():
@@ -701,6 +727,14 @@ async def ws_run(websocket: WebSocket):
       {"type": "error",    "message": "..."}  — job failed or invalid request
       {"type": "conflict", "blocking": [...]} — job conflicts with a running job
     """
+    # Auth gate (issue #157): same check as the HTTP middleware, before accept.
+    gl_state = getattr(websocket.app.state, "gl", None)
+    if auth_method(gl_state) != "none" and not request_authenticated(
+        websocket.cookies, websocket.headers
+    ):
+        await websocket.close(code=1008)  # policy violation
+        return
+
     await websocket.accept()
 
     try:
@@ -1003,6 +1037,52 @@ def download_export(filename: str):
 # committed under media/login-backgrounds/; S3 is a curation staging preview
 # only. Both endpoints degrade instead of raising: the login page is the
 # front door and must always render.
+
+# ── Auth endpoints (issue #157) ─────────────────────────────────────────────
+# Method dispatch and dev "basic" sessions; real AAA methods (#152-#156) plug
+# their own validation into this surface later.
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    gl = getattr(request.app.state, "gl", None)
+    method = auth_method(gl)
+    if method == "none":
+        # Nothing to validate — the UI's cosmetic front door handles "none".
+        return {"authenticated": True, "method": "none"}
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Expected JSON body")
+    if not verify_credentials(data.get("username"), data.get("password")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_session()
+    resp = JSONResponse({"authenticated": True, "method": method})
+    resp.set_cookie(
+        SESSION_COOKIE, token,
+        httponly=True, samesite="lax", path="/",
+    )
+    return resp
+
+
+@app.get("/api/auth/session")
+def auth_session(request: Request):
+    gl = getattr(request.app.state, "gl", None)
+    method = auth_method(gl)
+    if method == "none":
+        return {"authenticated": True, "method": "none"}
+    return {
+        "authenticated": session_valid(request.cookies.get(SESSION_COOKIE)),
+        "method": method,
+    }
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    destroy_session(request.cookies.get(SESSION_COOKIE))
+    resp = JSONResponse({"authenticated": False})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
 
 @app.get("/api/auth/backgrounds")
 def auth_backgrounds(request: Request, limit: Optional[int] = None):

@@ -32,11 +32,21 @@ test.describe('login flow', () => {
     await ok.tap()
     await expect(ok).toBeHidden()
 
+    // The form rests dissolved behind a "Sign in" whisper (#158); tapping it
+    // (or anywhere on the page) materializes the card
+    const whisper = page.locator('.whisper')
+    await expect(whisper).toBeVisible()
+    if (await coarsePointer(page)) {
+      const box = await whisper.boundingBox()
+      expect(box.height, 'whisper tap height').toBeGreaterThanOrEqual(44)
+    }
+    await whisper.tap()
+
     // Credential fields: reachable, fillable, and ≥16px so iOS Safari
     // doesn't zoom the page on focus
     const username = page.locator('input[name="username"]')
     const password = page.locator('input[name="password"]')
-    await username.tap()
+    await expect(username).toBeVisible()
     await username.fill('jamie')
     await password.fill('hunter2')
     if (await coarsePointer(page)) {
@@ -46,7 +56,8 @@ test.describe('login flow', () => {
       }
     }
 
-    const submit = page.getByRole('button', { name: 'Sign in' })
+    // scoped to the card: the whisper is also accessibly named "Sign in"
+    const submit = page.locator('.login-card').getByRole('button', { name: 'Sign in' })
     await expect(submit).toBeVisible() // also covers short landscape viewports
     await submit.tap()
 
@@ -81,7 +92,7 @@ test.describe('home workspace', () => {
 
   test('nav bar controls meet tap-target size', async ({ page }) => {
     test.skip(!(await coarsePointer(page)), 'touch-target rules only apply to coarse pointers')
-    for (const selector of ['.status-btn', '.config-btn', '.help-btn', '.theme-btn']) {
+    for (const selector of ['.status-btn', '.config-btn', '.help-btn', '.theme-btn', '.signout-btn']) {
       const box = await page.locator(selector).boundingBox()
       expect(box.height, `${selector} tap height`).toBeGreaterThanOrEqual(MIN_TAP)
       expect(box.width, `${selector} tap width`).toBeGreaterThanOrEqual(MIN_TAP)
