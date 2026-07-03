@@ -438,6 +438,8 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 `/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) behind a translucent sign-in card that stays subtle until hovered or focused. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production. Sign-in enforcement arrives with the session gate (epic #135); until then the form is presentational.
 
+Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment (per browser session). Toggle it with `auth.dod_banner_enabled` in `config.json`.
+
 #### Layout
 
 | Area | Content |
