@@ -28,6 +28,7 @@
   },
   "private_token": "",
   "auth": {
+    "method": "none",
     "dod_banner_enabled": true,
     "background": {
       "rotation_seconds": 15,

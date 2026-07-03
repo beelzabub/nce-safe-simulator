@@ -20,6 +20,26 @@ from mixins.bootstrap import BootstrapMixin
 
 
 # ---------------------------------------------------------------------------
+# Auth gate isolation (issue #157)
+# ---------------------------------------------------------------------------
+# The gate dispatches on the *local* config.json's auth.method, so without
+# this the whole suite would fail on any box whose live config enables
+# "basic". Force the gate off everywhere except test_auth_gate.py, which
+# exercises the real dispatch through stub gl objects and is hermetic.
+
+@pytest.fixture(autouse=True)
+def _auth_gate_off(request, monkeypatch):
+    if request.node.fspath.basename == "test_auth_gate.py":
+        yield
+        return
+    import server.app as _server_app
+    import server.auth_gate as _auth_gate
+    monkeypatch.setattr(_auth_gate, "auth_method", lambda gl=None: "none")
+    monkeypatch.setattr(_server_app, "auth_method", lambda gl=None: "none")
+    yield
+
+
+# ---------------------------------------------------------------------------
 # Minimal mock group / root objects
 # ---------------------------------------------------------------------------
 
