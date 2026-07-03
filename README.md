@@ -216,6 +216,40 @@ Start from the template (`cp config.example.json config.json`) and edit your loc
 | `stuck_thresholds` | Per-lifecycle-state age limits (days) the Epic Lifecycle report uses to flag "stuck" epics (see below) |
 | `defaults.bootstrap` | Default counts and ratios for `--create` (see below) |
 | `defaults.tools` | Default parameter values for utility tools (see below) |
+| `auth` | Login-page / front-door settings (see below); future AAA options land here |
+
+### Authentication (`auth` section)
+
+Settings for the web UI login page (epic #135). All keys are optional — the server applies these defaults when the section (or the whole `config.json`) is absent:
+
+```json
+"auth": {
+    "dod_banner_enabled": true,
+    "background": {
+        "rotation_seconds": 15,
+        "max_images": 8,
+        "source": "repo",
+        "staging_s3": {
+            "bucket": "nce-safe-sim-assets",
+            "prefix": "login-backgrounds/",
+            "presign_ttl_seconds": 3600
+        }
+    }
+}
+```
+
+| Field | Description |
+|---|---|
+| `dod_banner_enabled` | Show the standard DoD Notice and Consent banner on the login page (surfaced to the client via `GET /api/config`) |
+| `background.rotation_seconds` | Background slideshow rotation interval |
+| `background.max_images` | Maximum images returned to the client per page load |
+| `background.source` | `repo` (default) serves the committed images; `s3-test` presigns the staging bucket for live curation preview |
+| `background.staging_s3` | Staging bucket/prefix and presigned-URL TTL — used only by `s3-test` mode and the curation tooling |
+
+The images themselves are committed to the repo under `media/login-backgrounds/` with a `credits.json` credit-line manifest (see the README in that directory). The server exposes them via:
+
+- `GET /api/auth/backgrounds` — server-shuffled list: `images[0]` is the random initial background, the rest are the client's lazy-loaded rotation pool. Degrades to `{"fallback": true, "images": []}` (HTTP 200) when no images are available, so the login page always renders.
+- `GET /api/auth/backgrounds/{name}` — serves a single committed image with long-lived cache headers.
 
 ### Label Conventions
 
