@@ -13,6 +13,10 @@
     <div class="scrim" />
     <div class="focus-dim" :class="{ on: cardActive }" />
 
+    <Transition name="brand-fade" appear>
+      <img class="brand-mark" :class="{ dimmed: cardActive }" :src="brandSrc" alt="" aria-hidden="true" />
+    </Transition>
+
     <Transition name="credit">
       <p v-if="currentCredit" :key="currentCredit" class="credit-chip">{{ currentCredit }}</p>
     </Transition>
@@ -78,6 +82,7 @@ import { useAuthGate } from '../composables/useAuthGate.js'
 import DodBanner from '../components/DodBanner.vue'
 import heroSrc from '../assets/hero-carrier.png'
 import sealSrc from '../assets/login-seal.png'
+import brandSrc from '../assets/nce-logo-white.png'
 
 // DoD Notice and Consent acknowledgment is per browser session (DTM 08-060 —
 // the banner must precede authentication and be explicitly acknowledged).
@@ -329,6 +334,31 @@ async function onSubmit() {
 .credit-enter-from, .credit-leave-to { opacity: 0; }
 .credit-leave-active { position: absolute; }
 
+/* ── Brand mark: faint site identification while the page is at rest ── */
+
+.brand-mark {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 52px;
+  width: auto;
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 20px rgba(0, 0, 0, 0.4));
+  transition: opacity 0.35s ease;
+}
+
+.brand-mark.dimmed { opacity: 0.25; }
+
+.brand-fade-enter-active { transition: opacity 1s ease; }
+.brand-fade-enter-from { opacity: 0; }
+
+@media (max-width: 480px) {
+  .brand-mark { top: 16px; height: 36px; }
+}
+
 .banner-enter-active, .banner-leave-active { transition: opacity 0.4s ease; }
 .banner-enter-from, .banner-leave-to { opacity: 0; }
 
@@ -503,6 +533,7 @@ button:hover { background: var(--action-hover, #1d4ed8); }
   .card-enter-active, .card-leave-active { transition: opacity 0.25s ease; }
   .card-enter-from, .card-leave-to { transform: none; filter: none; }
   .focus-dim { transition: none; }
+  .brand-fade-enter-active { transition: none; }
 }
 
 /* ── Touch devices (issue #160): the whisper is the primary tap target for
