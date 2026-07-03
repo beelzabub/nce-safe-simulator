@@ -229,6 +229,8 @@ import ConflictBanner from './ConflictBanner.vue'
 import PathSelect from './PathSelect.vue'
 import HelpTip from './HelpTip.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
+import { buildToolCommand } from '../composables/useCliCommand.js'
+import { useCommandPreview } from '../composables/useCommandPreview.js'
 import { upload, getGroups, getProjects } from '../api.js'
 
 const props = defineProps({
@@ -387,6 +389,13 @@ const confirmRows = computed(() => {
   return rows
 })
 
+// The equivalent CLI one-liner for the current choices — rebuilt live as the
+// user edits params (#140) and pushed to the docked CommandBar while the dialog
+// is open. Cleared when the dialog unmounts.
+const { setPreview, clearPreview } = useCommandPreview()
+const cliCommand = computed(() => buildToolCommand(props.tool, values.value))
+watch(cliCommand, cmd => setPreview(cmd), { immediate: true })
+
 function onKeydown(e) {
   if (e.key === 'Escape' && props.tool) {
     if (confirming.value) confirming.value = false
@@ -394,7 +403,10 @@ function onKeydown(e) {
   }
 }
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  clearPreview()
+})
 
 // First click: show confirmation step (if tool.confirm); second click: launch.
 function submit() {
