@@ -20,13 +20,16 @@
       <button class="theme-btn" @click="toggle">
         {{ theme === 'dark' ? '☀ Light' : '☾ Dark' }}
       </button>
+      <button class="signout-btn" title="Sign out" @click="signOut">⎋ Sign out</button>
     </div>
   </header>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme.js'
+import { useAuthGate } from '../composables/useAuthGate.js'
 import heroSrc from '../assets/hero-carrier.png'
 import logoWhite from '../assets/nce-logo-white.png'  // white emblem — for dark UI
 import logoNavy from '../assets/nce-logo-navy.png'    // navy emblem — for light UI
@@ -36,6 +39,16 @@ const { theme, toggle } = useTheme()
 const logoSrc = computed(() => (theme.value === 'dark' ? logoWhite : logoNavy))
 defineProps({ runningCount: { type: Number, default: 0 } })
 defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
+
+const router = useRouter()
+
+// Re-locks the front door without closing the browser (issue #157). DoD
+// banner acknowledgment survives — consent is per browser session,
+// authentication is not.
+async function signOut() {
+  await useAuthGate().logout()
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -144,6 +157,19 @@ defineEmits(['toggle-status', 'toggle-config', 'toggle-help'])
   transition: background 0.15s;
 }
 .theme-btn:hover { background: var(--border); }
+
+.signout-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.signout-btn:hover { background: var(--border); color: var(--text-1); }
 
 .status-btn {
   background: transparent;

@@ -173,6 +173,13 @@
 
           <!-- ── Auth (login front door) ── -->
           <div v-if="activeTab === 'auth'" class="section">
+            <label class="field">
+              <span class="field-label">Auth Method</span>
+              <select v-model="form.auth.method" class="field-input field-input--sm">
+                <option value="none">none (no enforcement)</option>
+                <option value="basic">basic (dev credential)</option>
+              </select>
+            </label>
             <label class="field field--row">
               <span class="field-label">DoD Consent Banner</span>
               <input v-model="form.auth.dod_banner_enabled" type="checkbox" class="field-check" />
@@ -353,6 +360,7 @@ const HELP_SECTIONS = [
   {
     title: 'Auth — Login Front Door',
     fields: [
+      { label: 'Auth Method', help: 'Authentication enforcement: none (no server enforcement, cosmetic front door) or basic (dev-only hardcoded credential; every API/report/WebSocket request must authenticate). Real AAA methods (CAC/PKI, OIDC, SAML, LDAP, local) plug in here as they land.' },
       { label: 'DoD Consent Banner', help: 'Show the standard DoD Notice and Consent banner (DTM 08-060) on the login page before the sign-in card becomes interactive. Acknowledgment is per browser session.' },
       { label: 'Rotation (s)',       help: 'Seconds between background image crossfades on the login page.' },
       { label: 'Max Images',         help: 'Maximum number of background images the server returns per login page load.' },
@@ -426,6 +434,7 @@ const form = reactive({
     'lifecycle::backlog':   60,
   },
   auth: {
+    method:              'none',
     dod_banner_enabled:  true,
     rotation_seconds:    15,
     max_images:          8,
@@ -513,6 +522,7 @@ function populateForm(cfg) {
   const bg = au.background ?? {}
   const s3 = bg.staging_s3 ?? {}
   form.auth = {
+    method:              au.method              ?? 'none',
     dod_banner_enabled:  au.dod_banner_enabled  ?? true,
     rotation_seconds:    bg.rotation_seconds    ?? 15,
     max_images:          bg.max_images          ?? 8,
@@ -618,6 +628,7 @@ function buildConfig() {
 
   cfg.auth = {
     ...(rawConfig.auth ?? {}),
+    method:             form.auth.method,
     dod_banner_enabled: form.auth.dod_banner_enabled,
     background: {
       ...(rawConfig.auth?.background ?? {}),

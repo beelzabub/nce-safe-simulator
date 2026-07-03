@@ -35,6 +35,7 @@
           <input v-model="password" type="password" name="password" autocomplete="current-password" />
         </label>
 
+        <p v-if="loginError" class="login-error" role="alert">{{ loginError }}</p>
         <button type="submit">Sign in</button>
       </form>
     </main>
@@ -42,7 +43,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAuthBackgrounds, getConfig } from '../api.js'
 import { useAuthGate } from '../composables/useAuthGate.js'
@@ -61,6 +62,10 @@ const bannerVisible = ref(false)
 
 const username = ref('')
 const password = ref('')
+const loginError = ref('')
+
+// A rejected attempt's message clears as soon as the user edits either field.
+watch([username, password], () => { loginError.value = '' })
 
 // Rotation pool: only images whose preload completed are eligible, so a slow
 // network can never crossfade to a half-loaded background.
@@ -145,11 +150,16 @@ onUnmounted(() => {
 const router = useRouter()
 const gate = useAuthGate()
 
-function onSubmit() {
-  // Cosmetic acceptance: no credential validation exists yet. Real AAA will
-  // replace this with a POST /api/auth/login round trip (epic #135).
+async function onSubmit() {
   if (!username.value.trim() || !password.value) return
-  gate.accept()
+  loginError.value = ''
+  const ok = await gate.login(username.value.trim(), password.value)
+  if (!ok) {
+    // Server rejected the credentials — stay put and say so. (Don't touch
+    // the field refs here: the watcher above clears the error on any edit.)
+    loginError.value = 'Invalid username or password'
+    return
+  }
   router.push('/')
 }
 </script>
@@ -323,6 +333,14 @@ button {
 }
 
 button:hover { background: var(--action-hover, #1d4ed8); }
+
+.login-error {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: center;
+  color: #f87171;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .bg-layer { transition-duration: 0.5s; animation: none !important; }
