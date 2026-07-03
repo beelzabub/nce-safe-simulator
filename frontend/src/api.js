@@ -50,6 +50,43 @@ export async function getConfig() {
   }
 }
 
+// ── Auth session (epic #135, issue #157) ────────────────────────────────────
+// All three degrade to safe shapes on network failure: session degrades to
+// method "none" (cosmetic front door, app shell still reachable — matching
+// the pre-gate behavior when the API is down), login degrades to rejected.
+
+export async function getSession() {
+  try {
+    const r = await fetch('/api/auth/session')
+    if (!r.ok) return { authenticated: false, method: 'none' }
+    return r.json()
+  } catch {
+    return { authenticated: false, method: 'none' }
+  }
+}
+
+export async function postLogin(username, password) {
+  try {
+    const r = await fetch('/api/auth/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username, password }),
+    })
+    if (!r.ok) return { authenticated: false }
+    return r.json()
+  } catch {
+    return { authenticated: false }
+  }
+}
+
+export async function postLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' })
+  } catch {
+    /* logging out of a dead server is still logged out */
+  }
+}
+
 // Login-page background slideshow (epic #135). The server returns a shuffled
 // list — images[0] is the random initial background, the rest are the lazy
 // rotation pool. Degrades to the fallback shape on any failure so the login
