@@ -7,23 +7,13 @@
       <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
 
       <aside class="sidebar" :class="{ 'sidebar--open': sidebarOpen }">
-        <div class="sidebar-picker">
-          <SidePanel :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
-        </div>
-        <div class="sidebar-footer">
-          <a href="/quarto/" target="_blank" rel="noopener" class="reports-link">
-            Quarto&thinsp;↗
-          </a>
-          <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="reports-link">
-            GitLab&thinsp;↗
-          </a>
-          <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="reports-link">
-            Grafana&thinsp;↗
-          </a>
-          <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
-            Raw&thinsp;↗
-          </a>
-        </div>
+        <SidePanel
+          :running-jobs="runningJobKeys"
+          :gitlab-wiki-url="gitlabWikiUrl"
+          :grafana-url="grafanaUrl"
+          @launch="onLaunch"
+          @launch-reports="onLaunchReports"
+        />
       </aside>
 
       <main class="main-pane">
@@ -33,6 +23,7 @@
              with it rather than docking under every view. -->
         <JobRunner v-show="mainView === 'jobs'" />
         <CommandBar v-show="mainView === 'jobs'" />
+        <MarkdownView v-if="mainView === 'report'" />
       </main>
 
       <StatusSidebar :open="showStatus" @close="showStatus = false" />
@@ -47,10 +38,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import NavBar        from '../components/NavBar.vue'
 import SidePanel     from '../components/SidePanel.vue'
 import JobRunner     from './JobRunner.vue'
+import MarkdownView  from './MarkdownView.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
 import CommandBar    from '../components/CommandBar.vue'
 import HelpDialog          from '../components/HelpDialog.vue'
@@ -61,7 +53,13 @@ import { useJobs }         from '../composables/useJobs.js'
 import { useMainView }     from '../composables/useMainView.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
-const { mainView, showMain } = useMainView()
+const { mainView, reportPage, showMain } = useMainView()
+
+// Opening a report (or any main-view change from the panel) should reveal
+// the main pane on phones, same as launching a job does.
+watch([mainView, reportPage], () => {
+  if (isMobile.matches) sidebarOpen.value = false
+})
 
 // Below the mobile breakpoint the sidebar is an off-canvas drawer; start it
 // open there so first-time phone users land on the job list, not an empty
@@ -127,31 +125,6 @@ function onLaunchReports(reports, fmts, useLast) {
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
-
-.sidebar-picker {
-  flex: 1;
-  overflow: hidden;   /* JobPicker manages its own internal scroll */
-}
-
-.sidebar-footer {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  padding: 0.6rem 1rem;
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-}
-.reports-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.82rem;
-  font-weight: 400;
-  color: var(--text-3);
-  text-decoration: none;
-  transition: color 0.15s;
-}
-.reports-link:hover { color: var(--text-1); }
 
 /* ── Main pane ── */
 .main-pane {

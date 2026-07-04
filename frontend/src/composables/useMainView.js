@@ -6,9 +6,17 @@ import { ref } from 'vue'
 // composables — any component may switch the view without prop drilling.
 const mainView = ref('jobs')
 
+// The wiki page open in the report view: {date, time, slug} — MarkdownView
+// fetches content itself so a stale page never flashes while loading.
+const reportPage = ref(null)
+
 export function useMainView() {
   function showMain(view) {
     mainView.value = view
   }
-  return { mainView, showMain }
+  function openReport(page) {
+    reportPage.value = page
+    mainView.value = 'report'
+  }
+  return { mainView, reportPage, showMain, openReport }
 }
