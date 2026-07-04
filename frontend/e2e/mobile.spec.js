@@ -192,17 +192,17 @@ test.describe('home workspace', () => {
     await expect(tabs).toHaveCount(3)
     await expect(page.locator('.picker')).toBeVisible()
 
-    // Reports lists the mocked snapshot run; Analysis still a placeholder
+    // Reports lists the mocked snapshot run; Analysis lists its tools
     await tabs.filter({ hasText: 'Reports' }).tap()
     await expect(page.locator('.reports-tab .run-select')).toBeVisible()
     await tabs.filter({ hasText: 'Analysis' }).tap()
-    await expect(page.locator('.placeholder-title')).toHaveText('Analysis')
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Blocked Work Explorer')
 
     // Active tab survives a reload (localStorage). On phones the drawer
     // starts open after load, so the panel is already visible.
     await page.reload()
     await expect(page.locator('.nav-bar')).toBeVisible()
-    await expect(page.locator('.placeholder-title')).toHaveText('Analysis')
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Blocked Work Explorer')
 
     // Back to Tools: picker is intact
     await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
@@ -224,6 +224,32 @@ test.describe('home workspace', () => {
     await expectNoHorizontalOverflow(page)
 
     // Reset the persisted tab so later tests start from Tools
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
+  })
+
+  test('blocked work explorer renders totals, cards, and chains (#169)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Analysis' }).tap()
+    await page.locator('.analysis-row').tap()
+
+    const bwx = page.locator('.bwx')
+    await expect(bwx).toBeVisible()
+
+    // Totals strip from the mocked analysis
+    await expect(bwx.locator('.stat-value').nth(0)).toHaveText('1')
+    await expect(bwx.locator('.stat--bv .stat-value')).toHaveText('5')
+
+    // Top card starts expanded: chain nodes + blocked flag + blocker link
+    const card = bwx.locator('.epic-card').first()
+    await expect(card.locator('.card-title')).toContainText('Modernize Fleet Telemetry')
+    await expect(card.locator('.badge--weight')).toContainText('21')
+    await expect(card.locator('.chain-node.blocked .node-title')).toHaveText('Parse NMEA feeds')
+    await expect(card.locator('.blocker-link')).toHaveText('Upgrade message bus')
+    await expectNoHorizontalOverflow(page)
+
+    // Collapse via the card head chevron
+    await card.locator('.card-head').tap()
+    await expect(card.locator('.chain-node')).toHaveCount(0)
+
     await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
   })
 })
