@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import subprocess
+from datetime import datetime
 
 import yaml
 from PIL import Image
@@ -261,6 +262,45 @@ class DeckBuilder:
         xml_slides.remove(doomed)
 
     # -- slide sections ---------------------------------------------------
+    def _add_oval(self, slide, x, y, w, h, color):
+        shp = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, y, w, h)
+        shp.fill.solid()
+        shp.fill.fore_color.rgb = color
+        shp.line.fill.background()
+        shp.shadow.inherit = False
+        return shp
+
+    def _cover_timeline(self, slide, x, y, w, first_iso, last_iso):
+        """Compact development-timeline graphic for the cover: an accent line
+        with end dots, the first/last commit dates, and the elapsed span — a
+        visual replacement for the old plain "Development window:" text line."""
+        d0 = datetime.strptime(first_iso, "%Y-%m-%d")
+        d1 = datetime.strptime(last_iso, "%Y-%m-%d")
+        weeks = max(1, round((d1 - d0).days / 7))
+        fmt = lambda d: f"{d.strftime('%b')} {d.day}, {d.year}"
+        accent = self.C["blue"]                 # cyan — reads bright on the dark cover
+        light = RGBColor(0xEA, 0xED, 0xF0)
+        dim = RGBColor(0xA8, 0xB0, 0xB8)
+
+        self.add_text(slide, x, y, Emu(3000000), Emu(200000), "DEVELOPMENT TIMELINE", 9, accent, bold=True)
+        self.add_text(slide, x, y, w, Emu(200000), f"~{weeks} weeks", 10.5, light, bold=True, align=PP_ALIGN.RIGHT)
+
+        line_y = y + Emu(330000)
+        line_h = Emu(24000)
+        self.add_rect(slide, x, line_y, w, line_h, accent)
+        dia = Emu(104000)
+        dot_y = line_y + line_h // 2 - dia // 2
+        self._add_oval(slide, x, dot_y, dia, dia, light)
+        self._add_oval(slide, x + w - dia, dot_y, dia, dia, light)
+
+        lbl_y = line_y + Emu(150000)
+        self.add_text(slide, x, lbl_y, Emu(2600000), Emu(280000), fmt(d0), 12.5, light, bold=True)
+        self.add_text(slide, x + w - Emu(2600000), lbl_y, Emu(2600000), Emu(280000), fmt(d1), 12.5, light,
+                      bold=True, align=PP_ALIGN.RIGHT)
+        self.add_text(slide, x, lbl_y + Emu(300000), Emu(2600000), Emu(220000), "first commit", 8.5, dim)
+        self.add_text(slide, x + w - Emu(2600000), lbl_y + Emu(300000), Emu(2600000), Emu(220000),
+                      "latest commit", 8.5, dim, align=PP_ALIGN.RIGHT)
+
     def build_cover(self):
         # slide 1 in the template is an unrelated leftover sales slide - drop it.
         if len(self.prs.slides) > 1:
@@ -294,21 +334,35 @@ class DeckBuilder:
             spTree.insert(2, pic._element)
             spTree.insert(3, scrim._element)
 
-        # Cover title/subtitle use the color the user set by hand: theme
-        # "Background 1, darker 25%" (a light gray) rather than a fixed RGB.
+        # Title stays in the template's cover placeholder (large Gill Sans MT).
+        # The light-gray color is the "Background 1, darker 25%" the user set.
         def cover_color(run):
             run.font.color.theme_color = MSO_THEME_COLOR.BACKGROUND_1
             run.font.color.brightness = -0.25
 
         cover.placeholders[0].text_frame.paragraphs[0].runs[0].text = "NCE Safe Simulator"
         cover_color(cover.placeholders[0].text_frame.paragraphs[0].runs[0])
-        body_tf = cover.placeholders[10].text_frame
+
+        # The template subtitle placeholder held a vague "Simulator Overview:"
+        # line. Remove it entirely (an *emptied* placeholder renders PowerPoint's
+        # dotted prompt box + the template's sample "Gill Sans MT" prompt text);
+        # the tagline/blurb/timeline below are drawn as custom textboxes instead.
+        body_ph = cover.placeholders[10]
+        body_ph._element.getparent().remove(body_ph._element)
+
+        left = Emu(340000)
+        white_hi = RGBColor(0xF2, 0xF4, 0xF6)   # bright — the tagline stands out
+        light = RGBColor(0xC8, 0xCC, 0xD0)
+        self.add_text(cover, left, Emu(2560000), Emu(7000000), Emu(430000),
+                      "SAFe portfolio automation for GitLab", 21, white_hi, bold=True)
+        self.add_text(cover, left, Emu(3030000), Emu(6650000), Emu(760000),
+                      "Generates realistic SAFe portfolios in GitLab — the full Epic / Feature / Issue "
+                      "hierarchy — with WSJF, business-value, and risk reporting, driven from a CLI or a "
+                      "Vue web UI.", 12.5, light, italic=True)
+
         m = self.metrics
-        body_tf.paragraphs[0].runs[0].text = "Simulator Overview: SAFe GitLab Portfolio Tooling"
-        cover_color(body_tf.paragraphs[0].runs[0])
-        if len(body_tf.paragraphs) > 1 and body_tf.paragraphs[1].runs:
-            body_tf.paragraphs[1].runs[0].text = f"Development window: {m['first_commit_date']} – {m['last_commit_date']}"
-            cover_color(body_tf.paragraphs[1].runs[0])
+        self._cover_timeline(cover, left, Emu(4020000), Emu(4360000),
+                             m["first_commit_date"], m["last_commit_date"])
 
         # White emblem (not the navy one) now that the cover reads dark.
         nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
@@ -317,6 +371,23 @@ class DeckBuilder:
             cover.shapes.add_picture(nce_logo, Emu(320000), Emu(220000), height=Emu(500000))
         if os.path.exists(pmw_seal):
             cover.shapes.add_picture(pmw_seal, self.SW - Emu(900000), Emu(220000), height=Emu(650000))
+
+    def _agenda_number(self, p, color):
+        """Give an agenda paragraph a visible auto-number. The TOC layout numbers
+        the list but colors the digits schemeClr bg1 (white) — invisible on the
+        light agenda background — so override just the bullet color while keeping
+        the arabic-period auto-numbering."""
+        pPr = p._p.get_or_add_pPr()
+        pPr.set("marL", "228600")
+        pPr.set("indent", "-228600")
+        for tag in ("a:buClr", "a:buFont", "a:buNone", "a:buAutoNum", "a:buChar"):
+            for el in pPr.findall(qn(tag)):
+                pPr.remove(el)
+        buClr = pPr.makeelement(qn("a:buClr"), {})
+        buClr.append(buClr.makeelement(qn("a:srgbClr"), {"val": str(color)}))
+        pPr.append(buClr)
+        pPr.append(pPr.makeelement(qn("a:buFont"), {"typeface": "+mj-lt"}))
+        pPr.append(pPr.makeelement(qn("a:buAutoNum"), {"type": "arabicPeriod"}))
 
     def build_agenda(self):
         agenda = self.new_slide(self.TOC)
@@ -333,6 +404,7 @@ class DeckBuilder:
         for i, item in enumerate(items):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.text = item
+            self._agenda_number(p, RGBColor(0x00, 0x6B, 0xB5))
 
     def build_chrome_slides(self):
         s = os.path.join(self.screenshots_dir, "00-home_light.png")
@@ -889,7 +961,9 @@ class DeckBuilder:
         FMS sprint-review "Sprint Issues" slides (JIRA ID / Summary / Assignee /
         Status columns, banded alternating rows, split across N slides with the
         header repeated). Every issue #1..max gets a row; nothing is capped."""
-        issues = fetch_issues()
+        # Reuse the single fetch from build() so this matches the metrics KPI;
+        # fall back to a live fetch if called standalone.
+        issues = getattr(self, "issues", None) or fetch_issues()
         total = len(issues)
 
         margin = Emu(180000)
@@ -1004,6 +1078,14 @@ class DeckBuilder:
                 self.full_bleed_image_slide(shot["title"], path, dark=False)
 
     def build(self):
+        # Single-source the issue list so the "By the Numbers" KPI and the
+        # Issues table can never disagree: fetch once here and reconcile the
+        # metrics counts, since metrics.json can be staler than a live fetch.
+        self.issues = fetch_issues()
+        self.metrics["issues_total"] = len(self.issues)
+        self.metrics["issues_closed"] = sum(1 for i in self.issues if i["state"] == "closed")
+        self.metrics["issues_open"] = self.metrics["issues_total"] - self.metrics["issues_closed"]
+
         self.build_cover()
         self.build_agenda()
         self.build_chrome_slides()
