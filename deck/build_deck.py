@@ -309,7 +309,7 @@ class DeckBuilder:
 
         # White emblem (not the navy one) now that the cover reads dark.
         nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
-        pmw_seal = os.path.join(REPO_ROOT, "frontend/src/assets/pmw-120-seal.png")
+        pmw_seal = os.path.join(REPO_ROOT, "frontend/src/assets/pmw-120-seal-transparent.png")
         if os.path.exists(nce_logo):
             cover.shapes.add_picture(nce_logo, Emu(320000), Emu(220000), height=Emu(500000))
         if os.path.exists(pmw_seal):
