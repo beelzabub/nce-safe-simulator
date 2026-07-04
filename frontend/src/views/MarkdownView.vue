@@ -5,14 +5,17 @@
      is the trust boundary, exactly as with the standalone HTML view. -->
 <template>
   <div class="md-view">
-    <div class="md-header">
+    <div v-if="page" class="md-header">
       <span class="md-title">{{ title }}</span>
       <span class="md-run">{{ runLabel }}</span>
       <a v-if="page" class="md-ext" :href="`/api/runs/${page.date}/${page.time}/wiki/${page.slug}`"
          target="_blank" rel="noopener" title="Open standalone page">↗</a>
     </div>
 
-    <div v-if="state === 'loading'" class="md-empty">Loading…</div>
+    <div v-if="!page" class="md-empty">
+      Choose a report from the Reports tab to read it here.
+    </div>
+    <div v-else-if="state === 'loading'" class="md-empty">Loading…</div>
     <div v-else-if="state === 'error'" class="md-empty">
       Couldn't load this page — the snapshot may have been cleared.
     </div>
