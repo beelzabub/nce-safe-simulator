@@ -22,9 +22,9 @@ const { mainView, openAnalysis } = useMainView()
 
 const ANALYSES = [
   {
-    key: 'blocked-work',
-    name: 'Blocked Work Explorer',
-    desc: 'Portfolio epics with blocked descendants — chains, weight, and Business Value at risk',
+    key: 'portfolio',
+    name: 'Portfolio Explorer',
+    desc: 'Every portfolio epic (epic::epic) with attention drawn to blocked work and schedule risk',
   },
 ]
 </script>

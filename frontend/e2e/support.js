@@ -36,33 +36,62 @@ export const WIKI_INDEX = [
   { slug: 'portfolio-health', title: 'Portfolio Health Dashboard', tier: '00', tier_name: 'Executive Pulse' },
 ]
 
-export const BLOCKED_CHAINS = {
+export const PORTFOLIO = {
   snapshot: { date: '20260701', time: '120000', generated_at: '2026-07-01T12:00:00Z' },
-  totals: { portfolio_epics_at_risk: 1, blocked_items: 2, blocked_weight: 21, blocked_business_value: 5 },
+  totals: { portfolio_epics: 3, needs_attention: 2, blocked_items: 2,
+            blocked_weight: 21, blocked_business_value: 5 },
   portfolio_epics: [
     {
       epic: { id: 1, iid: 1, title: 'Modernize Fleet Telemetry', state: 'opened',
               type: 'Epic', web_url: 'https://gitlab.example/epics/1',
               labels: ['Epic', 'project::DO'], piid: 'PIID::2026Q3',
-              planned_weight: 233, actual_weight: 90, business_value: 21, pct_complete: 38.6 },
+              planned_weight: 233, actual_weight: 90, business_value: 21,
+              pct_complete: 38.6, pct_through_pi: 30 },
+      flags: { blocked: true, behind_schedule: false },
+      needs_attention: true,
       rollup: { blocked_count: 2, blocked_weight: 21, blocked_business_value: 5 },
       chains: [
         {
           nodes: [
             { id: 1, title: 'Modernize Fleet Telemetry', type: 'Epic', state: 'opened',
               web_url: 'https://gitlab.example/epics/1', labels: [], piid: 'PIID::2026Q3',
-              planned_weight: 233, actual_weight: 90, business_value: 21, pct_complete: 38.6, blocked: false },
+              planned_weight: 233, actual_weight: 90, business_value: 21,
+              pct_complete: 38.6, pct_through_pi: 30, blocked: false },
             { id: 2, title: 'Sensor Ingest Capability', type: 'Capability', state: 'opened',
               web_url: 'https://gitlab.example/epics/2', labels: [], piid: 'PIID::2026Q3',
-              planned_weight: 34, actual_weight: 12, business_value: 8, pct_complete: 20, blocked: false },
+              planned_weight: 34, actual_weight: 12, business_value: 8,
+              pct_complete: 20, pct_through_pi: 30, blocked: false },
             { id: 3, title: 'Parse NMEA feeds', type: 'Feature', state: 'opened',
               web_url: 'https://gitlab.example/epics/3', labels: [], piid: 'PIID::2026Q3',
-              planned_weight: 13, actual_weight: 5, business_value: 5, pct_complete: 10, blocked: true },
+              planned_weight: 13, actual_weight: 5, business_value: 5,
+              pct_complete: 10, pct_through_pi: 30, blocked: true },
           ],
           blockers: [{ id: 6, title: 'Upgrade message bus', type: 'Feature',
                        web_url: 'https://gitlab.example/epics/6' }],
         },
       ],
+    },
+    {
+      epic: { id: 7, iid: 7, title: 'Shipboard Cyber Hardening', state: 'opened',
+              type: 'Epic', web_url: 'https://gitlab.example/epics/7',
+              labels: ['Epic', 'project::RTSO'], piid: 'PIID::2026Q3',
+              planned_weight: 144, actual_weight: 10, business_value: 2,
+              pct_complete: 10, pct_through_pi: 60 },
+      flags: { blocked: false, behind_schedule: true },
+      needs_attention: true,
+      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      chains: [],
+    },
+    {
+      epic: { id: 5, iid: 5, title: 'Common Data Fabric', state: 'opened',
+              type: 'Epic', web_url: 'https://gitlab.example/epics/5',
+              labels: ['Epic', 'project::DO'], piid: 'PIID::2026Q3',
+              planned_weight: 89, actual_weight: 70, business_value: 13,
+              pct_complete: 80, pct_through_pi: 50 },
+      flags: { blocked: false, behind_schedule: false },
+      needs_attention: false,
+      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      chains: [],
     },
   ],
 }
@@ -86,7 +115,7 @@ export async function mockApi(page) {
     if (path.endsWith('/wiki/portfolio-health.json'))
       return json({ slug: 'portfolio-health', title: 'Portfolio Health Dashboard',
                     html: '<h1>Portfolio Health Dashboard</h1><table><tr><th>VS</th><th>Status</th></tr><tr><td>VS 01</td><td>Green</td></tr></table>' })
-    if (path === '/api/analysis/blocked-chains') return json(BLOCKED_CHAINS)
+    if (path === '/api/analysis/portfolio') return json(PORTFOLIO)
     return json({})
   })
 

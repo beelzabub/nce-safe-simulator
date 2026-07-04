@@ -1,8 +1,9 @@
-"""Tests for /api/analysis/blocked-chains (epic #165, issue #168).
+"""Tests for /api/analysis/portfolio (epic #165, issues #168/#169).
 
 Builds fixture snapshots under a tmp reports/ tree (the endpoint resolves the
-newest complete snapshot exactly like report reuse does) and asserts chain
-reconstruction and the weight/BV rollup semantics.
+newest complete snapshot exactly like report reuse does) and asserts the
+portfolio view: every epic::epic listed, attention flags, chain
+reconstruction, and the weight/BV rollup semantics.
 """
 
 import json
@@ -10,7 +11,7 @@ import json
 from fastapi.testclient import TestClient
 
 from server.app import app
-from server.analysis import build_blocked_chains
+from server.analysis import build_portfolio_view
 
 
 # ---------------------------------------------------------------------------
@@ -18,14 +19,15 @@ from server.analysis import build_blocked_chains
 # ---------------------------------------------------------------------------
 
 def _epic(id, type, title=None, parent_id=None, planned=None, actual=None,
-          bv=None, state="opened"):
+          bv=None, state="opened", pct_complete=0.0, pct_through_pi=None):
     return {
         "id": id, "iid": id, "type": type,
         "title": title or f"{type} {id}",
         "state": state, "parent_id": parent_id, "labels": [type],
         "piid": "PIID::2026Q3", "web_url": f"https://gitlab.example/epics/{id}",
         "planned_weight": planned, "actual_weight": actual,
-        "business_value": bv, "pct_complete": 0.0,
+        "business_value": bv,
+        "pct_complete": pct_complete, "pct_through_pi": pct_through_pi,
     }
 
 
@@ -34,17 +36,19 @@ def _ref(epic):
             "type": epic["type"], "web_url": epic["web_url"]}
 
 
-# Hierarchy: Epic 1 -> Capability 2 -> Feature 3 (blocked by Feature 6)
-#            Epic 1 -> Feature 4 (direct, blocked by Feature 6)
-#            Epic 5 -> (nothing blocked)
-E1 = _epic(1, "Epic", planned=233, bv=21)
+# Portfolio of three epics:
+#   Epic 1 — blocked work below it (via Capability 2 and directly)
+#   Epic 5 — healthy and ahead of schedule
+#   Epic 7 — nothing blocked, but behind schedule
+E1 = _epic(1, "Epic", planned=233, bv=21, pct_complete=40, pct_through_pi=30)
 C2 = _epic(2, "Capability", parent_id=1, planned=34, bv=8)
 F3 = _epic(3, "Feature", parent_id=2, planned=13, bv=5)
 F4 = _epic(4, "Feature", parent_id=1, planned=None, actual=8, bv=None)
-E5 = _epic(5, "Epic", planned=89, bv=13)
+E5 = _epic(5, "Epic", planned=89, bv=13, pct_complete=80, pct_through_pi=50)
 F6 = _epic(6, "Feature", parent_id=5, planned=5, bv=3)
+E7 = _epic(7, "Epic", planned=144, bv=2, pct_complete=10, pct_through_pi=60)
 
-EPICS = [E1, C2, F3, F4, E5, F6]
+EPICS = [E1, C2, F3, F4, E5, F6, E7]
 
 BLOCKING = {
     "summary": {"total_blocked": 2, "total_relationships": 2,
@@ -83,7 +87,7 @@ def _write_snapshot(reports_dir, date="20260701", time="120000",
 
 def test_404_when_no_snapshot(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = TestClient(app).get("/api/analysis/blocked-chains")
+    r = TestClient(app).get("/api/analysis/portfolio")
     assert r.status_code == 404
     assert "run reports" in r.json()["detail"]
 
@@ -91,7 +95,7 @@ def test_404_when_no_snapshot(tmp_path, monkeypatch):
 def test_incomplete_snapshot_is_ignored(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_snapshot(tmp_path / "reports", complete=False)
-    assert TestClient(app).get("/api/analysis/blocked-chains").status_code == 404
+    assert TestClient(app).get("/api/analysis/portfolio").status_code == 404
 
 
 def test_newest_complete_snapshot_wins(tmp_path, monkeypatch):
@@ -99,22 +103,44 @@ def test_newest_complete_snapshot_wins(tmp_path, monkeypatch):
     _write_snapshot(tmp_path / "reports", date="20260601", time="090000",
                     blocking={"relationships": []})
     _write_snapshot(tmp_path / "reports", date="20260701", time="120000")
-    body = TestClient(app).get("/api/analysis/blocked-chains").json()
+    body = TestClient(app).get("/api/analysis/portfolio").json()
     assert body["snapshot"] == {"date": "20260701", "time": "120000",
                                 "generated_at": "2026-07-01T12:00:00Z"}
     assert body["totals"]["blocked_items"] == 2
 
 
-def test_full_payload_shape_and_rollups(tmp_path, monkeypatch):
+def test_all_portfolio_epics_listed_with_flags(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_snapshot(tmp_path / "reports")
-    body = TestClient(app).get("/api/analysis/blocked-chains").json()
+    body = TestClient(app).get("/api/analysis/portfolio").json()
 
-    # E5 has no blocked descendants and must be absent.
-    assert body["totals"]["portfolio_epics_at_risk"] == 1
-    (pe,) = body["portfolio_epics"]
-    assert pe["epic"]["id"] == 1
-    assert pe["epic"]["business_value"] == 21
+    # Every epic::epic appears — healthy ones included.
+    assert body["totals"]["portfolio_epics"] == 3
+    assert body["totals"]["needs_attention"] == 2
+    by_id = {pe["epic"]["id"]: pe for pe in body["portfolio_epics"]}
+    assert set(by_id) == {1, 5, 7}
+
+    # Epic 1: blocked (and ahead of schedule).
+    assert by_id[1]["flags"] == {"blocked": True, "behind_schedule": False}
+    assert by_id[1]["needs_attention"] is True
+
+    # Epic 7: nothing blocked but trailing its PI.
+    assert by_id[7]["flags"] == {"blocked": False, "behind_schedule": True}
+    assert by_id[7]["rollup"]["blocked_count"] == 0
+    assert by_id[7]["chains"] == []
+
+    # Epic 5: healthy.
+    assert by_id[5]["needs_attention"] is False
+
+    # Attention sorts first; healthy last.
+    assert [pe["epic"]["id"] for pe in body["portfolio_epics"]] == [1, 7, 5]
+
+
+def test_rollups_and_chains(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_snapshot(tmp_path / "reports")
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    pe = next(p for p in body["portfolio_epics"] if p["epic"]["id"] == 1)
 
     # F3 planned 13 + F4 (planned null -> actual 8); BV 5 + null->0.
     assert pe["rollup"] == {"blocked_count": 2, "blocked_weight": 21,
@@ -131,23 +157,26 @@ def test_full_payload_shape_and_rollups(tmp_path, monkeypatch):
                                  "type": "Feature", "web_url": F6["web_url"]}]
     # Slim epic dicts must not leak bulky fields.
     assert "description" not in deep["nodes"][0]
+    # Schedule context ships with each epic for the UI's PI marker.
+    assert pe["epic"]["pct_through_pi"] == 30
 
 
-def test_empty_blocking_yields_zero_totals(tmp_path, monkeypatch):
+def test_empty_blocking_still_lists_portfolio(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_snapshot(tmp_path / "reports", blocking={"relationships": []})
-    body = TestClient(app).get("/api/analysis/blocked-chains").json()
-    assert body["totals"] == {"portfolio_epics_at_risk": 0, "blocked_items": 0,
-                              "blocked_weight": 0,
-                              "blocked_business_value": 0}
-    assert body["portfolio_epics"] == []
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    assert body["totals"]["portfolio_epics"] == 3
+    assert body["totals"]["blocked_items"] == 0
+    # Epic 7 still needs attention on schedule alone.
+    assert body["totals"]["needs_attention"] == 1
 
 
 def test_missing_blocking_file_is_empty_not_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_snapshot(tmp_path / "reports", blocking=None)
-    body = TestClient(app).get("/api/analysis/blocked-chains").json()
+    body = TestClient(app).get("/api/analysis/portfolio").json()
     assert body["totals"]["blocked_items"] == 0
+    assert body["totals"]["portfolio_epics"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +197,12 @@ def test_blocked_item_threatening_two_portfolio_epics_dedupes_totals():
         "blocked_by": [],
         "at_risk_portfolio_epics": [_ref(e10), _ref(e11)],
     }]}
-    body = build_blocked_chains(_by_id([e10, e11, f12]), blocking)
+    body = build_portfolio_view(_by_id([e10, e11, f12]), blocking)
 
     # Each threatened portfolio epic carries its own exposure...
-    assert body["totals"]["portfolio_epics_at_risk"] == 2
-    assert all(pe["rollup"]["blocked_weight"] == 13
-               for pe in body["portfolio_epics"])
+    at_risk = [pe for pe in body["portfolio_epics"] if pe["flags"]["blocked"]]
+    assert len(at_risk) == 2
+    assert all(pe["rollup"]["blocked_weight"] == 13 for pe in at_risk)
     # ...but grand totals count the blocked item once.
     assert body["totals"]["blocked_items"] == 1
     assert body["totals"]["blocked_weight"] == 13
@@ -189,8 +218,9 @@ def test_broken_parent_chain_is_skipped():
         "blocked_by": [],
         "at_risk_portfolio_epics": [_ref(e1)],
     }]}
-    body = build_blocked_chains(_by_id([e1, f2]), blocking)
-    assert body["portfolio_epics"] == []
+    body = build_portfolio_view(_by_id([e1, f2]), blocking)
+    (pe,) = body["portfolio_epics"]
+    assert pe["flags"]["blocked"] is False
     assert body["totals"]["blocked_items"] == 0
 
 
@@ -203,20 +233,36 @@ def test_parent_cycle_does_not_hang():
         "blocked_by": [],
         "at_risk_portfolio_epics": [_ref(e1)],
     }]}
-    body = build_blocked_chains(_by_id([e1, a, b]), blocking)
-    assert body["portfolio_epics"] == []
+    body = build_portfolio_view(_by_id([e1, a, b]), blocking)
+    (pe,) = body["portfolio_epics"]
+    assert pe["flags"]["blocked"] is False
 
 
-def test_sorted_by_bv_at_risk_desc():
-    e1 = _epic(1, "Epic")
-    f2 = _epic(2, "Feature", parent_id=1, planned=5, bv=2)
-    e3 = _epic(3, "Epic")
-    f4 = _epic(4, "Feature", parent_id=3, planned=3, bv=13)
+def test_closed_epic_is_not_behind_schedule():
+    done = _epic(1, "Epic", state="closed", pct_complete=10, pct_through_pi=90)
+    body = build_portfolio_view(_by_id([done]), {})
+    (pe,) = body["portfolio_epics"]
+    assert pe["flags"]["behind_schedule"] is False
+    assert pe["needs_attention"] is False
+
+
+def test_attention_sort_order():
+    blocked_big_bv = _epic(1, "Epic")
+    fb = _epic(2, "Feature", parent_id=1, planned=3, bv=13)
+    blocked_small_bv = _epic(3, "Epic")
+    fs = _epic(4, "Feature", parent_id=3, planned=5, bv=2)
+    behind = _epic(5, "Epic", planned=200, pct_complete=5, pct_through_pi=50)
+    healthy_heavy = _epic(6, "Epic", planned=999, pct_complete=90,
+                          pct_through_pi=10)
     blocking = {"relationships": [
-        {"blocked_epic": _ref(f2), "blocked_by": [],
-         "at_risk_portfolio_epics": [_ref(e1)]},
-        {"blocked_epic": _ref(f4), "blocked_by": [],
-         "at_risk_portfolio_epics": [_ref(e3)]},
+        {"blocked_epic": _ref(fb), "blocked_by": [],
+         "at_risk_portfolio_epics": [_ref(blocked_big_bv)]},
+        {"blocked_epic": _ref(fs), "blocked_by": [],
+         "at_risk_portfolio_epics": [_ref(blocked_small_bv)]},
     ]}
-    body = build_blocked_chains(_by_id([e1, f2, e3, f4]), blocking)
-    assert [pe["epic"]["id"] for pe in body["portfolio_epics"]] == [3, 1]
+    body = build_portfolio_view(
+        _by_id([blocked_big_bv, fb, blocked_small_bv, fs, behind,
+                healthy_heavy]),
+        blocking)
+    # Blocked by BV desc, then behind-schedule, healthy last.
+    assert [pe["epic"]["id"] for pe in body["portfolio_epics"]] == [1, 3, 5, 6]
