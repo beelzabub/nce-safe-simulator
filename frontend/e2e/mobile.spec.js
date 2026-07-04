@@ -185,4 +185,87 @@ test.describe('home workspace', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).tap()
     await expect(dialog).toBeHidden()
   })
+
+  test('side panel tabs switch and persist (epic #165)', async ({ page }) => {
+    // Tools is the default tab and hosts the job picker
+    const tabs = page.locator('.side-panel .tab-btn')
+    await expect(tabs).toHaveCount(3)
+    await expect(page.locator('.picker')).toBeVisible()
+
+    // Reports lists the mocked snapshot run; Analysis lists its tools
+    await tabs.filter({ hasText: 'Reports' }).tap()
+    await expect(page.locator('.reports-tab .run-select')).toBeVisible()
+    await tabs.filter({ hasText: 'Analysis' }).tap()
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Portfolio Explorer')
+
+    // Active tab survives a reload (localStorage). On phones the drawer
+    // starts open after load, so the panel is already visible.
+    await page.reload()
+    await expect(page.locator('.nav-bar')).toBeVisible()
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Portfolio Explorer')
+
+    // Back to Tools: picker is intact
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
+    await expect(page.locator('.picker')).toBeVisible()
+  })
+
+  test('reports tab opens a wiki page in the markdown viewer (#167)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
+
+    // Page tree mirrors the wiki hierarchy from the mocked snapshot
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toBeVisible()
+
+    // Filter narrows across the tree and keeps wiki context; × clears it
+    await page.locator('.reports-filter .filter-input').fill('health')
+    await expect(page.locator('.page-row')).toHaveCount(1)
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toHaveCount(0)
+    await page.locator('.reports-filter .filter-clear').tap()
+    await expect(page.locator('.page-row')).toHaveCount(3)
+
+    await page.locator('.page-row', { hasText: 'Portfolio Health Dashboard' }).tap()
+
+    // Main pane switches to the in-app viewer (drawer closes on phones)
+    const view = page.locator('.md-view')
+    await expect(view).toBeVisible()
+    await expect(view.locator('.md-title')).toHaveText('Portfolio Health Dashboard')
+    await expect(view.locator('.md-body table')).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+
+    // Reset the persisted tab so later tests start from Tools
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
+  })
+
+  test('portfolio explorer lists all epics and flags issues (#169)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Analysis' }).tap()
+    await page.locator('.analysis-row').tap()
+
+    const pfx = page.locator('.pfx')
+    await expect(pfx).toBeVisible()
+
+    // Totals strip: whole portfolio, attention count, BV at risk
+    await expect(pfx.locator('.stat-value').nth(0)).toHaveText('3')
+    await expect(pfx.locator('.stat--attention .stat-value')).toHaveText('2')
+    await expect(pfx.locator('.stat--bv .stat-value')).toHaveText('5')
+
+    // Every portfolio epic renders; attention sorts first, healthy last
+    const cards = pfx.locator('.epic-card')
+    await expect(cards).toHaveCount(3)
+    await expect(cards.nth(0).locator('.card-title')).toContainText('Modernize Fleet Telemetry')
+    await expect(cards.nth(0).locator('.badge--blocked')).toContainText('2 blocked')
+    await expect(cards.nth(1).locator('.badge--behind')).toBeVisible()
+    await expect(cards.nth(2).locator('.badge--ok')).toHaveText('on track')
+
+    // Top blocked card starts expanded: chain + blocked flag + blocker link
+    await expect(cards.nth(0).locator('.chain-node.blocked .node-title')).toHaveText('Parse NMEA feeds')
+    await expect(cards.nth(0).locator('.blocker-link')).toHaveText('Upgrade message bus')
+    await expectNoHorizontalOverflow(page)
+
+    // Collapse via the card head chevron
+    await cards.nth(0).locator('.card-head').tap()
+    await expect(cards.nth(0).locator('.chain-node')).toHaveCount(0)
+
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
+  })
 })
