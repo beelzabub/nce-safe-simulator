@@ -339,7 +339,7 @@ class DeckBuilder:
              "portfolio (Value Streams → ARTs → Teams) directly against the GitLab API.",
              "Generates realistic lorem test data, imports/exports epics & issues, and publishes a "
              "suite of portfolio-level reports (WSJF, Risk, Blocking, Capacity, Flow Metrics, Data Quality).",
-             "Three-tier system: a Python automation core (GraphQL against GitLab) fronted by a FastAPI "
+             "Three-tier system: a Python automation core (GitLab REST + GraphQL via python-gitlab) fronted by a FastAPI "
              "server, driving a Vue 3 web UI and a scriptable CLI — both call the same tool registry.",
              "Reports render to three surfaces: GitLab Wiki (markdown), a Quarto static site, and Marimo "
              "WASM interactive notebooks."],
@@ -383,7 +383,7 @@ class DeckBuilder:
         arch = self.new_slide()
         self.header_band(arch, "Architecture", "Three-tier system, three reporting surfaces")
         tiers = [
-            ("Python Automation Core", "NceGitLab.py + mixins/ — GraphQL calls to GitLab\n(groups, epics, issues, labels, wiki, reports)"),
+            ("Python Automation Core", "NceGitLab.py + mixins/ — GitLab REST v4 via python-gitlab,\nplus GraphQL where REST falls short (work-item/epic weight, blocking, links)"),
             ("FastAPI Server", "REST + WebSocket job runner\nstreams live logs to the browser"),
             ("Vue 3 Web UI  /  CLI", "Same tool registry exposed both ways\n(job picker + streaming UI, or scripted CLI flags)"),
         ]
