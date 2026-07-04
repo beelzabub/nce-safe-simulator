@@ -1,7 +1,8 @@
 <!-- Reports tab of the side panel (issue #167): browse report snapshot runs
-     and open wiki pages in the in-app markdown viewer. External report
-     surfaces (Quarto site, GitLab wiki, Grafana) live here too, relocated
-     from the old sidebar footer. -->
+     and open wiki pages in the in-app markdown viewer. The page list mirrors
+     the GitLab wiki hierarchy exactly (paths come from the run's pages.json
+     manifest), with a filter box matching the Tools tab's. External report
+     surfaces (Quarto site, GitLab wiki, Grafana) live at the top. -->
 <template>
   <div class="reports-tab">
 
@@ -28,18 +29,47 @@
         </select>
       </div>
 
-      <div class="page-list">
-        <div v-for="group in groupedPages" :key="group.key" class="tier-group">
-          <div class="tier-label">{{ group.label }}</div>
+      <div class="reports-filter">
+        <div class="filter-wrap">
+          <input
+            v-model="filter"
+            class="filter-input"
+            placeholder="Filter reports…"
+            spellcheck="false"
+          />
           <button
-            v-for="p in group.pages" :key="p.slug"
-            class="page-row"
-            :class="{ active: isOpen(p) }"
-            @click="open(p)"
-          >{{ p.title }}</button>
+            v-if="filter"
+            class="filter-clear"
+            @click="filter = ''"
+            aria-label="Clear filter"
+          >×</button>
         </div>
+        <span class="filter-count">
+          {{ visiblePageCount }}&thinsp;/&thinsp;{{ pages.length }}
+        </span>
+      </div>
+
+      <div class="page-list">
+        <template v-for="row in rows" :key="row.key">
+          <div
+            v-if="row.type === 'dir'"
+            class="dir-label"
+            :style="{ paddingLeft: (0.75 + row.depth * 0.85) + 'rem' }"
+          >{{ row.label }}</div>
+          <button
+            v-else
+            class="page-row"
+            :class="{ active: isOpen(row.page) }"
+            :style="{ paddingLeft: (0.9 + row.depth * 0.85) + 'rem' }"
+            :title="row.page.path || row.page.title"
+            @click="open(row.page)"
+          >{{ row.label }}</button>
+        </template>
         <div v-if="pagesLoaded && !pages.length" class="empty-state">
           This snapshot has no wiki pages.
+        </div>
+        <div v-else-if="filter && !visiblePageCount" class="empty-state">
+          No reports match “{{ filter }}”.
         </div>
       </div>
     </template>
@@ -63,25 +93,43 @@ const runs        = ref([])
 const selectedRun = ref(null)
 const pages       = ref([])
 const pagesLoaded = ref(false)
+const filter      = ref('')
 
 const wikiRuns = computed(() => runs.value.filter(r => r.has_wiki))
 
-const TIER_FALLBACK = 'Portfolio Home'
+const filteredPages = computed(() => {
+  const q = filter.value.trim().toLowerCase()
+  if (!q) return pages.value
+  return pages.value.filter(p =>
+    (p.path || p.title).toLowerCase().includes(q))
+})
 
-const groupedPages = computed(() => {
-  const groups = new Map()
-  for (const p of pages.value) {
-    const key = p.tier ?? ''
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: p.tier ? `${p.tier} · ${p.tier_name}` : TIER_FALLBACK,
-        pages: [],
-      })
-    }
-    groups.get(key).pages.push(p)
+const visiblePageCount = computed(() => filteredPages.value.length)
+
+// Rows mirroring the GitLab wiki tree: pages arrive in wiki path order, and
+// directory labels are emitted whenever a page's ancestor path diverges from
+// the previous row's. While filtering, ancestors of matches stay visible so
+// hits keep their wiki context.
+const rows = computed(() => {
+  const out = []
+  let prevDirs = []
+  for (const p of filteredPages.value) {
+    // A page's directories are every segment above the leaf; legacy entries
+    // (no manifest) fall back to the flat tier grouping.
+    const dirs = p.segments
+      ? p.segments.slice(0, -1)
+      : (p.tier ? [`${p.tier} ${p.tier_name}`] : [])
+    dirs.forEach((label, depth) => {
+      if (prevDirs[depth] !== label) {
+        out.push({ type: 'dir', key: `d:${dirs.slice(0, depth + 1).join('/')}`, label, depth })
+        prevDirs = prevDirs.slice(0, depth)
+        prevDirs[depth] = label
+      }
+    })
+    prevDirs = dirs
+    out.push({ type: 'page', key: `p:${p.slug}`, label: p.title, depth: dirs.length, page: p })
   }
-  return [...groups.values()]
+  return out
 })
 
 function formatRun(r) {
@@ -181,18 +229,67 @@ onMounted(async () => {
   padding: 0.3rem 0.4rem;
 }
 
+/* ── Filter (mirrors the Tools tab's) ── */
+.reports-filter {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.filter-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.filter-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-1);
+  padding: 5px 28px 5px 9px;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.filter-input:focus        { border-color: var(--action); }
+.filter-input::placeholder { color: var(--text-3); }
+.filter-clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.filter-clear:hover { color: var(--text-1); }
+.filter-count { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
+
+/* ── Wiki tree ── */
 .page-list {
   flex: 1;
   overflow-y: auto;
   padding: 0.25rem 0 0.75rem;
 }
-.tier-label {
+.dir-label {
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-3);
-  padding: 0.7rem 1rem 0.25rem;
+  padding-top: 0.7rem;
+  padding-bottom: 0.25rem;
+  padding-right: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .page-row {
   display: block;
@@ -202,8 +299,13 @@ onMounted(async () => {
   border: none;
   color: var(--text-2);
   font-size: 0.84rem;
-  padding: 0.42rem 1rem 0.42rem 1.35rem;
+  padding-top: 0.42rem;
+  padding-bottom: 0.42rem;
+  padding-right: 1rem;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background 0.12s, color 0.12s;
 }
 .page-row:hover  { background: var(--surface-alt); color: var(--text-1); }

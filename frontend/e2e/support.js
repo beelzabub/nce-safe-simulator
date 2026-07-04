@@ -32,8 +32,16 @@ export const RUNS = [
 ]
 
 export const WIKI_INDEX = [
-  { slug: 'home', title: 'Portfolio Home', tier: null, tier_name: null },
-  { slug: 'portfolio-health', title: 'Portfolio Health Dashboard', tier: '00', tier_name: 'Executive Pulse' },
+  { slug: 'home', title: 'NCE — Portfolio Home', path: 'NCE — Portfolio Home',
+    segments: ['NCE — Portfolio Home'], tier: null, tier_name: null },
+  { slug: 'portfolio-health', title: 'Portfolio Health Dashboard',
+    path: 'NCE — Portfolio Home/00 Executive Pulse/Portfolio Health Dashboard',
+    segments: ['NCE — Portfolio Home', '00 Executive Pulse', 'Portfolio Health Dashboard'],
+    tier: '00', tier_name: 'Executive Pulse' },
+  { slug: 'risk-register', title: 'Risk Register',
+    path: 'NCE — Portfolio Home/01 Program Management/Risk Register',
+    segments: ['NCE — Portfolio Home', '01 Program Management', 'Risk Register'],
+    tier: '01', tier_name: 'Program Management' },
 ]
 
 export const PORTFOLIO = {

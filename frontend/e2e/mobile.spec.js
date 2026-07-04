@@ -212,8 +212,18 @@ test.describe('home workspace', () => {
   test('reports tab opens a wiki page in the markdown viewer (#167)', async ({ page }) => {
     await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
 
-    // Tier-grouped page list from the mocked snapshot
-    await expect(page.locator('.tier-label').filter({ hasText: 'Executive Pulse' })).toBeVisible()
+    // Page tree mirrors the wiki hierarchy from the mocked snapshot
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toBeVisible()
+
+    // Filter narrows across the tree and keeps wiki context; × clears it
+    await page.locator('.reports-filter .filter-input').fill('health')
+    await expect(page.locator('.page-row')).toHaveCount(1)
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toHaveCount(0)
+    await page.locator('.reports-filter .filter-clear').tap()
+    await expect(page.locator('.page-row')).toHaveCount(3)
+
     await page.locator('.page-row', { hasText: 'Portfolio Health Dashboard' }).tap()
 
     // Main pane switches to the in-app viewer (drawer closes on phones)
