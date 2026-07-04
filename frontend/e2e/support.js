@@ -36,6 +36,37 @@ export const WIKI_INDEX = [
   { slug: 'portfolio-health', title: 'Portfolio Health Dashboard', tier: '00', tier_name: 'Executive Pulse' },
 ]
 
+export const BLOCKED_CHAINS = {
+  snapshot: { date: '20260701', time: '120000', generated_at: '2026-07-01T12:00:00Z' },
+  totals: { portfolio_epics_at_risk: 1, blocked_items: 2, blocked_weight: 21, blocked_business_value: 5 },
+  portfolio_epics: [
+    {
+      epic: { id: 1, iid: 1, title: 'Modernize Fleet Telemetry', state: 'opened',
+              type: 'Epic', web_url: 'https://gitlab.example/epics/1',
+              labels: ['Epic', 'project::DO'], piid: 'PIID::2026Q3',
+              planned_weight: 233, actual_weight: 90, business_value: 21, pct_complete: 38.6 },
+      rollup: { blocked_count: 2, blocked_weight: 21, blocked_business_value: 5 },
+      chains: [
+        {
+          nodes: [
+            { id: 1, title: 'Modernize Fleet Telemetry', type: 'Epic', state: 'opened',
+              web_url: 'https://gitlab.example/epics/1', labels: [], piid: 'PIID::2026Q3',
+              planned_weight: 233, actual_weight: 90, business_value: 21, pct_complete: 38.6, blocked: false },
+            { id: 2, title: 'Sensor Ingest Capability', type: 'Capability', state: 'opened',
+              web_url: 'https://gitlab.example/epics/2', labels: [], piid: 'PIID::2026Q3',
+              planned_weight: 34, actual_weight: 12, business_value: 8, pct_complete: 20, blocked: false },
+            { id: 3, title: 'Parse NMEA feeds', type: 'Feature', state: 'opened',
+              web_url: 'https://gitlab.example/epics/3', labels: [], piid: 'PIID::2026Q3',
+              planned_weight: 13, actual_weight: 5, business_value: 5, pct_complete: 10, blocked: true },
+          ],
+          blockers: [{ id: 6, title: 'Upgrade message bus', type: 'Feature',
+                       web_url: 'https://gitlab.example/epics/6' }],
+        },
+      ],
+    },
+  ],
+}
+
 export async function mockApi(page) {
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
@@ -55,6 +86,7 @@ export async function mockApi(page) {
     if (path.endsWith('/wiki/portfolio-health.json'))
       return json({ slug: 'portfolio-health', title: 'Portfolio Health Dashboard',
                     html: '<h1>Portfolio Health Dashboard</h1><table><tr><th>VS</th><th>Status</th></tr><tr><td>VS 01</td><td>Green</td></tr></table>' })
+    if (path === '/api/analysis/blocked-chains') return json(BLOCKED_CHAINS)
     return json({})
   })
 
