@@ -31,6 +31,8 @@ redeploy:
 ## Capture sprint-review deck screenshots (Playwright, ~10-15 min). See deck/README.md.
 deck-screenshots:
 	python3 deck/capture_screenshots.py
+	python3 deck/capture_diagrams.py
+	python3 deck/capture_cli_menu.py
 
 ## Build the sprint-review .pptx from live metrics + screenshots + the SAIC template
 deck:

@@ -25,6 +25,7 @@ Or run the steps directly:
 ```bash
 python3 deck/capture_screenshots.py   # -> deck/screenshots/
 python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/DoDAF diagrams)
+python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx
 ```
@@ -35,6 +36,13 @@ into `deck/screenshots/architecture/`, where `build_deck.py` drops them onto the
 architecture slides. It needs the `diagrams` package (in `requirements.txt`) and the
 Graphviz `dot` binary on PATH. If those images are absent, `build_deck.py` simply skips
 the diagram slides (with a warning) — the rest of the deck still builds.
+
+`capture_cli_menu.py` renders the CLI interactive main menu (`NceGitLab.py`'s
+`_run_main_menu`) as a terminal-style PNG for the "CLI vs. UI" slide. The live menu is
+interactive and prints runtime GitLab/server state, so this is a faithful static render
+(menu rows mirror `_run_main_menu`; the status block uses sample values) — keep its `MENU`
+list in sync if that menu changes. Needs only Pillow and the DejaVu Sans Mono system font;
+if the image is absent, `build_deck.py` skips it and the slide keeps the UI half.
 
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.
