@@ -68,7 +68,10 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	  cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never --context desired_count=0 && \
 	  echo "==> Building and pushing initial image..." && \
 	  aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
-	  docker build --platform linux/arm64 -t $$APP_NAME ../ && \
+	  docker build --platform linux/arm64 \
+	    --build-arg VCS_REF=$$(git -C .. rev-parse --short HEAD) \
+	    --build-arg NCE_VERSION=$$(git -C .. describe --tags --exact-match 2>/dev/null || true) \
+	    -t $$APP_NAME ../ && \
 	  docker tag $$APP_NAME:latest "$$REPO:latest" && \
 	  docker push "$$REPO:latest" && \
 	  echo "==> Image ready — scaling service up..."; \
@@ -124,7 +127,10 @@ ecr-push: ## Build and push :latest to ECR (follow with ecs-redeploy or eks-rede
 	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
 	printf '%s' "$$ECS_CF" > ../diagrams/cf-outputs-ecs.json && \
 	aws ecr get-login-password --region $$REGION | docker login --username AWS --password-stdin "$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com" && \
-	docker build --platform linux/arm64 -t nce-safe-simulator ../ && \
+	docker build --platform linux/arm64 \
+	  --build-arg VCS_REF=$$(git -C .. rev-parse --short HEAD) \
+	  --build-arg NCE_VERSION=$$(git -C .. describe --tags --exact-match 2>/dev/null || true) \
+	  -t nce-safe-simulator ../ && \
 	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
 	docker push "$$REPO:latest" && \
 	echo "Pushed $$REPO:latest — run 'make ecs-redeploy' or 'make eks-redeploy' to activate."
