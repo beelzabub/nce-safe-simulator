@@ -255,13 +255,13 @@ test.describe('home workspace', () => {
     await expect(pfx).toBeVisible()
 
     // Totals strip: whole portfolio, attention count, BV at risk
-    await expect(pfx.locator('.stat-value').nth(0)).toHaveText('3')
+    await expect(pfx.locator('.stat-value').nth(0)).toHaveText('13')
     await expect(pfx.locator('.stat--attention .stat-value')).toHaveText('2')
     await expect(pfx.locator('.stat--bv .stat-value')).toHaveText('5')
 
     // Every portfolio epic renders; attention sorts first, healthy last
     const cards = pfx.locator('.epic-card')
-    await expect(cards).toHaveCount(3)
+    await expect(cards).toHaveCount(13)
     await expect(cards.nth(0).locator('.card-title')).toContainText('Modernize Fleet Telemetry')
     await expect(cards.nth(0).locator('.badge--blocked')).toContainText('2 blocked')
     await expect(cards.nth(1).locator('.badge--behind')).toBeVisible()
@@ -271,6 +271,12 @@ test.describe('home workspace', () => {
     await expect(cards.nth(0).locator('.chain-node.blocked .node-title')).toHaveText('Parse NMEA feeds')
     await expect(cards.nth(0).locator('.blocker-link')).toHaveText('Upgrade message bus')
     await expectNoHorizontalOverflow(page)
+
+    // The expanded card must not be crushed by the flex column when the
+    // list outgrows the pane (clipped chains regression): its full content
+    // fits inside its own box.
+    const clipped = await cards.nth(0).evaluate(el => el.scrollHeight > el.clientHeight + 1)
+    expect(clipped, 'expanded epic card is vertically clipped').toBe(false)
 
     // Collapse via the card head chevron
     await cards.nth(0).locator('.card-head').tap()
