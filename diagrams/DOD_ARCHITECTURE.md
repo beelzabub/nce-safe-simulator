@@ -26,6 +26,7 @@ document and render natively in GitLab.
 | Operational concept | OV-1 | `ov1_operational_concept.py` | `ov1-architecture.png` |
 | System interfaces | SV-1 | `sv1_system_interfaces.py` | `sv1-architecture.png` |
 | Deployment topology (EKS) | SV-2 | `sv2_deployment_eks.py` | `sv2-architecture.png` |
+| Deployment topology (ECS Fargate) | SV-2 | `sv2_deployment_ecs.py` | `sv2ecs-architecture.png` |
 | Data flow | SV-4 | `dataflow_architecture.py` | `dataflow-architecture.png` |
 | DevSecOps pipeline | — (DevSecOps ref design) | `devsecops_pipeline.py` | `devsecops-architecture.png` |
 | Simple deployment (EKS / ECS) | SV-2 (summary) | `eks_architecture.py` / `ecs_architecture.py` | `eks-architecture.png` / `ecs-architecture.png` |
@@ -38,10 +39,17 @@ dialog. To regenerate locally:
 
 ```bash
 cd cdk
-make dod-diagrams   # OV-1, SV-1, SV-2, data flow, DevSecOps
+make dod-diagrams   # OV-1, SV-1, SV-2 (EKS + ECS), data flow, DevSecOps
 make eks-diagram    # simple EKS view (labels from live CloudFormation outputs)
 make ecs-diagram    # simple ECS view
 ```
+
+**Storage note:** persistent state (config, report snapshots, generated sites) lives on
+**local disk** when run locally or as a plain container, and on **EFS** only in the
+ECS/EKS deployments. S3 is *not* part of the runtime data path: the
+`nce-safe-sim-assets` staging bucket serves only the login-imagery curation tooling
+(`auth.background.source: "s3-test"` preview mode) and is never read in production
+(`"repo"` mode ships committed images and never imports boto3).
 
 ## PPSM — Ports, Protocols, and Services
 
@@ -56,8 +64,9 @@ make ecs-diagram    # simple ECS view
 | 7 | Browser ↔ app | (via 1–3) | 443/80 | WebSocket `/ws/run` | Job log streaming | Same session auth as HTTP; closes 1008 unauthenticated |
 | 8 | App | GitLab | 443 | HTTPS | REST v4 + GraphQL (system of record) | PAT with `api` scope; TLS verify on by default |
 | 9 | App pod/task | EFS | 2049 | NFS (TLS in transit) | `/config /reports /interactive /quarto-site` | EFS SG ingress tcp/2049 from cluster SG only |
-| 10 | App | AWS SSM / S3 / CloudWatch | 443 | HTTPS | Config pull, background staging, log delivery | IRSA / task role, least-privilege (`ssm:GetParameter` on `/nce/config`) |
+| 10 | App | AWS SSM / CloudWatch | 443 | HTTPS | Config pull (boot), log delivery | IRSA / task role, least-privilege (`ssm:GetParameter` on `/nce/config`) |
 | 11 | Amazon Managed Grafana | CloudFront `/data/*.json` | 443 | HTTPS | Dashboard datasource (Infinity plugin) | Read-only report JSON; AMG auth via IAM Identity Center |
+| 12 | App | AWS S3 (`nce-safe-sim-assets`) | 443 | HTTPS | Login-imagery curation preview **only** (`s3-test` mode) | Inactive in production — `source: "repo"` never reads the bucket |
 
 Local development listens on `127.0.0.1:4645` (configurable) and is out of
 scope for the boundary.
@@ -105,7 +114,8 @@ sequenceDiagram
 | Authentication | `none` (default, cosmetic) or `basic` (dev credential); CAC/PKI, OIDC, SAML, LDAP, and local accounts are planned plug-ins in `server/auth_gate.py` (issues #152–#156) |
 | Sessions | In-memory, `secrets.token_urlsafe(32)`, 12-hour TTL, cookie `nce_session`; lost on restart by design |
 | Secrets | GitLab PAT never committed — SSM SecureString in cloud, env var locally; Grafana API key in SSM with 30-day rotation |
-| Data at rest | EFS encrypted, transit encryption enabled; content is synthetic portfolio data |
+| Data at rest | Local disk (local/single-box) or EFS (ECS/EKS — encrypted, transit encryption enabled); content is synthetic portfolio data |
+| Login imagery | Committed to the repo (`media/login-backgrounds/`); the S3 staging bucket is curation tooling only (`s3-test` preview) and is never read in production |
 | Logging | Job/stdout logs to CloudWatch (`/eks/nce-eks`, `/ecs/nce-safe-simulator`), 1-month retention |
 | Network | No inbound admin ports — `make eks-exec`/`ecs-exec` uses SSM exec; ALB reachable only from CloudFront |
 

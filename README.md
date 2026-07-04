@@ -1163,6 +1163,7 @@ Beyond the two deployment summaries, `diagrams/` carries a standard set of DoD-s
 | Operational concept (stakeholders → system → GitLab → reporting) | OV-1 | `ov1_operational_concept.py` |
 | System interfaces (components + every external interface w/ protocol & port) | SV-1 | `sv1_system_interfaces.py` |
 | Deployment topology (EKS trust zones, security groups, ports) | SV-2 | `sv2_deployment_eks.py` |
+| Deployment topology (ECS Fargate trust zones, security groups, ports) | SV-2 | `sv2_deployment_ecs.py` |
 | Data flow (sources → snapshot pipeline → EFS stores → egress) | SV-4 | `dataflow_architecture.py` |
 | DevSecOps pipeline (CI + operator deploy paths) | — | `devsecops_pipeline.py` |
 
