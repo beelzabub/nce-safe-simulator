@@ -55,11 +55,12 @@ import { useJobs }         from '../composables/useJobs.js'
 import { useMainView }     from '../composables/useMainView.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
-const { mainView, reportPage, showMain } = useMainView()
+const { mainView, contentEpoch, showMain } = useMainView()
 
-// Opening a report (or any main-view change from the panel) should reveal
-// the main pane on phones, same as launching a job does.
-watch([mainView, reportPage], () => {
+// Opening a report page or an analysis reveals the main pane on phones,
+// same as launching a job. Tab switches don't bump the epoch — the drawer
+// stays open while browsing tabs (#171).
+watch(contentEpoch, () => {
   if (isMobile.matches) sidebarOpen.value = false
 })
 

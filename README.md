@@ -452,7 +452,7 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
 | Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button. **Reports** browses snapshot runs and opens wiki pages in the in-app markdown viewer, with external links (**Quarto ↗**, **GitLab ↗**, **Grafana ↗**) at the top. **Analysis** hosts portfolio analysis tools computed from snapshots — first up, the **Portfolio Explorer** |
-| Main pane | Job runner — one tab per launched job with streaming log output — plus the docked CLI command bar; report and analysis views render here as siblings when opened from their tabs |
+| Main pane | Owned by the active side-panel tab: **Tools** shows the job runner (one card per launched job with streaming log output, plus the docked CLI command bar), **Reports** the markdown viewer, **Analysis** the Portfolio Explorer. Launching a job pulls the runner forward from any tab |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
 #### Mobile support

@@ -10,6 +10,11 @@ const mainView = ref('jobs')
 // fetches content itself so a stale page never flashes while loading.
 const reportPage = ref(null)
 
+// Bumped only by content actions (opening a page / an analysis), never by
+// plain tab-driven view switches — the phone drawer closes on content
+// actions so the result is visible, but stays open while browsing tabs.
+const contentEpoch = ref(0)
+
 export function useMainView() {
   function showMain(view) {
     mainView.value = view
@@ -17,9 +22,11 @@ export function useMainView() {
   function openReport(page) {
     reportPage.value = page
     mainView.value = 'report'
+    contentEpoch.value++
   }
   function openAnalysis() {
     mainView.value = 'analysis'
+    contentEpoch.value++
   }
-  return { mainView, reportPage, showMain, openReport, openAnalysis }
+  return { mainView, reportPage, contentEpoch, showMain, openReport, openAnalysis }
 }
