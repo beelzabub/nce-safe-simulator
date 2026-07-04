@@ -90,6 +90,18 @@ test.describe('home workspace', () => {
     }
   })
 
+  test('version badge shows bottom-right on tablets/desktop (#173)', async ({ page }) => {
+    const badge = page.locator('.version-badge')
+    if (await phoneLayout(page)) {
+      await expect(badge).toBeHidden()   // corners are tap-targets on phones
+      return
+    }
+    await expect(badge).toHaveText('nce-abc1234')
+    const [box, viewport] = [await badge.boundingBox(), page.viewportSize()]
+    expect(box.x + box.width, 'anchored right').toBeGreaterThan(viewport.width * 0.8)
+    expect(box.y + box.height, 'anchored bottom').toBeGreaterThan(viewport.height * 0.9)
+  })
+
   test('nav bar controls meet tap-target size', async ({ page }) => {
     test.skip(!(await coarsePointer(page)), 'touch-target rules only apply to coarse pointers')
     for (const selector of ['.status-btn', '.config-btn', '.help-btn', '.theme-btn', '.signout-btn']) {

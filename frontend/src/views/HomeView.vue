@@ -31,6 +31,8 @@
 
     </div>
 
+    <span v-if="appVersion" class="version-badge" :class="{ 'version-badge--shifted': deploymentType }">{{ appVersion }}</span>
+
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
     <ArchitectureDialog v-if="showArchitecture" :deployment-type="deploymentType" @close="showArchitecture = false" />
@@ -77,6 +79,7 @@ const showArchitecture = ref(false)
 const gitlabWikiUrl  = ref('')
 const grafanaUrl     = ref('')
 const deploymentType = ref('')
+const appVersion     = ref('')
 
 onMounted(async () => {
   loadDiskHistory()
@@ -87,6 +90,7 @@ onMounted(async () => {
       gitlabWikiUrl.value  = data.wiki_url        || ''
       grafanaUrl.value     = data.grafana_url     || ''
       deploymentType.value = data.deployment_type || ''
+      appVersion.value     = data.version         || ''
     }
   } catch { /* server not yet ready */ }
 })
@@ -197,5 +201,25 @@ function onLaunchReports(reports, fmts, useLast) {
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
+}
+
+/* ── Version badge (issue #173) — bottom-right, unobtrusive ── */
+.version-badge {
+  position: fixed;
+  bottom: 0.35rem;
+  right: 0.75rem;
+  z-index: 140;
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-3);
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: text;
+}
+/* The AWS architecture button occupies the corner on ECS/EKS — sit left of it */
+.version-badge--shifted { right: calc(1.1rem + 56px + 12px); bottom: 1.35rem; }
+
+@media (max-width: 768px) {
+  .version-badge { display: none; }   /* corners are tap-targets on phones */
 }
 </style>
