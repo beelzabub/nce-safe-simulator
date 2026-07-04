@@ -28,7 +28,7 @@ def main():
         "rankdir": "LR",
         "splines": "spline",
         "labelloc": "t",
-        "label": "DevSecOps Pipeline — CI on every push; operator-driven container deploy",
+        "label": "DevSecOps Pipeline — CI tests on every push; cloud deploys are optional and on-demand",
     }
     node_attr = {"fontsize": "13"}
 
@@ -56,7 +56,7 @@ def main():
             cdk   = Cloudformation("CDK deploy\n(nce-ecs / nce-eks stacks)\n+ Helm chart")
             ssm   = SystemsManagerParameterStore("SSM seed-config\n/nce/config")
 
-        with Cluster("Runtime targets"):
+        with Cluster("Optional runtime targets — deployed on demand,\ntorn down when idle (make *-destroy)"):
             eks = EKS("EKS nce-eks\n(rolling restart)")
             ecs = ECS("ECS Fargate nce\n(circuit-breaker rollback)")
 
@@ -64,13 +64,13 @@ def main():
         repo >> test
         repo >> Edge(label="merge to develop") >> pages >> pages_site
 
-        dev >> Edge(label="make ecr-push") >> build >> ecr
-        dev >> Edge(label="make *-full-deploy") >> cdk
+        dev >> Edge(label="make ecr-push\n(when releasing)") >> build >> ecr
+        dev >> Edge(label="make *-full-deploy\n(when standing up)") >> cdk
         ssm >> Edge(style="dashed", label="config at boot") >> eks
-        ecr >> Edge(label="image pull") >> eks
-        ecr >> Edge(label="image pull") >> ecs
-        cdk >> eks
-        cdk >> ecs
+        ecr >> Edge(style="dashed", label="image pull\n(at deploy)") >> eks
+        ecr >> Edge(style="dashed", label="image pull\n(at deploy)") >> ecs
+        cdk >> Edge(style="dashed") >> eks
+        cdk >> Edge(style="dashed") >> ecs
 
 
 if __name__ == "__main__":
