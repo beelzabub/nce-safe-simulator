@@ -160,8 +160,10 @@ onMounted(async () => {
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
 
+  // 'eks'/'ecs' are deployment-specific summaries; the DoD views apply everywhere.
+  const DEPLOYMENT_KEYS = ['eks', 'ecs']
   const candidates = props.deploymentType
-    ? ALL_TABS.filter(t => t.key === props.deploymentType)
+    ? ALL_TABS.filter(t => t.key === props.deploymentType || !DEPLOYMENT_KEYS.includes(t.key))
     : ALL_TABS
 
   const results = await Promise.all(candidates.map(t => probe(t.key)))
