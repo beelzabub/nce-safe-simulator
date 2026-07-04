@@ -20,13 +20,24 @@ make deck-screenshots   # Playwright: capture UI dialogs + Quarto reports (~10-1
 make deck               # fetch live metrics, then build the .pptx
 ```
 
-Or run the three steps directly:
+Or run the steps directly:
 
 ```bash
 python3 deck/capture_screenshots.py   # -> deck/screenshots/
+python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/DoDAF diagrams)
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx
 ```
+
+`capture_diagrams.py` renders the architecture view set (`diagrams/*.py` — the same
+OV-1 / SV-1 / SV-2 / data-flow / DevSecOps views the container builds at image time)
+into `deck/screenshots/architecture/`, where `build_deck.py` drops them onto the DoD
+architecture slides. It needs the `diagrams` package (in `requirements.txt`) and the
+Graphviz `dot` binary on PATH. If those images are absent, `build_deck.py` simply skips
+the diagram slides (with a warning) — the rest of the deck still builds.
+
+`build_deck.py` also pulls **every** project issue live via `glab` for the paginated
+Issues table, so `glab` must be authenticated when building.
 
 All three are read-only against the target app **except one deliberate exception**:
 `live_run_shots` in `shots.yaml` selects a parameterless, explicitly read-only tool
