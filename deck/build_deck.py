@@ -472,6 +472,24 @@ class DeckBuilder:
             self.add_text(s, cell_x(2) + pad, y + Emu(45000), cols[2][1] - 2 * pad, row_h, shows, 9, body_color)
             y += row_h
 
+        # --- Diagram slides: the actual rendered DoDAF views (generated from
+        # diagrams/*.py into screenshots/architecture/ — see README/dod-diagrams). ---
+        arch_dir = os.path.join(self.screenshots_dir, "architecture")
+        diagrams = [
+            ("ov1-architecture.png",      "OV-1 — Operational Concept"),
+            ("sv1-architecture.png",      "SV-1 — System Interfaces"),
+            ("sv2-eks-architecture.png",  "SV-2 — Deployment Topology (EKS)"),
+            ("sv2-ecs-architecture.png",  "SV-2 — Deployment Topology (ECS Fargate)"),
+            ("dataflow-architecture.png", "SV-4 — Data Flow"),
+            ("devsecops-architecture.png", "DevSecOps Pipeline"),
+        ]
+        for fname, title in diagrams:
+            path = os.path.join(arch_dir, fname)
+            if os.path.exists(path):
+                self.full_bleed_image_slide(title, path, dark=False)
+            else:
+                print(f"  warn: architecture diagram not found, skipping slide: {path}")
+
         # --- Slide 2: security posture & known gaps ---
         s2 = self.new_slide()
         self.header_band(s2, "Security Posture & Known Gaps",
