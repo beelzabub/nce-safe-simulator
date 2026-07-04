@@ -35,6 +35,7 @@ from server.auth_gate import (
     session_valid,
     verify_credentials,
 )
+from server.analysis import blocked_chains_payload
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
@@ -439,6 +440,22 @@ def list_history():
             })
 
     return runs
+
+
+@app.get("/api/analysis/blocked-chains")
+def analysis_blocked_chains():
+    """Blocked portfolio chains with weight/BV rollups (epic #165).
+
+    Reads the newest complete report snapshot from disk — no GitLab calls.
+    404s with a hint when no snapshot exists yet.
+    """
+    data_dir = _resolve_reuse_data("last")
+    if data_dir is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No complete report snapshot found — run reports first.",
+        )
+    return blocked_chains_payload(data_dir)
 
 
 @app.get("/api/runs")
