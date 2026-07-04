@@ -172,7 +172,10 @@ class DeckBuilder:
 
     def header_band(self, slide, title, subtitle=None):
         self.add_rect(slide, 0, 0, self.SW, Emu(685800), self.C["blue"])
-        self.add_text(slide, Emu(320000), Emu(90000), self.SW - Emu(640000), Emu(360000), title, 22, WHITE, bold=True)
+        # Auto-shrink long titles so they stay on one line inside the band.
+        tsize = 22 if len(title) <= 46 else (18 if len(title) <= 60 else 15)
+        self.add_text(slide, Emu(320000), Emu(90000), self.SW - Emu(640000), Emu(360000), title, tsize,
+                      WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE if not subtitle else MSO_ANCHOR.TOP, wrap=False)
         if subtitle:
             self.add_text(slide, Emu(320000), Emu(430000), self.SW - Emu(640000), Emu(220000), subtitle, 10.5, WHITE)
         self.add_rect(slide, 0, Emu(685800), self.SW, Emu(27000), self.C["yellow"])
@@ -339,7 +342,7 @@ class DeckBuilder:
              "portfolio (Value Streams → ARTs → Teams) directly against the GitLab API.",
              "Generates realistic lorem test data, imports/exports epics & issues, and publishes a "
              "suite of portfolio-level reports (WSJF, Risk, Blocking, Capacity, Flow Metrics, Data Quality).",
-             "Three-tier system: a Python automation core (GitLab REST v4 via python-gitlab, plus direct GraphQL calls) fronted by a FastAPI "
+             "Three-tier system: a Python automation core (GitLab REST v4 via python-gitlab, plus direct GraphQL calls), frontend by a FastAPI "
              "server, driving a Vue 3 web UI and a scriptable CLI — both call the same tool registry.",
              "Reports render to three surfaces: GitLab Wiki (markdown), a Quarto static site, and Marimo "
              "WASM interactive notebooks."],
@@ -348,18 +351,8 @@ class DeckBuilder:
         self._build_architecture_slide()
         self._build_dod_architecture_slides()
         self._build_deployment_slide()
-        self.capability_slide(
-            "CLI vs. UI", "Same tool registry, two front ends",
-            ["CLI (NceGitLab.py): interactive numbered menu or scripted flags — built for automation and CI.",
-             "Web UI (Vue 3 + FastAPI): job picker with search, parameterized tool dialogs, live streaming "
-             "log viewer, session history, in-browser config editor, dark/light theme.",
-             "Every dialog shows its exact CLI equivalent inline — the UI is a guided front end over the "
-             "same commands, not a separate code path.",
-             "UI adds guardrails CLI doesn't enforce as a step: confirmation gating on mutating tools, "
-             "live status panel, auto-refreshing running-jobs list."],
-            image_path=os.path.join(self.screenshots_dir, "05-import-export-import-epics_light-cli-closeup.png"),
-            caption="Import Epics dialog (lower half) — every field mirrored by the generated CLI command",
-        )
+        self._build_make_slide()
+        self._build_cli_vs_ui_slide()
         m = self.metrics
         self.capability_slide(
             "Development Process & Tools", "Engineering discipline behind the build",
@@ -371,9 +364,10 @@ class DeckBuilder:
              "automation core it verifies (see Metrics).",
              "pytest markers (unit / integration / infra) separate fast tests from live AWS/K8s checks; "
              "Makefile standardizes the local fetch → render → publish → deploy pipeline.",
-             "Dedicated security-hygiene pass: leaked token scrubbed from git history, secrets moved to "
-             "environment variables.",
-             "Stack: Python (python-gitlab GraphQL, boto3, FastAPI, pandas, Plotly), Vue 3, Quarto, "
+             "Dedicated security-hygiene pass: after a GitLab token leaked into a commit, the entire "
+             "repository history was rewritten so no commit anywhere retains the token, and all secrets "
+             "were moved to environment variables.",
+             "Stack: Python (python-gitlab REST + GraphQL, boto3, FastAPI, pandas, Plotly), Vue 3, Quarto, "
              "Marimo, Docker, AWS CDK, Helm, optional Grafana."],
             image_path=os.path.join(self.screenshots_dir, "14-live-job-diagnose-03-completed.png"),
             caption="Diagnose — live API/compatibility check output",
@@ -387,15 +381,15 @@ class DeckBuilder:
             ("FastAPI Server", "REST + WebSocket job runner\nstreams live logs to the browser"),
             ("Vue 3 Web UI  /  CLI", "Same tool registry exposed both ways\n(job picker + streaming UI, or scripted CLI flags)"),
         ]
-        tier_w, gap, start_x, tier_y, tier_h = Emu(2850000), Emu(90000), Emu(180000), Emu(1150000), Emu(1050000)
+        tier_w, gap, start_x, tier_y, tier_h = Emu(2850000), Emu(90000), Emu(180000), Emu(1150000), Emu(1130000)
         for i, (t, desc) in enumerate(tiers):
             x = start_x + i * (tier_w + gap)
             box = self.add_rect(arch, x, tier_y, tier_w, tier_h, RGBColor(0xF5, 0xF6, 0xF7))
             box.line.color.rgb = self.C["blue"]
             box.line.width = Pt(1.25)
             self.add_rect(arch, x, tier_y, tier_w, Emu(60000), self.C["blue"])
-            self.add_text(arch, x + Emu(80000), tier_y + Emu(140000), tier_w - Emu(160000), Emu(300000), t, 13, self.C["blue"], bold=True)
-            self.add_text(arch, x + Emu(80000), tier_y + Emu(460000), tier_w - Emu(160000), Emu(560000), desc, 10, GRAY)
+            self.add_text(arch, x + Emu(80000), tier_y + Emu(130000), tier_w - Emu(160000), Emu(300000), t, 13, self.C["blue"], bold=True)
+            self.add_text(arch, x + Emu(80000), tier_y + Emu(440000), tier_w - Emu(160000), Emu(660000), desc, 9, GRAY)
             if i < len(tiers) - 1:
                 arrow = arch.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, x + tier_w, tier_y + tier_h // 2 - Emu(60000), gap, Emu(120000))
                 arrow.fill.solid(); arrow.fill.fore_color.rgb = self.C["yellow"]
@@ -545,6 +539,80 @@ class DeckBuilder:
             "CI (.gitlab-ci.yml): full pytest suite on every push; Quarto → GitLab Pages publish gated to the develop branch.",
             "Optional Amazon Managed Grafana (~$9/editor/mo) — off by default, toggled per deployment.",
         ], 12, RGBColor(0x2A, 0x2E, 0x32))
+
+    def _build_make_slide(self):
+        """Build & deploy automation — the two Makefiles (repo-root build pipeline
+        and cdk/ deploy orchestration)."""
+        s = self.new_slide()
+        self.header_band(s, "Build & Deploy Automation",
+                         "Two Makefiles: a repo-root build pipeline and a cdk/ deploy orchestrator")
+        margin, gap = Emu(180000), Emu(160000)
+        panel_w = (self.SW - 2 * margin - gap) // 2
+        lx, rx = margin, margin + panel_w + gap
+        head_y, body_y = Emu(820000), Emu(1150000)
+        body_h = self.SH - body_y - Emu(160000)
+        body_color = RGBColor(0x2A, 0x2E, 0x32)
+
+        self.add_rect(s, lx, head_y, panel_w, Emu(260000), self.C["blue"])
+        self.add_text(s, lx + Emu(80000), head_y, panel_w - Emu(160000), Emu(260000),
+                      "Top-level  Makefile  — build & run", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_bullets(s, lx + Emu(40000), body_y, panel_w - Emu(80000), body_h, [
+            "make build — full pipeline: data → interactive → static.",
+            "make data — NceGitLab.py --report all (fetch report data from GitLab).",
+            "make interactive — export the Marimo WASM notebooks (build_interactive.py).",
+            "make static — quarto render (build the Quarto report site).",
+            "make serve — serve the built site locally on :4645.",
+            "make deploy-local / redeploy — single-box EC2 bring-up (image + app + Caddy TLS), then hot-swap the app container.",
+            "make deck-screenshots / deck — regenerate this sprint-review deck.",
+        ], 10.5, body_color, space_after=7)
+
+        self.add_rect(s, rx, head_y, panel_w, Emu(260000), self.C["green"])
+        self.add_text(s, rx + Emu(80000), head_y, panel_w - Emu(160000), Emu(260000),
+                      "cdk/Makefile  — deploy orchestration", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_bullets(s, rx + Emu(40000), body_y, panel_w - Emu(80000), body_h, [
+            "Setup (once): install, bootstrap, set-vpc, set-efs.",
+            "ECS/Fargate: ecs-deploy, ecs-redeploy, ecs-logs, ecs-exec, ecs-destroy, ecs-full-(re)deploy.",
+            "EKS/K8s: eks-deploy, eks-helm-install, eks-lb-controller, eks-cloudfront-deploy, eks-redeploy, eks-destroy.",
+            "Diagrams: ecs-diagram, eks-diagram, dod-diagrams (regenerate architecture PNGs).",
+            "Grafana: grafana-setup, ecs-/eks-grafana-deploy (Infinity plugin + dashboards).",
+            "seed-config (config.json → SSM SecureString), ecr-push, audit.",
+            "*-full-redeploy targets run unattended: teardown → deploy → validate.",
+        ], 10.5, body_color, space_after=7)
+
+    def _build_cli_vs_ui_slide(self):
+        """CLI vs. UI — side-by-side: the CLI interactive menu and the UI dialog
+        that generates the equivalent CLI command."""
+        s = self.new_slide()
+        self.header_band(s, "CLI vs. UI",
+                         "Same tool registry, two front ends — every UI dialog shows its exact CLI command")
+        margin, gap = Emu(180000), Emu(160000)
+        panel_w = (self.SW - 2 * margin - gap) // 2
+        lx, rx = margin, margin + panel_w + gap
+        label_y, img_y, img_h = Emu(820000), Emu(1150000), Emu(2820000)
+        cap_y = img_y + img_h + Emu(30000)
+
+        self.add_text(s, lx, label_y, panel_w, Emu(280000), "CLI — interactive numbered menu", 13,
+                      self.C["blue"], bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        menu = os.path.join(self.screenshots_dir, "cli-interactive-menu.png")
+        if os.path.exists(menu):
+            self.add_picture_contain(s, menu, lx, img_y, panel_w, img_h)
+        self.add_text(s, lx, cap_y, panel_w, Emu(220000),
+                      "NceGitLab.py — this menu, or scripted flags for CI", 9, GRAY,
+                      align=PP_ALIGN.CENTER, italic=True)
+
+        self.add_text(s, rx, label_y, panel_w, Emu(280000), "Web UI — guided dialog", 13,
+                      self.C["blue"], bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        ui = os.path.join(self.screenshots_dir, "05-import-export-import-epics_light-cli-closeup.png")
+        if os.path.exists(ui):
+            self.add_picture_contain(s, ui, rx, img_y, panel_w, img_h)
+        self.add_text(s, rx, cap_y, panel_w, Emu(220000),
+                      "Import Epics dialog — the same command, generated for you", 9, GRAY,
+                      align=PP_ALIGN.CENTER, italic=True)
+
+        self.add_text(s, margin, self.SH - Emu(400000), self.SW - 2 * margin, Emu(320000),
+                      "Both front ends call the same tool registry — the UI is a guided layer over the same "
+                      "commands, adding confirmation gating, a live status panel, and streaming logs.",
+                      11, RGBColor(0x2A, 0x2E, 0x32), align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
 
     def build_metrics_slide(self):
         m = self.metrics
@@ -727,6 +795,13 @@ class DeckBuilder:
              "Runs pytest on every push; publishes the Quarto site to Pages."),
         ]),
     ]
+
+    def _section_divider(self, title, subtitle=None):
+        """Standard section-break slide using the template's Divider layout."""
+        d = self.new_slide(self.DIVIDER1)
+        text = f"{title}\n{subtitle}" if subtitle else title
+        d.placeholders[0].text_frame.paragraphs[0].text = text
+        return d
 
     def build_tech_stack(self):
         """Section divider + a paginated three-column table (Technology / What it
@@ -933,7 +1008,9 @@ class DeckBuilder:
         self.build_agenda()
         self.build_chrome_slides()
         self.build_tech_stack()
+        self._section_divider("By the Numbers", "Project Metrics")
         self.build_metrics_slide()
+        self._section_divider("Issues", "Full Backlog — every issue by number")
         self.build_issues_table()
         self.build_capability_slides()
         self.build_wrapup()
