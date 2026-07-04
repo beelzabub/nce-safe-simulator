@@ -69,13 +69,14 @@ BLOCKING = {
 
 
 def _write_snapshot(reports_dir, date="20260701", time="120000",
-                    epics=EPICS, blocking=BLOCKING, complete=True):
+                    epics=EPICS, blocking=BLOCKING, complete=True,
+                    graph_name="blocking_graph.json"):
     data = reports_dir / date / time / "data"
     data.mkdir(parents=True)
     (data / "epics.json").write_text(json.dumps(
         {"generated_at": "2026-07-01T12:00:00Z", "epics": epics}))
     if blocking is not None:
-        (data / "blocking.json").write_text(json.dumps(blocking))
+        (data / graph_name).write_text(json.dumps(blocking))
     if complete:
         (data / "snapshot.complete").touch()
     return data
@@ -174,6 +175,29 @@ def test_empty_blocking_still_lists_portfolio(tmp_path, monkeypatch):
 def test_missing_blocking_file_is_empty_not_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_snapshot(tmp_path / "reports", blocking=None)
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    assert body["totals"]["blocked_items"] == 0
+    assert body["totals"]["portfolio_epics"] == 3
+
+
+def test_legacy_blocking_json_fallback(tmp_path, monkeypatch):
+    # Pre-#172 runs only have blocking.json; a well-formed one still works.
+    monkeypatch.chdir(tmp_path)
+    _write_snapshot(tmp_path / "reports", graph_name="blocking.json")
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    assert body["totals"]["blocked_items"] == 2
+
+
+def test_clobbered_legacy_blocking_json_degrades_gracefully(tmp_path, monkeypatch):
+    # Pre-#172 runs where the Quarto data layer overwrote blocking.json:
+    # different schema, no relationships — an empty graph, not an error.
+    monkeypatch.chdir(tmp_path)
+    quarto_shape = {"report_date": "2026-07-01",
+                    "summary": {"total_blocked": 8, "total_relationships": 8,
+                                "total_portfolio_risk": 0, "total_cross_art": 2},
+                    "portfolio_risk": [], "vs_cross_art": [], "blocked_items": []}
+    _write_snapshot(tmp_path / "reports", blocking=quarto_shape,
+                    graph_name="blocking.json")
     body = TestClient(app).get("/api/analysis/portfolio").json()
     assert body["totals"]["blocked_items"] == 0
     assert body["totals"]["portfolio_epics"] == 3
