@@ -686,12 +686,7 @@ class DeckBuilder:
                       "commands, adding confirmation gating, a live status panel, and streaming logs.",
                       11, RGBColor(0x2A, 0x2E, 0x32), align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
 
-    def build_metrics_slide(self):
-        m = self.metrics
-        metrics_s = self.new_slide()
-        first, last = m["first_commit_date"], m["last_commit_date"]
-        self.header_band(metrics_s, "By the Numbers", f"Development timeline: {first} – {last}  (no formal sprint cadence)")
-
+    def _kpi_tiles(self, slide, m):
         sloc_total = m["sloc"]["grand_total"]
         kpis = [
             (str(m["issues_total"]), f"Issues ({m['issues_closed']} closed)", self.C["blue"]),
@@ -699,80 +694,133 @@ class DeckBuilder:
             (str(m["commits_total"]), "Commits", self.C["green"]),
             (f"~{sloc_total / 1000:.1f}K", "Lines of Code", self.C["yellow"]),
         ]
-        tile_w, gap, tile_y, tile_h = Emu(2130000), Emu(60000), Emu(830000), Emu(1000000)
+        tile_w, gap, tile_y, tile_h = Emu(2130000), Emu(60000), Emu(830000), Emu(980000)
         for i, (num, label, color) in enumerate(kpis):
             x = Emu(140000) + i * (tile_w + gap)
-            tile = self.add_rect(metrics_s, x, tile_y, tile_w, tile_h, RGBColor(0xF5, 0xF6, 0xF7))
+            tile = self.add_rect(slide, x, tile_y, tile_w, tile_h, RGBColor(0xF5, 0xF6, 0xF7))
             tile.line.color.rgb = color
             tile.line.width = Pt(1.25)
-            self.add_rect(metrics_s, x, tile_y, tile_w, Emu(70000), color)
-            self.add_text(metrics_s, x + Emu(60000), tile_y + Emu(160000), tile_w - Emu(120000), Emu(420000),
+            self.add_rect(slide, x, tile_y, tile_w, Emu(70000), color)
+            self.add_text(slide, x + Emu(60000), tile_y + Emu(150000), tile_w - Emu(120000), Emu(420000),
                           num, 30, color, bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-            self.add_text(metrics_s, x + Emu(60000), tile_y + Emu(620000), tile_w - Emu(120000), Emu(340000),
+            self.add_text(slide, x + Emu(60000), tile_y + Emu(600000), tile_w - Emu(120000), Emu(340000),
                           label, 10, GRAY, align=PP_ALIGN.CENTER)
 
-        chart_y, chart_h, chart_w, chart_x = Emu(1980000), Emu(2950000), Emu(5300000), Emu(140000)
-        self.add_text(metrics_s, chart_x, chart_y, chart_w, Emu(240000), "Commit Velocity by Month", 13, self.C["blue"], bold=True)
+    def _footer_note(self, slide, text):
+        self.add_rect(slide, 0, self.SH - Emu(300000), self.SW, Emu(300000), RGBColor(0xF5, 0xF6, 0xF7))
+        self.add_text(slide, Emu(140000), self.SH - Emu(280000), Emu(8800000), Emu(260000),
+                      text, 9, GRAY, anchor=MSO_ANCHOR.MIDDLE)
+
+    def build_metrics_slide(self):
+        """Two slides: (1) KPI tiles + commit velocity + SLOC-by-week growth,
+        (2) issue-status donut and MR-status bar with value labels. Split from
+        one crowded slide so every chart has room and actually renders."""
+        m = self.metrics
+        first, last = m["first_commit_date"], m["last_commit_date"]
+
+        # ---- Slide 1: activity & code growth ----
+        s1 = self.new_slide()
+        self.header_band(s1, "By the Numbers", f"Development activity & code growth · {first} – {last}")
+        self._kpi_tiles(s1, m)
+
+        cy, ch = Emu(2020000), Emu(2360000)
+        lx, lw = Emu(140000), Emu(4340000)
+        self.add_text(s1, lx, cy, lw, Emu(240000), "Commit Velocity by Month", 13, self.C["blue"], bold=True)
         trend = m["monthly_commit_trend"]
-        chart_data = CategoryChartData()
-        chart_data.categories = list(trend.keys())
-        chart_data.add_series("Commits", list(trend.values()))
-        gframe = metrics_s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, chart_x, chart_y + Emu(260000),
-                                            chart_w, chart_h - Emu(260000), chart_data)
-        chart = gframe.chart
-        chart.has_legend = False
-        plot = chart.plots[0]
-        plot.has_data_labels = True
-        plot.data_labels.font.size = Pt(10)
-        plot.data_labels.font.color.rgb = GRAY
-        plot.series[0].format.fill.solid()
-        plot.series[0].format.fill.fore_color.rgb = self.C["blue"]
-        chart.category_axis.tick_labels.font.size = Pt(10)
-        chart.value_axis.visible = False
-        chart.value_axis.has_major_gridlines = False
+        cd = CategoryChartData()
+        cd.categories = list(trend.keys())
+        cd.add_series("Commits", list(trend.values()))
+        g = s1.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, lx, cy + Emu(280000), lw, ch, cd).chart
+        g.has_legend = False
+        gp = g.plots[0]
+        gp.has_data_labels = True
+        gp.data_labels.show_value = True
+        gp.data_labels.font.size = Pt(10)
+        gp.data_labels.font.color.rgb = GRAY
+        gp.series[0].format.fill.solid()
+        gp.series[0].format.fill.fore_color.rgb = self.C["blue"]
+        g.category_axis.tick_labels.font.size = Pt(10)
+        g.value_axis.visible = False
+        g.value_axis.has_major_gridlines = False
 
-        donut_x, donut_w = Emu(5580000), Emu(2320000)
-        self.add_text(metrics_s, donut_x, chart_y, donut_w, Emu(240000), "Issue Status", 13, self.C["blue"], bold=True)
-        donut_data = CategoryChartData()
-        donut_data.categories = ["Closed", "Open"]
-        donut_data.add_series("Issues", (m["issues_closed"], m["issues_open"]))
-        dframe = metrics_s.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, donut_x, chart_y + Emu(260000), donut_w, Emu(1500000), donut_data)
-        dchart = dframe.chart
-        dchart.has_legend = True
-        dchart.legend.position = XL_LEGEND_POSITION.BOTTOM
-        dchart.legend.include_in_layout = False
-        dchart.legend.font.size = Pt(9)
-        dpoints = dchart.plots[0].series[0].points
-        dpoints[0].format.fill.solid(); dpoints[0].format.fill.fore_color.rgb = self.C["blue"]
-        dpoints[1].format.fill.solid(); dpoints[1].format.fill.fore_color.rgb = self.C["lgray"]
+        rx, rw = Emu(4660000), Emu(4340000)
+        self.add_text(s1, rx, cy, rw, Emu(240000), "Source Lines of Code by Week", 13, self.C["blue"], bold=True)
+        weekly = m.get("sloc_by_week") or {}
+        if weekly:
+            sd = CategoryChartData()
+            sd.categories = list(weekly.keys())
+            sd.add_series("SLOC", list(weekly.values()))
+            sg = s1.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, rx, cy + Emu(280000), rw, ch, sd).chart
+            sg.has_legend = False
+            sser = sg.plots[0].series[0]
+            sser.format.line.color.rgb = self.C["blue"]
+            sser.format.line.width = Pt(2.25)
+            sg.category_axis.tick_labels.font.size = Pt(8)
+            sg.value_axis.tick_labels.font.size = Pt(9)
+            sg.value_axis.has_major_gridlines = True
+        else:
+            self.add_text(s1, rx, cy + Emu(280000), rw, Emu(400000),
+                          "(run fetch_metrics.py to populate weekly SLOC)", 10, GRAY, italic=True)
 
-        mr_y = chart_y + Emu(1900000)
-        self.add_text(metrics_s, donut_x, mr_y, donut_w, Emu(240000), "MR Status", 13, self.C["blue"], bold=True)
-        mr_data = CategoryChartData()
-        mr_data.categories = ["Merged", "Closed", "Open"]
-        mr_data.add_series("MRs", (m["mrs_merged"], m["mrs_closed"], m["mrs_open"]))
-        mframe = metrics_s.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, donut_x, mr_y + Emu(220000), donut_w, Emu(1050000), mr_data)
-        mchart = mframe.chart
-        mchart.has_legend = False
-        mplot = mchart.plots[0]
-        mplot.has_data_labels = True
-        mplot.data_labels.font.size = Pt(9)
-        mplot.data_labels.font.color.rgb = GRAY
-        mplot.series[0].format.fill.solid()
-        mplot.series[0].format.fill.fore_color.rgb = self.C["teal"]
-        mchart.category_axis.tick_labels.font.size = Pt(9)
-        mchart.value_axis.visible = False
-        mchart.value_axis.has_major_gridlines = False
-
-        self.add_rect(metrics_s, 0, self.SH - Emu(300000), self.SW, Emu(300000), RGBColor(0xF5, 0xF6, 0xF7))
         tests_lines = m["sloc"]["by_bucket_lines"].get("tests", 0)
         core_lines = m["sloc"]["by_bucket_lines"].get("mixins", 0)
         pct = (tests_lines / core_lines * 100) if core_lines else 0
-        self.add_text(metrics_s, Emu(140000), self.SH - Emu(280000), Emu(8800000), Emu(260000),
-                      f"Test suite (~{tests_lines/1000:.1f}K lines) covers ~{pct:.0f}% the size of the automation "
-                      f"core it verifies (~{core_lines/1000:.1f}K lines)  |  Python {m['sloc']['python_total']/1000:.1f}K "
-                      f"SLOC + Vue/JS frontend {m['sloc']['frontend_total']/1000:.1f}K SLOC",
-                      9, GRAY, anchor=MSO_ANCHOR.MIDDLE)
+        self._footer_note(s1,
+                          f"Test suite (~{tests_lines/1000:.1f}K lines) covers ~{pct:.0f}% the size of the automation "
+                          f"core it verifies (~{core_lines/1000:.1f}K lines)  |  Python {m['sloc']['python_total']/1000:.1f}K "
+                          f"SLOC + Vue/JS frontend {m['sloc']['frontend_total']/1000:.1f}K SLOC")
+
+        # ---- Slide 2: issues & merge requests ----
+        s2 = self.new_slide()
+        self.header_band(s2, "By the Numbers", "Issues & merge requests")
+        open_gray = RGBColor(0x9A, 0xA0, 0xA6)   # mid gray so white value labels stay legible
+
+        dx, dw = Emu(360000), Emu(3960000)
+        self.add_text(s2, dx, Emu(900000), dw, Emu(260000), "Issue Status", 14, self.C["blue"], bold=True)
+        dd = CategoryChartData()
+        dd.categories = ["Closed", "Open"]
+        dd.add_series("Issues", (m["issues_closed"], m["issues_open"]))
+        dchart = s2.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, dx, Emu(1220000), dw, Emu(3050000), dd).chart
+        dchart.has_legend = True
+        dchart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        dchart.legend.include_in_layout = False
+        dchart.legend.font.size = Pt(11)
+        dplot = dchart.plots[0]
+        dplot.has_data_labels = True
+        dlbl = dplot.data_labels
+        dlbl.show_value = True
+        dlbl.number_format = "0"
+        dlbl.number_format_is_linked = False
+        dlbl.font.size = Pt(13)
+        dlbl.font.bold = True
+        dlbl.font.color.rgb = WHITE
+        dpts = dplot.series[0].points
+        dpts[0].format.fill.solid(); dpts[0].format.fill.fore_color.rgb = self.C["blue"]
+        dpts[1].format.fill.solid(); dpts[1].format.fill.fore_color.rgb = open_gray
+
+        mx, mw = Emu(4760000), Emu(4180000)
+        self.add_text(s2, mx, Emu(900000), mw, Emu(260000), "Merge Request Status", 14, self.C["blue"], bold=True)
+        md = CategoryChartData()
+        md.categories = ["Merged", "Closed", "Open"]
+        md.add_series("MRs", (m["mrs_merged"], m["mrs_closed"], m["mrs_open"]))
+        mchart = s2.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, mx, Emu(1220000), mw, Emu(3050000), md).chart
+        mchart.has_legend = False
+        mp = mchart.plots[0]
+        mp.has_data_labels = True
+        mp.data_labels.show_value = True
+        mp.data_labels.font.size = Pt(12)
+        mp.data_labels.font.bold = True
+        mp.data_labels.font.color.rgb = GRAY
+        mp.series[0].format.fill.solid()
+        mp.series[0].format.fill.fore_color.rgb = self.C["blue"]
+        mchart.category_axis.tick_labels.font.size = Pt(11)
+        mchart.value_axis.visible = False
+        mchart.value_axis.has_major_gridlines = False
+
+        self._footer_note(s2,
+                          f"{m['issues_closed']} of {m['issues_total']} issues closed ({m['issues_open']} open)  |  "
+                          f"{m['mrs_merged']} of {m['mrs_total']} merge requests merged "
+                          f"({m['mrs_open']} open, {m['mrs_closed']} closed)")
 
     def build_capability_slides(self):
         for cap in self.capabilities:
