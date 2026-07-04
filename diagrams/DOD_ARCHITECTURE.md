@@ -25,8 +25,8 @@ document and render natively in GitLab.
 |---|---|---|---|
 | Operational concept | OV-1 | `ov1_operational_concept.py` | `ov1-architecture.png` |
 | System interfaces | SV-1 | `sv1_system_interfaces.py` | `sv1-architecture.png` |
-| Deployment topology (EKS) | SV-2 | `sv2_deployment_eks.py` | `sv2-architecture.png` |
-| Deployment topology (ECS Fargate) | SV-2 | `sv2_deployment_ecs.py` | `sv2ecs-architecture.png` |
+| Deployment topology (EKS) | SV-2 | `sv2_deployment_eks.py` | `sv2-eks-architecture.png` |
+| Deployment topology (ECS Fargate) | SV-2 | `sv2_deployment_ecs.py` | `sv2-ecs-architecture.png` |
 | Data flow | SV-4 | `dataflow_architecture.py` | `dataflow-architecture.png` |
 | DevSecOps pipeline | — (DevSecOps ref design) | `devsecops_pipeline.py` | `devsecops-architecture.png` |
 | Simple deployment (EKS / ECS) | SV-2 (summary) | `eks_architecture.py` / `ecs_architecture.py` | `eks-architecture.png` / `ecs-architecture.png` |

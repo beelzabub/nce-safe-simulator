@@ -34,7 +34,7 @@ def _load_cf(path):
 
 
 def main():
-    output_path = sys.argv[1] if len(sys.argv) > 1 else "sv2-architecture.png"
+    output_path = sys.argv[1] if len(sys.argv) > 1 else "sv2-eks-architecture.png"
     filename = output_path.rsplit(".", 1)[0]
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
