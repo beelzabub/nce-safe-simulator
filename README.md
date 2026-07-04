@@ -536,6 +536,10 @@ The sidebar footer contains four links. **Quarto ↗** opens the static Quarto r
 python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo outputs
 ```
 
+#### Analysis API
+
+`GET /api/analysis/blocked-chains` (epic #165) computes **blocked portfolio chains with weight and Business Value rollups** from the newest complete report snapshot on disk — no GitLab calls, so it responds instantly and works offline. For every portfolio epic with a blocked descendant anywhere in its chain, the response carries the full hierarchy path (Epic → Capability → Feature → blocked item), the blockers, and a per-epic rollup (`blocked_count`, `blocked_weight`, `blocked_business_value`). Blocked weight prefers `planned_weight` and falls back to `actual_weight`. A blocked item counts toward every portfolio epic it threatens, while the grand `totals` dedupe blocked items so portfolio-wide numbers aren't inflated. Returns 404 with a hint when no snapshot exists yet. This feeds the Analysis tab's Blocked Work Explorer (#169).
+
 ---
 
 ## What `--create` Builds
