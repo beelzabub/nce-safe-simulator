@@ -8,7 +8,7 @@
 
       <aside class="sidebar" :class="{ 'sidebar--open': sidebarOpen }">
         <div class="sidebar-picker">
-          <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
+          <SidePanel :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
         </div>
         <div class="sidebar-footer">
           <a href="/quarto/" target="_blank" rel="noopener" class="reports-link">
@@ -27,14 +27,17 @@
       </aside>
 
       <main class="main-pane">
-        <JobRunner />
+        <!-- JobRunner stays mounted (v-show) so live job streams never
+             unmount; report/analysis panes are siblings (#167 / #169).
+             The CLI command bar belongs to the job runner, so it hides
+             with it rather than docking under every view. -->
+        <JobRunner v-show="mainView === 'jobs'" />
+        <CommandBar v-show="mainView === 'jobs'" />
       </main>
 
       <StatusSidebar :open="showStatus" @close="showStatus = false" />
 
     </div>
-
-    <CommandBar />
 
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
@@ -46,7 +49,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import NavBar        from '../components/NavBar.vue'
-import JobPicker     from '../components/JobPicker.vue'
+import SidePanel     from '../components/SidePanel.vue'
 import JobRunner     from './JobRunner.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
 import CommandBar    from '../components/CommandBar.vue'
@@ -55,8 +58,10 @@ import ConfigDialog        from '../components/ConfigDialog.vue'
 import ArchitectureButton  from '../components/ArchitectureButton.vue'
 import ArchitectureDialog  from '../components/ArchitectureDialog.vue'
 import { useJobs }         from '../composables/useJobs.js'
+import { useMainView }     from '../composables/useMainView.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
+const { mainView, showMain } = useMainView()
 
 // Below the mobile breakpoint the sidebar is an off-canvas drawer; start it
 // open there so first-time phone users land on the job list, not an empty
@@ -87,10 +92,12 @@ onMounted(async () => {
 
 function onLaunch(job, params) {
   launch(job, params)
+  showMain('jobs')   // a fresh run always surfaces the runner pane
   if (isMobile.matches) sidebarOpen.value = false   // reveal the runner pane
 }
 function onLaunchReports(reports, fmts, useLast) {
   launchReports(reports, fmts, useLast)
+  showMain('jobs')
   if (isMobile.matches) sidebarOpen.value = false
 }
 </script>

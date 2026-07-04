@@ -185,4 +185,27 @@ test.describe('home workspace', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).tap()
     await expect(dialog).toBeHidden()
   })
+
+  test('side panel tabs switch and persist (epic #165)', async ({ page }) => {
+    // Tools is the default tab and hosts the job picker
+    const tabs = page.locator('.side-panel .tab-btn')
+    await expect(tabs).toHaveCount(3)
+    await expect(page.locator('.picker')).toBeVisible()
+
+    // Reports / Analysis show their placeholder bodies for now
+    await tabs.filter({ hasText: 'Reports' }).tap()
+    await expect(page.locator('.placeholder-title')).toHaveText('Reports')
+    await tabs.filter({ hasText: 'Analysis' }).tap()
+    await expect(page.locator('.placeholder-title')).toHaveText('Analysis')
+
+    // Active tab survives a reload (localStorage). On phones the drawer
+    // starts open after load, so the panel is already visible.
+    await page.reload()
+    await expect(page.locator('.nav-bar')).toBeVisible()
+    await expect(page.locator('.placeholder-title')).toHaveText('Analysis')
+
+    // Back to Tools: picker is intact
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
+    await expect(page.locator('.picker')).toBeVisible()
+  })
 })

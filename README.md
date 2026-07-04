@@ -451,8 +451,8 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 | Area | Content |
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
-| Left sidebar | Job picker (collapsible groups) + Run Reports button + footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
-| Main pane | Job runner — one tab per launched job with streaming log output |
+| Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button; **Reports** (#167) and **Analysis** (#169) fill in as those features land. Footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
+| Main pane | Job runner — one tab per launched job with streaming log output — plus the docked CLI command bar; report and analysis views render here as siblings when opened from their tabs |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
 #### Mobile support
