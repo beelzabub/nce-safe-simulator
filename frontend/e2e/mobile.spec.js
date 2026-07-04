@@ -224,6 +224,16 @@ test.describe('home workspace', () => {
     await page.locator('.reports-filter .filter-clear').tap()
     await expect(page.locator('.page-row')).toHaveCount(3)
 
+    // Run Reports is available here too, above the restored footer links
+    const reportsTab = page.locator('.reports-tab')
+    await expect(reportsTab.getByRole('button', { name: 'Run Reports…' })).toBeVisible()
+    await expect(page.locator('.panel-footer .footer-link', { hasText: 'Quarto' })).toBeVisible()
+    await reportsTab.getByRole('button', { name: 'Run Reports…' }).tap()
+    const rpDialog = page.locator('.overlay .dialog')
+    await expect(rpDialog).toBeVisible()
+    await rpDialog.getByRole('button', { name: 'Cancel' }).tap()
+    await expect(rpDialog).toBeHidden()
+
     await page.locator('.page-row', { hasText: 'Portfolio Health Dashboard' }).tap()
 
     // Main pane switches to the in-app viewer (drawer closes on phones)

@@ -28,12 +28,22 @@
 
     <!-- ── Reports (#167) ── -->
     <div v-if="activeTab === 'reports'" class="panel-body">
-      <ReportsTab :gitlab-wiki-url="gitlabWikiUrl" :grafana-url="grafanaUrl" />
+      <ReportsTab
+        @launch-reports="(reports, fmts, useLast) => $emit('launch-reports', reports, fmts, useLast)"
+      />
     </div>
 
     <!-- ── Analysis (#169) ── -->
     <div v-if="activeTab === 'analysis'" class="panel-body">
       <AnalysisTab />
+    </div>
+
+    <!-- ── External surfaces — the original sidebar footer (issue #170) ── -->
+    <div class="panel-footer">
+      <a href="/quarto/" target="_blank" rel="noopener" class="footer-link">Quarto&thinsp;↗</a>
+      <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="footer-link">GitLab&thinsp;↗</a>
+      <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="footer-link">Grafana&thinsp;↗</a>
+      <a href="/api/wiki" target="_blank" rel="noopener" class="footer-link">Raw&thinsp;↗</a>
     </div>
   </div>
 </template>
@@ -141,4 +151,25 @@ function selectTab(key) {
   display: flex;
   flex-direction: column;
 }
+
+/* ── Footer links (restored from the pre-tab sidebar) ── */
+.panel-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.6rem 1rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.footer-link:hover { color: var(--text-1); }
 </style>
