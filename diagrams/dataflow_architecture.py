@@ -81,7 +81,11 @@ def main():
         engine   >> Edge(label="wiki markdown\nHTTPS 443") >> wiki
         engine   >> builders >> sites
         sites    >> Edge(label="HTTP GET") >> viewer
-        sites    >> Edge(style="dashed", label="report JSON") >> grafana
+        # Grafana initiates (Infinity datasource polls /data/*.json served from
+        # the latest snapshot); << reverses the arrowhead while keeping the
+        # data_dir→grafana ranking so the LR pipeline layout holds.
+        data_dir << Edge(style="dashed",
+                         label="pull: HTTP GET /data/*.json\n(via CloudFront)") << grafana
 
         engine >> Edge(style="dashed") >> cw
 
