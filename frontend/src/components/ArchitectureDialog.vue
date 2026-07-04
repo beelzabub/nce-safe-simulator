@@ -70,8 +70,8 @@ const ALL_TABS = [
   { key: 'ecs', label: 'ECS' },
   { key: 'ov1', label: 'OV-1' },
   { key: 'sv1', label: 'SV-1' },
-  { key: 'sv2', label: 'SV-2 EKS' },
-  { key: 'sv2ecs', label: 'SV-2 ECS' },
+  { key: 'sv2-eks', label: 'SV-2 EKS' },
+  { key: 'sv2-ecs', label: 'SV-2 ECS' },
   { key: 'dataflow', label: 'Data Flow' },
   { key: 'devsecops', label: 'DevSecOps' },
 ]

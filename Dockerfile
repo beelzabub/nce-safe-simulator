@@ -18,8 +18,8 @@ RUN mkdir -p /diagrams \
     && python3 ecs_architecture.py /diagrams/ecs-architecture.png \
     && python3 ov1_operational_concept.py /diagrams/ov1-architecture.png \
     && python3 sv1_system_interfaces.py /diagrams/sv1-architecture.png \
-    && python3 sv2_deployment_eks.py /diagrams/sv2-architecture.png \
-    && python3 sv2_deployment_ecs.py /diagrams/sv2ecs-architecture.png \
+    && python3 sv2_deployment_eks.py /diagrams/sv2-eks-architecture.png \
+    && python3 sv2_deployment_ecs.py /diagrams/sv2-ecs-architecture.png \
     && python3 dataflow_architecture.py /diagrams/dataflow-architecture.png \
     && python3 devsecops_pipeline.py /diagrams/devsecops-architecture.png
 
