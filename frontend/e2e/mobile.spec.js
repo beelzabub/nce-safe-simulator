@@ -276,6 +276,15 @@ test.describe('home workspace', () => {
     await cards.nth(0).locator('.card-head').tap()
     await expect(cards.nth(0).locator('.chain-node')).toHaveCount(0)
 
+    // #171 regression: each tab owns its main-area view — Tools brings the
+    // job runner forward again, Reports shows its viewer pane.
+    if (await phoneLayout(page)) await page.locator('.jobs-btn').tap()
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
+    await expect(page.locator('.runner')).toBeVisible()
+    await expect(pfx).toBeHidden()
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
+    await expect(page.locator('.md-view')).toBeVisible()
+
     await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
   })
 })

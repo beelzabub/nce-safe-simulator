@@ -54,6 +54,7 @@ import JobPicker from './JobPicker.vue'
 import ReportsTab from './ReportsTab.vue'
 import AnalysisTab from './AnalysisTab.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
+import { useMainView } from '../composables/useMainView.js'
 
 defineProps({
   runningJobs:   { type: Array, default: () => [] },
@@ -72,9 +73,17 @@ const TAB_KEY = 'nce.sidepanel.tab'
 const stored = loadStored(TAB_KEY, 'tools')
 const activeTab = ref(TABS.some(t => t.key === stored) ? stored : 'tools')
 
+// Each tab owns a main-area view (#171): switching tabs switches the pane —
+// Tools brings the job runner forward, Reports its viewer, Analysis the
+// explorer. Launch flows may pull 'jobs' forward without changing the tab.
+const { showMain } = useMainView()
+const VIEW_FOR = { tools: 'jobs', reports: 'report', analysis: 'analysis' }
+showMain(VIEW_FOR[activeTab.value])   // restored tab drives the initial pane
+
 function selectTab(key) {
   activeTab.value = key
   saveStored(TAB_KEY, key)
+  showMain(VIEW_FOR[key])
 }
 </script>
 
