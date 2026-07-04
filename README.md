@@ -455,6 +455,15 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 | Main pane | Owned by the active side-panel tab: **Tools** shows the job runner (one card per launched job with streaming log output, plus the docked CLI command bar), **Reports** the markdown viewer, **Analysis** the Portfolio Explorer. Launching a job pulls the runner forward from any tab |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
+#### Version badge
+
+The bottom-right corner shows the running build's version (hidden at phone widths; it shifts left of the AWS button on ECS/EKS). Resolution order, computed once per server process and served via `GET /api/config`:
+
+1. `NCE_VERSION` env var — explicit deploy-time override
+2. `version.json` — baked at image build (`docker build` receives `VCS_REF` / `NCE_VERSION` args from the Makefile and deploy scripts; a tagged release shows the tag, a branch build shows `nce-<commit>`)
+3. Live git (local checkouts): exact tag on HEAD → the tag; otherwise `nce-<short-hash>`
+4. The committed `VERSION` file (source-tarball fallback)
+
 #### Mobile support
 
 The UI is responsive and touch-ready — usable on iPhones, iPads, and Android phones. At phone widths (≤ 768 px):

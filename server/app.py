@@ -37,6 +37,7 @@ from server.auth_gate import (
 )
 from server.analysis import portfolio_payload
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.version import app_version
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
 
@@ -182,7 +183,8 @@ def get_config(request: Request):
     dod_banner = bool(load_auth_config(gl).get("dod_banner_enabled", True))
     if gl is None:
         return {"target_group": "", "wiki_url": "", "grafana_url": "",
-                "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner}
+                "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner,
+                "version": app_version()}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
@@ -205,6 +207,7 @@ def get_config(request: Request):
         "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
         "deployment_type": _deployment_type(),
         "dod_banner_enabled": dod_banner,
+        "version": app_version(),
     }
 
 
