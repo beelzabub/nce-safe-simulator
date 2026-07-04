@@ -9,10 +9,22 @@ architecture diagrams (see Dockerfile stage 2).
 import sys
 
 from diagrams import Diagram, Cluster, Edge
+from diagrams.generic.blank import Blank
 from diagrams.onprem.client import Users, Client
 from diagrams.onprem.vcs import Gitlab
 from diagrams.programming.framework import FastAPI, Vue
 from diagrams.aws.management import AmazonManagedGrafana
+
+LEGEND = (
+    '<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2" CELLPADDING="2">'
+    '<TR><TD ALIGN="LEFT"><B>RTE</B> — Release Train Engineer: facilitates an Agile Release Train'
+    '<BR ALIGN="LEFT"/>(PI Planning, cross-team dependencies, flow); SAFe program-level scrum master</TD></TR>'
+    '<TR><TD ALIGN="LEFT"><B>PM</B> — Program/Project Manager: owns scope, budget, and stakeholder accountability</TD></TR>'
+    '<TR><TD ALIGN="LEFT"><B>Tiers</B> mirror the wiki portfolio home and its cadence:</TD></TR>'
+    '<TR><TD ALIGN="LEFT">  T1 Executive Pulse (daily) · T2 Program Management (weekly)'
+    '<BR ALIGN="LEFT"/>  T3 Operational Detail (on demand) · T4 Data Quality (as needed)</TD></TR>'
+    '</TABLE>>'
+)
 
 
 def main():
@@ -73,6 +85,9 @@ def main():
         api >> Edge(label="report JSON") >> grafana
 
         wiki >> Edge(style="dashed", label="consume") >> execs
+
+        with Cluster("Legend"):
+            Blank(LEGEND, labelloc="c", fontsize="12", width="6.4", height="1.6")
 
 
 if __name__ == "__main__":
