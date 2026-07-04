@@ -451,7 +451,7 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 | Area | Content |
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
-| Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button; **Reports** (#167) and **Analysis** (#169) fill in as those features land. Footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
+| Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button. **Reports** browses snapshot runs and opens wiki pages in the in-app markdown viewer, with external links (**Quarto ↗**, **GitLab ↗**, **Grafana ↗**) at the top. **Analysis** (#169) fills in as it lands |
 | Main pane | Job runner — one tab per launched job with streaming log output — plus the docked CLI command bar; report and analysis views render here as siblings when opened from their tabs |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
@@ -530,7 +530,7 @@ Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accent
 
 #### Reports
 
-The sidebar footer contains four links. **Quarto ↗** opens the static Quarto report site (`/quarto/`) in a new tab. **Wiki ↗** opens the GitLab group wiki. **GitLab ↗** opens the root GitLab group. **AMG ↗** opens the Amazon Managed Grafana workspace (only shown when `grafana_url` is set in config). Reports and interactive pages must be built first:
+The side panel's **Reports** tab is the in-app reading surface: it lists report snapshot runs (newest first, switchable), groups each run's wiki pages by tier (00 Executive Pulse → 03 Data Quality), and opens any page in a themed in-app markdown viewer in the main pane (server-rendered via `GET /api/runs/{date}/{time}/wiki/index.json` and `.../{slug}.json` — same python-markdown renderer as the standalone `/api/runs/.../wiki/{slug}` pages, so there is exactly one renderer). External links at the top of the tab: **Quarto ↗** opens the static Quarto report site (`/quarto/`; each report page there toggles to its Marimo interactive counterpart), **GitLab ↗** the group wiki, **Grafana ↗** the Amazon Managed Grafana workspace (only when `grafana_url` is set). Reports and interactive pages must be built first:
 
 ```bash
 python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo outputs

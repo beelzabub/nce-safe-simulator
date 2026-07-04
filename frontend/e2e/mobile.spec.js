@@ -192,9 +192,9 @@ test.describe('home workspace', () => {
     await expect(tabs).toHaveCount(3)
     await expect(page.locator('.picker')).toBeVisible()
 
-    // Reports / Analysis show their placeholder bodies for now
+    // Reports lists the mocked snapshot run; Analysis still a placeholder
     await tabs.filter({ hasText: 'Reports' }).tap()
-    await expect(page.locator('.placeholder-title')).toHaveText('Reports')
+    await expect(page.locator('.reports-tab .run-select')).toBeVisible()
     await tabs.filter({ hasText: 'Analysis' }).tap()
     await expect(page.locator('.placeholder-title')).toHaveText('Analysis')
 
@@ -207,5 +207,23 @@ test.describe('home workspace', () => {
     // Back to Tools: picker is intact
     await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
     await expect(page.locator('.picker')).toBeVisible()
+  })
+
+  test('reports tab opens a wiki page in the markdown viewer (#167)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
+
+    // Tier-grouped page list from the mocked snapshot
+    await expect(page.locator('.tier-label').filter({ hasText: 'Executive Pulse' })).toBeVisible()
+    await page.locator('.page-row', { hasText: 'Portfolio Health Dashboard' }).tap()
+
+    // Main pane switches to the in-app viewer (drawer closes on phones)
+    const view = page.locator('.md-view')
+    await expect(view).toBeVisible()
+    await expect(view.locator('.md-title')).toHaveText('Portfolio Health Dashboard')
+    await expect(view.locator('.md-body table')).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+
+    // Reset the persisted tab so later tests start from Tools
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
   })
 })

@@ -27,11 +27,8 @@
     </div>
 
     <!-- ── Reports (#167) ── -->
-    <div v-if="activeTab === 'reports'" class="panel-body panel-body--padded">
-      <div class="placeholder">
-        <p class="placeholder-title">Reports</p>
-        <p class="placeholder-hint">Browse report snapshots and read wiki pages in-app — coming with #167.</p>
-      </div>
+    <div v-if="activeTab === 'reports'" class="panel-body">
+      <ReportsTab :gitlab-wiki-url="gitlabWikiUrl" :grafana-url="grafanaUrl" />
     </div>
 
     <!-- ── Analysis (#169) ── -->
@@ -47,10 +44,13 @@
 <script setup>
 import { ref } from 'vue'
 import JobPicker from './JobPicker.vue'
+import ReportsTab from './ReportsTab.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
 defineProps({
-  runningJobs: { type: Array, default: () => [] },
+  runningJobs:   { type: Array, default: () => [] },
+  gitlabWikiUrl: { type: String, default: '' },
+  grafanaUrl:    { type: String, default: '' },
 })
 defineEmits(['launch', 'launch-reports'])
 
