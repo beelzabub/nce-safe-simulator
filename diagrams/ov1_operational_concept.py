@@ -78,7 +78,7 @@ def main():
         for actor in (execs, rtes, leads, stewards):
             actor >> Edge(label="HTTPS") >> ui
 
-        api >> Edge(label="REST + GraphQL") >> gitlab
+        api >> Edge(label="REST +\nGraphQL") >> gitlab
         api >> Edge(label="publish") >> wiki
         api >> Edge(label="publish") >> pages
         api >> Edge(label="publish") >> marimo
@@ -87,7 +87,10 @@ def main():
         wiki >> Edge(style="dashed", label="consume") >> execs
 
         with Cluster("Legend"):
-            Blank(LEGEND, labelloc="c", fontsize="12", width="6.4", height="1.6")
+            # fixedsize=false lets graphviz size the node to the label; a fixed
+            # width clips the text at the node boundary.
+            Blank(LEGEND, labelloc="c", fontsize="12", fixedsize="false",
+                  width="0", height="0", imagescale="false")
 
 
 if __name__ == "__main__":

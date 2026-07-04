@@ -61,9 +61,9 @@ def main():
             engine   = Python("Report generators\n(pandas / plotly)")
             builders = Python("Quarto + Marimo\nsite builders")
 
-        with Cluster("Published Content"):
+        with Cluster("Published Content", graph_attr={"margin": "30"}):
             sites = Storage("quarto-site/\npublic/interactive/\npublic/exports/")
-            efs   = EFS("ECS/EKS: EFS access points\n(encrypted, TLS in transit)\nlocal / single-box: local disk")
+            efs   = EFS("EFS (ECS/EKS)\nencrypted, TLS transit\nlocal disk otherwise")
             sites - Edge(style="dotted") - efs
 
         with Cluster("Egress / Consumers"):

@@ -90,7 +90,7 @@ def main():
 
         browser >> Edge(label="HTTPS 443") >> cdn
         cdn >> Edge(label="HTTP 80 (origin)") >> alb
-        alb >> Edge(label="HTTP 80\ntarget-type ip") >> pod
+        alb >> Edge(label="HTTP 80 (ip targets)") >> pod
         pod >> Edge(label="NFS 2049") >> efs
 
         ecr  >> Edge(style="dashed", label="image pull") >> node
