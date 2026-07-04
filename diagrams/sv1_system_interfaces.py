@@ -12,7 +12,7 @@ from diagrams.onprem.client import Users
 from diagrams.onprem.vcs import Gitlab
 from diagrams.programming.framework import FastAPI, Vue
 from diagrams.programming.language import Python
-from diagrams.aws.storage import S3, EFS
+from diagrams.aws.storage import EFS
 from diagrams.aws.management import (
     Cloudwatch,
     SystemsManagerParameterStore,
@@ -66,17 +66,15 @@ def main():
 
         gitlab = Gitlab("GitLab\nREST v4 + GraphQL")
         ssm    = SystemsManagerParameterStore("SSM Parameter Store\n/nce/config (SecureString)\n/nce/grafana-api-key")
-        s3     = S3("S3 staging\nnce-safe-sim-assets\n(login backgrounds)")
-        efs    = EFS("EFS\n/config /reports\n/interactive /quarto-site")
-        cw     = Cloudwatch("CloudWatch Logs")
+        store  = EFS("Storage\nECS/EKS: EFS (NFS 2049)\nlocal / single-box: local disk\n/config /reports\n/interactive /quarto-site")
+        cw     = Cloudwatch("CloudWatch Logs\n(cloud deployments)")
         amg    = AmazonManagedGrafana("Amazon Managed\nGrafana (optional)")
 
         browser >> Edge(label="HTTPS 443") >> spa
         spa >> Edge(label="HTTP/WSS") >> gate
 
         core >> Edge(label="HTTPS 443\nPAT (api scope)") >> gitlab
-        gate >> Edge(label="HTTPS 443 (boto3)\npresigned URLs", style="dashed") >> s3
-        core >> Edge(label="NFS 2049\n(cloud deployments)") >> efs
+        core >> Edge(label="file I/O") >> store
         api  >> Edge(label="HTTPS 443 (boot)\nconfig pull", style="dashed") >> ssm
         core >> Edge(label="stdout → agent", style="dashed") >> cw
         amg  >> Edge(label="HTTPS 443\n/data/*.json via CloudFront", style="dashed") >> static
