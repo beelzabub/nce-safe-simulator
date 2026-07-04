@@ -674,7 +674,8 @@ reports/
     HHMMSS/
       epics.json      # typed epics (full fields + rollups) + all_epics_raw (includes untyped)
       issues.json     # all issues: full fields including assignees, milestone, epic link
-      blocking.json   # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+      blocking_graph.json # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+                      # (named to avoid the Quarto data layer's blocking.json, written to the same dir — Refs #172)
       issue_blocking.json # issue→issue blocking graph: blocked issues, blockers, parent epic
       groups.json     # SAFe group hierarchy: portfolio → VS → ART → Team, each with level tag
       projects.json   # Team Backlog projects with namespace_id, path, and issues_enabled flag
@@ -686,7 +687,7 @@ The directory is printed to the console at the start of every run:
 Data snapshot → reports/20260525/143022/
   epics.json    (47 typed + 2 untyped)
   issues.json   (312 issues)
-  blocking.json (5 blocked epics)
+  blocking_graph.json (5 blocked epics)
   issue_blocking.json (3 blocked issues)
   groups.json   (15 groups)
   projects.json (8 projects)
@@ -696,9 +697,9 @@ Data snapshot → reports/20260525/143022/
 
 **`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
-**`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
+**`blocking_graph.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
 
-> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
+> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking_graph.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
 
 **`issue_blocking.json` structure:** `summary` (total blocked, total relationships) + `relationships` array where each entry has `blocked_issue` (`id`, `iid`, `title`, `web_url`, `project_path`, `state`, `epic_iid`, `epic_title`) and a `blocked_by` list (each `id`, `iid`, `title`, `web_url`, `project_path`). Blocked issues are flagged via a bulk GraphQL `Issue.blocked` query; only flagged issues are then REST-fetched (`GET /projects/:id/issues/:iid/links`, keeping `is_blocked_by` links).
 
@@ -1226,7 +1227,7 @@ Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/sai
 
 **Job timing** — Each phase (clean, create, individual reports, all) logs start/stop times and elapsed duration via `_print_timing_table()` in `mixins/utils.py`. `--all` aggregates all phases into a consolidated summary table.
 
-**Data snapshots** — Every report run writes six files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking.json`, `issue_blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
+**Data snapshots** — Every report run writes six files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking_graph.json`, `issue_blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
 
 ---
 

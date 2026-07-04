@@ -52,7 +52,12 @@ def load_snapshot(data_dir: Path):
     """Load epics + blocking graph from a snapshot data/ directory."""
     epics_doc = json.loads((data_dir / "epics.json").read_text())
     epics_by_id = {e["id"]: e for e in epics_doc.get("epics", [])}
-    blocking_path = data_dir / "blocking.json"
+    # blocking_graph.json since #172; blocking.json in older runs was
+    # clobbered by the Quarto data layer (no relationships key), which the
+    # .get("relationships") consumers degrade to an empty graph.
+    blocking_path = data_dir / "blocking_graph.json"
+    if not blocking_path.is_file():
+        blocking_path = data_dir / "blocking.json"
     blocking = (
         json.loads(blocking_path.read_text()) if blocking_path.is_file() else {}
     )

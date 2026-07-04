@@ -6770,11 +6770,13 @@ class ReportsMixin:
         epic_by_id = {e["id"]: e for e in all_epics_raw}
         parent_of  = {e["id"]: e["parent_id"] for e in all_epics_raw if e.get("parent_id")}
 
+        # Resolve tier from raw labels via the canonical resolver — scoped
+        # (epic::epic), single-colon, and plain label styles all map to the
+        # display name. Comparing display names against raw labels (the old
+        # local helper) never matched scoped configs, so every blocked epic
+        # lost its portfolio ancestors and typed as Unknown (Refs #172).
         def _etype(labels):
-            for t in self.EPIC_TYPE_DISPLAY_NAMES:
-                if t in labels:
-                    return t
-            return "Unknown"
+            return self._epic_type_display(labels)
 
         def _portfolio_ancestors(epic_id):
             result, cur, seen = [], epic_id, set()
@@ -7118,7 +7120,12 @@ class ReportsMixin:
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
 
-        (data_dir / "blocking.json").write_text(
+        # Named blocking_graph.json: write_report_json() later drops the
+        # Quarto/Grafana-layer blocking.json (a different schema with no
+        # relationships) into this same directory, and it used to clobber
+        # this file — silently blanking the blocking detail for snapshot
+        # reuse and the Portfolio Explorer (Refs #172).
+        (data_dir / "blocking_graph.json").write_text(
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
 
@@ -7155,7 +7162,7 @@ class ReportsMixin:
         print(f"\n  Data snapshot → {data_dir}/")
         print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
-        print(f"    blocking.json ({n_blocked} blocked epics)")
+        print(f"    blocking_graph.json ({n_blocked} blocked epics)")
         print(f"    issue_blocking.json ({n_iss_blocked} blocked issues)")
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
@@ -7567,7 +7574,13 @@ class ReportsMixin:
         """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
         epics_data    = json.loads((data_dir / "epics.json").read_text(encoding="utf-8"))
         issues_data   = json.loads((data_dir / "issues.json").read_text(encoding="utf-8"))
-        blocking_data = json.loads((data_dir / "blocking.json").read_text(encoding="utf-8"))
+        # blocking_graph.json since #172; older runs only have blocking.json,
+        # which the Quarto data writer overwrote with a schema that has no
+        # relationships — the .get() below degrades those to an empty graph.
+        blocking_path = data_dir / "blocking_graph.json"
+        if not blocking_path.is_file():
+            blocking_path = data_dir / "blocking.json"
+        blocking_data = json.loads(blocking_path.read_text(encoding="utf-8"))
         groups_data   = json.loads((data_dir / "groups.json").read_text(encoding="utf-8"))
         projects_data = json.loads((data_dir / "projects.json").read_text(encoding="utf-8"))
 
