@@ -1,6 +1,6 @@
 # Capability-area content for deck/build_deck.py.
 #
-# This is a maintained mapping, not re-derived from GitLab on every build: clustering 142
+# This is a maintained mapping, not re-derived from GitLab on every build: clustering 160+
 # issues into capability areas is a judgment call, and re-running a semantic pass each
 # build would be non-deterministic and cost an LLM call for no real benefit. When new
 # issues land that don't fit an existing area, add them here by hand (or bump `count` and
@@ -98,6 +98,26 @@ capabilities:
     image: "00-home_light.png"
     caption: "Web UI — job picker home"
 
+  - title: "Login & Authentication (DoD-grade)"
+    count: 18
+    blurb: "A full login experience plus a pluggable enterprise-auth roadmap"
+    bullets:
+      - "#135 Login page (epic) — a themed sign-in card over a rotating fleet-imagery slideshow (#148, #158, #162)."
+      - "#149 DoD Notice & Consent banner (DTM 08-060), acknowledged once per browser session; #163 tracks a session-expiry re-prompt defect."
+      - "#150 Session gate + Vue Router guard; #146 Auth config tab and login-backgrounds API; #157 server-wide basic-auth enforcement with auth.method dispatch."
+      - "#147 Login imagery curated via an S3 staging bucket + sync tooling; #159 / #161 Operation Epic Fury imagery and a faint NCE logo for site identity."
+      - "Pluggable auth methods on the roadmap (#152–#156): CAC/PIV via DoD PKI, OIDC / OAuth 2.0, SAML 2.0, LDAP / Active Directory, and STIG break-glass local accounts."
+
+  - title: "In-App Reports & Analysis Panel"
+    count: 5
+    blurb: "In-flight — bringing reports and blocked-work analysis into the app itself"
+    bullets:
+      - "#165 / #166 New Reports section and a multi-tab side-panel shell (Tools / Reports / Analysis)."
+      - "#167 Reports tab with an in-app Markdown viewer — read generated reports without leaving the UI."
+      - "#168 Analysis API — a blocked-chains endpoint with weight / Business-Value rollups."
+      - "#169 Analysis tab — a Blocked Work Explorer UI over that endpoint."
+      - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). All open/in-flight — the project's current momentum."
+
   - title: "Cloud Deployment & Infrastructure"
     count: 16
     blurb: "Docker → ECS → EKS, one CDK project"
@@ -139,9 +159,9 @@ capabilities:
     caption: "Audit & Validation — Audit Hierarchy"
 
   - title: "Open & Future Work"
-    count: 3
-    blurb: "Still open at time of this review"
+    count: 2
+    blurb: "Remaining evaluation work; the active roadmap now has its own slides"
     bullets:
-      - "#84 Analyze the use of S3 for the safe simulator"
-      - "#135 Create a login page for nce-safe-sim (epic)"
-      - "Plus in-flight web-UI forward work folded into the frontend arc above"
+      - "#84 Evaluate the use of S3 for the safe simulator (analysis spike)."
+      - "Enterprise authentication methods (#152–#156) — see the Login & Authentication slide."
+      - "In-app Analysis panel (#165–#169) — see the In-App Reports & Analysis slide."
