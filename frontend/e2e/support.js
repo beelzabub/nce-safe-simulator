@@ -26,6 +26,16 @@ export const REPORTS = [
   { key: 'risk-register',    description: 'ROAM risk register' },
 ]
 
+export const RUNS = [
+  { date: '20260701', time: '120000', path: 'reports/20260701/120000',
+    has_log: true, log_name: 'run.log', has_data: true, has_wiki: true },
+]
+
+export const WIKI_INDEX = [
+  { slug: 'home', title: 'Portfolio Home', tier: null, tier_name: null },
+  { slug: 'portfolio-health', title: 'Portfolio Health Dashboard', tier: '00', tier_name: 'Executive Pulse' },
+]
+
 export async function mockApi(page) {
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
@@ -39,8 +49,12 @@ export async function mockApi(page) {
     if (path === '/api/tools')            return json(TOOLS)
     if (path === '/api/reports')          return json(REPORTS)
     if (path === '/api/history')          return json([])
-    if (path === '/api/runs')             return json([])
+    if (path === '/api/runs')             return json(RUNS)
     if (path === '/api/running')          return json([])
+    if (path === '/api/runs/20260701/120000/wiki/index.json') return json(WIKI_INDEX)
+    if (path.endsWith('/wiki/portfolio-health.json'))
+      return json({ slug: 'portfolio-health', title: 'Portfolio Health Dashboard',
+                    html: '<h1>Portfolio Health Dashboard</h1><table><tr><th>VS</th><th>Status</th></tr><tr><td>VS 01</td><td>Green</td></tr></table>' })
     return json({})
   })
 

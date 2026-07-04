@@ -483,6 +483,7 @@ def list_runs():
                 "has_log":  bool(log_files),
                 "log_name": log_files[0].name if log_files else None,
                 "has_data": (time_dir / "data").is_dir(),
+                "has_wiki": (time_dir / "wiki").is_dir(),
             })
     return runs
 
@@ -635,6 +636,61 @@ def browse_run_wiki(date: str, time: str):
   <h1>Wiki pages &mdash; {d} &nbsp; {t} &nbsp; ({len(pages)} pages)</h1>
   <ul>{items}</ul>
 </body></html>"""
+
+
+_TIER_NAMES = {
+    "00": "Executive Pulse",
+    "01": "Program Management",
+    "02": "Operational Detail",
+    "03": "Data Quality",
+}
+
+
+def _wiki_page_tier(slug: str) -> "str | None":
+    """Tier number ("00".."03") parsed from a slugified wiki path, or None.
+
+    Wiki slugs encode the page path with '--' separators, e.g.
+    ...portfolio-home--01-program-management--risk-register.
+    """
+    m = re.search(r"--(0[0-3])-", slug)
+    return m.group(1) if m else None
+
+
+@app.get("/api/runs/{date}/{time}/wiki/index.json")
+def wiki_index_json(date: str, time: str):
+    """Wiki pages of a run as JSON for the in-app Reports tab (epic #165)."""
+    wiki_dir = Path("reports") / date / time / "wiki"
+    if not wiki_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Wiki directory not found")
+    pages = []
+    for f in sorted(wiki_dir.glob("*.md")):
+        tier = _wiki_page_tier(f.stem)
+        pages.append({
+            "slug": f.stem,
+            "title": _wiki_page_title(f),
+            "tier": tier,
+            "tier_name": _TIER_NAMES.get(tier),
+        })
+    pages.sort(key=lambda p: (p["tier"] or "", p["title"].lower()))
+    return pages
+
+
+@app.get("/api/runs/{date}/{time}/wiki/{slug}.json")
+def wiki_page_json(date: str, time: str, slug: str):
+    """A wiki page rendered to an HTML fragment for the in-app viewer.
+
+    Same renderer as the standalone HTML route; the SPA styles the fragment
+    with its own theme variables.
+    """
+    md_path = Path("reports") / date / time / "wiki" / f"{slug}.md"
+    if not md_path.is_file():
+        raise HTTPException(status_code=404, detail="Wiki page not found")
+    content = md_path.read_text(encoding="utf-8")
+    return {
+        "slug": slug,
+        "title": _wiki_page_title(md_path),
+        "html": _md.markdown(content, extensions=["extra", "toc"]),
+    }
 
 
 @app.get("/api/runs/{date}/{time}/wiki/{slug}", response_class=HTMLResponse)
