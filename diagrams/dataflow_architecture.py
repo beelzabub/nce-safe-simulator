@@ -54,16 +54,16 @@ def main():
 
         snapshot = Python("Snapshot fetch\n(one API pass per run)")
 
-        with Cluster("Snapshot Store — EFS /reports"):
+        with Cluster("Snapshot Store — reports/ (EFS on ECS/EKS; local disk otherwise)"):
             data_dir = Storage("reports/<date>/<time>/data\nepics, issues, blocking,\ngroups, projects (JSON)")
 
         with Cluster("Report Generation"):
             engine   = Python("Report generators\n(pandas / plotly)")
             builders = Python("Quarto + Marimo\nsite builders")
 
-        with Cluster("Published Content — EFS (encrypted, TLS in transit)"):
+        with Cluster("Published Content"):
             sites = Storage("quarto-site/\npublic/interactive/\npublic/exports/")
-            efs   = EFS("EFS access points\n/config /reports\n/interactive /quarto-site")
+            efs   = EFS("ECS/EKS: EFS access points\n(encrypted, TLS in transit)\nlocal / single-box: local disk")
             sites - Edge(style="dotted") - efs
 
         with Cluster("Egress / Consumers"):
@@ -71,7 +71,7 @@ def main():
             viewer  = Users("Browser\n(reports, downloads)")
             grafana = AmazonManagedGrafana("Grafana\n(/data/*.json)")
 
-        cw = Cloudwatch("CloudWatch Logs\n(job output, no secrets)")
+        cw = Cloudwatch("CloudWatch Logs\n(cloud deployments;\njob output, no secrets)")
 
         gitlab_src >> Edge(label="HTTPS 443") >> snapshot >> data_dir
         uploads    >> Edge(label="POST /api/upload") >> engine
