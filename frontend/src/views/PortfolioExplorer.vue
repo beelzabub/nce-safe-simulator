@@ -1,0 +1,435 @@
+<!-- Portfolio Explorer (issue #169) — the Analysis tab's first capability.
+     Lists EVERY portfolio epic (the epic::epic tier) as a GitLab-style card
+     and draws attention to the ones with issues: blocked descendants (with
+     the full hierarchy chains and weight/BV at risk) and behind-schedule
+     progress. Attention cards sort first; healthy epics read at a glance. -->
+<template>
+  <div class="pfx">
+
+    <div class="pfx-header">
+      <span class="pfx-title">Portfolio Explorer</span>
+      <span v-if="snapshot" class="pfx-run">snapshot {{ snapshotLabel }}</span>
+      <button class="pfx-refresh" title="Reload from latest snapshot" @click="load">↻</button>
+    </div>
+
+    <div v-if="state === 'loading'" class="pfx-empty">Analyzing latest snapshot…</div>
+
+    <div v-else-if="state === 'no-snapshot'" class="pfx-empty">
+      <p class="pfx-empty-lead">No report snapshot yet</p>
+      <p>Run reports from the Tools tab — the explorer reads the portfolio data each run captures.</p>
+    </div>
+
+    <div v-else-if="state === 'error'" class="pfx-empty">
+      Couldn't load the analysis. <button class="pfx-link" @click="load">Retry</button>
+    </div>
+
+    <template v-else>
+      <div class="totals-strip">
+        <div class="stat">
+          <span class="stat-value">{{ totals.portfolio_epics }}</span>
+          <span class="stat-label">Portfolio epics</span>
+        </div>
+        <div class="stat" :class="{ 'stat--attention': totals.needs_attention }">
+          <span class="stat-value">{{ totals.needs_attention }}</span>
+          <span class="stat-label">Need attention</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ totals.blocked_weight }}</span>
+          <span class="stat-label">Blocked weight</span>
+        </div>
+        <div class="stat stat--bv">
+          <span class="stat-value">{{ totals.blocked_business_value }}</span>
+          <span class="stat-label">BV at risk</span>
+        </div>
+      </div>
+
+      <div v-if="!portfolioEpics.length" class="pfx-empty">
+        <p class="pfx-empty-lead">No portfolio epics</p>
+        <p>This snapshot has no epics carrying the portfolio tier label (epic::epic).</p>
+      </div>
+
+      <div v-else class="card-list">
+        <div
+          v-for="pe in portfolioEpics" :key="pe.epic.id"
+          class="epic-card"
+          :class="{ 'epic-card--attention': pe.needs_attention }"
+        >
+
+          <button class="card-head" @click="toggle(pe.epic.id)" :disabled="!pe.chains.length">
+            <span class="chev" :class="{ open: expanded.has(pe.epic.id), hidden: !pe.chains.length }">▸</span>
+            <span class="state-dot" :class="pe.epic.state" :title="pe.epic.state" />
+            <span class="card-title">
+              <a :href="pe.epic.web_url" target="_blank" rel="noopener" @click.stop>🏆 {{ pe.epic.title }}</a>
+            </span>
+            <span class="chips">
+              <span v-if="pe.epic.piid" class="chip chip--piid">{{ pe.epic.piid }}</span>
+              <span v-for="l in projectLabels(pe.epic)" :key="l" class="chip">{{ l }}</span>
+            </span>
+            <span class="badges">
+              <span v-if="pe.flags.blocked" class="badge badge--blocked" :title="`${pe.rollup.blocked_count} blocked item(s): weight ${pe.rollup.blocked_weight}, BV ${pe.rollup.blocked_business_value} at risk`">
+                ⛔ {{ pe.rollup.blocked_count }} blocked · w {{ pe.rollup.blocked_weight }} · bv {{ pe.rollup.blocked_business_value }}
+              </span>
+              <span v-if="pe.flags.behind_schedule" class="badge badge--behind" title="% complete trails % through PI">
+                ⏱ behind schedule
+              </span>
+              <span v-if="!pe.needs_attention" class="badge badge--ok">on track</span>
+            </span>
+          </button>
+
+          <div class="card-meta">
+            <!-- Progress vs the PI clock: the notch marks % through PI, so a
+                 fill short of the notch is visibly behind schedule. -->
+            <div class="progress" :title="progressTitle(pe.epic)">
+              <div class="progress-fill" :class="{ behind: pe.flags.behind_schedule }" :style="{ width: pct(pe.epic.pct_complete) + '%' }" />
+              <div v-if="pe.epic.pct_through_pi != null" class="progress-notch" :style="{ left: pct(pe.epic.pct_through_pi) + '%' }" />
+            </div>
+            <span class="meta-nums">
+              {{ pct(pe.epic.pct_complete) }}% done<template v-if="pe.epic.pct_through_pi != null"> · {{ pct(pe.epic.pct_through_pi) }}% through PI</template>
+              · planned {{ pe.epic.planned_weight ?? '—' }} · BV {{ pe.epic.business_value ?? '—' }}
+            </span>
+          </div>
+
+          <div v-if="expanded.has(pe.epic.id)" class="chains">
+            <div v-for="(chain, ci) in pe.chains" :key="ci" class="chain">
+              <div
+                v-for="(node, ni) in chain.nodes" :key="node.id"
+                class="chain-node"
+                :class="{ blocked: node.blocked }"
+                :style="{ paddingLeft: (0.75 + ni * 1.1) + 'rem' }"
+              >
+                <span class="node-icon">{{ tierIcon(node.type) }}</span>
+                <a class="node-title" :href="node.web_url" target="_blank" rel="noopener">{{ node.title }}</a>
+                <span v-if="node.blocked" class="blocked-flag">blocked</span>
+                <span class="node-nums">
+                  w {{ node.planned_weight ?? node.actual_weight ?? '—' }} · bv {{ node.business_value ?? '—' }}
+                </span>
+              </div>
+              <div v-if="chain.blockers.length" class="blockers" :style="{ paddingLeft: (0.75 + chain.nodes.length * 1.1) + 'rem' }">
+                <span class="blockers-label">blocked by</span>
+                <a
+                  v-for="b in chain.blockers" :key="b.id"
+                  class="blocker-link" :href="b.web_url" target="_blank" rel="noopener"
+                >{{ b.title }}</a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </template>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+
+const state          = ref('loading')   // loading | no-snapshot | error | ready
+const totals         = ref({})
+const portfolioEpics = ref([])
+const snapshot       = ref(null)
+const expanded       = ref(new Set())
+
+const snapshotLabel = computed(() => {
+  if (!snapshot.value) return ''
+  const { date: d, time: t } = snapshot.value
+  return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)} ${t.slice(0, 2)}:${t.slice(2, 4)}`
+})
+
+function pct(v) {
+  return Math.round(v ?? 0)
+}
+
+function progressTitle(epic) {
+  const done = `${pct(epic.pct_complete)}% complete`
+  return epic.pct_through_pi == null
+    ? done
+    : `${done} vs ${pct(epic.pct_through_pi)}% through PI`
+}
+
+function projectLabels(epic) {
+  return (epic.labels || []).filter(l => l.startsWith('project::'))
+}
+
+const TIER_ICONS = { Epic: '🏆', Capability: '🧩', Feature: '🛠️' }
+function tierIcon(type) {
+  return TIER_ICONS[type] || '•'
+}
+
+function toggle(id) {
+  const next = new Set(expanded.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  expanded.value = next
+}
+
+async function load() {
+  state.value = 'loading'
+  try {
+    const r = await fetch('/api/analysis/portfolio')
+    if (r.status === 404) { state.value = 'no-snapshot'; return }
+    if (!r.ok) throw new Error(String(r.status))
+    const body = await r.json()
+    totals.value         = body.totals
+    portfolioEpics.value = body.portfolio_epics
+    snapshot.value       = body.snapshot
+    // The top blocked card is what the user came to see — start it expanded.
+    const first = body.portfolio_epics.find(pe => pe.chains.length)
+    expanded.value = new Set(first ? [first.epic.id] : [])
+    state.value = 'ready'
+  } catch {
+    state.value = 'error'
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.pfx {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pfx-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.pfx-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
+.pfx-run   { font-size: 0.75rem; color: var(--text-3); }
+.pfx-refresh {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.pfx-refresh:hover { color: var(--text-1); }
+
+.pfx-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.pfx-empty-lead { font-size: 1rem; font-weight: 600; color: var(--text-2); margin: 0 0 0.3rem; }
+.pfx-link {
+  background: none; border: none; color: var(--action);
+  cursor: pointer; font-size: inherit; padding: 0;
+}
+
+/* ── Totals strip ── */
+.totals-strip {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.stat--bv .stat-value        { color: var(--accent); }
+.stat--attention .stat-value { color: #f85149; }
+.stat-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+}
+
+/* ── Cards ── */
+.card-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.85rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.epic-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.epic-card--attention { border-left: 3px solid #f85149; }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.7rem 0.9rem 0.35rem;
+  cursor: pointer;
+}
+.card-head:disabled { cursor: default; }
+.chev {
+  color: var(--text-3);
+  font-size: 0.8rem;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.chev.open   { transform: rotate(90deg); }
+.chev.hidden { visibility: hidden; }
+.state-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.state-dot.opened { background: #3fb950; }
+.state-dot.closed { background: var(--text-3); }
+.card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.card-title a { color: var(--text-1); text-decoration: none; }
+.card-title a:hover { color: var(--action); }
+
+.chips { display: flex; gap: 0.3rem; flex-shrink: 0; }
+.chip {
+  font-size: 0.66rem;
+  font-weight: 600;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 0.06rem 0.5rem;
+  white-space: nowrap;
+}
+.chip--piid { color: var(--action); }
+
+.badges { display: flex; gap: 0.35rem; margin-left: auto; flex-shrink: 0; }
+.badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0.14rem 0.5rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.badge--blocked { background: rgba(248, 81, 73, 0.14); color: #f85149; }
+.badge--behind  { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+.badge--ok      { background: rgba(63, 185, 80, 0.12); color: #3fb950; }
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0 0.9rem 0.65rem 2.2rem;
+}
+.progress {
+  position: relative;
+  flex: 0 0 120px;
+  height: 6px;
+  background: var(--surface-alt);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill { height: 100%; background: #3fb950; }
+.progress-fill.behind { background: #d29922; }
+.progress-notch {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--text-3);
+}
+.meta-nums {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Chains ── */
+.chains {
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0.9rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.chain { display: flex; flex-direction: column; gap: 0.1rem; }
+.chain-node {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  padding-top: 0.14rem;
+  padding-bottom: 0.14rem;
+  border-radius: 4px;
+}
+.chain-node.blocked { background: rgba(248, 81, 73, 0.09); }
+.node-icon { flex-shrink: 0; font-size: 0.8rem; }
+.node-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  text-decoration: none;
+}
+.node-title:hover { color: var(--action); }
+.chain-node.blocked .node-title { color: var(--text-1); font-weight: 600; }
+.blocked-flag {
+  flex-shrink: 0;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 3px;
+  padding: 0 0.35rem;
+}
+.node-nums {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.blockers {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.76rem;
+}
+.blockers-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #f85149;
+}
+.blocker-link { color: var(--text-2); text-decoration: none; }
+.blocker-link:hover { color: var(--action); text-decoration: underline; }
+</style>

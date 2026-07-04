@@ -32,11 +32,8 @@
     </div>
 
     <!-- ── Analysis (#169) ── -->
-    <div v-if="activeTab === 'analysis'" class="panel-body panel-body--padded">
-      <div class="placeholder">
-        <p class="placeholder-title">Analysis</p>
-        <p class="placeholder-hint">Portfolio analysis tools, starting with the Blocked Work Explorer — coming with #169.</p>
-      </div>
+    <div v-if="activeTab === 'analysis'" class="panel-body">
+      <AnalysisTab />
     </div>
   </div>
 </template>
@@ -45,6 +42,7 @@
 import { ref } from 'vue'
 import JobPicker from './JobPicker.vue'
 import ReportsTab from './ReportsTab.vue'
+import AnalysisTab from './AnalysisTab.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
 defineProps({
@@ -133,27 +131,5 @@ function selectTab(key) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-.panel-body--padded {
-  overflow-y: auto;
-  padding: 0.65rem 0.85rem;
-}
-
-.placeholder {
-  margin-top: 2rem;
-  text-align: center;
-  padding: 0 0.5rem;
-}
-.placeholder-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-2);
-  margin: 0 0 0.4rem;
-}
-.placeholder-hint {
-  font-size: 0.78rem;
-  color: var(--text-3);
-  margin: 0;
-  line-height: 1.5;
 }
 </style>
