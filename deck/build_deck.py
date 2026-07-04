@@ -339,7 +339,7 @@ class DeckBuilder:
              "portfolio (Value Streams → ARTs → Teams) directly against the GitLab API.",
              "Generates realistic lorem test data, imports/exports epics & issues, and publishes a "
              "suite of portfolio-level reports (WSJF, Risk, Blocking, Capacity, Flow Metrics, Data Quality).",
-             "Three-tier system: a Python automation core (GitLab REST + GraphQL via python-gitlab) fronted by a FastAPI "
+             "Three-tier system: a Python automation core (GitLab REST v4 via python-gitlab, plus direct GraphQL calls) fronted by a FastAPI "
              "server, driving a Vue 3 web UI and a scriptable CLI — both call the same tool registry.",
              "Reports render to three surfaces: GitLab Wiki (markdown), a Quarto static site, and Marimo "
              "WASM interactive notebooks."],
