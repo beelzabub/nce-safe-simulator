@@ -68,6 +68,12 @@ defineEmits(['close'])
 const ALL_TABS = [
   { key: 'eks', label: 'EKS' },
   { key: 'ecs', label: 'ECS' },
+  { key: 'ov1', label: 'OV-1' },
+  { key: 'sv1', label: 'SV-1' },
+  { key: 'sv2-eks', label: 'SV-2 EKS' },
+  { key: 'sv2-ecs', label: 'SV-2 ECS' },
+  { key: 'dataflow', label: 'Data Flow' },
+  { key: 'devsecops', label: 'DevSecOps' },
 ]
 
 const availableTabs = ref([])
@@ -154,8 +160,10 @@ onMounted(async () => {
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
 
+  // 'eks'/'ecs' are deployment-specific summaries; the DoD views apply everywhere.
+  const DEPLOYMENT_KEYS = ['eks', 'ecs']
   const candidates = props.deploymentType
-    ? ALL_TABS.filter(t => t.key === props.deploymentType)
+    ? ALL_TABS.filter(t => t.key === props.deploymentType || !DEPLOYMENT_KEYS.includes(t.key))
     : ALL_TABS
 
   const results = await Promise.all(candidates.map(t => probe(t.key)))

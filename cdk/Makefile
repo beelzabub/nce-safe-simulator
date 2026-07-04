@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram audit help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram dod-diagrams audit help
 .DEFAULT_GOAL := help
 
 # Separate CDK config files for ECS and EKS stacks.
@@ -86,6 +86,16 @@ eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation sta
 	printf '%s' "$$EKS_CF" > ../diagrams/cf-outputs-eks.json && \
 	python3 ../diagrams/eks_architecture.py ../public/architecture/eks-architecture.png
 	@echo "==> ../public/architecture/eks-architecture.png"
+
+dod-diagrams: ## Regenerate the DoD architecture view set (OV-1, SV-1, SV-2 EKS/ECS, data flow, DevSecOps)
+	@mkdir -p ../public/architecture
+	@python3 ../diagrams/ov1_operational_concept.py ../public/architecture/ov1-architecture.png && \
+	python3 ../diagrams/sv1_system_interfaces.py ../public/architecture/sv1-architecture.png && \
+	python3 ../diagrams/sv2_deployment_eks.py ../public/architecture/sv2-eks-architecture.png && \
+	python3 ../diagrams/sv2_deployment_ecs.py ../public/architecture/sv2-ecs-architecture.png && \
+	python3 ../diagrams/dataflow_architecture.py ../public/architecture/dataflow-architecture.png && \
+	python3 ../diagrams/devsecops_pipeline.py ../public/architecture/devsecops-architecture.png
+	@echo "==> ../public/architecture/{ov1,sv1,sv2-eks,sv2-ecs,dataflow,devsecops}-architecture.png"
 
 ecs-diagram: ## Regenerate ECS architecture PNG (queries live CloudFormation stack for labels)
 	@mkdir -p ../public/architecture
