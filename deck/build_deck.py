@@ -20,8 +20,9 @@ from PIL import Image
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Pt
@@ -65,6 +66,43 @@ def _load_theme_colors(prs):
         "lgray": vals.get("accent5", LGRAY),
         "yellow": vals.get("accent6", RGBColor(0xFD, 0xB9, 0x13)),
     }
+
+
+def _decode_concatenated_json_arrays(text):
+    """glab api --paginate concatenates one JSON array per page with no separator
+    (e.g. "[...][...]"), so a plain json.loads() fails past page 1. Mirrors the
+    same helper in fetch_metrics.py."""
+    decoder = json.JSONDecoder()
+    items, idx, text = [], 0, text.strip()
+    while idx < len(text):
+        obj, end = decoder.raw_decode(text, idx)
+        items.extend(obj)
+        idx = end
+    return items
+
+
+def fetch_issues():
+    """Pull every issue (open + closed) for the project the current git remote
+    points at — same `glab api projects/:id/...` project-resolution approach as
+    fetch_metrics.py, so there's no hardcoded project ID. Returns a list of
+    {iid, title, state, type, assignee} dicts sorted by issue number ascending."""
+    out = subprocess.run(
+        ["glab", "api", "projects/:id/issues?state=all&per_page=100&order_by=created_at&sort=asc",
+         "--paginate"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    rows = []
+    for x in _decode_concatenated_json_arrays(out):
+        issue_type = ""
+        for label in x.get("labels", []):
+            if label.startswith("type::"):
+                issue_type = label.split("::", 1)[1]
+                break
+        assignee = (x.get("assignee") or {}).get("username", "")
+        rows.append({"iid": x["iid"], "title": x["title"], "state": x["state"],
+                     "type": issue_type, "assignee": assignee})
+    rows.sort(key=lambda r: r["iid"])
+    return rows
 
 
 def ensure_template(s3_path, cache_dir):
@@ -150,6 +188,29 @@ class DeckBuilder:
         x, y = box_x + (box_w - w) // 2, box_y + (box_h - h) // 2
         slide.shapes.add_picture(img_path, x, y, width=w, height=h)
 
+    def add_picture_cover(self, slide, img_path, box_x, box_y, box_w, box_h):
+        """Like add_picture_contain, but crops (non-destructively, via the
+        picture's srcRect) to fill the box exactly instead of letterboxing —
+        CSS background-size: cover."""
+        with Image.open(img_path) as im:
+            iw, ih = im.size
+        img_ratio, box_ratio = iw / ih, box_w / box_h
+        pic = slide.shapes.add_picture(img_path, box_x, box_y, width=box_w, height=box_h)
+        if img_ratio > box_ratio:
+            crop = (1 - box_ratio / img_ratio) / 2
+            pic.crop_left, pic.crop_right = crop, crop
+        else:
+            crop = (1 - img_ratio / box_ratio) / 2
+            pic.crop_top, pic.crop_bottom = crop, crop
+        return pic
+
+    def set_fill_opacity(self, shape, opacity_pct):
+        """Set a solid-filled shape's fill opacity (0-100). DrawingML's alpha
+        is stated in thousandths of a percent, so 45% opacity -> val=45000."""
+        srgb = shape._element.spPr.find(qn("a:solidFill")).find(qn("a:srgbClr"))
+        alpha = srgb.makeelement(qn("a:alpha"), {"val": str(int(opacity_pct * 1000))})
+        srgb.append(alpha)
+
     def new_slide(self, layout=None):
         return self.prs.slides.add_slide(layout or self.BLANK)
 
@@ -202,13 +263,52 @@ class DeckBuilder:
         if len(self.prs.slides) > 1:
             self.remove_slide(1)
         cover = self.prs.slides[0]
+
+        # The template's "Cover 1" layout decorates the right half with two
+        # groups of faceted freeform triangles instead of a photo slot. Strip
+        # them from the layout (Cover 1 is only used by this one slide, so
+        # this can't bleed into any other slide) and put a real fleet photo
+        # in the space they occupied instead.
+        layout = cover.slide_layout
+        for shape in list(layout.shapes):
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                shape._element.getparent().remove(shape._element)
+
+        # Full-bleed fleet photo behind everything, knocked back by a dark
+        # scrim so the white title/subtitle stay legible over the busy image
+        # (bright sky up top, dark sea below — a uniform overlay reads on both).
+        csg_photo = os.path.join(REPO_ROOT, "media/login-backgrounds/csg-valiant-shield-formation.jpg")
+        spTree = cover.shapes._spTree
+        if os.path.exists(csg_photo):
+            pic = self.add_picture_cover(cover, csg_photo, 0, 0, self.SW, self.SH)
+            scrim = self.add_rect(cover, 0, 0, self.SW, self.SH, RGBColor(0x0A, 0x0E, 0x14))
+            self.set_fill_opacity(scrim, 52)
+            # add_picture / add_rect append to the front of the z-order; drop
+            # the photo to the very back and the scrim just above it, so both
+            # sit behind the title, subtitle, logo, and seal.
+            for el in (pic._element, scrim._element):
+                spTree.remove(el)
+            spTree.insert(2, pic._element)
+            spTree.insert(3, scrim._element)
+
+        # Cover title/subtitle use the color the user set by hand: theme
+        # "Background 1, darker 25%" (a light gray) rather than a fixed RGB.
+        def cover_color(run):
+            run.font.color.theme_color = MSO_THEME_COLOR.BACKGROUND_1
+            run.font.color.brightness = -0.25
+
         cover.placeholders[0].text_frame.paragraphs[0].runs[0].text = "NCE Safe Simulator"
+        cover_color(cover.placeholders[0].text_frame.paragraphs[0].runs[0])
         body_tf = cover.placeholders[10].text_frame
         m = self.metrics
-        body_tf.paragraphs[0].runs[0].text = "Sprint Review — SAFe GitLab Portfolio Tooling"
+        body_tf.paragraphs[0].runs[0].text = "Simulator Overview: SAFe GitLab Portfolio Tooling"
+        cover_color(body_tf.paragraphs[0].runs[0])
         if len(body_tf.paragraphs) > 1 and body_tf.paragraphs[1].runs:
             body_tf.paragraphs[1].runs[0].text = f"Development window: {m['first_commit_date']} – {m['last_commit_date']}"
-        nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-navy.png")
+            cover_color(body_tf.paragraphs[1].runs[0])
+
+        # White emblem (not the navy one) now that the cover reads dark.
+        nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
         pmw_seal = os.path.join(REPO_ROOT, "frontend/src/assets/pmw-120-seal.png")
         if os.path.exists(nce_logo):
             cover.shapes.add_picture(nce_logo, Emu(320000), Emu(220000), height=Emu(500000))
@@ -218,8 +318,11 @@ class DeckBuilder:
     def build_agenda(self):
         agenda = self.new_slide(self.TOC)
         agenda.placeholders[0].text_frame.paragraphs[0].text = "Agenda"
-        items = ["Project Overview", "Architecture", "Deployment Methods", "CLI vs. UI",
-                 "Development Process & Tools", "By the Numbers — Metrics",
+        items = ["Project Overview", "Architecture", "DoD Architecture Views",
+                 "Deployment Methods", "CLI vs. UI",
+                 "Development Process & Tools", "Technology Stack",
+                 "By the Numbers — Metrics",
+                 "Issues — Full Backlog",
                  f"Capability Areas ({len(self.capabilities)})",
                  "Appendix — Full UI & Report Reference"]
         tf = agenda.placeholders[1].text_frame
@@ -229,7 +332,7 @@ class DeckBuilder:
             p.text = item
 
     def build_chrome_slides(self):
-        s = os.path.join(self.screenshots_dir, "00-home_dark.png")
+        s = os.path.join(self.screenshots_dir, "00-home_light.png")
         self.capability_slide(
             "Project Overview", "SAFe portfolio automation for GitLab",
             ["Manages the Epic → Capability/Feature → Issue hierarchy across a multi-group SAFe "
@@ -243,6 +346,7 @@ class DeckBuilder:
             image_path=s, caption="Web UI — job picker",
         )
         self._build_architecture_slide()
+        self._build_dod_architecture_slides()
         self._build_deployment_slide()
         self.capability_slide(
             "CLI vs. UI", "Same tool registry, two front ends",
@@ -253,8 +357,8 @@ class DeckBuilder:
              "same commands, not a separate code path.",
              "UI adds guardrails CLI doesn't enforce as a step: confirmation gating on mutating tools, "
              "live status panel, auto-refreshing running-jobs list."],
-            image_path=os.path.join(self.screenshots_dir, "05-import-export-import-epics_dark.png"),
-            caption="Import Epics dialog — form + generated CLI command",
+            image_path=os.path.join(self.screenshots_dir, "05-import-export-import-epics_light-cli-closeup.png"),
+            caption="Import Epics dialog (lower half) — every field mirrored by the generated CLI command",
         )
         m = self.metrics
         self.capability_slide(
@@ -304,9 +408,99 @@ class DeckBuilder:
             "Marimo — WASM notebooks, full client-side interactivity, no server round-trip",
         ], 12, RGBColor(0x2A, 0x2E, 0x32))
         self.add_text(arch, Emu(180000), self.SH - Emu(380000), self.SW - Emu(360000), Emu(280000),
-                       "Architecture diagrams for ECS/EKS are generated on demand from live infra "
-                       "(diagrams/ecs_architecture.py, diagrams/eks_architecture.py) — regenerate via "
-                       "`make ecs-diagram` / `make eks-diagram`.", 8.5, GRAY, italic=True)
+                       "Architecture is generated as code (Python `diagrams`, rendered at container build): the "
+                       "simple ECS/EKS deployment views plus a DoD/DoDAF view set — OV-1, SV-1, SV-2, data flow, "
+                       "DevSecOps (see next slide). Regenerate via `make ecs-diagram` / `eks-diagram` / `dod-diagrams`.",
+                       8.5, GRAY, italic=True)
+
+    def _build_dod_architecture_slides(self):
+        """DoD/DoDAF architecture view set added in MR!139 — a views table plus a
+        security-posture / known-gaps slide, distilled from diagrams/DOD_ARCHITECTURE.md."""
+        # --- Slide 1: the DoDAF view set ---
+        s = self.new_slide()
+        self.header_band(s, "DoD Architecture View Set",
+                         "DoDAF-aligned views generated as code — for program review / assessment packages")
+        self.add_text(s, Emu(180000), Emu(760000), self.SW - Emu(360000), Emu(300000),
+                      "Generated from diagrams/ scripts (Python `diagrams` library) at container build and "
+                      "surfaced in the web UI architecture dialog, alongside a master DOD_ARCHITECTURE.md "
+                      "(AV-1 summary, PPSM ports table, OV-6c logon/consent sequence).",
+                      10, GRAY, italic=True)
+
+        margin = Emu(180000)
+        content_w = self.SW - 2 * margin
+        top = Emu(1160000)
+        pad = Emu(70000)
+        line_h = 155000
+        char_w = 58000
+        body_color = RGBColor(0x2A, 0x2E, 0x32)
+        cols = [("View", Emu(2750000)), ("DoDAF", Emu(1150000)), ("What it shows", Emu(4884000))]
+
+        def cell_x(i):
+            return margin + sum(c[1] for c in cols[:i])
+
+        def est_lines(text, w):
+            cpl = max(1, int((w - 2 * pad) / char_w))
+            return max(1, -(-len(text) // cpl))
+
+        rows = [
+            ("Operational concept", "OV-1", "Stakeholder tiers, the system, GitLab as system of record, and the reporting surfaces"),
+            ("System interfaces", "SV-1", "System boundary plus every external interface, each with its protocol and port"),
+            ("Deployment topology — EKS", "SV-2", "Trust zones, CloudFront-only ALB security group, IRSA scope, EFS access points"),
+            ("Deployment topology — ECS", "SV-2", "Task trust zones, task role, deploy circuit-breaker, SSM exec access"),
+            ("Data flow", "SV-4", "Sources → one-pass snapshot → stores → egress; Grafana drawn as a read-only pull"),
+            ("DevSecOps pipeline", "—", "CI tests on every push; cloud deploys are optional, on-demand `make` targets"),
+            ("Ports, protocols & services", "PPSM", "12-row table — each source→destination flow with its port and boundary control"),
+            ("Logon & consent flow", "OV-6c", "DoD Notice & Consent banner (DTM 08-060) and the sign-in / session sequence"),
+        ]
+
+        # header row
+        self.add_rect(s, margin, top, content_w, Emu(300000), self.C["blue"])
+        for i, (label, w) in enumerate(cols):
+            self.add_text(s, cell_x(i) + pad, top, w - 2 * pad, Emu(300000),
+                          label, 10.5, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        y = top + Emu(300000)
+        for r, (view, vp, shows) in enumerate(rows):
+            lines = max(est_lines(view, cols[0][1]), est_lines(shows, cols[2][1]))
+            row_h = Emu(max(300000, lines * line_h + 110000))
+            if r % 2 == 0:
+                self.add_rect(s, margin, y, content_w, row_h, WHITE)
+            else:
+                band = self.add_rect(s, margin, y, content_w, row_h, self.C["blue"])
+                self.set_fill_opacity(band, 12)
+            self.add_text(s, cell_x(0) + pad, y + Emu(45000), cols[0][1] - 2 * pad, row_h, view, 9, self.C["blue"], bold=True)
+            self.add_text(s, cell_x(1) + pad, y + Emu(45000), cols[1][1] - 2 * pad, row_h, vp, 9, body_color, bold=True)
+            self.add_text(s, cell_x(2) + pad, y + Emu(45000), cols[2][1] - 2 * pad, row_h, shows, 9, body_color)
+            y += row_h
+
+        # --- Slide 2: security posture & known gaps ---
+        s2 = self.new_slide()
+        self.header_band(s2, "Security Posture & Known Gaps",
+                         "From the DoD architecture master document (AV-1 / PPSM / OV-6c)")
+        col_w = (self.SW - Emu(540000)) // 2
+        left_x, right_x = Emu(180000), Emu(180000) + col_w + Emu(180000)
+        head_y, body_y = Emu(830000), Emu(1140000)
+        body_h = self.SH - body_y - Emu(160000)
+        self.add_rect(s2, left_x, head_y, col_w, Emu(260000), self.C["blue"])
+        self.add_text(s2, left_x + Emu(80000), head_y, col_w - Emu(160000), Emu(260000),
+                      "Security posture", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_bullets(s2, left_x + Emu(40000), body_y, col_w - Emu(80000), body_h, [
+            "TLS at CloudFront (cloud) / Caddy + Let's Encrypt (single-box); HTTP only inside the VPC/Docker network.",
+            "DoD Notice & Consent banner (DTM 08-060), on by default, re-acknowledged each browser session.",
+            "AuthN: none (cosmetic front door) or basic (dev credential); in-memory sessions, 12-hour TTL.",
+            "Secrets: GitLab PAT in SSM SecureString (cloud) / env var (local) — never committed.",
+            "Data at rest: local disk or encrypted EFS; content is synthetic portfolio data (no PII/CUI).",
+            "No inbound admin ports — SSM exec only; ALB reachable solely from CloudFront.",
+        ], 11, body_color, space_after=8)
+        self.add_rect(s2, right_x, head_y, col_w, Emu(260000), self.C["green"])
+        self.add_text(s2, right_x + Emu(80000), head_y, col_w - Emu(160000), Emu(260000),
+                      "Known gaps (candidate roadmap)", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_bullets(s2, right_x + Emu(40000), body_y, col_w - Emu(80000), body_h, [
+            "No CAC/PIV or federated identity yet — basic is dev-only (AAA methods tracked in #152–#156).",
+            "No RBAC — access is authenticated-vs-not; job conflicts use writer/read-only groups, not permissions.",
+            "CI runs tests only — no SAST, dependency/container scanning, or SBOM stages; images deploy operator-driven.",
+            "No per-user structured audit trail (job/stdout logs to CloudWatch, 1-month retention).",
+            "Commercial us-east-1 — a GovCloud / Impact-Level target would need its own accreditation work.",
+        ], 11, body_color, space_after=8)
 
     def _build_deployment_slide(self):
         deploy = self.new_slide()
@@ -432,6 +626,253 @@ class DeckBuilder:
                 image_path=image_path, caption=cap.get("caption"),
             )
 
+    # Technology stack: (category, [(technology, what it is, purpose), ...]). Pulled
+    # from the repo's real manifests (requirements.txt, frontend/package.json,
+    # Dockerfile, cdk/requirements.txt, helm/, .gitlab-ci.yml).
+    TECH_STACK = [
+        ("Languages & Runtimes", [
+            ("Python 3.11", "General-purpose programming language; the project's primary runtime.",
+             "Powers the automation core, FastAPI server, AWS CDK app, and diagram generation."),
+            ("JavaScript (ES2022)", "Browser scripting language.",
+             "Implements the Vue single-page web UI and its interactivity."),
+            ("Vue SFC / HTML / CSS", "Component markup and styling.",
+             "Structure and dark/light theming of the web UI."),
+            ("Bash", "Unix shell scripting.",
+             "Deploy-validate loops and the local fetch → render → publish pipeline."),
+            ("YAML", "Declarative configuration format.",
+             "Capabilities config, GitLab CI, Helm values, and CDK context."),
+        ]),
+        ("Automation Core (Python)", [
+            ("python-gitlab", "GitLab API client (GraphQL + REST).",
+             "Drives the Epic → Feature → Issue hierarchy, labels, and wiki against GitLab."),
+            ("pandas", "DataFrame / data-analysis library.",
+             "Aggregates issue and MR data for the portfolio reports."),
+            ("boto3", "AWS SDK for Python.",
+             "Reads SSM config and talks to AWS services at runtime."),
+            ("lorem", "Latin placeholder-text generator.",
+             "Creates realistic lorem test data (epics and issues)."),
+            ("python-dateutil", "Date/time parsing utilities.",
+             "Normalizes GitLab timestamps for the flow metrics."),
+            ("markdown", "Markdown → HTML renderer.",
+             "Publishes generated report pages to the GitLab Wiki."),
+            ("requests / httpx", "Synchronous and async HTTP clients.",
+             "Auxiliary API calls and service health checks."),
+        ]),
+        ("Web Server & Frontend", [
+            ("FastAPI", "Async Python web framework.",
+             "REST + WebSocket job runner exposing the shared tool registry."),
+            ("Uvicorn", "ASGI application server.",
+             "Serves the FastAPI app inside the container."),
+            ("websockets / python-multipart", "WebSocket protocol + multipart parsing.",
+             "Streams live job logs to the browser; handles CSV/JSON upload."),
+            ("Vue 3", "Reactive UI framework.",
+             "The job-picker web UI with parameterized dialogs and log viewer."),
+            ("Vue Router", "Single-page-app router for Vue.",
+             "Client-side navigation between UI views."),
+            ("Vite", "Frontend build tool and dev server.",
+             "Bundles the Vue app; output is overlaid into the container image."),
+        ]),
+        ("Reporting & Visualization", [
+            ("Plotly", "Interactive charting library.",
+             "WSJF / Risk / Flow charts in the Quarto site and notebooks."),
+            ("Quarto", "Scientific static-site publisher.",
+             "Renders the report site, published via GitLab Pages."),
+            ("Marimo", "Reactive Python notebooks (WASM).",
+             "Client-side interactive report notebooks, no server round-trip."),
+            ("Jupyter / nbformat", "Notebook ecosystem and file format.",
+             "Notebook tooling underlying report authoring."),
+            ("Diagrams + Graphviz", "Diagram-as-code library + graph layout engine.",
+             "Generates the ECS/EKS architecture diagrams at image-build time."),
+            ("Pillow", "Python imaging library.",
+             "Screenshot processing and image handling for the deck pipeline."),
+        ]),
+        ("Infrastructure & DevOps", [
+            ("Docker", "Multi-stage container build and runtime.",
+             "One ARM64 image for the single-box, ECS, and EKS deployments."),
+            ("AWS CDK", "Infrastructure-as-code in Python (aws-cdk-lib, constructs).",
+             "Defines the ECS (Fargate) and EKS stacks."),
+            ("Helm", "Kubernetes package manager.",
+             "Chart for the EKS path — deployment, service, ingress, PV/PVC, SA."),
+            ("AWS (ECS, EKS, ALB, CloudFront, ECR, EFS, SSM, EventBridge, EC2)", "Cloud platform services.",
+             "Compute, load balancing, CDN, registry, storage, config, scheduling."),
+            ("Caddy", "Auto-TLS reverse proxy.",
+             "Fronts the single-box EC2 deployment with automatic HTTPS."),
+            ("Amazon Managed Grafana", "Managed observability dashboards (optional).",
+             "Optional ops dashboards, toggled per deployment and off by default."),
+        ]),
+        ("Testing & CI/CD", [
+            ("pytest / pytest-mock", "Python test framework and mocking.",
+             "Unit / integration / infra suite (markers) run on every push."),
+            ("Playwright", "Browser automation and E2E testing.",
+             "Frontend end-to-end tests and deck screenshot capture."),
+            ("GitLab CI/CD", "Pipeline automation.",
+             "Runs pytest on every push; publishes the Quarto site to Pages."),
+        ]),
+    ]
+
+    def build_tech_stack(self):
+        """Section divider + a paginated three-column table (Technology / What it
+        is / Purpose) grouped by category, with category banner rows and zebra
+        striping. Row heights grow with wrapped text; content flows onto new
+        slides (header + column header repeated) whenever a row won't fit."""
+        divider = self.new_slide(self.DIVIDER1)
+        divider.placeholders[0].text_frame.paragraphs[0].text = (
+            "Technology Stack\nLanguages, Libraries, Tools & Infrastructure")
+
+        margin = Emu(180000)
+        content_w = self.SW - 2 * margin
+        top = Emu(830000)
+        bottom_limit = self.SH - Emu(130000)
+        pad = Emu(70000)
+        line_h = Emu(155000)
+        char_w = 58000  # rough EMU per char at 9pt, for wrap-line estimation
+        body_color = RGBColor(0x2A, 0x2E, 0x32)
+
+        cols = [
+            ("Technology",  Emu(1950000)),
+            ("What it is",  Emu(3417000)),
+            ("Purpose",     Emu(3417000)),
+        ]
+
+        def cell_x(i):
+            return margin + sum(c[1] for c in cols[:i])
+
+        def est_lines(text, w):
+            cpl = max(1, int((w - 2 * pad) / char_w))
+            return max(1, -(-len(text) // cpl))  # ceil
+
+        state = {"slide": None, "y": None}
+
+        def start_page():
+            s = self.new_slide()
+            self.header_band(s, "Technology Stack",
+                             "What each language, library, and tool is — and why it's used")
+            self.add_rect(s, margin, top, content_w, Emu(300000), self.C["blue"])
+            for i, (label, w) in enumerate(cols):
+                self.add_text(s, cell_x(i) + pad, top, w - 2 * pad, Emu(300000),
+                              label, 10.5, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+            state["slide"] = s
+            state["y"] = top + Emu(300000)
+
+        start_page()
+        stripe = 0
+        for category, items in self.TECH_STACK:
+            cat_h = Emu(300000)
+            if state["y"] + cat_h > bottom_limit:
+                start_page()
+            # Category banner row (solid blue bar, white bold label).
+            self.add_rect(state["slide"], margin, state["y"], content_w, cat_h, self.C["blue"])
+            self.add_text(state["slide"], margin + pad, state["y"], content_w - 2 * pad, cat_h,
+                          category, 11, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+            state["y"] += cat_h
+            stripe = 0
+
+            for name, what, purpose in items:
+                lines = max(est_lines(name, cols[0][1]), est_lines(what, cols[1][1]),
+                            est_lines(purpose, cols[2][1]))
+                row_h = Emu(max(300000, lines * int(line_h) + 120000))
+                if state["y"] + row_h > bottom_limit:
+                    start_page()
+                    stripe = 0
+                if stripe % 2 == 0:
+                    self.add_rect(state["slide"], margin, state["y"], content_w, row_h, WHITE)
+                else:
+                    band = self.add_rect(state["slide"], margin, state["y"], content_w, row_h, self.C["blue"])
+                    self.set_fill_opacity(band, 12)
+                self.add_text(state["slide"], cell_x(0) + pad, state["y"] + Emu(50000),
+                              cols[0][1] - 2 * pad, row_h, name, 9, self.C["blue"], bold=True)
+                self.add_text(state["slide"], cell_x(1) + pad, state["y"] + Emu(50000),
+                              cols[1][1] - 2 * pad, row_h, what, 9, body_color)
+                self.add_text(state["slide"], cell_x(2) + pad, state["y"] + Emu(50000),
+                              cols[2][1] - 2 * pad, row_h, purpose, 9, body_color)
+                state["y"] += row_h
+                stripe += 1
+
+        n_items = sum(len(items) for _, items in self.TECH_STACK)
+        print(f"  tech stack: {n_items} technologies across {len(self.TECH_STACK)} categories")
+
+    def build_issues_table(self):
+        """Full backlog as a paginated, zebra-striped table — modelled on the
+        FMS sprint-review "Sprint Issues" slides (JIRA ID / Summary / Assignee /
+        Status columns, banded alternating rows, split across N slides with the
+        header repeated). Every issue #1..max gets a row; nothing is capped."""
+        issues = fetch_issues()
+        total = len(issues)
+
+        margin = Emu(180000)
+        content_w = self.SW - 2 * margin
+        top = Emu(830000)
+        bottom_margin = Emu(140000)
+        col_hdr_h = Emu(300000)
+        row_h = Emu(250000)
+        avail_h = self.SH - top - bottom_margin
+        rows_per_page = max(1, int((avail_h - col_hdr_h) // row_h))
+        pages = (total + rows_per_page - 1) // rows_per_page
+
+        # (label, width EMU, key, align) — Title is the wide column, mirroring
+        # the FMS "Summary" column. Widths sum to content_w.
+        cols = [
+            ("#",        Emu(620000),  "iid",      PP_ALIGN.CENTER),
+            ("Title",    Emu(4744000), "title",    PP_ALIGN.LEFT),
+            ("Type",     Emu(900000),  "type",     PP_ALIGN.CENTER),
+            ("Assignee", Emu(1560000), "assignee", PP_ALIGN.LEFT),
+            ("Status",   Emu(960000),  "status",   PP_ALIGN.CENTER),
+        ]
+        pad = Emu(70000)
+        body_color = RGBColor(0x2A, 0x2E, 0x32)
+
+        def cell_x(col_idx):
+            return margin + sum(c[1] for c in cols[:col_idx])
+
+        rendered = 0
+        for page in range(pages):
+            chunk = issues[page * rows_per_page:(page + 1) * rows_per_page]
+            s = self.new_slide()
+            self.header_band(
+                s, "Issues",
+                f"All {total} issues (#{issues[0]['iid']}–#{issues[-1]['iid']})  ·  "
+                f"page {page + 1} of {pages}",
+            )
+
+            # Column-header row: solid blue bar, white bold labels.
+            self.add_rect(s, margin, top, content_w, col_hdr_h, self.C["blue"])
+            for i, (label, w, _key, align) in enumerate(cols):
+                self.add_text(s, cell_x(i) + pad, top, w - 2 * pad, col_hdr_h,
+                              label, 10.5, GRAY, bold=True, align=align,
+                              anchor=MSO_ANCHOR.MIDDLE)
+
+            # Data rows: zebra striping — white for even rows, a low-opacity
+            # SAIC-teal tint for odd rows (distinct fill RGBs per the FMS banding).
+            for r, issue in enumerate(chunk):
+                y = top + col_hdr_h + r * row_h
+                if r % 2 == 0:
+                    self.add_rect(s, margin, y, content_w, row_h, WHITE)
+                else:
+                    band = self.add_rect(s, margin, y, content_w, row_h, self.C["blue"])
+                    self.set_fill_opacity(band, 14)
+
+                closed = issue["state"] == "closed"
+                status_txt = "Closed" if closed else "Open"
+                status_color = self.C["green"] if closed else self.C["blue"]
+                values = {
+                    "iid": f"#{issue['iid']}",
+                    "title": (issue["title"][:86] + "…") if len(issue["title"]) > 87 else issue["title"],
+                    "type": issue["type"].capitalize() if issue["type"] else "Issue",
+                    "assignee": "Jamie Powers" if issue["assignee"] in ("", "beelzabub") else issue["assignee"],
+                    "status": status_txt,
+                }
+                for i, (_label, w, key, align) in enumerate(cols):
+                    color = status_color if key == "status" else body_color
+                    self.add_text(s, cell_x(i) + pad, y, w - 2 * pad, row_h,
+                                  values[key], 9, color, bold=(key == "status"),
+                                  align=align, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+                rendered += 1
+
+        print(f"  issues table: rendered {rendered} rows across {pages} slides "
+              f"({rows_per_page} rows/page) — total issues {total}")
+        if rendered != total:
+            print(f"  WARNING: rendered {rendered} != total {total} — some issues missing!")
+
     def build_wrapup(self):
         m = self.metrics
         wrap = self.new_slide()
@@ -473,7 +914,9 @@ class DeckBuilder:
         self.build_cover()
         self.build_agenda()
         self.build_chrome_slides()
+        self.build_tech_stack()
         self.build_metrics_slide()
+        self.build_issues_table()
         self.build_capability_slides()
         self.build_wrapup()
         self.build_appendix()

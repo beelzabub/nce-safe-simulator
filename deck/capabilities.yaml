@@ -27,7 +27,7 @@ capabilities:
       - "#82 Make stuck-item thresholds configurable + creation-date distribution"
       - "#119 Verify epic created_at backdating feasibility"
       - "#3 Expand PIID labels to cover 2–3 years of PI history"
-    image: "10-initial-setup-create-lorem-data_dark.png"
+    image: "10-initial-setup-create-lorem-data_light.png"
     caption: "Initial Setup — Create Lorem Data"
 
   - title: "WSJF, Business Value & Risk Reporting"
@@ -57,7 +57,7 @@ capabilities:
     bullets:
       - "#6 Wiki pages not updating on subsequent runs (slug regression)"
       - "#9 Fix wiki slug mismatch and duplicate-page upload failure"
-    image: "12-wiki-management-list-wikis_dark.png"
+    image: "12-wiki-management-list-wikis_light.png"
     caption: "Wiki Management — List Wikis"
 
   - title: "Test Coverage Program"
@@ -95,7 +95,7 @@ capabilities:
       - "#67 Phase 2(C) WebSocket job streaming"
       - "#71 Phase 2(E3) JobRunner tabbed interface + streaming LogPane"
       - "#72 Phase 2(F) Site theme, dark/light toggle, professional job picker UI"
-    image: "00-home_dark.png"
+    image: "00-home_light.png"
     caption: "Web UI — job picker home"
 
   - title: "Cloud Deployment & Infrastructure"
@@ -135,7 +135,7 @@ capabilities:
       - "#104 Evaluate PMW framework transition"
       - "#121 Integrate NCE logo"
       - "#114 Document the issue-block seeding capability"
-    image: "13-audit-validation-audit-hierarchy_dark.png"
+    image: "13-audit-validation-audit-hierarchy_light.png"
     caption: "Audit & Validation — Audit Hierarchy"
 
   - title: "Open & Future Work"
