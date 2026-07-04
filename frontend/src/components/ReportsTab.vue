@@ -1,16 +1,10 @@
 <!-- Reports tab of the side panel (issue #167): browse report snapshot runs
      and open wiki pages in the in-app markdown viewer. The page list mirrors
      the GitLab wiki hierarchy exactly (paths come from the run's pages.json
-     manifest), with a filter box matching the Tools tab's. External report
-     surfaces (Quarto site, GitLab wiki, Grafana) live at the top. -->
+     manifest), with a filter box matching the Tools tab's. Run Reports… is
+     pinned at the bottom, same as on the Tools tab (issue #170). -->
 <template>
   <div class="reports-tab">
-
-    <div class="links-row">
-      <a href="/quarto/" target="_blank" rel="noopener" class="ext-link">Quarto&thinsp;↗</a>
-      <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="ext-link">GitLab&thinsp;↗</a>
-      <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="ext-link">Grafana&thinsp;↗</a>
-    </div>
 
     <div v-if="loading" class="empty-state">Loading runs…</div>
 
@@ -74,19 +68,40 @@
       </div>
     </template>
 
+    <!-- Run Reports — pinned to bottom, same affordance as the Tools tab -->
+    <div class="reports-area">
+      <button class="reports-btn" @click="showReportDialog = true">
+        Run Reports…
+      </button>
+    </div>
+
   </div>
+
+  <ReportPickerDialog
+    v-if="showReportDialog"
+    :reports="reportDefs"
+    @launch="onReportLaunch"
+    @close="showReportDialog = false"
+  />
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { getReports } from '../api.js'
+import ReportPickerDialog from './ReportPickerDialog.vue'
 import { useMainView } from '../composables/useMainView.js'
 
-defineProps({
-  gitlabWikiUrl: { type: String, default: '' },
-  grafanaUrl:    { type: String, default: '' },
-})
+const emit = defineEmits(['launch-reports'])
 
 const { reportPage, openReport } = useMainView()
+
+const showReportDialog = ref(false)
+const reportDefs       = ref([])
+
+function onReportLaunch(selectedReports, formats, useLast) {
+  showReportDialog.value = false
+  emit('launch-reports', selectedReports, formats, useLast)
+}
 
 const loading     = ref(true)
 const runs        = ref([])
@@ -177,6 +192,11 @@ onMounted(async () => {
   }
   selectedRun.value = wikiRuns.value[0] || null
   loading.value = false
+  try {
+    reportDefs.value = await getReports()
+  } catch {
+    reportDefs.value = []
+  }
 })
 </script>
 
@@ -187,22 +207,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
 }
-
-.links-row {
-  flex-shrink: 0;
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--border);
-}
-.ext-link {
-  font-size: 0.82rem;
-  color: var(--text-3);
-  text-decoration: none;
-  transition: color 0.15s;
-}
-.ext-link:hover { color: var(--text-1); }
 
 .run-row {
   flex-shrink: 0;
@@ -317,5 +321,31 @@ onMounted(async () => {
   font-size: 0.8rem;
   color: var(--text-3);
   line-height: 1.5;
+}
+
+/* ── Run Reports (matches the Tools tab's) ── */
+.reports-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.65rem 1rem;
+  background: var(--surface);
+}
+.reports-btn {
+  width: 100%;
+  padding: 7px 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.reports-btn:hover {
+  border-color: var(--action);
+  color: var(--action);
+}
+@media (pointer: coarse) {
+  .reports-btn { min-height: 44px; }
 }
 </style>
