@@ -1,3 +1,4 @@
+import json
 import re
 import gitlab
 
@@ -13,6 +14,18 @@ class WikiMixin:
             safe = re.sub(r'-+', '-', safe).strip('-')
             wiki_dir.mkdir(parents=True, exist_ok=True)
             (wiki_dir / f"{safe}.md").write_text(content, encoding="utf-8")
+            # The slug is lossy (dash collapsing erases the '/' separators),
+            # so record the real GitLab page path alongside — the web UI's
+            # Reports tab rebuilds the wiki hierarchy from this manifest.
+            manifest_path = wiki_dir / "pages.json"
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = {}
+            manifest[safe] = page_title
+            manifest_path.write_text(
+                json.dumps(manifest, indent=1, ensure_ascii=False),
+                encoding="utf-8")
 
         try:
             import re as _re

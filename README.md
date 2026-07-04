@@ -451,8 +451,8 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 | Area | Content |
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
-| Left sidebar | Job picker (collapsible groups) + Run Reports button + footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
-| Main pane | Job runner — one tab per launched job with streaming log output |
+| Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button. **Reports** browses snapshot runs and opens wiki pages in the in-app markdown viewer, with external links (**Quarto ↗**, **GitLab ↗**, **Grafana ↗**) at the top. **Analysis** hosts portfolio analysis tools computed from snapshots — first up, the **Portfolio Explorer** |
+| Main pane | Job runner — one tab per launched job with streaming log output — plus the docked CLI command bar; report and analysis views render here as siblings when opened from their tabs |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
 #### Mobile support
@@ -530,11 +530,17 @@ Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accent
 
 #### Reports
 
-The sidebar footer contains four links. **Quarto ↗** opens the static Quarto report site (`/quarto/`) in a new tab. **Wiki ↗** opens the GitLab group wiki. **GitLab ↗** opens the root GitLab group. **AMG ↗** opens the Amazon Managed Grafana workspace (only shown when `grafana_url` is set in config). Reports and interactive pages must be built first:
+The side panel's **Reports** tab is the in-app reading surface: it lists report snapshot runs (newest first, switchable), mirrors each run's **GitLab wiki hierarchy** exactly (page paths persisted per run in `wiki/pages.json`; legacy runs fall back to flat tier grouping), offers a filter box like the Tools tab's, and opens any page in a themed in-app markdown viewer in the main pane (server-rendered via `GET /api/runs/{date}/{time}/wiki/index.json` and `.../{slug}.json` — same python-markdown renderer as the standalone `/api/runs/.../wiki/{slug}` pages, so there is exactly one renderer). External links at the top of the tab: **Quarto ↗** opens the static Quarto report site (`/quarto/`; each report page there toggles to its Marimo interactive counterpart), **GitLab ↗** the group wiki, **Grafana ↗** the Amazon Managed Grafana workspace (only when `grafana_url` is set). Reports and interactive pages must be built first:
 
 ```bash
 python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo outputs
 ```
+
+#### Analysis API
+
+`GET /api/analysis/portfolio` (epic #165) computes a **portfolio-level view** from the newest complete report snapshot on disk — no GitLab calls, so it responds instantly and works offline. Every portfolio epic (the `epic::epic` tier) is listed with attention flags: **blocked** (a blocked descendant anywhere in its chain, with the full hierarchy path Epic → Capability → Feature → blocked item, the blockers, and a rollup of `blocked_count` / `blocked_weight` / `blocked_business_value`) and **behind_schedule** (open epic whose `pct_complete` trails `pct_through_pi` — the standard At Risk rule). Blocked weight prefers `planned_weight` and falls back to `actual_weight`. A blocked item counts toward every portfolio epic it threatens, while the grand `totals` dedupe blocked items so portfolio-wide numbers aren't inflated. Epics needing attention sort first (by BV at risk, then blocked weight); returns 404 with a hint when no snapshot exists yet.
+
+The **Portfolio Explorer** (Analysis tab) renders this: a totals strip (portfolio epics · need attention · blocked weight · BV at risk), then one GitLab-style card per portfolio epic — state, linked title, PIID/project chips, and a progress bar with a **PI-clock notch** (fill short of the notch = visibly behind schedule). Attention cards carry a red edge and issue badges (⛔ blocked with weight/BV, ⏱ behind schedule); healthy epics read "on track" at a glance. Blocked cards expand to the hierarchy chains (🏆 Epic → 🧩 Capability → 🛠️ Feature) with the blocked node flagged, its blockers linked, and per-node weight/BV figures; the top blocked card starts expanded. Empty states cover no-snapshot (with a call-to-action to run reports) and a portfolio with no `epic::epic` items.
 
 ---
 
