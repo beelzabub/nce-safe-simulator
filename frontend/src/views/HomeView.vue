@@ -24,6 +24,7 @@
         <JobRunner v-show="mainView === 'jobs'" />
         <CommandBar v-show="mainView === 'jobs'" />
         <MarkdownView v-if="mainView === 'report'" />
+        <PortfolioExplorer v-if="mainView === 'analysis'" />
       </main>
 
       <StatusSidebar :open="showStatus" @close="showStatus = false" />
@@ -43,6 +44,7 @@ import NavBar        from '../components/NavBar.vue'
 import SidePanel     from '../components/SidePanel.vue'
 import JobRunner     from './JobRunner.vue'
 import MarkdownView  from './MarkdownView.vue'
+import PortfolioExplorer from './PortfolioExplorer.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
 import CommandBar    from '../components/CommandBar.vue'
 import HelpDialog          from '../components/HelpDialog.vue'

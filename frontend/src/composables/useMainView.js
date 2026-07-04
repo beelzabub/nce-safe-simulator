@@ -18,5 +18,8 @@ export function useMainView() {
     reportPage.value = page
     mainView.value = 'report'
   }
-  return { mainView, reportPage, showMain, openReport }
+  function openAnalysis() {
+    mainView.value = 'analysis'
+  }
+  return { mainView, reportPage, showMain, openReport, openAnalysis }
 }
