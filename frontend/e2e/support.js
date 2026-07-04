@@ -46,7 +46,7 @@ export const WIKI_INDEX = [
 
 export const PORTFOLIO = {
   snapshot: { date: '20260701', time: '120000', generated_at: '2026-07-01T12:00:00Z' },
-  totals: { portfolio_epics: 3, needs_attention: 2, blocked_items: 2,
+  totals: { portfolio_epics: 13, needs_attention: 2, blocked_items: 2,
             blocked_weight: 21, blocked_business_value: 5 },
   portfolio_epics: [
     {
@@ -101,6 +101,19 @@ export const PORTFOLIO = {
       rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
       chains: [],
     },
+    // Filler so the card list outgrows the pane — regression fixture for the
+    // flex squeeze that crushed expanded cards and clipped their chains.
+    ...Array.from({ length: 10 }, (_, i) => ({
+      epic: { id: 100 + i, iid: 100 + i, title: `Healthy Epic ${i + 1}`, state: 'opened',
+              type: 'Epic', web_url: `https://gitlab.example/epics/${100 + i}`,
+              labels: ['Epic'], piid: 'PIID::2026Q3',
+              planned_weight: 21, actual_weight: 5, business_value: 3,
+              pct_complete: 60, pct_through_pi: 40 },
+      flags: { blocked: false, behind_schedule: false },
+      needs_attention: false,
+      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      chains: [],
+    })),
   ],
 }
 

@@ -269,6 +269,9 @@ onMounted(load)
   gap: 0.7rem;
 }
 .epic-card {
+  flex-shrink: 0;   /* flex column children compress to fit by default,
+                       crushing expanded cards and clipping their chains
+                       once the list outgrows the pane — scroll instead */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
