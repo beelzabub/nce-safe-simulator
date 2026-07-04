@@ -18,3 +18,4 @@ Pillow
 
 pytest
 pytest-mock
+diagrams
