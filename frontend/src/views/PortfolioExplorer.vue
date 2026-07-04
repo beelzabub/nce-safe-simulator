@@ -1,36 +1,37 @@
-<!-- Blocked Work Explorer (issue #169) — the Analysis tab's first capability.
-     Built for a portfolio manager scanning for the biggest fires: totals up
-     top, one GitLab-style card per threatened portfolio epic sorted by BV at
-     risk, each expanding to the hierarchy chains that carry the block. -->
+<!-- Portfolio Explorer (issue #169) — the Analysis tab's first capability.
+     Lists EVERY portfolio epic (the epic::epic tier) as a GitLab-style card
+     and draws attention to the ones with issues: blocked descendants (with
+     the full hierarchy chains and weight/BV at risk) and behind-schedule
+     progress. Attention cards sort first; healthy epics read at a glance. -->
 <template>
-  <div class="bwx">
+  <div class="pfx">
 
-    <div class="bwx-header">
-      <span class="bwx-title">Blocked Work Explorer</span>
-      <span v-if="snapshot" class="bwx-run">snapshot {{ snapshotLabel }}</span>
-      <button class="bwx-refresh" title="Reload from latest snapshot" @click="load">↻</button>
+    <div class="pfx-header">
+      <span class="pfx-title">Portfolio Explorer</span>
+      <span v-if="snapshot" class="pfx-run">snapshot {{ snapshotLabel }}</span>
+      <button class="pfx-refresh" title="Reload from latest snapshot" @click="load">↻</button>
     </div>
 
-    <div v-if="state === 'loading'" class="bwx-empty">Analyzing latest snapshot…</div>
+    <div v-if="state === 'loading'" class="pfx-empty">Analyzing latest snapshot…</div>
 
-    <div v-else-if="state === 'no-snapshot'" class="bwx-empty">
-      <p class="bwx-empty-lead">No report snapshot yet</p>
-      <p>Run reports from the Tools tab — the explorer reads the blocking data each run captures.</p>
+    <div v-else-if="state === 'no-snapshot'" class="pfx-empty">
+      <p class="pfx-empty-lead">No report snapshot yet</p>
+      <p>Run reports from the Tools tab — the explorer reads the portfolio data each run captures.</p>
     </div>
 
-    <div v-else-if="state === 'error'" class="bwx-empty">
-      Couldn't load the analysis. <button class="bwx-link" @click="load">Retry</button>
+    <div v-else-if="state === 'error'" class="pfx-empty">
+      Couldn't load the analysis. <button class="pfx-link" @click="load">Retry</button>
     </div>
 
     <template v-else>
       <div class="totals-strip">
         <div class="stat">
-          <span class="stat-value">{{ totals.portfolio_epics_at_risk }}</span>
-          <span class="stat-label">Portfolio epics at risk</span>
+          <span class="stat-value">{{ totals.portfolio_epics }}</span>
+          <span class="stat-label">Portfolio epics</span>
         </div>
-        <div class="stat">
-          <span class="stat-value">{{ totals.blocked_items }}</span>
-          <span class="stat-label">Blocked items</span>
+        <div class="stat" :class="{ 'stat--attention': totals.needs_attention }">
+          <span class="stat-value">{{ totals.needs_attention }}</span>
+          <span class="stat-label">Need attention</span>
         </div>
         <div class="stat">
           <span class="stat-value">{{ totals.blocked_weight }}</span>
@@ -42,16 +43,20 @@
         </div>
       </div>
 
-      <div v-if="!portfolioEpics.length" class="bwx-empty">
-        <p class="bwx-empty-lead">All clear</p>
-        <p>No portfolio epic has a blocked descendant in this snapshot.</p>
+      <div v-if="!portfolioEpics.length" class="pfx-empty">
+        <p class="pfx-empty-lead">No portfolio epics</p>
+        <p>This snapshot has no epics carrying the portfolio tier label (epic::epic).</p>
       </div>
 
       <div v-else class="card-list">
-        <div v-for="pe in portfolioEpics" :key="pe.epic.id" class="epic-card">
+        <div
+          v-for="pe in portfolioEpics" :key="pe.epic.id"
+          class="epic-card"
+          :class="{ 'epic-card--attention': pe.needs_attention }"
+        >
 
-          <button class="card-head" @click="toggle(pe.epic.id)">
-            <span class="chev" :class="{ open: expanded.has(pe.epic.id) }">▸</span>
+          <button class="card-head" @click="toggle(pe.epic.id)" :disabled="!pe.chains.length">
+            <span class="chev" :class="{ open: expanded.has(pe.epic.id), hidden: !pe.chains.length }">▸</span>
             <span class="state-dot" :class="pe.epic.state" :title="pe.epic.state" />
             <span class="card-title">
               <a :href="pe.epic.web_url" target="_blank" rel="noopener" @click.stop>🏆 {{ pe.epic.title }}</a>
@@ -61,23 +66,27 @@
               <span v-for="l in projectLabels(pe.epic)" :key="l" class="chip">{{ l }}</span>
             </span>
             <span class="badges">
-              <span class="badge badge--weight" title="Blocked weight (planned, falling back to actual)">
-                ⚓ {{ pe.rollup.blocked_weight }}
+              <span v-if="pe.flags.blocked" class="badge badge--blocked" :title="`${pe.rollup.blocked_count} blocked item(s): weight ${pe.rollup.blocked_weight}, BV ${pe.rollup.blocked_business_value} at risk`">
+                ⛔ {{ pe.rollup.blocked_count }} blocked · w {{ pe.rollup.blocked_weight }} · bv {{ pe.rollup.blocked_business_value }}
               </span>
-              <span class="badge badge--bv" title="Business Value at risk">
-                ★ {{ pe.rollup.blocked_business_value }}
+              <span v-if="pe.flags.behind_schedule" class="badge badge--behind" title="% complete trails % through PI">
+                ⏱ behind schedule
               </span>
-              <span class="badge badge--count" title="Blocked items under this epic">
-                {{ pe.rollup.blocked_count }} blocked
-              </span>
+              <span v-if="!pe.needs_attention" class="badge badge--ok">on track</span>
             </span>
           </button>
 
           <div class="card-meta">
-            <div class="progress" :title="`${pct(pe.epic)}% complete`">
-              <div class="progress-fill" :style="{ width: pct(pe.epic) + '%' }" />
+            <!-- Progress vs the PI clock: the notch marks % through PI, so a
+                 fill short of the notch is visibly behind schedule. -->
+            <div class="progress" :title="progressTitle(pe.epic)">
+              <div class="progress-fill" :class="{ behind: pe.flags.behind_schedule }" :style="{ width: pct(pe.epic.pct_complete) + '%' }" />
+              <div v-if="pe.epic.pct_through_pi != null" class="progress-notch" :style="{ left: pct(pe.epic.pct_through_pi) + '%' }" />
             </div>
-            <span class="meta-nums">{{ pct(pe.epic) }}% · planned {{ pe.epic.planned_weight ?? '—' }} · BV {{ pe.epic.business_value ?? '—' }}</span>
+            <span class="meta-nums">
+              {{ pct(pe.epic.pct_complete) }}% done<template v-if="pe.epic.pct_through_pi != null"> · {{ pct(pe.epic.pct_through_pi) }}% through PI</template>
+              · planned {{ pe.epic.planned_weight ?? '—' }} · BV {{ pe.epic.business_value ?? '—' }}
+            </span>
           </div>
 
           <div v-if="expanded.has(pe.epic.id)" class="chains">
@@ -127,8 +136,15 @@ const snapshotLabel = computed(() => {
   return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)} ${t.slice(0, 2)}:${t.slice(2, 4)}`
 })
 
-function pct(epic) {
-  return Math.round((epic.pct_complete ?? 0))
+function pct(v) {
+  return Math.round(v ?? 0)
+}
+
+function progressTitle(epic) {
+  const done = `${pct(epic.pct_complete)}% complete`
+  return epic.pct_through_pi == null
+    ? done
+    : `${done} vs ${pct(epic.pct_through_pi)}% through PI`
 }
 
 function projectLabels(epic) {
@@ -149,16 +165,16 @@ function toggle(id) {
 async function load() {
   state.value = 'loading'
   try {
-    const r = await fetch('/api/analysis/blocked-chains')
+    const r = await fetch('/api/analysis/portfolio')
     if (r.status === 404) { state.value = 'no-snapshot'; return }
     if (!r.ok) throw new Error(String(r.status))
     const body = await r.json()
     totals.value         = body.totals
     portfolioEpics.value = body.portfolio_epics
     snapshot.value       = body.snapshot
-    // The top card is what the user came to see — start it expanded.
-    expanded.value = new Set(
-      body.portfolio_epics.length ? [body.portfolio_epics[0].epic.id] : [])
+    // The top blocked card is what the user came to see — start it expanded.
+    const first = body.portfolio_epics.find(pe => pe.chains.length)
+    expanded.value = new Set(first ? [first.epic.id] : [])
     state.value = 'ready'
   } catch {
     state.value = 'error'
@@ -169,14 +185,14 @@ onMounted(load)
 </script>
 
 <style scoped>
-.bwx {
+.pfx {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.bwx-header {
+.pfx-header {
   flex-shrink: 0;
   display: flex;
   align-items: baseline;
@@ -185,9 +201,9 @@ onMounted(load)
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.bwx-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
-.bwx-run   { font-size: 0.75rem; color: var(--text-3); }
-.bwx-refresh {
+.pfx-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
+.pfx-run   { font-size: 0.75rem; color: var(--text-3); }
+.pfx-refresh {
   margin-left: auto;
   background: none;
   border: none;
@@ -195,17 +211,17 @@ onMounted(load)
   cursor: pointer;
   font-size: 0.95rem;
 }
-.bwx-refresh:hover { color: var(--text-1); }
+.pfx-refresh:hover { color: var(--text-1); }
 
-.bwx-empty {
+.pfx-empty {
   padding: 2.5rem 1.5rem;
   text-align: center;
   color: var(--text-3);
   font-size: 0.85rem;
   line-height: 1.6;
 }
-.bwx-empty-lead { font-size: 1rem; font-weight: 600; color: var(--text-2); margin: 0 0 0.3rem; }
-.bwx-link {
+.pfx-empty-lead { font-size: 1rem; font-weight: 600; color: var(--text-2); margin: 0 0 0.3rem; }
+.pfx-link {
   background: none; border: none; color: var(--action);
   cursor: pointer; font-size: inherit; padding: 0;
 }
@@ -234,7 +250,8 @@ onMounted(load)
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
 }
-.stat--bv .stat-value { color: var(--accent); }
+.stat--bv .stat-value        { color: var(--accent); }
+.stat--attention .stat-value { color: #f85149; }
 .stat-label {
   font-size: 0.68rem;
   text-transform: uppercase;
@@ -257,6 +274,7 @@ onMounted(load)
   border-radius: 8px;
   overflow: hidden;
 }
+.epic-card--attention { border-left: 3px solid #f85149; }
 .card-head {
   display: flex;
   align-items: center;
@@ -268,13 +286,15 @@ onMounted(load)
   padding: 0.7rem 0.9rem 0.35rem;
   cursor: pointer;
 }
+.card-head:disabled { cursor: default; }
 .chev {
   color: var(--text-3);
   font-size: 0.8rem;
   transition: transform 0.15s;
   flex-shrink: 0;
 }
-.chev.open { transform: rotate(90deg); }
+.chev.open   { transform: rotate(90deg); }
+.chev.hidden { visibility: hidden; }
 .state-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -315,9 +335,9 @@ onMounted(load)
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.badge--weight { background: var(--conflict-bg, rgba(210, 153, 34, 0.15)); color: #d29922; }
-.badge--bv     { background: rgba(252, 109, 38, 0.15); color: var(--accent); }
-.badge--count  { background: var(--surface-alt); color: var(--text-2); }
+.badge--blocked { background: rgba(248, 81, 73, 0.14); color: #f85149; }
+.badge--behind  { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+.badge--ok      { background: rgba(63, 185, 80, 0.12); color: #3fb950; }
 
 .card-meta {
   display: flex;
@@ -326,6 +346,7 @@ onMounted(load)
   padding: 0 0.9rem 0.65rem 2.2rem;
 }
 .progress {
+  position: relative;
   flex: 0 0 120px;
   height: 6px;
   background: var(--surface-alt);
@@ -333,6 +354,14 @@ onMounted(load)
   overflow: hidden;
 }
 .progress-fill { height: 100%; background: #3fb950; }
+.progress-fill.behind { background: #d29922; }
+.progress-notch {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--text-3);
+}
 .meta-nums {
   font-size: 0.72rem;
   color: var(--text-3);

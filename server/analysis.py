@@ -1,9 +1,16 @@
-"""Blocked-chain analysis over report snapshots (epic #165, issue #168).
+"""Portfolio analysis over report snapshots (epic #165, issues #168/#169).
 
 Pure disk reads — joins a snapshot's ``blocking.json`` relationships with
 ``epics.json``, reconstructs each full hierarchy chain (Portfolio Epic →
-Capability → Feature → blocked item) by walking ``parent_id``, and rolls up
-the weight and Business Value of blocked work per portfolio epic.
+Capability → Feature → blocked item) by walking ``parent_id``, and builds a
+portfolio-level view: **every** portfolio epic (the ``epic::epic`` tier,
+``type == "Epic"`` in the snapshot), each with attention flags and, where
+work is blocked, the chains and weight/BV rollups that quantify it.
+
+Attention semantics:
+- ``blocked`` — the epic has a blocked descendant anywhere in its chain.
+- ``behind_schedule`` — open epic whose ``pct_complete`` trails
+  ``pct_through_pi`` (the repo's standard At Risk rule).
 
 Rollup semantics (mirrors how the WSJF board treats at-risk value):
 - A blocked item counts toward *every* portfolio epic it threatens, so each
@@ -22,7 +29,8 @@ from pathlib import Path
 # nothing else (descriptions in particular can be huge).
 _EPIC_FIELDS = (
     "id", "iid", "title", "state", "type", "web_url", "labels", "piid",
-    "planned_weight", "actual_weight", "business_value", "pct_complete",
+    "planned_weight", "actual_weight", "business_value",
+    "pct_complete", "pct_through_pi",
 )
 
 
@@ -73,10 +81,13 @@ def _chain_nodes(epics_by_id, blocked_id, portfolio_id):
     return None
 
 
-def build_blocked_chains(epics_by_id, blocking):
-    """Compute the /api/analysis/blocked-chains payload body."""
-    per_portfolio = {}       # portfolio id -> {"epic", "chains", blocked ids}
-    all_blocked_ids = set()  # distinct blocked items for deduped grand totals
+def _blocked_by_portfolio(epics_by_id, blocking):
+    """Group blocked chains by threatened portfolio epic.
+
+    Returns ({portfolio_id: {"chains": [...], "blocked_ids": set}}, all_blocked_ids).
+    """
+    per_portfolio = {}
+    all_blocked_ids = set()
 
     for rel in blocking.get("relationships", []):
         blocked_id = rel.get("blocked_epic", {}).get("id_int")
@@ -96,53 +107,86 @@ def build_blocked_chains(epics_by_id, blocking):
 
         for ancestor in rel.get("at_risk_portfolio_epics", []):
             pid = ancestor.get("id_int")
-            portfolio = epics_by_id.get(pid)
-            if portfolio is None:
+            if pid not in epics_by_id:
                 continue
             nodes = _chain_nodes(epics_by_id, blocked_id, pid)
             if nodes is None:
                 continue
 
-            entry = per_portfolio.setdefault(pid, {
-                "epic": _slim(portfolio),
-                "chains": [],
-                "_blocked_ids": set(),
-            })
+            entry = per_portfolio.setdefault(
+                pid, {"chains": [], "blocked_ids": set()})
             entry["chains"].append({
                 "nodes": [
                     _slim(n, blocked=(n["id"] == blocked_id)) for n in nodes
                 ],
                 "blockers": blockers,
             })
-            entry["_blocked_ids"].add(blocked_id)
+            entry["blocked_ids"].add(blocked_id)
             all_blocked_ids.add(blocked_id)
 
-    portfolio_epics = []
-    for entry in per_portfolio.values():
-        blocked_ids = entry.pop("_blocked_ids")
-        entry["rollup"] = {
-            "blocked_count": len(blocked_ids),
-            "blocked_weight": sum(
-                _blocked_value(epics_by_id[i]) for i in blocked_ids
-            ),
-            "blocked_business_value": sum(
-                epics_by_id[i].get("business_value") or 0 for i in blocked_ids
-            ),
-        }
-        portfolio_epics.append(entry)
+    return per_portfolio, all_blocked_ids
 
-    # Biggest fires first: BV at risk, then blocked weight.
+
+def _behind_schedule(epic):
+    """The repo's standard At Risk rule: % done trails % through PI."""
+    if epic.get("state") != "opened":
+        return False
+    done, through = epic.get("pct_complete"), epic.get("pct_through_pi")
+    if done is None or through is None:
+        return False
+    return done < through
+
+
+def build_portfolio_view(epics_by_id, blocking):
+    """Compute the /api/analysis/portfolio payload body."""
+    blocked_by_pid, all_blocked_ids = _blocked_by_portfolio(
+        epics_by_id, blocking)
+
+    portfolio_epics = []
+    for epic in epics_by_id.values():
+        if epic.get("type") != "Epic":
+            continue
+
+        pb = blocked_by_pid.get(epic["id"], {"chains": [], "blocked_ids": set()})
+        blocked_ids = pb["blocked_ids"]
+        flags = {
+            "blocked": bool(blocked_ids),
+            "behind_schedule": _behind_schedule(epic),
+        }
+        portfolio_epics.append({
+            "epic": _slim(epic),
+            "flags": flags,
+            "needs_attention": any(flags.values()),
+            "rollup": {
+                "blocked_count": len(blocked_ids),
+                "blocked_weight": sum(
+                    _blocked_value(epics_by_id[i]) for i in blocked_ids
+                ),
+                "blocked_business_value": sum(
+                    epics_by_id[i].get("business_value") or 0
+                    for i in blocked_ids
+                ),
+            },
+            "chains": pb["chains"],
+        })
+
+    # Attention first — biggest BV at risk, then blocked weight, then the
+    # heaviest planned work; healthy epics follow by weight.
     portfolio_epics.sort(
         key=lambda e: (
-            e["rollup"]["blocked_business_value"],
-            e["rollup"]["blocked_weight"],
-        ),
-        reverse=True,
+            not e["needs_attention"],
+            -e["rollup"]["blocked_business_value"],
+            -e["rollup"]["blocked_weight"],
+            -(e["epic"].get("planned_weight") or 0),
+        )
     )
 
     return {
         "totals": {
-            "portfolio_epics_at_risk": len(portfolio_epics),
+            "portfolio_epics": len(portfolio_epics),
+            "needs_attention": sum(
+                1 for e in portfolio_epics if e["needs_attention"]
+            ),
             "blocked_items": len(all_blocked_ids),
             "blocked_weight": sum(
                 _blocked_value(epics_by_id[i]) for i in all_blocked_ids
@@ -156,10 +200,10 @@ def build_blocked_chains(epics_by_id, blocking):
     }
 
 
-def blocked_chains_payload(data_dir: Path):
-    """Full response for GET /api/analysis/blocked-chains."""
+def portfolio_payload(data_dir: Path):
+    """Full response for GET /api/analysis/portfolio."""
     epics_by_id, blocking, generated_at = load_snapshot(data_dir)
-    payload = build_blocked_chains(epics_by_id, blocking)
+    payload = build_portfolio_view(epics_by_id, blocking)
     run_dir = data_dir.parent
     payload["snapshot"] = {
         "date": run_dir.parent.name,
