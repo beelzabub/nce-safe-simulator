@@ -648,32 +648,62 @@ _TIER_NAMES = {
 }
 
 
-def _wiki_page_tier(slug: str) -> "str | None":
-    """Tier number ("00".."03") parsed from a slugified wiki path, or None.
+def _wiki_page_tier(slug_or_path: str) -> "str | None":
+    """Tier number ("00".."03") from a wiki page path or slug, or None.
 
-    Wiki slugs encode the page path with '--' separators, e.g.
-    ...portfolio-home--01-program-management--risk-register.
+    Works on real page paths ("… Portfolio Home/01 Program Management/…")
+    and on slugs, where dash collapsing has erased the '/' separators
+    (…portfolio-home-01-program-management-…).
     """
-    m = re.search(r"--(0[0-3])-", slug)
+    m = re.search(r"(?:^|[/-])(0[0-3])[ -]", slug_or_path)
     return m.group(1) if m else None
 
 
 @app.get("/api/runs/{date}/{time}/wiki/index.json")
 def wiki_index_json(date: str, time: str):
-    """Wiki pages of a run as JSON for the in-app Reports tab (epic #165)."""
+    """Wiki pages of a run as JSON for the in-app Reports tab (epic #165).
+
+    Each entry carries the page's real GitLab wiki path (from the run's
+    pages.json manifest) split into segments, so the Reports tab can mirror
+    the wiki hierarchy exactly. Runs from before the manifest fall back to
+    the leaf H1 title with no nesting.
+    """
     wiki_dir = Path("reports") / date / time / "wiki"
     if not wiki_dir.is_dir():
         raise HTTPException(status_code=404, detail="Wiki directory not found")
+
+    manifest = {}
+    manifest_path = wiki_dir / "pages.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except ValueError:
+            manifest = {}
+
     pages = []
     for f in sorted(wiki_dir.glob("*.md")):
-        tier = _wiki_page_tier(f.stem)
+        path = manifest.get(f.stem)
+        if path:
+            segments = path.split("/")
+            title = segments[-1]
+            tier = _wiki_page_tier(path)
+        else:
+            segments = None
+            title = _wiki_page_title(f)
+            tier = _wiki_page_tier(f.stem)
         pages.append({
             "slug": f.stem,
-            "title": _wiki_page_title(f),
+            "title": title,
+            "path": path,
+            "segments": segments,
             "tier": tier,
             "tier_name": _TIER_NAMES.get(tier),
         })
-    pages.sort(key=lambda p: (p["tier"] or "", p["title"].lower()))
+    # Wiki order: by full path where known (home page naturally precedes the
+    # numbered tier folders), legacy entries by tier then title.
+    pages.sort(key=lambda p: (
+        (p["path"] or "").lower() or (p["tier"] or "") + p["title"].lower(),
+    ))
     return pages
 
 
