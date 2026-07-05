@@ -66,6 +66,49 @@ test.describe('login flow', () => {
   })
 })
 
+test.describe('DoD banner re-consent (#163)', () => {
+  // The banner ack lives in sessionStorage; only a real signed-in ->
+  // signed-out transition (session TTL lapse, server restart) may clear it.
+
+  async function mockExpiredBasicSession(page) {
+    await mockApi(page)
+    // Later-registered routes win: server-enforced mode, session gone.
+    await page.route('**/api/auth/session', (route) =>
+      route.fulfill({ json: { method: 'basic', authenticated: false } }))
+  }
+
+  test('session expiry -> guard redirect re-presents the banner', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')
+      sessionStorage.setItem('nce.auth.wasAuthenticated', '1')   // was signed in
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/')
+    await expect(page).toHaveURL(/\/app\/login$/)
+    await expect(page.getByRole('button', { name: 'OK' })).toBeVisible()
+  })
+
+  test('session expiry -> direct /login visit re-presents the banner', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')
+      sessionStorage.setItem('nce.auth.wasAuthenticated', '1')
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/login')
+    await expect(page.getByRole('button', { name: 'OK' })).toBeVisible()
+  })
+
+  test('reloading /login before ever signing in does not re-nag', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')   // no wasAuthenticated
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/login')
+    await expect(page.locator('.whisper')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'OK' })).toBeHidden()
+  })
+})
+
 test.describe('home workspace', () => {
   test.beforeEach(async ({ page }) => {
     await seedAuthedSession(page)
