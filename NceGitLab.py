@@ -68,6 +68,9 @@ class NceGitLab(
             "Epic":       "⚡",
             "Capability": "💠",
             "Feature":    "🔖",
+            # Not a tier — issue-type blockers surfaced by the work-items
+            # linked-items pass (Refs #177) render with their own icon.
+            "Issue":      "📋",
         }
 
         self._ssl_verify_override = ssl_verify

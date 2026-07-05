@@ -156,7 +156,8 @@ def test_rollups_and_chains(tmp_path, monkeypatch):
     deep = chains[(1, 2, 3)]
     assert [n["blocked"] for n in deep["nodes"]] == [False, False, True]
     assert deep["blockers"] == [{"id": 6, "title": F6["title"],
-                                 "type": "Feature", "web_url": F6["web_url"]}]
+                                 "type": "Feature", "item_type": "Epic",
+                                 "web_url": F6["web_url"]}]
     # Slim epic dicts must not leak bulky fields.
     assert "description" not in deep["nodes"][0]
     # Schedule context ships with each epic for the UI's PI marker.

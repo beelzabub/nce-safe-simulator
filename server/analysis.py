@@ -112,6 +112,7 @@ def _blocked_by_portfolio(epics_by_id, blocking):
                 "id": b.get("id_int"),
                 "title": b.get("title"),
                 "type": b.get("type"),
+                "item_type": b.get("item_type") or "Epic",
                 "web_url": b.get("web_url"),
             }
             for b in rel.get("blocked_by", [])

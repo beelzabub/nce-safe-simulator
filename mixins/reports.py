@@ -6753,6 +6753,109 @@ class ReportsMixin:
             self._run_reports(selected, reuse_data=reuse_data, formats=formats)
             return True
 
+    _EPIC_ISSUE_BLOCKERS_QUERY = """
+    query($path: ID!, $cursor: String) {
+      group(fullPath: $path) {
+        workItems(types: [EPIC], includeDescendants: true, first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            iid
+            namespace { fullPath }
+            widgets {
+              ... on WorkItemWidgetLinkedItems {
+                linkedItems {
+                  nodes {
+                    linkType
+                    workItem {
+                      id iid title webUrl
+                      workItemType { name }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }"""
+
+    def _fetch_epic_issue_blockers(self, group):
+        """Issue-type blockers of epics, invisible to /related_epics (Refs #177).
+
+        GitLab's work-items model creates cross-type blocking links; an epic
+        blocked by an Issue appears in neither the epic->epic REST graph nor
+        the issue->issue links. This pass reads the linked-items widget over
+        every epic work item and keeps is_blocked_by targets of type Issue
+        (epic-type blockers stay with the reconciled REST path).
+
+        Returns {(group_id, epic_iid): [blocker dict, ...]}. Fails soft: any
+        GraphQL trouble returns what was collected so far with a warning —
+        a hiccup degrades to the epic-only graph rather than blanking it.
+        """
+        path_to_gid = {group.full_path: group.id}
+        try:
+            for g in group.descendant_groups.list(all=True):
+                path_to_gid[g.full_path] = g.id
+        except Exception as e:
+            print(f"  WARNING: descendant group listing failed ({e}) — "
+                  "issue-blocker namespaces limited to the root group.")
+
+        blockers_by_key = {}
+        cursor = None
+        while True:
+            try:
+                data = self.graphql_query(
+                    self._EPIC_ISSUE_BLOCKERS_QUERY,
+                    variables={"path": group.full_path, "cursor": cursor},
+                    retries=1,
+                )
+            except Exception as e:
+                data = None
+                print(f"  WARNING: issue-blocker GraphQL pass failed ({e}).")
+            if not data or not data.get("group"):
+                if data is None:
+                    print("  WARNING: issue-blocker pass incomplete — "
+                          "epics blocked only by issues may be missing.")
+                break
+
+            page = data["group"]["workItems"]
+            for node in page.get("nodes", []):
+                gid = path_to_gid.get((node.get("namespace") or {}).get("fullPath"))
+                if gid is None:
+                    continue
+                items = []
+                for w in node.get("widgets", []):
+                    linked = (w or {}).get("linkedItems")
+                    if linked:
+                        items = linked.get("nodes", [])
+                        break
+                found = []
+                for li in items:
+                    wi = li.get("workItem") or {}
+                    if li.get("linkType") != "is_blocked_by":
+                        continue
+                    if (wi.get("workItemType") or {}).get("name") != "Issue":
+                        continue   # epic blockers come from the REST graph
+                    raw_id = str(wi.get("id", ""))
+                    num_id = int(raw_id.rsplit("/", 1)[-1]) if raw_id.rsplit("/", 1)[-1].isdigit() else None
+                    found.append({
+                        "id":        num_id,
+                        "id_int":    num_id,
+                        "title":     wi.get("title", ""),
+                        "type":      "Issue",
+                        "item_type": "Issue",
+                        "web_url":   wi.get("webUrl", ""),
+                    })
+                if found:
+                    blockers_by_key[(gid, int(node["iid"]))] = found
+
+            info = page.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                break
+            cursor = info.get("endCursor")
+
+        return blockers_by_key
+
     def _fetch_blocking_graph(self, group):
         """Return the raw blocking relationship graph via the REST related_epics API.
 
@@ -6794,6 +6897,10 @@ class ReportsMixin:
         total_rels    = 0
         fetch_failed  = set()   # epic ids whose /related_epics call failed (Refs #107)
 
+        # Issue-type blockers live only in the work-items linked-items widget;
+        # merge them alongside each epic's REST epic-blockers (Refs #177).
+        issue_blockers = self._fetch_epic_issue_blockers(group)
+
         for epic in all_epics_raw:
             grp_id = epic.get("group_id")
             iid    = epic.get("iid")
@@ -6818,12 +6925,15 @@ class ReportsMixin:
                 rel_id   = rel["id"]
                 rel_info = epic_by_id.get(rel_id, {})
                 blockers.append({
-                    "id":      rel_id,
-                    "id_int":  rel_id,
-                    "title":   rel.get("title", rel_info.get("title", "")),
-                    "type":    _etype(rel_info.get("labels", [])),
-                    "web_url": rel.get("web_url", rel_info.get("web_url", "")),
+                    "id":        rel_id,
+                    "id_int":    rel_id,
+                    "title":     rel.get("title", rel_info.get("title", "")),
+                    "type":      _etype(rel_info.get("labels", [])),
+                    "item_type": "Epic",
+                    "web_url":   rel.get("web_url", rel_info.get("web_url", "")),
                 })
+
+            blockers.extend(issue_blockers.get((grp_id, iid), []))
 
             if not blockers:
                 continue
