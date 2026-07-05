@@ -325,6 +325,10 @@ test.describe('home workspace', () => {
     // Top blocked card starts expanded: chain + blocked flag + blocker link
     await expect(cards.nth(0).locator('.chain-node.blocked .node-title')).toHaveText('Parse NMEA feeds')
     await expect(cards.nth(0).locator('.blocker-link')).toHaveText('Upgrade message bus')
+
+    // Untyped epics render in chains with a badge and a data-quality hint (#174)
+    await expect(cards.nth(0).locator('.untyped-flag')).toBeVisible()
+    await expect(pfx.locator('.dq-hint')).toContainText('no epic-type label')
     await expectNoHorizontalOverflow(page)
 
     // The expanded card must not be crushed by the flex column when the

@@ -70,11 +70,12 @@ BLOCKING = {
 
 def _write_snapshot(reports_dir, date="20260701", time="120000",
                     epics=EPICS, blocking=BLOCKING, complete=True,
-                    graph_name="blocking_graph.json"):
+                    graph_name="blocking_graph.json", raw=None):
     data = reports_dir / date / time / "data"
     data.mkdir(parents=True)
     (data / "epics.json").write_text(json.dumps(
-        {"generated_at": "2026-07-01T12:00:00Z", "epics": epics}))
+        {"generated_at": "2026-07-01T12:00:00Z", "epics": epics,
+         "all_epics_raw": raw if raw is not None else epics}))
     if blocking is not None:
         (data / graph_name).write_text(json.dumps(blocking))
     if complete:
@@ -201,6 +202,55 @@ def test_clobbered_legacy_blocking_json_degrades_gracefully(tmp_path, monkeypatc
     body = TestClient(app).get("/api/analysis/portfolio").json()
     assert body["totals"]["blocked_items"] == 0
     assert body["totals"]["portfolio_epics"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Untyped epics in chains (#174) — a labeling slip must degrade the display,
+# not hide the blocked work.
+# ---------------------------------------------------------------------------
+
+def _untyped(id, title, parent_id=None, planned=None, bv=None):
+    e = _epic(id, "Feature", title=title, parent_id=parent_id,
+              planned=planned, bv=bv)
+    del e["type"]
+    e["labels"] = []          # no tier label at all
+    return e
+
+
+def test_untyped_intermediate_renders_instead_of_dropping_chain(tmp_path, monkeypatch):
+    # Mirrors live #37 -> #45 (untyped) -> #47 (untyped, blocked twice).
+    monkeypatch.chdir(tmp_path)
+    e37 = _epic(94, "Epic", title="Portfolio Epic 1")
+    u45 = _untyped(96, "Child 3 Epic", parent_id=94)
+    u47 = _untyped(98, "Child 3-1 Epic", parent_id=96, planned=8, bv=13)
+    b1 = _epic(70, "Feature", title="Blocker A")
+    b2 = _epic(71, "Feature", title="Blocker B")
+    blocking = {"relationships": [{
+        "blocked_epic": _ref({**u47, "type": None}),
+        "blocked_by": [_ref(b1), _ref(b2)],
+        "at_risk_portfolio_epics": [_ref(e37)],
+    }]}
+    _write_snapshot(tmp_path / "reports", epics=[e37, b1, b2],
+                    raw=[e37, u45, u47, b1, b2], blocking=blocking)
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+
+    pe = next(p for p in body["portfolio_epics"] if p["epic"]["id"] == 94)
+    assert pe["flags"]["blocked"] is True
+    (chain,) = pe["chains"]
+    assert [(n["id"], n.get("type"), n["blocked"]) for n in chain["nodes"]] == [
+        (94, "Epic", False), (96, None, False), (98, None, True)]
+    assert len(chain["blockers"]) == 2
+    # Untyped blocked item still contributes weight/BV.
+    assert pe["rollup"] == {"blocked_count": 1, "blocked_weight": 8,
+                            "blocked_business_value": 13}
+    assert body["totals"]["untyped_in_chains"] == 2
+
+
+def test_fully_typed_snapshot_reports_zero_untyped(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_snapshot(tmp_path / "reports")
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    assert body["totals"]["untyped_in_chains"] == 0
 
 
 # ---------------------------------------------------------------------------

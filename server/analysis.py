@@ -49,9 +49,16 @@ def _blocked_value(epic):
 
 
 def load_snapshot(data_dir: Path):
-    """Load epics + blocking graph from a snapshot data/ directory."""
+    """Load epics + blocking graph from a snapshot data/ directory.
+
+    Returns the typed epics plus a raw lookup covering *every* epic —
+    including untyped ones (no tier label), which chains must be able to
+    traverse so a labeling slip degrades the display instead of hiding
+    blocked work (#174).
+    """
     epics_doc = json.loads((data_dir / "epics.json").read_text())
     epics_by_id = {e["id"]: e for e in epics_doc.get("epics", [])}
+    raw_by_id = {e["id"]: e for e in epics_doc.get("all_epics_raw", [])}
     # blocking_graph.json since #172; blocking.json in older runs was
     # clobbered by the Quarto data layer (no relationships key), which the
     # .get("relationships") consumers degrade to an empty graph.
@@ -61,7 +68,7 @@ def load_snapshot(data_dir: Path):
     blocking = (
         json.loads(blocking_path.read_text()) if blocking_path.is_file() else {}
     )
-    return epics_by_id, blocking, epics_doc.get("generated_at")
+    return epics_by_id, raw_by_id, blocking, epics_doc.get("generated_at")
 
 
 def _chain_nodes(epics_by_id, blocked_id, portfolio_id):
@@ -142,10 +149,17 @@ def _behind_schedule(epic):
     return done < through
 
 
-def build_portfolio_view(epics_by_id, blocking):
-    """Compute the /api/analysis/portfolio payload body."""
+def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
+    """Compute the /api/analysis/portfolio payload body.
+
+    Chains walk a merged lookup — typed epics preferred (they carry the
+    resolved tier), raw epics as fallback — so untyped intermediates and
+    untyped blocked items render (type: null) rather than dropping the
+    chain and silently hiding the risk (#174).
+    """
+    chain_lookup = {**(raw_by_id or {}), **epics_by_id}
     blocked_by_pid, all_blocked_ids = _blocked_by_portfolio(
-        epics_by_id, blocking)
+        chain_lookup, blocking)
 
     portfolio_epics = []
     for epic in epics_by_id.values():
@@ -165,10 +179,10 @@ def build_portfolio_view(epics_by_id, blocking):
             "rollup": {
                 "blocked_count": len(blocked_ids),
                 "blocked_weight": sum(
-                    _blocked_value(epics_by_id[i]) for i in blocked_ids
+                    _blocked_value(chain_lookup[i]) for i in blocked_ids
                 ),
                 "blocked_business_value": sum(
-                    epics_by_id[i].get("business_value") or 0
+                    chain_lookup[i].get("business_value") or 0
                     for i in blocked_ids
                 ),
             },
@@ -186,6 +200,14 @@ def build_portfolio_view(epics_by_id, blocking):
         )
     )
 
+    untyped_in_chains = len({
+        n["id"]
+        for e in portfolio_epics
+        for c in e["chains"]
+        for n in c["nodes"]
+        if n.get("type") is None
+    })
+
     return {
         "totals": {
             "portfolio_epics": len(portfolio_epics),
@@ -194,12 +216,13 @@ def build_portfolio_view(epics_by_id, blocking):
             ),
             "blocked_items": len(all_blocked_ids),
             "blocked_weight": sum(
-                _blocked_value(epics_by_id[i]) for i in all_blocked_ids
+                _blocked_value(chain_lookup[i]) for i in all_blocked_ids
             ),
             "blocked_business_value": sum(
-                epics_by_id[i].get("business_value") or 0
+                chain_lookup[i].get("business_value") or 0
                 for i in all_blocked_ids
             ),
+            "untyped_in_chains": untyped_in_chains,
         },
         "portfolio_epics": portfolio_epics,
     }
@@ -207,8 +230,8 @@ def build_portfolio_view(epics_by_id, blocking):
 
 def portfolio_payload(data_dir: Path):
     """Full response for GET /api/analysis/portfolio."""
-    epics_by_id, blocking, generated_at = load_snapshot(data_dir)
-    payload = build_portfolio_view(epics_by_id, blocking)
+    epics_by_id, raw_by_id, blocking, generated_at = load_snapshot(data_dir)
+    payload = build_portfolio_view(epics_by_id, blocking, raw_by_id)
     run_dir = data_dir.parent
     payload["snapshot"] = {
         "date": run_dir.parent.name,
