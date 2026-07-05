@@ -122,7 +122,8 @@
                 <a
                   v-for="b in chain.blockers" :key="b.id"
                   class="blocker-link" :href="b.web_url" target="_blank" rel="noopener"
-                >{{ b.title }}</a>
+                  :title="b.item_type === 'Issue' ? 'Blocking issue' : 'Blocking epic'"
+                ><TierIcon :type="b.item_type === 'Issue' ? 'Issue' : b.type" size="12" /> {{ b.title }}</a>
               </div>
             </div>
           </div>

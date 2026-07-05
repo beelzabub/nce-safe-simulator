@@ -706,7 +706,7 @@ Data snapshot → reports/20260525/143022/
 
 **`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
-**`blocking_graph.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
+**`blocking_graph.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int` and an `item_type` of `Epic` or `Issue` — epic blockers come from the REST `related_epics` graph, while **issue-type blockers** are collected from the work-items linked-items widget via GraphQL, since GitLab's cross-type blocking links appear in neither the epic→epic nor the issue→issue APIs, #177), and `at_risk_portfolio_epics` list.
 
 > **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking_graph.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
 

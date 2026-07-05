@@ -17,6 +17,7 @@
     <path v-if="badge.glyph" :d="badge.glyph" fill="#fff" :opacity="badge.opacity || 1" />
     <path v-if="badge.glyph2" :d="badge.glyph2" fill="#fff" opacity="0.55" />
     <circle v-if="badge.dot" cx="8" cy="8" r="2.6" fill="#fff" opacity="0.85" />
+    <circle v-if="badge.ring" cx="8" cy="8" r="3.6" fill="none" stroke="#fff" stroke-width="1.7" />
   </svg>
 </template>
 
@@ -33,6 +34,8 @@ const BADGES = {
   Capability: { bg: '#0d9488', glyph: 'M8 2.4 12.4 5.6 8 8.8 3.6 5.6Z',
                 glyph2: 'M8 7.4 12.4 10.6 8 13.8 3.6 10.6Z' },
   Feature:    { bg: '#2563eb', glyph: 'M4.8 2.6h6.4v10.8L8 10.6l-3.2 2.8Z' },
+  // Issue blockers (not a SAFe tier) — GitLab-issue green, circle glyph
+  Issue:      { bg: '#16a34a', ring: true },
 }
 const UNTYPED = { bg: '#6b7280', dot: true }
 
