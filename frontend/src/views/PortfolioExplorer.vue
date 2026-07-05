@@ -34,13 +34,31 @@
           <span class="stat-label">Need attention</span>
         </div>
         <div class="stat">
-          <span class="stat-value">{{ totals.blocked_weight }}</span>
-          <span class="stat-label">Blocked weight</span>
+          <span class="stat-value">{{ totals.blocked_weight_downstream }}</span>
+          <span class="stat-label">Weight at risk <button class="help-btn" title="What do these numbers mean?" aria-label="Explain the weight-at-risk metrics" :aria-expanded="showHelp" aria-controls="pfx-metrics-help" @click="showHelp = true">ⓘ</button></span>
+          <span class="stat-sub">direct {{ totals.blocked_weight }} · subtree {{ totals.blocked_weight_subtree }}</span>
         </div>
         <div class="stat stat--bv">
-          <span class="stat-value">{{ totals.blocked_business_value }}</span>
-          <span class="stat-label">BV at risk</span>
+          <span class="stat-value">{{ totals.blocked_business_value_downstream }}</span>
+          <span class="stat-label">BV at risk <button class="help-btn" title="What do these numbers mean?" aria-label="Explain the BV-at-risk metrics" :aria-expanded="showHelp" aria-controls="pfx-metrics-help" @click="showHelp = true">ⓘ</button></span>
+          <span class="stat-sub">direct {{ totals.blocked_business_value }} · subtree {{ totals.blocked_business_value_subtree }}</span>
         </div>
+      </div>
+
+      <!-- ── Metric definitions (#178) — toggled by the ⓘ icons ── -->
+      <div v-if="showHelp" id="pfx-metrics-help" class="metrics-help">
+        <div class="metrics-help-head">
+          <span>How weight &amp; BV at risk are computed</span>
+          <button class="close-btn" @click="showHelp = false" aria-label="Close">×</button>
+        </div>
+        <table class="metrics-table">
+          <tbody>
+          <tr><th>Direct</th><td>on the blocked items themselves — "the work items that can't move"</td></tr>
+          <tr><th>Downstream</th><td>blocked items <em>plus their open descendants</em> — "value that can't be delivered until this clears." Closed/done items are excluded: their value is already delivered, so a block can't hold it hostage</td></tr>
+          <tr><th>Subtree</th><td>blocked items plus <em>all</em> descendants, closed included — sizing/exposure of the threatened branch, not risk</td></tr>
+          </tbody>
+        </table>
+        <p class="metrics-note">Weight prefers planned and falls back to actual; BV is the GitLab Business Value field (epics only). Overlapping blocked subtrees are never double-counted. A <em>closed</em> item still carrying blocking links stays in the tree (flagged "blocked · closed") as a data-cleanup signal but contributes 0 downstream.</p>
       </div>
 
       <div v-if="totals.untyped_in_chains" class="dq-hint">
@@ -74,9 +92,17 @@
               <span v-for="l in projectLabels(pe.epic)" :key="l" class="chip">{{ l }}</span>
             </span>
             <span class="badges">
-              <span v-if="pe.flags.blocked" class="badge badge--blocked" :title="`${pe.rollup.blocked_count} blocked item(s): weight ${pe.rollup.blocked_weight}, BV ${pe.rollup.blocked_business_value} at risk`">
-                ⛔ {{ pe.rollup.blocked_count }} blocked · w {{ pe.rollup.blocked_weight }} · bv {{ pe.rollup.blocked_business_value }}
-              </span>
+              <template v-if="pe.flags.blocked">
+                <span class="badge badge--blocked" title="Blocked items under this epic">
+                  ⛔ {{ pe.rollup.blocked_count }} blocked
+                </span>
+                <span class="badge badge--weight" :title="`Weight at risk — direct ${pe.rollup.blocked_weight} · downstream (open only) ${pe.rollup.blocked_weight_downstream} · subtree ${pe.rollup.blocked_weight_subtree}`">
+                  ⚓ {{ pe.rollup.blocked_weight }} · dn {{ pe.rollup.blocked_weight_downstream }}
+                </span>
+                <span class="badge badge--bv" :title="`BV at risk — direct ${pe.rollup.blocked_business_value} · downstream (open only) ${pe.rollup.blocked_business_value_downstream} · subtree ${pe.rollup.blocked_business_value_subtree}`">
+                  ★ {{ pe.rollup.blocked_business_value }} · dn {{ pe.rollup.blocked_business_value_downstream }}
+                </span>
+              </template>
               <span v-if="pe.flags.behind_schedule" class="badge badge--behind" title="% complete trails % through PI">
                 ⏱ behind schedule
               </span>
@@ -112,7 +138,12 @@
                   class="untyped-flag"
                   title="Add an epic-type label (epic::capability / epic::feature) so reports can classify this epic"
                 >untyped</span>
-                <span v-if="node.blocked" class="blocked-flag">blocked</span>
+                <span
+                  v-if="node.blocked"
+                  class="blocked-flag"
+                  :class="{ 'blocked-flag--closed': node.state === 'closed' }"
+                  :title="node.state === 'closed' ? 'Closed but still carries blocking links — consider clearing them (data cleanup)' : undefined"
+                >{{ node.state === 'closed' ? 'blocked · closed' : 'blocked' }}</span>
                 <span class="node-nums">
                   w {{ node.planned_weight ?? node.actual_weight ?? '—' }} · bv {{ node.business_value ?? '—' }}
                 </span>
@@ -144,6 +175,7 @@ const totals         = ref({})
 const portfolioEpics = ref([])
 const snapshot       = ref(null)
 const expanded       = ref(new Set())
+const showHelp       = ref(false)
 
 const snapshotLabel = computed(() => {
   if (!snapshot.value) return ''
@@ -268,6 +300,59 @@ onMounted(load)
   letter-spacing: 0.05em;
   color: var(--text-3);
 }
+.stat-sub {
+  font-size: 0.68rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.help-btn {
+  background: none;
+  border: none;
+  color: var(--action);
+  cursor: pointer;
+  font-size: 0.8rem;
+  /* Inflate the touch target without shifting the inline layout */
+  padding: 6px;
+  margin: -6px -4px;
+  vertical-align: baseline;
+}
+.help-btn:hover { color: var(--text-1); }
+
+/* ── Metric definitions panel (#178) ── */
+.metrics-help {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.7rem 1.25rem 0.85rem;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+.metrics-help-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 0.45rem;
+}
+.metrics-help .close-btn {
+  background: none; border: none; color: var(--text-3);
+  cursor: pointer; font-size: 1rem; line-height: 1;
+}
+.metrics-help .close-btn:hover { color: var(--text-1); }
+.metrics-table { border-collapse: collapse; }
+.metrics-table th {
+  text-align: left;
+  padding: 0.2rem 0.9rem 0.2rem 0;
+  color: var(--text-1);
+  white-space: nowrap;
+  vertical-align: top;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.metrics-table td { padding: 0.2rem 0; line-height: 1.45; }
+.metrics-note { margin: 0.5rem 0 0; color: var(--text-3); line-height: 1.45; }
 
 /* ── Cards ── */
 .card-list {
@@ -349,6 +434,8 @@ onMounted(load)
   white-space: nowrap;
 }
 .badge--blocked { background: rgba(248, 81, 73, 0.14); color: #f85149; }
+.badge--weight  { background: rgba(88, 166, 255, 0.14); color: #58a6ff; }
+.badge--bv      { background: rgba(252, 109, 38, 0.15); color: var(--accent); }
 .badge--behind  { background: rgba(210, 153, 34, 0.15); color: #d29922; }
 .badge--ok      { background: rgba(63, 185, 80, 0.12); color: #3fb950; }
 
@@ -441,6 +528,13 @@ onMounted(load)
   border: 1px solid rgba(248, 81, 73, 0.4);
   border-radius: 3px;
   padding: 0 0.35rem;
+}
+.blocked-flag.blocked-flag--closed {
+  color: var(--text-3);
+  border-color: var(--border);
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 81, 73, 0.55);
+  cursor: help;
 }
 .node-nums {
   margin-left: auto;

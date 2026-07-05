@@ -17,7 +17,12 @@ Rollup semantics (mirrors how the WSJF board treats at-risk value):
   portfolio epic's rollup reflects its own exposure.
 - Grand totals dedupe blocked items, so the portfolio-wide numbers are not
   inflated when one blocked item threatens several portfolio epics.
-- ``blocked_weight`` prefers ``planned_weight`` and falls back to
+- Weight and BV each come in three tiers (#178): **direct** (the blocked
+  items themselves), **downstream** (``*_downstream`` — plus *open*
+  descendants only; delivered value can't be held hostage), and **subtree**
+  (``*_subtree`` — plus all descendants, closed included; sizing, not risk).
+  Overlapping blocked subtrees sum over the union of nodes.
+- ``blocked_weight*`` prefers ``planned_weight`` and falls back to
   ``actual_weight``; missing values contribute 0. ``business_value`` of
   ``null`` likewise contributes 0.
 """
@@ -36,8 +41,16 @@ _EPIC_FIELDS = (
 
 def _slim(epic, blocked=False):
     out = {k: epic.get(k) for k in _EPIC_FIELDS}
+    # Snapshots capitalize states ("Opened"/"Closed"); normalize so flag
+    # logic and UI state classes are case-proof (#178 — the capitalized
+    # form silently disabled behind_schedule on real snapshots).
+    out["state"] = (epic.get("state") or "").lower()
     out["blocked"] = blocked
     return out
+
+
+def _is_open(epic):
+    return (epic.get("state") or "").lower() == "opened"
 
 
 def _blocked_value(epic):
@@ -93,6 +106,55 @@ def _chain_nodes(epics_by_id, blocked_id, portfolio_id):
     return None
 
 
+def _descendants(lookup, children_by_parent, root_id):
+    """All descendant ids of root_id (cycle-guarded, excludes the root)."""
+    out, stack, seen = [], list(children_by_parent.get(root_id, [])), {root_id}
+    while stack:
+        cur = stack.pop()
+        if cur in seen or cur not in lookup:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        stack.extend(children_by_parent.get(cur, []))
+    return out
+
+
+def _tier_sums(lookup, children_by_parent, node_ids):
+    """Three-tier BV/weight sums over a set of blocked items (#178).
+
+    - direct:     the blocked items themselves
+    - downstream: blocked items plus descendants, OPEN items only — closed
+                  value is already delivered; a block can't hold it hostage
+    - subtree:    blocked items plus descendants regardless of state —
+                  sizing/exposure, not risk
+
+    Overlapping subtrees (a blocked item under another blocked item) are
+    handled by summing over the UNION of nodes, never double-counting.
+    """
+    down_ids, sub_ids = set(), set()
+    for nid in node_ids:
+        family = [nid] + _descendants(lookup, children_by_parent, nid)
+        for fid in family:
+            sub_ids.add(fid)
+            if _is_open(lookup[fid]):
+                down_ids.add(fid)
+
+    def _bv(ids):
+        return sum(lookup[i].get("business_value") or 0 for i in ids)
+
+    def _w(ids):
+        return sum(_blocked_value(lookup[i]) for i in ids)
+
+    return {
+        "blocked_business_value":            _bv(node_ids),
+        "blocked_business_value_downstream": _bv(down_ids),
+        "blocked_business_value_subtree":    _bv(sub_ids),
+        "blocked_weight":                    _w(node_ids),
+        "blocked_weight_downstream":         _w(down_ids),
+        "blocked_weight_subtree":            _w(sub_ids),
+    }
+
+
 def _blocked_by_portfolio(epics_by_id, blocking):
     """Group blocked chains by threatened portfolio epic.
 
@@ -142,7 +204,7 @@ def _blocked_by_portfolio(epics_by_id, blocking):
 
 def _behind_schedule(epic):
     """The repo's standard At Risk rule: % done trails % through PI."""
-    if epic.get("state") != "opened":
+    if not _is_open(epic):
         return False
     done, through = epic.get("pct_complete"), epic.get("pct_through_pi")
     if done is None or through is None:
@@ -159,6 +221,11 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
     chain and silently hiding the risk (#174).
     """
     chain_lookup = {**(raw_by_id or {}), **epics_by_id}
+    children_by_parent = {}
+    for e in chain_lookup.values():
+        pid = e.get("parent_id")
+        if pid is not None:
+            children_by_parent.setdefault(pid, []).append(e["id"])
     blocked_by_pid, all_blocked_ids = _blocked_by_portfolio(
         chain_lookup, blocking)
 
@@ -173,20 +240,13 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
             "blocked": bool(blocked_ids),
             "behind_schedule": _behind_schedule(epic),
         }
+        rollup = {"blocked_count": len(blocked_ids)}
+        rollup.update(_tier_sums(chain_lookup, children_by_parent, blocked_ids))
         portfolio_epics.append({
             "epic": _slim(epic),
             "flags": flags,
             "needs_attention": any(flags.values()),
-            "rollup": {
-                "blocked_count": len(blocked_ids),
-                "blocked_weight": sum(
-                    _blocked_value(chain_lookup[i]) for i in blocked_ids
-                ),
-                "blocked_business_value": sum(
-                    chain_lookup[i].get("business_value") or 0
-                    for i in blocked_ids
-                ),
-            },
+            "rollup": rollup,
             "chains": pb["chains"],
         })
 
@@ -195,8 +255,8 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
     portfolio_epics.sort(
         key=lambda e: (
             not e["needs_attention"],
-            -e["rollup"]["blocked_business_value"],
-            -e["rollup"]["blocked_weight"],
+            -e["rollup"]["blocked_business_value_downstream"],
+            -e["rollup"]["blocked_weight_downstream"],
             -(e["epic"].get("planned_weight") or 0),
         )
     )
@@ -209,22 +269,18 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
         if n.get("type") is None
     })
 
+    totals = {
+        "portfolio_epics": len(portfolio_epics),
+        "needs_attention": sum(
+            1 for e in portfolio_epics if e["needs_attention"]
+        ),
+        "blocked_items": len(all_blocked_ids),
+        "untyped_in_chains": untyped_in_chains,
+    }
+    totals.update(_tier_sums(chain_lookup, children_by_parent, all_blocked_ids))
+
     return {
-        "totals": {
-            "portfolio_epics": len(portfolio_epics),
-            "needs_attention": sum(
-                1 for e in portfolio_epics if e["needs_attention"]
-            ),
-            "blocked_items": len(all_blocked_ids),
-            "blocked_weight": sum(
-                _blocked_value(chain_lookup[i]) for i in all_blocked_ids
-            ),
-            "blocked_business_value": sum(
-                chain_lookup[i].get("business_value") or 0
-                for i in all_blocked_ids
-            ),
-            "untyped_in_chains": untyped_in_chains,
-        },
+        "totals": totals,
         "portfolio_epics": portfolio_epics,
     }
 

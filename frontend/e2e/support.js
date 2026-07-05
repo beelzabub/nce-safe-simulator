@@ -47,7 +47,9 @@ export const WIKI_INDEX = [
 export const PORTFOLIO = {
   snapshot: { date: '20260701', time: '120000', generated_at: '2026-07-01T12:00:00Z' },
   totals: { portfolio_epics: 13, needs_attention: 2, blocked_items: 2,
-            blocked_weight: 21, blocked_business_value: 5, untyped_in_chains: 1 },
+            blocked_weight: 21, blocked_weight_downstream: 13, blocked_weight_subtree: 21,
+            blocked_business_value: 5, blocked_business_value_downstream: 5,
+            blocked_business_value_subtree: 5, untyped_in_chains: 1 },
   portfolio_epics: [
     {
       epic: { id: 1, iid: 1, title: 'Modernize Fleet Telemetry', state: 'opened',
@@ -57,7 +59,10 @@ export const PORTFOLIO = {
               pct_complete: 38.6, pct_through_pi: 30 },
       flags: { blocked: true, behind_schedule: false },
       needs_attention: true,
-      rollup: { blocked_count: 2, blocked_weight: 21, blocked_business_value: 5 },
+      rollup: { blocked_count: 2,
+                blocked_weight: 21, blocked_weight_downstream: 13, blocked_weight_subtree: 21,
+                blocked_business_value: 5, blocked_business_value_downstream: 5,
+                blocked_business_value_subtree: 5 },
       chains: [
         {
           nodes: [
@@ -75,7 +80,21 @@ export const PORTFOLIO = {
               pct_complete: 10, pct_through_pi: 30, blocked: true },
           ],
           blockers: [{ id: 6, title: 'Upgrade message bus', type: 'Feature',
-                       web_url: 'https://gitlab.example/epics/6' }],
+                       item_type: 'Epic', web_url: 'https://gitlab.example/epics/6' }],
+        },
+        {
+          nodes: [
+            { id: 1, title: 'Modernize Fleet Telemetry', type: 'Epic', state: 'opened',
+              web_url: 'https://gitlab.example/epics/1', labels: [], piid: 'PIID::2026Q3',
+              planned_weight: 233, actual_weight: 90, business_value: 21,
+              pct_complete: 38.6, pct_through_pi: 30, blocked: false },
+            { id: 90, title: 'Deprecated Ingest Path', type: 'Feature', state: 'closed',
+              web_url: 'https://gitlab.example/epics/90', labels: [], piid: 'PIID::2026Q3',
+              planned_weight: 8, actual_weight: 8, business_value: 0,
+              pct_complete: 100, pct_through_pi: 30, blocked: true },
+          ],
+          blockers: [{ id: 91, title: 'Retired firewall rule review', type: 'Issue',
+                       item_type: 'Issue', web_url: 'https://gitlab.example/issues/91' }],
         },
       ],
     },
@@ -87,7 +106,10 @@ export const PORTFOLIO = {
               pct_complete: 10, pct_through_pi: 60 },
       flags: { blocked: false, behind_schedule: true },
       needs_attention: true,
-      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      rollup: { blocked_count: 0,
+                blocked_weight: 0, blocked_weight_downstream: 0, blocked_weight_subtree: 0,
+                blocked_business_value: 0, blocked_business_value_downstream: 0,
+                blocked_business_value_subtree: 0 },
       chains: [],
     },
     {
@@ -98,7 +120,10 @@ export const PORTFOLIO = {
               pct_complete: 80, pct_through_pi: 50 },
       flags: { blocked: false, behind_schedule: false },
       needs_attention: false,
-      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      rollup: { blocked_count: 0,
+                blocked_weight: 0, blocked_weight_downstream: 0, blocked_weight_subtree: 0,
+                blocked_business_value: 0, blocked_business_value_downstream: 0,
+                blocked_business_value_subtree: 0 },
       chains: [],
     },
     // Filler so the card list outgrows the pane — regression fixture for the
@@ -111,7 +136,10 @@ export const PORTFOLIO = {
               pct_complete: 60, pct_through_pi: 40 },
       flags: { blocked: false, behind_schedule: false },
       needs_attention: false,
-      rollup: { blocked_count: 0, blocked_weight: 0, blocked_business_value: 0 },
+      rollup: { blocked_count: 0,
+                blocked_weight: 0, blocked_weight_downstream: 0, blocked_weight_subtree: 0,
+                blocked_business_value: 0, blocked_business_value_downstream: 0,
+                blocked_business_value_subtree: 0 },
       chains: [],
     })),
   ],
