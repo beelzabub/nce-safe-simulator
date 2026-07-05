@@ -90,7 +90,12 @@ class NceGitLab(
             exit(1)
 
         try:
-            self.gl = gitlab.Gitlab(self.url, private_token=self.private_token, ssl_verify=self.ssl_verify)
+            self.gl = gitlab.Gitlab(
+                self.url, private_token=self.private_token, ssl_verify=self.ssl_verify,
+                # Transient GitLab 5xx (and 429) retry with backoff instead of
+                # aborting a long snapshot fetch minutes in (Refs #176).
+                retry_transient_errors=True,
+            )
             self.gl.auth()
 
             version, _ = self.gl.version()
