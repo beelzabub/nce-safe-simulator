@@ -47,7 +47,7 @@ export const WIKI_INDEX = [
 export const PORTFOLIO = {
   snapshot: { date: '20260701', time: '120000', generated_at: '2026-07-01T12:00:00Z' },
   totals: { portfolio_epics: 13, needs_attention: 2, blocked_items: 2,
-            blocked_weight: 21, blocked_business_value: 5 },
+            blocked_weight: 21, blocked_business_value: 5, untyped_in_chains: 1 },
   portfolio_epics: [
     {
       epic: { id: 1, iid: 1, title: 'Modernize Fleet Telemetry', state: 'opened',
@@ -65,7 +65,7 @@ export const PORTFOLIO = {
               web_url: 'https://gitlab.example/epics/1', labels: [], piid: 'PIID::2026Q3',
               planned_weight: 233, actual_weight: 90, business_value: 21,
               pct_complete: 38.6, pct_through_pi: 30, blocked: false },
-            { id: 2, title: 'Sensor Ingest Capability', type: 'Capability', state: 'opened',
+            { id: 2, title: 'Sensor Ingest Capability', type: null, state: 'opened',
               web_url: 'https://gitlab.example/epics/2', labels: [], piid: 'PIID::2026Q3',
               planned_weight: 34, actual_weight: 12, business_value: 8,
               pct_complete: 20, pct_through_pi: 30, blocked: false },
