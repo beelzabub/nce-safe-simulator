@@ -319,16 +319,35 @@ test.describe('home workspace', () => {
     await expect(cards).toHaveCount(13)
     await expect(cards.nth(0).locator('.card-title')).toContainText('Modernize Fleet Telemetry')
     await expect(cards.nth(0).locator('.badge--blocked')).toContainText('2 blocked')
+    // Three-tier metrics (#178): direct + downstream on the badges…
+    await expect(cards.nth(0).locator('.badge--weight')).toHaveText(/21 · dn 13/)
+    await expect(cards.nth(0).locator('.badge--bv')).toHaveText(/5 · dn 5/)
+    // …downstream headline + direct/subtree sub-line in the totals strip
+    await expect(pfx.locator('.stat-sub').first()).toContainText('direct 21 · subtree 21')
     await expect(cards.nth(1).locator('.badge--behind')).toBeVisible()
     await expect(cards.nth(2).locator('.badge--ok')).toHaveText('on track')
 
-    // Top blocked card starts expanded: chain + blocked flag + blocker link
-    await expect(cards.nth(0).locator('.chain-node.blocked .node-title')).toHaveText('Parse NMEA feeds')
-    await expect(cards.nth(0).locator('.blocker-link')).toHaveText('Upgrade message bus')
+    // Top blocked card starts expanded: chains + blocked flags + blocker links
+    await expect(cards.nth(0).locator('.chain-node.blocked .node-title'))
+      .toHaveText(['Parse NMEA feeds', 'Deprecated Ingest Path'])
+    await expect(cards.nth(0).locator('.blocker-link'))
+      .toHaveText(['Upgrade message bus', 'Retired firewall rule review'])
 
     // Untyped epics render in chains with a badge and a data-quality hint (#174)
     await expect(cards.nth(0).locator('.untyped-flag')).toBeVisible()
     await expect(pfx.locator('.dq-hint')).toContainText('no epic-type label')
+
+    // Closed blocked item stays visible with the cleanup-variant flag (#178)
+    const closedFlag = cards.nth(0).locator('.blocked-flag--closed')
+    await expect(closedFlag).toHaveText('blocked · closed')
+
+    // Help icon opens the metric definitions table (#178)
+    await pfx.locator('.help-btn').first().tap()
+    const help = pfx.locator('.metrics-help')
+    await expect(help).toBeVisible()
+    await expect(help.locator('.metrics-table th')).toHaveText(['Direct', 'Downstream', 'Subtree'])
+    await help.locator('.close-btn').tap()
+    await expect(help).toBeHidden()
     await expectNoHorizontalOverflow(page)
 
     // The expanded card must not be crushed by the flex column when the
