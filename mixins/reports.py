@@ -209,9 +209,9 @@ _TYPE_ICON_LEGEND = [
     "",
     "| Icon | Type |",
     "|------|------|",
-    "| 🏆 | Epic |",
-    "| 🧩 | Capability |",
-    "| 🛠️ | Feature |",
+    "| ⚡ | Epic |",
+    "| 💠 | Capability |",
+    "| 🔖 | Feature |",
     "",
 ]
 
@@ -824,7 +824,7 @@ class ReportsMixin:
                 nonlocal markdown_report
 
                 epic_type = self._epic_type_display(epic.get("labels", []))
-                icon      = _tip(self.EPIC_TYPE_ICONS.get(epic_type, "🏆"), epic_type)
+                icon      = _tip(self.EPIC_TYPE_ICONS.get(epic_type, "⚡"), epic_type)
                 children  = epic_hierarchy.get(epic['id'], [])
 
                 blocked    = epic.get('blocked_by_count', 0) > 0
@@ -865,9 +865,9 @@ class ReportsMixin:
                 render_epic_details(epic)
 
             markdown_report.extend(["", "", ""] + _LEGEND_OPEN + [
-                "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-                "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-                "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+                "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+                "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+                "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             ] + _LEGEND_CLOSE)
 
             md = "\n".join(markdown_report)
@@ -905,7 +905,7 @@ class ReportsMixin:
             risk_flag = " ⚠️" if avg_pi is not None and avg_done < avg_pi else ""
             pi_cell   = f"{avg_pi}%{risk_flag}" if avg_pi is not None else "—"
 
-            icon       = _tip(self.EPIC_TYPE_ICONS.get(metric_type, "🏆"), metric_type)
+            icon       = _tip(self.EPIC_TYPE_ICONS.get(metric_type, "⚡"), metric_type)
             lbl        = label_by_type.get(metric_type, metric_type)
             url_all    = f"{base}?label_name[]={lbl}&state=all"
             url_open   = f"{base}?label_name[]={lbl}&state=opened"
@@ -1046,9 +1046,9 @@ class ReportsMixin:
 
         md.extend(_LEGEND_OPEN + [
             "### SAFe Hierarchy",
-            "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-            "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-            "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+            "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+            "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+            "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             "",
             "### Column Definitions",
             "- **Epics** — count of Epics, Capabilities, and Features assigned to this group for the PI; links to the filtered work items board",
@@ -1121,7 +1121,7 @@ class ReportsMixin:
             state          = epic.get("state", "").upper()
             blocked_by_cnt = epic.get("blockedByCount", 0)
             etype          = epic_type(epic)
-            icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+            icon           = self.EPIC_TYPE_ICONS.get(etype, "⚡")
 
             print(f"⛔ {epic['title']}  [{icon} {etype}]")
             print(f"   State: {state}  |  Blocked by: {blocked_by_cnt}")
@@ -1133,7 +1133,7 @@ class ReportsMixin:
                 node      = edge["node"]
                 connector = "└─" if i == last else "├─"
                 btype     = epic_type(node)
-                bicon     = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                bicon     = self.EPIC_TYPE_ICONS.get(btype, "⚡")
                 print(f"   {connector} 🔒 {node['title']}  [{bicon} {btype}]")
                 print(f"        {node['webUrl']}")
             print()
@@ -1256,11 +1256,11 @@ class ReportsMixin:
             ):
                 anc_node   = id_to_ancestor[epic_id]
                 desc_links = ", ".join(
-                    f"{self.EPIC_TYPE_ICONS.get(d.get('type', 'Epic'), '🏆')} {link(_short(d['title']), d['web_url'])}"
+                    f"{self.EPIC_TYPE_ICONS.get(d.get('type', 'Epic'), '⚡')} {link(_short(d['title']), d['web_url'])}"
                     for d in descendants
                 )
                 md.append(
-                    f"| ⚠️ 🏆 **{link(anc_node['title'], anc_node['web_url'])}** "
+                    f"| ⚠️ ⚡ **{link(anc_node['title'], anc_node['web_url'])}** "
                     f"| **{len(descendants)}:** {desc_links} |"
                 )
             md.append("")
@@ -1294,7 +1294,7 @@ class ReportsMixin:
             for rel in rels:
                 epic           = rel["blocked_epic"]
                 etype          = epic.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon           = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 state          = epic.get("state", "").capitalize()
                 blocked_by_cnt = len(rel.get("blocked_by", []))
 
@@ -1308,7 +1308,7 @@ class ReportsMixin:
 
                 for blocker in rel.get("blocked_by", []):
                     btype = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                    bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                    bicon = self.EPIC_TYPE_ICONS.get(btype, "⚡")
                     md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}**")
                     md.append("")
 
@@ -1318,7 +1318,7 @@ class ReportsMixin:
                     md.append("")
                     for ancestor in ancestors:
                         atype = ancestor.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                        aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
+                        aicon = self.EPIC_TYPE_ICONS.get(atype, "⚡")
                         md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}**")
                         md.append("")
 
@@ -1661,9 +1661,9 @@ class ReportsMixin:
             md.append("")
 
         md.extend(_LEGEND_OPEN + [
-            "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-            "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-            "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+            "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+            "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+            "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             "- **Parent**: the direct parent epic in the hierarchy, if one exists",
             "- Items with no parent and no children are also captured by the Orphaned Epics report",
         ] + _LEGEND_CLOSE)
@@ -2293,7 +2293,7 @@ class ReportsMixin:
                 epic_title = epic_info.get("title", f"Epic {epic_id}") if epic_info else f"Epic {epic_id}"
 
                 md.append(
-                    f"<details open><summary>🛠️ "
+                    f"<details open><summary>🔖 "
                     f'<a href="{epic_url}" target="_blank" rel="noopener noreferrer">{epic_title}</a>'
                     f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
                 )
@@ -2768,8 +2768,8 @@ class ReportsMixin:
         md.append("")
         md.append("Delivery status per Value Stream, broken down by PI and ART.")
         md.append("")
-        md.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
-        md.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
+        md.append("- **💠 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md.append("- **🔖 Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
         md.append("")
 
         for vs_name, wiki_url, total_caps, total_direct, at_risk, blocked in index_entries:
@@ -2793,8 +2793,8 @@ class ReportsMixin:
         md_top.append("")
         md_top.append("Delivery status per Value Stream, broken down by PI and ART.")
         md_top.append("")
-        md_top.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
-        md_top.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
+        md_top.append("- **💠 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md_top.append("- **🔖 Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
         md_top.append("")
         md_top.append("## Value Streams")
         md_top.append("")
@@ -2881,7 +2881,7 @@ class ReportsMixin:
             # --- Capabilities section ---
             art_cap_buckets = cap_pi_buckets.get(piid, {})
             if art_cap_buckets:
-                md.append("### 🧩 Capabilities _(cross-ART/VS deliverables)_")
+                md.append("### 💠 Capabilities _(cross-ART/VS deliverables)_")
                 md.append("")
                 md.append("| ART | Capabilities | Planned | Actual | Δ | % Done | Status |")
                 md.append("|-----|-------------|---------|--------|---|--------|--------|")
@@ -2924,7 +2924,7 @@ class ReportsMixin:
             # --- Direct Features section ---
             art_direct_buckets = direct_pi_buckets.get(piid, {})
             if art_direct_buckets:
-                md.append("### 🛠️ Direct Features _(parented to Epic, no Capability wrapper)_")
+                md.append("### 🔖 Direct Features _(parented to Epic, no Capability wrapper)_")
                 md.append("")
                 md.append("| ART | Features | Planned | Actual | Δ | % Done | Status |")
                 md.append("|-----|----------|---------|--------|---|--------|--------|")
@@ -2965,8 +2965,8 @@ class ReportsMixin:
                     md.append("")
 
         md.extend(_LEGEND_OPEN + [
-            "- **🧩 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
-            "- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
+            "- **💠 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
+            "- **🔖 Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
             "- **% Done** — closed issue weight ÷ total issue weight",
             "- **PI Elapsed** — `(today − PI start) ÷ (PI end − PI start) × 100`",
             "- **Weight** — Planned pt → Actual pt",
@@ -3147,8 +3147,8 @@ class ReportsMixin:
 
                 b_type  = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                 bl_type = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
-                bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
+                b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "⚡")
+                bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "⚡")
 
                 b_link  = _mlink(f'{b_icon} {blocked["title"]}', blocked["web_url"])
                 bl_link = _mlink(f'{bl_icon} {blocker["title"]}', blocker["web_url"])
@@ -3866,7 +3866,7 @@ class ReportsMixin:
                 "title":   epic["title"],
                 "url":     epic.get("web_url", ""),
                 "type":    etype,
-                "icon":    self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":    self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "piid":    epic.get("piid"),
                 "value":   value,
                 "urgency": urgency,
@@ -3923,7 +3923,7 @@ class ReportsMixin:
                     "blocked_title": blocked["title"],
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
-                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "⚡"),
                     "blockers":      blocker_list,
                 })
                 continue
@@ -3939,7 +3939,7 @@ class ReportsMixin:
                     "blocked_title": blocked["title"],
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
-                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "⚡"),
                     "blockers":      blocker_list,
                 })
                 if pe_id not in seen_pe_bv:
@@ -4056,7 +4056,7 @@ class ReportsMixin:
                         "title": d["title"],
                         "url":   d.get("web_url", ""),
                         "type":  d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]),
-                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]), "⚡"),
                     }
                     for d in descendants
                 ],
@@ -4075,14 +4075,14 @@ class ReportsMixin:
                 "title":  epic["title"],
                 "url":    epic.get("web_url", ""),
                 "type":   etype,
-                "icon":   self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":   self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "state":  epic.get("state", "").capitalize(),
                 "blockers": [
                     {
                         "title": b["title"],
                         "url":   b.get("web_url", ""),
                         "type":  b.get("type", t0),
-                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", t0), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", t0), "⚡"),
                     }
                     for b in rel.get("blocked_by", [])
                 ],
@@ -4091,7 +4091,7 @@ class ReportsMixin:
                         "title": a["title"],
                         "url":   a.get("web_url", ""),
                         "type":  a.get("type", t0),
-                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", t0), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", t0), "⚡"),
                     }
                     for a in rel.get("at_risk_portfolio_epics", [])
                 ],
@@ -4644,7 +4644,7 @@ class ReportsMixin:
             avg_pi     = round(sum(pcts_pi) / len(pcts_pi)) if pcts_pi else None
             summary.append({
                 "type":        metric_type,
-                "icon":        self.EPIC_TYPE_ICONS.get(metric_type, "🏆"),
+                "icon":        self.EPIC_TYPE_ICONS.get(metric_type, "⚡"),
                 "total":       total,
                 "open":        open_cnt,
                 "closed":      closed_cnt,
@@ -4681,7 +4681,7 @@ class ReportsMixin:
                 "title":          epic["title"],
                 "url":            epic.get("web_url", ""),
                 "type":           etype,
-                "icon":           self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":           self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "state":          epic.get("state", ""),
                 "pct_done":       pct_done,
                 "pct_pi":         pct_pi,
@@ -5085,7 +5085,7 @@ class ReportsMixin:
             md.append("|------|---------|-----|")
             for item in top_blocked:
                 etype = item["type"]
-                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 link  = (
                     f'[{icon} {item["title"]}]({item["url"]})'
                     if item["url"] else f'{icon} {item["title"]}'
@@ -5102,7 +5102,7 @@ class ReportsMixin:
             md.append("|------|------|-----------|-----|--------|-----|")
             for item in at_risk_epics:
                 etype = item["type"]
-                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 link  = (
                     f'[{icon} {item["title"]}]({item["url"]})'
                     if item["url"] else f'{icon} {item["title"]}'
@@ -5799,7 +5799,7 @@ class ReportsMixin:
 
             for rank, c in enumerate(candidates, 1):
                 epic   = c["epic"]
-                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "🏆")
+                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "⚡")
                 link   = _mlink(epic['title'], epic['web_url'])
                 piid   = c["piid"] or "_backlog_"
                 v_str  = str(c["value"])   if c["value"]   is not None else "—"
@@ -5851,7 +5851,7 @@ class ReportsMixin:
                 for b in blockers
             )
             b_type  = blocked.get("type", _t0)
-            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
+            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "⚡")
             bl_link = (_mlink(blocked['title'], blocked['web_url'])
                        if blocked.get("web_url") else blocked["title"])
 

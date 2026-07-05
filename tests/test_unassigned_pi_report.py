@@ -45,12 +45,12 @@ class TestUnassignedPiWithData:
     def test_grouped_by_type_shows_epic_section(self):
         epic = make_epic(id=10, title="No-PI Epic", etype="Epic", labels=["Epic"])
         content = _run(ReportsHarness(epics_all=[epic]))
-        assert "## 🏆 Epic" in content
+        assert "## ⚡ Epic" in content
 
     def test_grouped_by_type_shows_feature_section(self):
         feat = make_epic(id=11, title="No-PI Feat", etype="Feature", labels=["Feature"])
         content = _run(ReportsHarness(epics_all=[feat]))
-        assert "## 🛠️ Feature" in content
+        assert "## 🔖 Feature" in content
 
     def test_unassigned_count_reflects_epics_without_piid(self):
         e1 = make_epic(id=10, etype="Feature", labels=["Feature"])

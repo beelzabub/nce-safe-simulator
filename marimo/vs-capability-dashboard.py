@@ -131,9 +131,9 @@ def _(value_streams, vs_selector, pi_selector, mo):
 
             _sections += f"""
             <h4 style="margin-top:24px">{_vs_link} &nbsp;|&nbsp; {_sel_pi} &nbsp;|&nbsp; {_date}</h4>
-            <h5 style="margin:8px 0 4px">🧩 Capabilities</h5>
+            <h5 style="margin:8px 0 4px">💠 Capabilities</h5>
             {_cap_html if _cap_html else '<p><em>None.</em></p>'}
-            <h5 style="margin:12px 0 4px">🛠️ Direct Features</h5>
+            <h5 style="margin:12px 0 4px">🔖 Direct Features</h5>
             {_dir_html if _dir_html else '<p><em>None.</em></p>'}
             """
 

@@ -59,7 +59,9 @@
             <span class="chev" :class="{ open: expanded.has(pe.epic.id), hidden: !pe.chains.length }">▸</span>
             <span class="state-dot" :class="pe.epic.state" :title="pe.epic.state" />
             <span class="card-title">
-              <a :href="pe.epic.web_url" target="_blank" rel="noopener" @click.stop>🏆 {{ pe.epic.title }}</a>
+              <a :href="pe.epic.web_url" target="_blank" rel="noopener" @click.stop>
+                <TierIcon type="Epic" size="15" /> {{ pe.epic.title }}
+              </a>
             </span>
             <span class="chips">
               <span v-if="pe.epic.piid" class="chip chip--piid">{{ pe.epic.piid }}</span>
@@ -97,7 +99,7 @@
                 :class="{ blocked: node.blocked }"
                 :style="{ paddingLeft: (0.75 + ni * 1.1) + 'rem' }"
               >
-                <span class="node-icon">{{ tierIcon(node.type) }}</span>
+                <TierIcon :type="node.type" size="14" class="node-icon" />
                 <a class="node-title" :href="node.web_url" target="_blank" rel="noopener">{{ node.title }}</a>
                 <span v-if="node.blocked" class="blocked-flag">blocked</span>
                 <span class="node-nums">
@@ -123,6 +125,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import TierIcon from '../components/TierIcon.vue'
 
 const state          = ref('loading')   // loading | no-snapshot | error | ready
 const totals         = ref({})
@@ -149,11 +152,6 @@ function progressTitle(epic) {
 
 function projectLabels(epic) {
   return (epic.labels || []).filter(l => l.startsWith('project::'))
-}
-
-const TIER_ICONS = { Epic: '🏆', Capability: '🧩', Feature: '🛠️' }
-function tierIcon(type) {
-  return TIER_ICONS[type] || '•'
 }
 
 function toggle(id) {
@@ -390,7 +388,7 @@ onMounted(load)
   border-radius: 4px;
 }
 .chain-node.blocked { background: rgba(248, 81, 73, 0.09); }
-.node-icon { flex-shrink: 0; font-size: 0.8rem; }
+.node-icon { flex-shrink: 0; }
 .node-title {
   min-width: 0;
   overflow: hidden;

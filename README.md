@@ -8,15 +8,15 @@ Python automation for GitLab groups organised around the **Scaled Agile Framewor
 
 ```
 Root Group  (Portfolio)
-│   Portfolio Epics  🏆
-│   Direct Features  🛠️  ← Features parented straight to a Portfolio Epic
+│   Portfolio Epics  ⚡
+│   Direct Features  🔖  ← Features parented straight to a Portfolio Epic
 │
 ├── Value Stream 01
-│   Capabilities  🧩  ← cross-ART/VS deliverables
+│   Capabilities  💠  ← cross-ART/VS deliverables
 │   ├── ART 01
-│   │   Capabilities  🧩
+│   │   Capabilities  💠
 │   │   ├── Team 01
-│   │   │   Features  🛠️
+│   │   │   Features  🔖
 │   │   │   Team Backlog project  (Issues linked to Features)
 │   │   └── Team 02  ...
 │   └── ART 02  ...
@@ -549,7 +549,7 @@ python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo 
 
 `GET /api/analysis/portfolio` (epic #165) computes a **portfolio-level view** from the newest complete report snapshot on disk — no GitLab calls, so it responds instantly and works offline. Every portfolio epic (the `epic::epic` tier) is listed with attention flags: **blocked** (a blocked descendant anywhere in its chain, with the full hierarchy path Epic → Capability → Feature → blocked item, the blockers, and a rollup of `blocked_count` / `blocked_weight` / `blocked_business_value`) and **behind_schedule** (open epic whose `pct_complete` trails `pct_through_pi` — the standard At Risk rule). Blocked weight prefers `planned_weight` and falls back to `actual_weight`. A blocked item counts toward every portfolio epic it threatens, while the grand `totals` dedupe blocked items so portfolio-wide numbers aren't inflated. Epics needing attention sort first (by BV at risk, then blocked weight); returns 404 with a hint when no snapshot exists yet.
 
-The **Portfolio Explorer** (Analysis tab) renders this: a totals strip (portfolio epics · need attention · blocked weight · BV at risk), then one GitLab-style card per portfolio epic — state, linked title, PIID/project chips, and a progress bar with a **PI-clock notch** (fill short of the notch = visibly behind schedule). Attention cards carry a red edge and issue badges (⛔ blocked with weight/BV, ⏱ behind schedule); healthy epics read "on track" at a glance. Blocked cards expand to the hierarchy chains (🏆 Epic → 🧩 Capability → 🛠️ Feature) with the blocked node flagged, its blockers linked, and per-node weight/BV figures; the top blocked card starts expanded. Empty states cover no-snapshot (with a call-to-action to run reports) and a portfolio with no `epic::epic` items.
+The **Portfolio Explorer** (Analysis tab) renders this: a totals strip (portfolio epics · need attention · blocked weight · BV at risk), then one GitLab-style card per portfolio epic — state, linked title, PIID/project chips, and a progress bar with a **PI-clock notch** (fill short of the notch = visibly behind schedule). Attention cards carry a red edge and issue badges (⛔ blocked with weight/BV, ⏱ behind schedule); healthy epics read "on track" at a glance. Blocked cards expand to the hierarchy chains — rendered in the UI with Jira-style tier badges (purple bolt Epic, teal layered-diamond Capability, blue bookmark Feature; `TierIcon.vue`), while text surfaces use the matching emoji (⚡ Epic → 💠 Capability → 🔖 Feature) — with the blocked node flagged, its blockers linked, and per-node weight/BV figures; the top blocked card starts expanded. Empty states cover no-snapshot (with a call-to-action to run reports) and a portfolio with no `epic::epic` items.
 
 ---
 
@@ -557,11 +557,11 @@ The **Portfolio Explorer** (Analysis tab) renders this: a totals strip (portfoli
 
 `create_all_lorem_objects()` builds a full SAFe group hierarchy under the configured root group:
 
-- Root group with **Portfolio Epics** (🏆)
-- *N* Value Stream subgroups, each with **Capabilities** (🧩)
-- *N* ART subgroups per Value Stream, each with **Capabilities** (🧩)
+- Root group with **Portfolio Epics** (⚡)
+- *N* Value Stream subgroups, each with **Capabilities** (💠)
+- *N* ART subgroups per Value Stream, each with **Capabilities** (💠)
 - *N* Team subgroups per ART, each with:
-  - **Features** (🛠️)
+  - **Features** (🔖)
   - A `Team Backlog` GitLab project
   - 8–15 Issues per Feature, with Fibonacci weights
 
