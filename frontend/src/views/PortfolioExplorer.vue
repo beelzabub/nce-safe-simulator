@@ -43,6 +43,12 @@
         </div>
       </div>
 
+      <div v-if="totals.untyped_in_chains" class="dq-hint">
+        ⚠ {{ totals.untyped_in_chains }} epic{{ totals.untyped_in_chains === 1 ? '' : 's' }} in blocked chains
+        {{ totals.untyped_in_chains === 1 ? 'has' : 'have' }} no epic-type label — shown unclassified below.
+        Label them so reports can classify this work.
+      </div>
+
       <div v-if="!portfolioEpics.length" class="pfx-empty">
         <p class="pfx-empty-lead">No portfolio epics</p>
         <p>This snapshot has no epics carrying the portfolio tier label (epic::epic).</p>
@@ -99,6 +105,11 @@
               >
                 <span class="node-icon">{{ tierIcon(node.type) }}</span>
                 <a class="node-title" :href="node.web_url" target="_blank" rel="noopener">{{ node.title }}</a>
+                <span
+                  v-if="!node.type"
+                  class="untyped-flag"
+                  title="Add an epic-type label (epic::capability / epic::feature) so reports can classify this epic"
+                >untyped</span>
                 <span v-if="node.blocked" class="blocked-flag">blocked</span>
                 <span class="node-nums">
                   w {{ node.planned_weight ?? node.actual_weight ?? '—' }} · bv {{ node.business_value ?? '—' }}
@@ -401,6 +412,26 @@ onMounted(load)
 }
 .node-title:hover { color: var(--action); }
 .chain-node.blocked .node-title { color: var(--text-1); font-weight: 600; }
+.untyped-flag {
+  flex-shrink: 0;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  border-radius: 3px;
+  padding: 0 0.35rem;
+  cursor: help;
+}
+.dq-hint {
+  flex-shrink: 0;
+  font-size: 0.76rem;
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.08);
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 1.25rem;
+}
 .blocked-flag {
   flex-shrink: 0;
   font-size: 0.64rem;
