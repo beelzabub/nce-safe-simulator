@@ -14,13 +14,17 @@ from urllib3.util.retry import Retry
 
 
 class _TimeoutAdapter(HTTPAdapter):
-    """HTTPAdapter that applies a default timeout and 429 retry-with-backoff."""
+    """HTTPAdapter with a default timeout plus retry-with-backoff on 429 and
+    transient 5xx (matching python-gitlab's retry_transient_errors set). The
+    urllib3 default allowed_methods restricts retries to idempotent methods,
+    so mutation POSTs keep fail-fast semantics while the GET-heavy snapshot
+    fetches survive a passing gateway error (Refs #176)."""
     def __init__(self, timeout, **kwargs):
         self.timeout = timeout
         retry = Retry(
             total=5,
             backoff_factor=1,          # sleeps 1 2 4 8 16 s between retries
-            status_forcelist=[429],
+            status_forcelist=[429, 500, 502, 503, 504],
             respect_retry_after_header=True,
             raise_on_status=False,
         )
