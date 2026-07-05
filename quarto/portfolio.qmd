@@ -108,9 +108,9 @@ else:
 ::: {.callout-note collapse="true"}
 ## Legend
 
-- **🏆 Epic** — Portfolio-level initiative spanning multiple PIs and ARTs
-- **🧩 Capability** — Large Solution-level deliverable decomposed from an Epic; fits within one PI
-- **🛠️ Feature** — Service or function delivered by a single ART within one PI
+- **⚡ Epic** — Portfolio-level initiative spanning multiple PIs and ARTs
+- **💠 Capability** — Large Solution-level deliverable decomposed from an Epic; fits within one PI
+- **🔖 Feature** — Service or function delivered by a single ART within one PI
 - **⚠️** — % Done is below % of PI elapsed (at risk)
 - **⛔** — Epic is blocked by one or more other epics
 :::

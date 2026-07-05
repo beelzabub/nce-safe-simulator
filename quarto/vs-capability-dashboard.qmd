@@ -29,8 +29,8 @@ HTML(f"""
 </p>
 <p>Delivery status per Value Stream, broken down by PI and ART.</p>
 <ul>
-  <li><strong>🧩 Capabilities</strong> — cross-ART/VS deliverables that may span multiple ARTs</li>
-  <li><strong>🛠️ Direct Features</strong> — Features parented directly to an Epic (no Capability wrapper), owned by a single ART</li>
+  <li><strong>💠 Capabilities</strong> — cross-ART/VS deliverables that may span multiple ARTs</li>
+  <li><strong>🔖 Direct Features</strong> — Features parented directly to an Epic (no Capability wrapper), owned by a single ART</li>
 </ul>""")
 ```
 
@@ -126,8 +126,8 @@ else:
             if pi["date_range"]:
                 html += f" <small><em>{pi['date_range']}</em></small>"
             html += "</h3>"
-            html += _art_summary_table(pi["capabilities"],    "🧩 Capabilities")
-            html += _art_summary_table(pi["direct_features"], "🛠️ Direct Features")
+            html += _art_summary_table(pi["capabilities"],    "💠 Capabilities")
+            html += _art_summary_table(pi["direct_features"], "🔖 Direct Features")
 
     display(HTML(html))
 ```
@@ -135,8 +135,8 @@ else:
 ::: {.callout-note collapse="true"}
 ## Legend
 
-- **🧩 Capability** — cross-ART/VS deliverable decomposed from a Portfolio Epic
-- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper)
+- **💠 Capability** — cross-ART/VS deliverable decomposed from a Portfolio Epic
+- **🔖 Direct Feature** — Feature parented directly to an Epic (no Capability wrapper)
 - **% Done** — closed issue weight ÷ total issue weight
 - **Weight** — Planned pt → Actual pt
 - **✅ On Track** — % Done ≥ PI Elapsed
