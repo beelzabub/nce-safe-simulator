@@ -65,9 +65,9 @@ class NceGitLab(
             exit(1)
 
         self.EPIC_TYPE_ICONS = {
-            "Epic":       "🏆",
-            "Capability": "🧩",
-            "Feature":    "🛠️",
+            "Epic":       "⚡",
+            "Capability": "💠",
+            "Feature":    "🔖",
         }
 
         self._ssl_verify_override = ssl_verify

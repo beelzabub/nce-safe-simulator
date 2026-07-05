@@ -75,7 +75,7 @@ else:
                 epic_link = (f'<a href="{grp["epic_url"]}" target="_blank">{grp["epic_title"]}</a>'
                              if grp["epic_url"] and grp["epic_url"] != "#" else grp["epic_title"])
                 html += (
-                    f"<details><summary>🛠️ {epic_link} "
+                    f"<details><summary>🔖 {epic_link} "
                     f"— {grp['open']} open · {grp['pct_done']}% done "
                     f"· {grp['closed_weight']}/{grp['total_weight']} pt</summary>"
                     f"<p><strong>Feature state:</strong> {grp['epic_state']}</p>"

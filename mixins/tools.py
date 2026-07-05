@@ -2146,7 +2146,7 @@ class ToolsMixin:
                 flagged += 1
                 direction = "▲ over" if actual > planned else "▼ under"
                 etype = self._epic_type_display(e.get("labels", []))
-                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 print(
                     f"  !! {icon} [{e['iid']}] '{e['title'][:55]}'  "
                     f"planned={planned}pt  actual={actual}pt  "
