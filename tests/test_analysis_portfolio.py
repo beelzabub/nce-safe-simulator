@@ -145,10 +145,17 @@ def test_rollups_and_chains(tmp_path, monkeypatch):
     pe = next(p for p in body["portfolio_epics"] if p["epic"]["id"] == 1)
 
     # F3 planned 13 + F4 (planned null -> actual 8); BV 5 + null->0.
-    assert pe["rollup"] == {"blocked_count": 2, "blocked_weight": 21,
-                            "blocked_business_value": 5}
+    # Both blocked items are open leaves, so all three tiers coincide.
+    assert pe["rollup"] == {
+        "blocked_count": 2,
+        "blocked_weight": 21, "blocked_weight_downstream": 21,
+        "blocked_weight_subtree": 21,
+        "blocked_business_value": 5, "blocked_business_value_downstream": 5,
+        "blocked_business_value_subtree": 5,
+    }
     assert body["totals"]["blocked_weight"] == 21
     assert body["totals"]["blocked_business_value"] == 5
+    assert body["totals"]["blocked_business_value_downstream"] == 5
 
     # Chains are reconstructed top-down with the blocked node flagged.
     chains = {tuple(n["id"] for n in c["nodes"]): c for c in pe["chains"]}
@@ -241,9 +248,11 @@ def test_untyped_intermediate_renders_instead_of_dropping_chain(tmp_path, monkey
     assert [(n["id"], n.get("type"), n["blocked"]) for n in chain["nodes"]] == [
         (94, "Epic", False), (96, None, False), (98, None, True)]
     assert len(chain["blockers"]) == 2
-    # Untyped blocked item still contributes weight/BV.
-    assert pe["rollup"] == {"blocked_count": 1, "blocked_weight": 8,
-                            "blocked_business_value": 13}
+    # Untyped blocked item still contributes weight/BV (open leaf: tiers equal).
+    assert pe["rollup"]["blocked_count"] == 1
+    assert pe["rollup"]["blocked_weight"] == 8
+    assert pe["rollup"]["blocked_business_value"] == 13
+    assert pe["rollup"]["blocked_business_value_downstream"] == 13
     assert body["totals"]["untyped_in_chains"] == 2
 
 
@@ -252,6 +261,122 @@ def test_fully_typed_snapshot_reports_zero_untyped(tmp_path, monkeypatch):
     _write_snapshot(tmp_path / "reports")
     body = TestClient(app).get("/api/analysis/portfolio").json()
     assert body["totals"]["untyped_in_chains"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Three-tier BV/weight metrics (#178): direct / downstream (open only) /
+# subtree (closed included). Closed value is already delivered — a block
+# can't hold it hostage — while subtree answers "how big is this branch."
+# ---------------------------------------------------------------------------
+
+def _tier_fixture():
+    """Portfolio Epic -> blocked Capability with open + closed children."""
+    pe   = _epic(1, "Epic", planned=200, bv=21, pct_complete=10)
+    cap  = _epic(2, "Capability", parent_id=1, planned=30, bv=8)   # blocked
+    f_o  = _epic(3, "Feature", parent_id=2, planned=13, bv=5)              # open
+    f_c  = _epic(4, "Feature", parent_id=2, planned=8, bv=3, state="Closed")  # done
+    blk  = _epic(9, "Feature", title="Blocker")
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap),
+        "blocked_by": [_ref(blk)],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    return [pe, cap, f_o, f_c, blk], blocking
+
+
+def test_downstream_excludes_closed_subtree_includes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    epics, blocking = _tier_fixture()
+    _write_snapshot(tmp_path / "reports", epics=epics, blocking=blocking)
+    body = TestClient(app).get("/api/analysis/portfolio").json()
+    pe = next(p for p in body["portfolio_epics"] if p["epic"]["id"] == 1)
+
+    r = pe["rollup"]
+    assert r["blocked_business_value"] == 8              # cap itself
+    assert r["blocked_business_value_downstream"] == 13  # cap 8 + open f 5
+    assert r["blocked_business_value_subtree"] == 16     # + closed f 3
+    assert r["blocked_weight"] == 30
+    assert r["blocked_weight_downstream"] == 43          # 30 + 13
+    assert r["blocked_weight_subtree"] == 51             # + 8
+    # Totals mirror (single blocked item portfolio-wide).
+    assert body["totals"]["blocked_business_value_downstream"] == 13
+    assert body["totals"]["blocked_weight_subtree"] == 51
+
+
+def test_overlapping_blocked_subtrees_do_not_double_count():
+    # Blocked Capability whose child Feature is ALSO blocked: union semantics.
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=30, bv=8)
+    f   = _epic(3, "Feature", parent_id=2, planned=13, bv=5)
+    blk = _epic(9, "Feature", title="Blocker")
+    blocking = {"relationships": [
+        {"blocked_epic": _ref(cap), "blocked_by": [_ref(blk)],
+         "at_risk_portfolio_epics": [_ref(pe)]},
+        {"blocked_epic": _ref(f), "blocked_by": [_ref(blk)],
+         "at_risk_portfolio_epics": [_ref(pe)]},
+    ]}
+    body = build_portfolio_view(_by_id([pe, cap, f, blk]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    # Direct counts both blocked items; downstream is the UNION (8+5), not 8+5+5.
+    assert entry["rollup"]["blocked_business_value"] == 13
+    assert entry["rollup"]["blocked_business_value_downstream"] == 13
+    assert entry["rollup"]["blocked_weight_downstream"] == 43
+
+
+def test_closed_blocked_item_visible_but_zero_downstream():
+    # Data-cleanup signal: a closed epic still carrying is_blocked_by links
+    # stays in the tree, but delivered value is not "at risk".
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=30, bv=8, state="Closed")
+    blk = _epic(9, "Feature", title="Blocker")
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [_ref(blk)],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, blk]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    # Chain renders (closed state normalized for the UI badge variant)...
+    (chain,) = entry["chains"]
+    assert chain["nodes"][-1]["state"] == "closed"
+    assert chain["nodes"][-1]["blocked"] is True
+    # ...direct/subtree count it, downstream does not.
+    assert entry["rollup"]["blocked_business_value"] == 8
+    assert entry["rollup"]["blocked_business_value_downstream"] == 0
+    assert entry["rollup"]["blocked_business_value_subtree"] == 8
+
+
+def test_open_descendants_of_closed_blocked_item_count_downstream():
+    # Data-anomaly state: the blocking link lives on a CLOSED capability that
+    # still has an OPEN child. The closed item itself contributes 0 downstream
+    # (open-only rule), but its open descendant stays in the downstream union —
+    # the branch can't deliver while the stale link stands, and the figure
+    # self-heals to 0 the moment cleanup removes the link.
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=30, bv=8, state="Closed")
+    f   = _epic(3, "Feature", parent_id=2, planned=13, bv=4)
+    blk = _epic(9, "Feature", title="Blocker")
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [_ref(blk)],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, f, blk]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_business_value"] == 8               # closed cap itself
+    assert r["blocked_business_value_downstream"] == 4    # open child only
+    assert r["blocked_business_value_subtree"] == 12      # both
+    assert r["blocked_weight_downstream"] == 13
+
+
+def test_capitalized_snapshot_states_are_normalized():
+    # Real snapshots capitalize states ("Opened"/"Closed"); the lowercase
+    # comparison silently disabled behind_schedule until #178.
+    behind = _epic(1, "Epic", planned=100, pct_complete=5, pct_through_pi=60,
+                   state="Opened")
+    body = build_portfolio_view(_by_id([behind]), {})
+    (entry,) = body["portfolio_epics"]
+    assert entry["flags"]["behind_schedule"] is True
+    assert entry["epic"]["state"] == "opened"   # normalized for UI classes
 
 
 # ---------------------------------------------------------------------------
