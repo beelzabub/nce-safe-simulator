@@ -133,7 +133,7 @@ def make_risk(
 class ReportsHarness(ReportsMixin, UtilitiesMixin):
     """Concrete subclass of ReportsMixin with all _rd_ state pre-wired for tests."""
 
-    EPIC_TYPE_ICONS         = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_ICONS         = {"Epic": "⚡", "Capability": "💠", "Feature": "🔖"}
     EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
     EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
     RISK_LABELS             = ["ROAM::Resolved", "ROAM::Owned", "ROAM::Accepted", "ROAM::Mitigated"]
@@ -245,7 +245,7 @@ def _make_issue_mock(id=200, iid=1, title="Test Issue", epic_id=None):
 class ToolsHarness(ToolsMixin, LabelsMixin, WikiMixin, UtilitiesMixin):
     """Concrete subclass of ToolsMixin with all external calls pre-wired for tests."""
 
-    EPIC_TYPE_ICONS         = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+    EPIC_TYPE_ICONS         = {"Epic": "⚡", "Capability": "💠", "Feature": "🔖"}
     EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
     EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
     ROAM_LABELS = ["roam::owned", "roam::accepted", "roam::mitigated", "roam::resolved"]

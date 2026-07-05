@@ -58,7 +58,7 @@ else:
     html = "<p>Top-level Epics that contain one or more blocked descendants:</p>"
     html += '<table class="table table-sm table-bordered"><thead><tr><th>Epic</th><th>Blocked Descendants</th></tr></thead><tbody>'
     for row in portfolio_risk:
-        elink = f'<a href="{row["url"]}" target="_blank">⚠️ 🏆 {row["title"]}</a>' if row["url"] else f'⚠️ 🏆 {row["title"]}'
+        elink = f'<a href="{row["url"]}" target="_blank">⚠️ ⚡ {row["title"]}</a>' if row["url"] else f'⚠️ ⚡ {row["title"]}'
         desc_links = ", ".join(
             f'<a href="{d["url"]}" target="_blank">{d["icon"]} {d["title"]}</a>' if d["url"] else f'{d["icon"]} {d["title"]}'
             for d in row["blocked_descendants"]
