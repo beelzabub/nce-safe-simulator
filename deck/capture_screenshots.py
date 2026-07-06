@@ -4,7 +4,8 @@ sprint-review deck (deck/build_deck.py). Read-only navigation only: dialogs are 
 to photograph the form, never submitted (Launch/Save/Confirm are never clicked), with
 one deliberate exception documented below.
 
-Config: deck/shots.yaml (app_url, quarto_base_url, ui_shots, live_run_shots, quarto_shots).
+Config: deck/shots.yaml (app_url, quarto_base_url, ui_shots, live_run_shots, quarto_shots,
+login_shots).
 
 Usage:
   python3 deck/capture_screenshots.py [--config deck/shots.yaml] [--out-dir deck/screenshots]
@@ -18,7 +19,7 @@ import os
 import sys
 
 import yaml
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -86,6 +87,36 @@ def capture_ui_shot(browser, base_url, shot, out_dir, viewport):
     page.screenshot(path=os.path.join(out_dir, f"{out}_light.png"), full_page=True)
     page.close()
     print(f"  ok: {out} (dark + light)")
+
+
+def capture_login_shot(browser, base_url, shot, out_dir, viewport):
+    """Capture the /login front door with the background slideshow and its nav
+    chevrons (issue #187) visible.
+
+    Deliberately the inverse of the app shots: it does NOT seed the auth gate —
+    it lands on the real unauthenticated /login slideshow — but it DOES pre-ack
+    the DoD banner (sessionStorage flag only), which otherwise sits over the
+    slideshow and hides the chevrons, exactly as the login-slideshow e2e does.
+    Seeding the auth flags here would send the router guard away from /login.
+    Read-only: sets nothing on the server."""
+    login_url = base_url.rstrip("/") + "/login"
+    page = browser.new_page(viewport=viewport)
+    page.add_init_script(
+        "try { sessionStorage.setItem('nce.auth.dodBannerAccepted', '1'); } catch (e) {}"
+    )
+    page.goto(login_url, wait_until="networkidle", timeout=30000)
+    # The chevrons appear (v-show) only once a second background has preloaded
+    # into the rotation pool; wait for that so the shot proves the feature.
+    try:
+        page.wait_for_selector(".slide-nav--next", state="visible", timeout=15000)
+    except PlaywrightTimeoutError:
+        print(f"  warn: {shot['out']} — nav chevrons never appeared "
+              "(single background, or #187 not deployed?)")
+    page.wait_for_timeout(1500)   # let the active background fully paint in
+    out = shot["out"]
+    page.screenshot(path=os.path.join(out_dir, f"{out}.png"), full_page=True)
+    page.close()
+    print(f"  ok: {out}")
 
 
 def capture_live_run_shot(browser, base_url, shot, out_dir, viewport):
@@ -186,7 +217,7 @@ def main():
     ap.add_argument("--config", default=os.path.join(HERE, "shots.yaml"))
     ap.add_argument("--out-dir", default=os.path.join(HERE, "screenshots"))
     ap.add_argument("--only", default=None, help="substring filter on shot `out` name")
-    ap.add_argument("--section", default="all", choices=["all", "ui", "live", "quarto"],
+    ap.add_argument("--section", default="all", choices=["all", "ui", "live", "quarto", "login"],
                     help="capture only one section (e.g. --section quarto to refresh just "
                          "the report pages without re-running the UI/live shots)")
     ap.add_argument("--width", type=int, default=1440)
@@ -208,6 +239,12 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
+
+        if section("login"):
+            print("Login front-door shots:")
+            for shot in config.get("login_shots", []):
+                if wanted(shot["out"]):
+                    capture_login_shot(browser, config["app_url"], shot, args.out_dir, viewport)
 
         if section("ui"):
             print("UI dialog shots:")

@@ -65,10 +65,16 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 ## Config files
 
 - **`shots.yaml`** — the screenshot shot list: which UI dialogs to open (`ui_shots`),
-  the one live-run demo (`live_run_shots`), and which Quarto report pages to capture
-  (`quarto_shots`). Add a new tool or report page here and re-run `capture_screenshots.py`
-  with `--only <name>` to add just that one shot without a full re-capture, or
-  `--section quarto` to refresh just the report pages (skips the UI/live shots).
+  the one live-run demo (`live_run_shots`), which Quarto report pages to capture
+  (`quarto_shots`), and the `/login` front door (`login_shots`). Add a new tool or
+  report page here and re-run `capture_screenshots.py` with `--only <name>` to add just
+  that one shot without a full re-capture, or `--section quarto` / `--section login` to
+  refresh just those (skips the other sections).
+
+  `login_shots` is captured differently from `ui_shots`: it does **not** seed the auth
+  gate (so the real background slideshow shows) but pre-acknowledges the DoD banner so
+  the slideshow nav chevrons (issue #187) aren't hidden behind it. One full-bleed image,
+  no dark/light toggle — the front door is always the photographic dark theme.
 
   Report pages are long scrollable documents, so a single full-page screenshot is
   unreadable on a slide. Tall `quarto_shots` are therefore **also** captured as 2–4
