@@ -63,6 +63,15 @@
         </button>
       </div>
 
+      <!-- Equivalent CLI command(s) for the current selection — pinned inside
+           the dialog so it stays visible while the modal covers the docked bar
+           (issue #185). -->
+      <CliCommandStrip
+        class="dialog-cmd"
+        :command="cliCommand"
+        empty-hint="Select at least one report to see its CLI command"
+      />
+
     </div>
   </div>
 </template>
@@ -72,6 +81,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { buildReportCommand } from '../composables/useCliCommand.js'
 import { useCommandPreview } from '../composables/useCommandPreview.js'
+import CliCommandStrip from './CliCommandStrip.vue'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -112,12 +122,14 @@ const allSelected = computed(() => selectedKeys.value.length === props.reports.l
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
 
 // Equivalent CLI command(s) for the current selection — one `-r` line per
-// chosen report, sharing --formats / --last (#140) — pushed live to the docked
-// CommandBar while the picker is open.
-const { setPreview, clearPreview } = useCommandPreview()
+// chosen report, sharing --formats / --last (#140) — shown in the in-dialog
+// CliCommandStrip and mirrored to the docked CommandBar. Only non-empty commands
+// are mirrored, so closing the picker leaves the last command on the bar for
+// later reference instead of wiping it (issue #185).
+const { setPreview } = useCommandPreview()
 const cliCommand = computed(() =>
   buildReportCommand(selectedKeys.value, selectedFormats.value, useLast.value))
-watch(cliCommand, cmd => setPreview(cmd), { immediate: true })
+watch(cliCommand, cmd => { if (cmd) setPreview(cmd) }, { immediate: true })
 
 // Drop site-build formats when not all reports are selected
 watch(allSelected, (all) => {
@@ -136,7 +148,6 @@ function onKeydown(e) {
 onMounted(() => document.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
-  clearPreview()
 })
 
 function launch() {
@@ -288,6 +299,13 @@ function launch() {
 }
 .btn-launch:disabled { background: var(--action-off); color: var(--action-off-text); cursor: not-allowed; }
 .btn-launch:not(:disabled):hover { background: var(--action-hover); }
+
+/* ── In-dialog CLI command strip (issue #185) ── */
+.dialog-cmd {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt);
+}
 
 /* ── Mobile (issue #160): the dialog takes the whole screen ── */
 @media (max-width: 768px) {
