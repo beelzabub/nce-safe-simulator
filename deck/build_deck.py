@@ -574,6 +574,18 @@ class DeckBuilder:
         body_y = Emu(830000)
         self.add_picture_contain(s, path, Emu(180000), body_y,
                                  self.SW - Emu(360000), self.SH - body_y - Emu(220000))
+        # Epic-scale variant: child branches integrate on the epic's own branch,
+        # and only the epic branch merges to develop.
+        epic_path = os.path.join(self.screenshots_dir, "git-workflow-epic.png")
+        if not os.path.exists(epic_path):
+            print("  warn: git-workflow-epic.png missing (run deck/capture_git_workflow.py) — "
+                  "skipping the epic workflow slide")
+            return
+        s = self.new_slide()
+        self.header_band(s, "Development Workflow — Epics",
+                         "Child issues merge to the epic's branch; the epic merges to develop once")
+        self.add_picture_contain(s, epic_path, Emu(180000), body_y,
+                                 self.SW - Emu(360000), self.SH - body_y - Emu(220000))
 
     def _build_architecture_slide(self):
         arch = self.new_slide()
