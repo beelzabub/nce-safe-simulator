@@ -656,7 +656,7 @@ class DeckBuilder:
         that generates the equivalent CLI command."""
         s = self.new_slide()
         self.header_band(s, "CLI vs. UI",
-                         "Same tool registry, two front ends — every UI dialog shows its exact CLI command")
+                         "Same tool registry, two front ends — every UI dialog builds its exact CLI command live")
         margin, gap = Emu(180000), Emu(160000)
         panel_w = (self.SW - 2 * margin - gap) // 2
         lx, rx = margin, margin + panel_w + gap
@@ -675,15 +675,21 @@ class DeckBuilder:
         self.add_text(s, rx, label_y, panel_w, Emu(280000), "Web UI — guided dialog", 13,
                       self.C["blue"], bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
         ui = os.path.join(self.screenshots_dir, "05-import-export-import-epics_light-cli-closeup.png")
+        if not os.path.exists(ui):
+            # #185 renders the equivalent command inside the dialog itself, so the
+            # full dialog shot now carries it — fall back to that when no
+            # hand-cropped closeup is present.
+            ui = os.path.join(self.screenshots_dir, "05-import-export-import-epics_light.png")
         if os.path.exists(ui):
             self.add_picture_contain(s, ui, rx, img_y, panel_w, img_h)
         self.add_text(s, rx, cap_y, panel_w, Emu(220000),
-                      "Import Epics dialog — the same command, generated for you", 9, GRAY,
+                      "Import Epics dialog — the equivalent command, built live in-dialog with Copy", 9, GRAY,
                       align=PP_ALIGN.CENTER, italic=True)
 
         self.add_text(s, margin, self.SH - Emu(400000), self.SW - 2 * margin, Emu(320000),
                       "Both front ends call the same tool registry — the UI is a guided layer over the same "
-                      "commands, adding confirmation gating, a live status panel, and streaming logs.",
+                      "commands, adding confirmation gating, a live status panel, streaming logs, and the exact "
+                      "CLI command built live inside every dialog to copy or script.",
                       11, RGBColor(0x2A, 0x2E, 0x32), align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
 
     def _kpi_tiles(self, slide, m):

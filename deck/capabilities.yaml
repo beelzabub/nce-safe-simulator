@@ -109,14 +109,15 @@ capabilities:
       - "Pluggable auth methods on the roadmap (#152–#156): CAC/PIV via DoD PKI, OIDC / OAuth 2.0, SAML 2.0, LDAP / Active Directory, and STIG break-glass local accounts."
 
   - title: "In-App Reports & Analysis Panel"
-    count: 5
-    blurb: "In-flight — bringing reports and blocked-work analysis into the app itself"
+    count: 6
+    blurb: "Reports and portfolio analysis brought into the app itself — and back out as published reports"
     bullets:
       - "#165 / #166 New Reports section and a multi-tab side-panel shell (Tools / Reports / Analysis)."
       - "#167 Reports tab with an in-app Markdown viewer — read generated reports without leaving the UI."
       - "#168 Analysis API — a blocked-chains endpoint with weight / Business-Value rollups."
-      - "#169 Analysis tab — a Blocked Work Explorer UI over that endpoint."
-      - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). All open/in-flight — the project's current momentum."
+      - "#169 Analysis tab — a Blocked Work Explorer that grew into a portfolio-level Portfolio Explorer (three-tier BV/weight-at-risk, untyped-epic warnings)."
+      - "#182 Portfolio Explorer published as a report — the same view now renders to a Tier-1 wiki page and a Quarto Executive page, with numbers pinned to the app's own analysis engine so they can't drift."
+      - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). The panel work has started landing (#182 merged); the rest is the project's current momentum."
 
   - title: "Cloud Deployment & Infrastructure"
     count: 16
