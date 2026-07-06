@@ -73,8 +73,8 @@ capabilities:
       - "#23 Analyze current test coverage and develop a plan"
       - "#24 / #25 / #26 Test coverage phases 1–3 (report / tool / pipeline unit tests)"
       - "Result: test suite scales with the automation core it covers (see Metrics)"
-    image: "14-live-job-diagnose-03-completed.png"
-    caption: "Diagnose — live validation & compatibility check output"
+    image: "pytest-run.png"
+    caption: "The coverage program's unit tests — a real run, excerpted (capture_test_log.py)"
 
   - title: "Reporting Platform Migration: Wiki → Quarto → Marimo"
     count: 16
@@ -94,8 +94,8 @@ capabilities:
       - "#57 Grafana PoC: Infinity datasource + Flow Metrics dashboard"
       - "#93 Generate Grafana JSON data files during report run"
       - "#96 Make AMG (Amazon Managed Grafana) optional, off by default"
-    image: "reports_quarto/13-flow-metrics.png"
-    caption: "Flow Metrics — the same data the Grafana dashboard visualizes"
+    image: "deck/assets/grafana-logo.png"
+    caption: "Grafana (open source) — deployed as Amazon Managed Grafana, optional and off by default (#96)"
 
   - title: "Web Server & Vue Frontend Build-out"
     count: 15
@@ -132,8 +132,8 @@ capabilities:
       - "#169 Analysis tab — a Blocked Work Explorer that grew into a portfolio-level Portfolio Explorer (three-tier BV/weight-at-risk, untyped-epic warnings)."
       - "#182 Portfolio Explorer published as a report — the same view now renders to a Tier-1 wiki page and a Quarto Executive page, with numbers pinned to the app's own analysis engine so they can't drift."
       - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). The panel work has started landing (#182 merged); the rest is the project's current momentum."
-    image: "reports_quarto/16-vs-capability-dashboard.png"
-    caption: "Portfolio analysis — the Portfolio Explorer view, published (#182)"
+    image: "17-analysis-portfolio-explorer_light.png"
+    caption: "Portfolio Explorer — the in-app Analysis panel, live (#169)"
 
   - title: "Cloud Deployment & Infrastructure"
     count: 16

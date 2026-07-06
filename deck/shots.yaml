@@ -3,8 +3,9 @@
 # ui_shots: opens a dialog/panel in the web UI and captures it (dark + light by default).
 #   expand: category accordion headers to click first (in order)
 #   select: job-list item text to click (opens its parameter dialog)
-#   click:  a raw Playwright selector to click instead of/in addition to select
-#           (used for chrome elements that aren't job-list items, e.g. "Run Reports…")
+#   click:  a raw Playwright selector — or a list of them, clicked in order — instead
+#           of/in addition to select (used for chrome elements that aren't job-list
+#           items, e.g. "Run Reports…", or multi-step paths like tab → analysis row)
 #
 # live_run_shots: like ui_shots, but the selected tool is parameterless and read-only,
 #   so selecting it launches immediately. Captured once (dark only) to avoid running the
@@ -75,6 +76,11 @@ ui_shots:
   - out: 16-config-connection
     title: "Web UI — Config: GitLab Connection & Private Token"
     click: "button.config-btn"
+  - out: 17-analysis-portfolio-explorer
+    title: "Web UI — Analysis: Portfolio Explorer"
+    click:
+      - "button.tab-btn:has-text('Analysis')"
+      - "button.analysis-row:has-text('Portfolio Explorer')"
 
 # "Other" only has one tool (Diagnose) and it's parameterless/read-only, so it belongs here,
 # not in ui_shots — selecting it launches the job immediately, there's no dialog to screenshot.

@@ -46,6 +46,17 @@ def _new_app_page(browser, viewport):
     return page
 
 
+def _click_steps(page, shot):
+    """Run a shot's `click` — a raw Playwright selector, or a list of them
+    clicked in order (e.g. open the Analysis tab, then pick an analysis)."""
+    clicks = shot.get("click")
+    if not clicks:
+        return
+    for sel in [clicks] if isinstance(clicks, str) else clicks:
+        page.click(sel, timeout=8000)
+        page.wait_for_timeout(600)
+
+
 def _navigate(page, base_url, shot):
     page.goto(base_url, wait_until="networkidle", timeout=30000)
     page.wait_for_timeout(1200)
@@ -55,9 +66,7 @@ def _navigate(page, base_url, shot):
     if shot.get("select"):
         page.click(f"li.job-item:has-text('{shot['select']}')", timeout=8000)
         page.wait_for_timeout(600)
-    if shot.get("click"):
-        page.click(shot["click"], timeout=8000)
-        page.wait_for_timeout(600)
+    _click_steps(page, shot)
 
 
 def capture_ui_shot(browser, base_url, shot, out_dir, viewport):
@@ -81,9 +90,7 @@ def capture_ui_shot(browser, base_url, shot, out_dir, viewport):
     if shot.get("select"):
         page.click(f"li.job-item:has-text('{shot['select']}')", timeout=8000)
         page.wait_for_timeout(600)
-    if shot.get("click"):
-        page.click(shot["click"], timeout=8000)
-        page.wait_for_timeout(600)
+    _click_steps(page, shot)
     page.screenshot(path=os.path.join(out_dir, f"{out}_light.png"), full_page=True)
     page.close()
     print(f"  ok: {out} (dark + light)")

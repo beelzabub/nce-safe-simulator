@@ -35,6 +35,7 @@ Or run the steps directly:
 python3 deck/capture_screenshots.py   # -> deck/screenshots/
 python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/DoDAF diagrams)
 python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu.png
+python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx
 ```
@@ -52,6 +53,13 @@ interactive and prints runtime GitLab/server state, so this is a faithful static
 (menu rows mirror `_run_main_menu`; the status block uses sample values) — keep its `MENU`
 list in sync if that menu changes. Needs only Pillow and the DejaVu Sans Mono system font;
 if the image is absent, `build_deck.py` skips it and the slide keeps the UI half.
+
+`capture_test_log.py` runs the Test Coverage Program's unit tests (report / tool /
+pipeline — issues #24–#26) via pytest and renders an excerpt of the **real** output as a
+terminal-style PNG for the "Test Coverage Program" capability slide. The command shown in
+the rendered prompt is the command actually run; if the run doesn't pass cleanly the
+script warns and the image shows the failure — fix the tests, don't ship the deck. Same
+requirements as `capture_cli_menu.py` (Pillow + DejaVu Sans Mono).
 
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.
