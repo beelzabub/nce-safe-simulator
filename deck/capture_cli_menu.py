@@ -11,16 +11,79 @@ mirror NceGitLab.py:_run_main_menu verbatim (keep them in sync if that menu chan
 and the status block uses representative sample values.
 
 Requires: Pillow (in requirements-deck.txt) and DejaVu Sans Mono (system font).
+The font is resolved across distros/macOS (known dirs, a recursive scan, then
+fontconfig's `fc-match`); if it is genuinely absent the run fails with an
+install hint rather than a hardcoded-path error.
 
 Usage:
   python3 deck/capture_cli_menu.py [--out deck/screenshots/cli-interactive-menu.png]
 """
 import argparse
+import glob
 import os
+import shutil
+import subprocess
 
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Directories that ship DejaVu Sans Mono across the platforms we build on.
+# Debian/Ubuntu, Fedora/RHEL, Arch, and macOS (Homebrew + system) all differ.
+_FONT_DIRS = [
+    "/usr/share/fonts/truetype/dejavu",      # Debian/Ubuntu
+    "/usr/share/fonts/dejavu",               # Fedora/RHEL
+    "/usr/share/fonts/dejavu-sans-mono-fonts",
+    "/usr/share/fonts/TTF",                  # Arch
+    "/opt/homebrew/share/fonts",             # macOS (Apple Silicon Homebrew)
+    "/usr/local/share/fonts",                # macOS (Intel Homebrew) / misc Linux
+    os.path.expanduser("~/.local/share/fonts"),
+    os.path.expanduser("~/Library/Fonts"),   # macOS user fonts
+    "/Library/Fonts",                        # macOS system fonts
+]
+_FONT_CACHE = {}
+
+
+def _find_font_file(name):
+    """Resolve a DejaVu font filename to an absolute path across distros/macOS.
+
+    Tries the known font directories first, then a recursive scan of the
+    common font roots, then `fc-match` (fontconfig) if available. Returns None
+    if the font cannot be located, so the caller can fall back to PIL's own
+    name-based lookup or a clear error.
+    """
+    if name in _FONT_CACHE:
+        return _FONT_CACHE[name]
+    # 1) Known per-distro/OS directories.
+    for d in _FONT_DIRS:
+        candidate = os.path.join(d, name)
+        if os.path.isfile(candidate):
+            _FONT_CACHE[name] = candidate
+            return candidate
+    # 2) Recursive scan of the common font roots (catches unusual layouts).
+    for root in ("/usr/share/fonts", "/usr/local/share/fonts",
+                 os.path.expanduser("~/.local/share/fonts")):
+        if os.path.isdir(root):
+            hits = glob.glob(os.path.join(root, "**", name), recursive=True)
+            if hits:
+                _FONT_CACHE[name] = hits[0]
+                return hits[0]
+    # 3) fontconfig — ask it for the family and verify the file exists.
+    if shutil.which("fc-match"):
+        family = "DejaVu Sans Mono:bold" if "Bold" in name else "DejaVu Sans Mono"
+        try:
+            out = subprocess.run(
+                ["fc-match", "-f", "%{file}", family],
+                capture_output=True, text=True, timeout=5,
+            )
+            path = out.stdout.strip()
+            if path and os.path.isfile(path):
+                _FONT_CACHE[name] = path
+                return path
+        except (subprocess.SubprocessError, OSError):
+            pass
+    _FONT_CACHE[name] = None
+    return None
 
 # Terminal palette (dark). Named to read like an ANSI theme.
 BG        = (0x1B, 0x1F, 0x26)
@@ -53,7 +116,18 @@ SERVER = ("Server     ", "RUNNING  (port 4645)")
 
 def _font(bold, size):
     name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
-    return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/{name}", size)
+    path = _find_font_file(name)
+    if path:
+        return ImageFont.truetype(path, size)
+    # Fall back to PIL's own name-based lookup (searches some system dirs and
+    # honours the bundled font), then surface a clear, actionable error.
+    try:
+        return ImageFont.truetype(name, size)
+    except OSError:
+        raise OSError(
+            f"DejaVu Sans Mono not found ({name}). Install it — Debian/Ubuntu: "
+            "`apt-get install fonts-dejavu`, macOS: `brew install font-dejavu`."
+        )
 
 
 def render(out_path):
