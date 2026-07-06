@@ -87,6 +87,18 @@ test.describe('CLI command accessibility (#185)', () => {
       await expect(text).toHaveClass(/cmd-text--expanded/)
       await expect(toggle).toHaveAttribute('aria-expanded', 'true')
       expect(await text.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap')
+
+      // Expanded, the buttons must not eat a side column (#187 follow-up): the
+      // action row sits above the command, and the command spans (near) the
+      // full strip width.
+      const strip   = dialog.locator('.dialog-cmd')          // the .cmd-strip root
+      const actions = dialog.locator('.dialog-cmd .cmd-actions')
+      const [tBox, aBox, sBox] = await Promise.all([
+        text.boundingBox(), actions.boundingBox(), strip.boundingBox(),
+      ])
+      expect(aBox.y + aBox.height).toBeLessThanOrEqual(tBox.y + 2)  // actions above the text
+      expect(tBox.width).toBeGreaterThan(sBox.width * 0.9)          // text uses the full width
+
       await toggle.click()
       await expect(text).not.toHaveClass(/cmd-text--expanded/)
     }

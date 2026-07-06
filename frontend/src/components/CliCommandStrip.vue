@@ -15,24 +15,27 @@
     <span v-else class="cmd-hint">{{ emptyHint }}</span>
     <!-- Long commands stay one line by default so they don't distort the
          layout (or a presentation); the toggle reveals the full text on
-         demand. Only shown when the command actually overflows (issue #187). -->
-    <button
-      v-if="command && (expanded || overflowing)"
-      type="button"
-      class="cmd-expand"
-      :class="{ 'cmd-expand--open': expanded }"
-      :aria-expanded="expanded ? 'true' : 'false'"
-      :title="expanded ? 'Collapse command' : 'Show full command'"
-      @click="expanded = !expanded"
-    >▾</button>
-    <button
-      v-if="command"
-      type="button"
-      class="cmd-copy"
-      :class="{ 'cmd-copy--done': copied }"
-      :title="copied ? 'Copied to clipboard' : 'Copy command'"
-      @click="copy"
-    >{{ copied ? '✓ Copied' : 'Copy' }}</button>
+         demand. Only shown when the command actually overflows (issue #187).
+         When expanded the actions ride in a compact top row so the wrapped
+         command uses the full width instead of a squeezed column. -->
+    <div v-if="command" class="cmd-actions">
+      <button
+        v-if="expanded || overflowing"
+        type="button"
+        class="cmd-expand"
+        :class="{ 'cmd-expand--open': expanded }"
+        :aria-expanded="expanded ? 'true' : 'false'"
+        :title="expanded ? 'Collapse command' : 'Show full command'"
+        @click="expanded = !expanded"
+      >▾</button>
+      <button
+        type="button"
+        class="cmd-copy"
+        :class="{ 'cmd-copy--done': copied }"
+        :title="copied ? 'Copied to clipboard' : 'Copy command'"
+        @click="copy"
+      >{{ copied ? '✓ Copied' : 'Copy' }}</button>
+    </div>
   </div>
 </template>
 
@@ -106,9 +109,16 @@ onBeforeUnmount(() => {
   padding: 0.4rem 0.75rem;
   min-height: 2.1rem;
 }
-/* When expanded the command wraps to several lines; keep the icon and buttons
-   pinned to the first line rather than floating to the vertical centre. */
-.cmd-strip--expanded { align-items: flex-start; }
+/* When expanded, the command drops to its own full-width row while the actions
+   sit in a compact top row — so the buttons cost one row of height, not a whole
+   column of width. */
+.cmd-strip--expanded {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.cmd-strip--expanded .cmd-icon    { display: none; }
+.cmd-strip--expanded .cmd-actions { order: 1; margin-left: auto; }
+.cmd-strip--expanded .cmd-text    { order: 2; flex-basis: 100%; }
 .cmd-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 700;
@@ -137,6 +147,12 @@ onBeforeUnmount(() => {
   font-size: 0.76rem;
   font-style: italic;
   color: var(--text-3);
+}
+.cmd-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 .cmd-copy {
   flex-shrink: 0;
