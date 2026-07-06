@@ -9,9 +9,18 @@ of the live web UI and Quarto reports captured with Playwright.
 ```bash
 python3 -m venv .venv-deck
 source .venv-deck/bin/activate
-pip install -r deck/requirements-deck.txt
+pip install -r deck/requirements-deck.txt   # playwright, python-pptx, Pillow, PyYAML, segno
 playwright install chromium
 ```
+
+**System prerequisites** (not pip-installable — the pipeline shells out to these):
+
+- **Graphviz** — the `dot` binary on `PATH`, for the architecture diagrams (`capture_diagrams.py`). Debian/Ubuntu `apt-get install graphviz`, macOS `brew install graphviz`.
+- **DejaVu Sans Mono** font — for the CLI-menu render (`capture_cli_menu.py`). Present by default on most Linux (`fonts-dejavu`); the path is Debian-style (`/usr/share/fonts/truetype/dejavu/`).
+- **`glab`**, authenticated (`glab auth status`) — `build_deck.py` / `fetch_metrics.py` pull live issues & MRs.
+- **`aws`**, authenticated — `build_deck.py` fetches the SAIC template from S3.
+
+If Graphviz or the font is missing, `build_deck.py` skips those slides with a warning rather than failing; `glab`/`aws` are hard requirements for the build.
 
 ## Pipeline
 

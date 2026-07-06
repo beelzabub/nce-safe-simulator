@@ -58,7 +58,14 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
 
 ## Installation
 
-**Requirements:** Python 3.9+, Node.js 18+, Git, a GitLab Personal Access Token with `api` scope.
+**Requirements:**
+
+- **Core** — Python 3.9+, Node.js 18+, Git, and a GitLab Personal Access Token with `api` scope.
+- **Report & diagram generation** — building reports in the `plotly` / `interactive` / `all` formats shells out to two system binaries that are **not** installed by `pip`/`npm`:
+  - **[Quarto CLI](https://quarto.org/docs/get-started/)** — renders the static Quarto site (`mixins/serve.py` runs `quarto render`). The container pins **v1.9.38** (`Dockerfile`).
+  - **[Graphviz](https://graphviz.org/download/)** — the `dot` binary must be on `PATH`; the `diagrams` package uses it to render the architecture views.
+
+  Markdown-only reports (`--formats markdown`, the default) need neither. Quick install — Debian/Ubuntu: `apt-get install graphviz` + Quarto's `.deb`; macOS: `brew install graphviz quarto`.
 
 ### 1 — Clone
 
@@ -1067,7 +1074,8 @@ The simulator runs on AWS in two configurations. **EKS (Kubernetes)** is recomme
 - AWS CLI configured (`aws configure`)
 - Docker (for building the container image)
 - CDK CLI: `npm install -g aws-cdk`
-- `kubectl` (EKS only)
+- `jq` — the `cdk/Makefile` deploy/audit targets parse and write `cdk-*.json` state with it
+- `kubectl` and `helm` (EKS only)
 - SSM Session Manager plugin (for exec into the running container):
   ```bash
   sudo dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_arm64/session-manager-plugin.rpm
