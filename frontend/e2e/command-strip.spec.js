@@ -62,4 +62,45 @@ test.describe('CLI command accessibility (#185)', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
   })
+
+  // Issue #187: the command strip stays a single line by default so a long
+  // command can't stretch the layout; a toggle expands it on demand.
+  test('the command collapses to one line with an expand toggle', async ({ page }) => {
+    await page.getByRole('button', { name: 'Run Reports…' }).first().click()
+    const dialog = page.locator('.overlay .dialog')
+    await expect(dialog).toBeVisible()
+
+    const text   = dialog.locator('.dialog-cmd .cmd-text')
+    const toggle = dialog.locator('.dialog-cmd .cmd-expand')
+    await expect(text).toBeVisible()
+
+    // Collapsed by default — one line, whatever the viewport width.
+    await expect(text).not.toHaveClass(/cmd-text--expanded/)
+    expect(await text.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('nowrap')
+
+    // When the command is too long to fit, the toggle is offered and expands
+    // the strip to the full wrapped command, then collapses it again.
+    if (await text.evaluate((el) => el.scrollWidth - el.clientWidth > 1)) {
+      await expect(toggle).toBeVisible()
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await toggle.click()
+      await expect(text).toHaveClass(/cmd-text--expanded/)
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(await text.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap')
+
+      // Expanded, the buttons must not eat a side column (#187 follow-up): the
+      // action row sits above the command, and the command spans (near) the
+      // full strip width.
+      const strip   = dialog.locator('.dialog-cmd')          // the .cmd-strip root
+      const actions = dialog.locator('.dialog-cmd .cmd-actions')
+      const [tBox, aBox, sBox] = await Promise.all([
+        text.boundingBox(), actions.boundingBox(), strip.boundingBox(),
+      ])
+      expect(aBox.y + aBox.height).toBeLessThanOrEqual(tBox.y + 2)  // actions above the text
+      expect(tBox.width).toBeGreaterThan(sBox.width * 0.9)          // text uses the full width
+
+      await toggle.click()
+      await expect(text).not.toHaveClass(/cmd-text--expanded/)
+    }
+  })
 })

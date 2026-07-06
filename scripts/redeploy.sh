@@ -16,11 +16,37 @@ IMAGE="nce-safe-simulator:latest"
 NETWORK="nce-net"
 APP="nce-safe-sim"
 
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" != "develop" ]; then
+  echo "==> NOTE: building from '$BRANCH', not develop. The live site will run" >&2
+  echo "          that branch's code — make sure that is intended." >&2
+fi
+
 echo "==> Building image ($IMAGE)..."
 docker build \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
   -t "$IMAGE" .
+
+# Guard (issue #186): never swap the live container for an image that can't
+# report its own version. This catches builds made from a branch that predates
+# the version support (server/version.py / VERSION absent), which silently ship
+# a UI with no version badge. Runs before the container swap, so a bad build
+# aborts the deploy instead of going live.
+echo "==> Verifying version stamp baked into image..."
+# --entrypoint python3 bypasses the image's "NceGitLab.py --serve" entrypoint
+# (which would demand a config and exit). tail -n1 keeps just the version line.
+BAKED_VERSION="$(docker run --rm --entrypoint python3 "$IMAGE" -c \
+  'from server.version import app_version; print(app_version())' 2>/dev/null \
+  | tail -n1 | tr -d '[:space:]' || true)"
+if [ -z "$BAKED_VERSION" ] || [ "$BAKED_VERSION" = "nce-unknown" ]; then
+  echo "ERROR: built image has no resolvable version (got: '${BAKED_VERSION:-<server.version import failed>}')." >&2
+  echo "       The source tree is likely missing server/version.py or VERSION —" >&2
+  echo "       usually a build from a branch that predates version support." >&2
+  echo "       Check out develop (or a branch based on it) and retry. Deploy aborted." >&2
+  exit 1
+fi
+echo "    version: $BAKED_VERSION"
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 
