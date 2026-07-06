@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 from collections import Counter
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -139,6 +140,81 @@ def fetch_sloc():
     }
 
 
+def _is_source(rel_path):
+    """Match fetch_sloc's bucket rules for a git-tracked path: root-level .py
+    (the CLI entry), .py under the tracked Python dirs, and frontend/src Vue/JS."""
+    ext = os.path.splitext(rel_path)[1]
+    if ext == ".py":
+        if "/" not in rel_path:
+            return True
+        return rel_path.split("/", 1)[0] in ("mixins", "tests", "marimo", "server", "cdk", "diagrams")
+    if rel_path.startswith("frontend/src/"):
+        return ext in (".vue", ".js", ".ts")
+    return False
+
+
+def _sloc_at_commit(commit):
+    """Total source lines at a commit, read straight from the object store
+    (no checkout): list the tree's source blobs, then stream them through one
+    `git cat-file --batch` and count lines (newlines, +1 for an unterminated
+    final line — matching fetch_sloc's per-file line count)."""
+    tree = _git(["ls-tree", "-r", commit])
+    blobs = []
+    for line in tree.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) >= 3 and parts[1] == "blob" and _is_source(path):
+            blobs.append(parts[2])
+    if not blobs:
+        return 0
+    proc = subprocess.run(["git", "cat-file", "--batch"], cwd=REPO_ROOT,
+                          input="".join(o + "\n" for o in blobs).encode(),
+                          capture_output=True, check=True)
+    out, total, i = proc.stdout, 0, 0
+    while i < len(out):
+        nl = out.index(b"\n", i)
+        parts = out[i:nl].split()
+        i = nl + 1
+        if len(parts) != 3 or parts[1] != b"blob":
+            continue  # 'missing' etc.
+        size = int(parts[2])
+        content = out[i:i + size]
+        i += size + 1
+        total += content.count(b"\n") + (1 if size and not content.endswith(b"\n") else 0)
+    return total
+
+
+def fetch_sloc_by_week():
+    """SLOC at the tip of each week from first to last commit — the code-growth
+    curve for the deck's 'SLOC by Week' chart."""
+    commits = []
+    for line in _git(["log", "--format=%H %cI"]).splitlines():
+        h, iso = line.split(" ", 1)
+        # git emits a trailing 'Z' for UTC, which datetime.fromisoformat rejects
+        # before Python 3.11 — normalize it so the build runs on 3.9/3.10 too.
+        if iso.endswith("Z"):
+            iso = iso[:-1] + "+00:00"
+        commits.append((h, datetime.fromisoformat(iso)))
+    commits.sort(key=lambda c: c[1])
+    if not commits:
+        return {}
+    first_dt, last_dt = commits[0][1], commits[-1][1]
+    points, t = [], first_dt
+    while t < last_dt:
+        t += timedelta(weeks=1)
+        points.append(min(t, last_dt))
+    if not points or points[-1] != last_dt:
+        points.append(last_dt)
+    series, ci, latest = {}, 0, None
+    for p in points:
+        while ci < len(commits) and commits[ci][1] <= p:
+            latest = commits[ci][0]
+            ci += 1
+        if latest is not None:
+            series[p.strftime("%m/%d")] = _sloc_at_commit(latest)
+    return series
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(HERE, "metrics.json"))
@@ -148,6 +224,7 @@ def main():
     metrics.update(fetch_issue_mr_counts())
     metrics.update(fetch_commit_stats())
     metrics["sloc"] = fetch_sloc()
+    metrics["sloc_by_week"] = fetch_sloc_by_week()
 
     with open(args.out, "w") as f:
         json.dump(metrics, f, indent=2)
