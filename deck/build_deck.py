@@ -11,6 +11,7 @@ Requires deck/metrics.json (run fetch_metrics.py first) and deck/screenshots/ (r
 capture_screenshots.py first, or point --screenshots-dir at an existing set).
 """
 import argparse
+import glob
 import json
 import os
 import subprocess
@@ -252,6 +253,54 @@ class DeckBuilder:
         box_y = Emu(500000)
         box_h = self.SH - box_y - Emu(80000)
         self.add_picture_contain(s, img_path, Emu(120000), box_y, self.SW - Emu(240000), box_h)
+        return s
+
+    def report_segments_slide(self, title, seg_paths):
+        """A report page too long to read at full-bleed, shown instead as a few
+        readable crops taken down the page (capture_screenshots.py) and laid out
+        as a centered, equal-height row of cards — like columns of the document
+        read left-to-right (issue #144)."""
+        s = self.new_slide()
+        self.add_rect(s, 0, 0, self.SW, self.SH, RGBColor(0xF2, 0xF3, 0xF4))
+        self.add_rect(s, 0, 0, self.SW, Emu(430000), self.C["blue"])
+        self.add_text(s, Emu(220000), Emu(70000), self.SW - Emu(440000), Emu(300000),
+                       f"{title}  —  read left → right", 14, WHITE, bold=True,
+                       anchor=MSO_ANCHOR.MIDDLE)
+        self.add_rect(s, 0, Emu(430000), self.SW, Emu(18000), self.C["yellow"])
+
+        n = len(seg_paths)
+        gap = Emu(110000)
+        area_x, area_y = Emu(150000), Emu(560000)
+        area_w = self.SW - 2 * area_x
+        area_h = self.SH - area_y - Emu(110000)
+
+        # Size every crop to the same height (fill the band); if the resulting
+        # row is wider than the area, scale all of them down uniformly to fit —
+        # so the crops stay the same height and read as aligned columns.
+        ratios = []
+        for p in seg_paths:
+            with Image.open(p) as im:
+                iw, ih = im.size
+            ratios.append(iw / ih)
+        h = area_h
+        widths = [int(h * r) for r in ratios]
+        row_w = sum(widths) + gap * (n - 1)
+        if row_w > area_w:
+            scale = (area_w - gap * (n - 1)) / sum(widths)
+            widths = [int(w * scale) for w in widths]
+            h = int(h * scale)
+            row_w = sum(widths) + gap * (n - 1)
+
+        x = area_x + (area_w - row_w) // 2
+        y = area_y + (area_h - h) // 2
+        for p, w in zip(seg_paths, widths):
+            card = self.add_rect(s, x - Emu(14000), y - Emu(14000),
+                                 w + Emu(28000), h + Emu(28000), WHITE)
+            card.line.color.rgb = RGBColor(0xD5, 0xD9, 0xDD)
+            card.line.width = Pt(0.75)
+            # box matches the crop's ratio, so contain fills it with no letterbox
+            self.add_picture_contain(s, p, x, y, w, h)
+            x += w + gap
         return s
 
     def remove_slide(self, index):
@@ -1127,9 +1176,15 @@ class DeckBuilder:
                     self.full_bleed_image_slide(f"{shot['title']}: {label}", path, dark=True)
 
         for shot in self.shots.get("quarto_shots", []):
-            path = os.path.join(self.screenshots_dir, "reports_quarto", f"{shot['out']}.png")
-            if os.path.exists(path):
-                self.full_bleed_image_slide(shot["title"], path, dark=False)
+            base = os.path.join(self.screenshots_dir, "reports_quarto", shot["out"])
+            segs = sorted(glob.glob(f"{base}__seg*.png"),
+                          key=lambda p: int(p.rsplit("__seg", 1)[1].split(".")[0]))
+            if segs:
+                # Long report page: readable crops laid out side by side.
+                self.report_segments_slide(shot["title"], segs)
+            elif os.path.exists(f"{base}.png"):
+                # Short page: the single full-page image reads fine full-bleed.
+                self.full_bleed_image_slide(shot["title"], f"{base}.png", dark=False)
 
     def build(self):
         # Single-source the issue list so the "By the Numbers" KPI and the
@@ -1148,6 +1203,7 @@ class DeckBuilder:
         self.build_metrics_slide()
         self._section_divider("Issues", "Full Backlog — every issue by number")
         self.build_issues_table()
+        self._section_divider("Capability Areas", "The same work, grouped by capability area")
         self.build_capability_slides()
         self.build_wrapup()
         self.build_appendix()

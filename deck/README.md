@@ -58,7 +58,16 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 - **`shots.yaml`** — the screenshot shot list: which UI dialogs to open (`ui_shots`),
   the one live-run demo (`live_run_shots`), and which Quarto report pages to capture
   (`quarto_shots`). Add a new tool or report page here and re-run `capture_screenshots.py`
-  with `--only <name>` to add just that one shot without a full re-capture.
+  with `--only <name>` to add just that one shot without a full re-capture, or
+  `--section quarto` to refresh just the report pages (skips the UI/live shots).
+
+  Report pages are long scrollable documents, so a single full-page screenshot is
+  unreadable on a slide. Tall `quarto_shots` are therefore **also** captured as 2–4
+  readable, viewport-height crops taken down the page (portrait frame, 2× device
+  scale); `build_deck.py` lays those out as a centered row of cards in the Appendix
+  (`report_segments_slide`), while short pages keep the single full-bleed image. The
+  crop count is automatic from page height; override per shot with `segments: <n>`
+  (or `segments: false` to force a single image).
 - **`capabilities.yaml`** — the deck's capability-area content: title, issue count, blurb,
   flagship-issue bullets, and (optionally) which captured screenshot to embed. This is a
   **maintained mapping, not re-derived automatically** — clustering issues into capability

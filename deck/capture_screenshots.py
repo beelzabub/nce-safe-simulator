@@ -121,15 +121,64 @@ def capture_live_run_shot(browser, base_url, shot, out_dir, viewport):
     print(f"  ok: {out} (live run: before/running/completed)")
 
 
+# Report pages are long, scrollable documents. A single full_page screenshot
+# crammed onto one slide is unreadable, so tall pages are ALSO captured as a
+# handful of readable, viewport-height crops taken down the page (build_deck.py
+# lays them out side by side). Capture in a portrait frame at 2x device scale so
+# the text stays crisp and each crop shows a tall slice of content.
+QUARTO_CAP_W, QUARTO_CAP_H = 1200, 1600
+QUARTO_SCALE = 2
+QUARTO_SEG_MIN_RATIO = 1.25   # only segment pages taller than this * frame height
+
+
+def _segment_offsets(scroll_h, frame_h, n):
+    """n scroll offsets evenly spanning top -> bottom (first shows the top,
+    last shows the tail); some overlap between adjacent crops is fine."""
+    if n <= 1:
+        return [0]
+    span = max(0, scroll_h - frame_h)
+    return [round(i * span / (n - 1)) for i in range(n)]
+
+
+def _quarto_segment_count(shot, scroll_h):
+    """How many crops to take: an explicit per-shot `segments` (int, or False to
+    force a single full-page image) overrides; otherwise auto from page height,
+    clamped to 2-4 for pages that scroll well past one frame."""
+    override = shot.get("segments")
+    if override is False:
+        return 1
+    if isinstance(override, int):
+        return max(1, min(4, override))
+    if scroll_h > QUARTO_CAP_H * QUARTO_SEG_MIN_RATIO:
+        return max(2, min(4, round(scroll_h / QUARTO_CAP_H)))
+    return 1
+
+
 def capture_quarto_shot(browser, quarto_base_url, shot, out_dir, viewport):
     out = shot["out"]
     url = quarto_base_url.rstrip("/") + "/" + shot["path"] if shot["path"] else quarto_base_url
-    page = browser.new_page(viewport=viewport)
+    qdir = os.path.join(out_dir, "reports_quarto")
+    page = browser.new_page(viewport={"width": QUARTO_CAP_W, "height": QUARTO_CAP_H},
+                            device_scale_factor=QUARTO_SCALE)
     page.goto(url, wait_until="networkidle", timeout=30000)
-    page.wait_for_timeout(1000)
-    page.screenshot(path=os.path.join(out_dir, "reports_quarto", f"{out}.png"), full_page=True)
+    page.wait_for_timeout(1200)
+
+    # Full page: the capability-slide thumbnail and the fallback for short pages.
+    page.screenshot(path=os.path.join(qdir, f"{out}.png"), full_page=True)
+
+    scroll_h = page.evaluate(
+        "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)")
+    n = _quarto_segment_count(shot, scroll_h)
+
+    seg = 0
+    if n > 1:
+        for i, y in enumerate(_segment_offsets(scroll_h, QUARTO_CAP_H, n), 1):
+            page.evaluate("(y) => window.scrollTo(0, y)", y)
+            page.wait_for_timeout(400)
+            page.screenshot(path=os.path.join(qdir, f"{out}__seg{i}.png"))  # viewport-clipped
+            seg += 1
     page.close()
-    print(f"  ok: {out}")
+    print(f"  ok: {out}" + (f" (+{seg} readable segments)" if seg else ""))
 
 
 def main():
@@ -137,6 +186,9 @@ def main():
     ap.add_argument("--config", default=os.path.join(HERE, "shots.yaml"))
     ap.add_argument("--out-dir", default=os.path.join(HERE, "screenshots"))
     ap.add_argument("--only", default=None, help="substring filter on shot `out` name")
+    ap.add_argument("--section", default="all", choices=["all", "ui", "live", "quarto"],
+                    help="capture only one section (e.g. --section quarto to refresh just "
+                         "the report pages without re-running the UI/live shots)")
     ap.add_argument("--width", type=int, default=1440)
     ap.add_argument("--height", type=int, default=900)
     args = ap.parse_args()
@@ -151,23 +203,29 @@ def main():
     def wanted(name):
         return args.only is None or args.only in name
 
+    def section(name):
+        return args.section in ("all", name)
+
     with sync_playwright() as p:
         browser = p.chromium.launch()
 
-        print("UI dialog shots:")
-        for shot in config.get("ui_shots", []):
-            if wanted(shot["out"]):
-                capture_ui_shot(browser, config["app_url"], shot, args.out_dir, viewport)
+        if section("ui"):
+            print("UI dialog shots:")
+            for shot in config.get("ui_shots", []):
+                if wanted(shot["out"]):
+                    capture_ui_shot(browser, config["app_url"], shot, args.out_dir, viewport)
 
-        print("Live-run shots (real read-only job execution):")
-        for shot in config.get("live_run_shots", []):
-            if wanted(shot["out"]):
-                capture_live_run_shot(browser, config["app_url"], shot, args.out_dir, viewport)
+        if section("live"):
+            print("Live-run shots (real read-only job execution):")
+            for shot in config.get("live_run_shots", []):
+                if wanted(shot["out"]):
+                    capture_live_run_shot(browser, config["app_url"], shot, args.out_dir, viewport)
 
-        print("Quarto report shots:")
-        for shot in config.get("quarto_shots", []):
-            if wanted(shot["out"]):
-                capture_quarto_shot(browser, config["quarto_base_url"], shot, args.out_dir, viewport)
+        if section("quarto"):
+            print("Quarto report shots:")
+            for shot in config.get("quarto_shots", []):
+                if wanted(shot["out"]):
+                    capture_quarto_shot(browser, config["quarto_base_url"], shot, args.out_dir, viewport)
 
         browser.close()
 
