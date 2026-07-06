@@ -22,6 +22,28 @@ from playwright.sync_api import sync_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# The deployed app sits behind the login front door (epic #135): a DoD Notice &
+# Consent banner plus a session gate (frontend useAuthGate.js). The live auth
+# method is "none", so no credentials are needed — seeding the same per-session
+# flags the router guard checks lets the capture reach the authenticated views
+# (job picker, parameter dialogs), exactly as the e2e suite's seedAuthedSession
+# does. Read-only: sets nothing on the server. Without this, /app/ redirects to
+# /app/login and every job-list click times out.
+_SEED_AUTH_JS = """
+try {
+  sessionStorage.setItem('nce.auth.accepted', '1');
+  sessionStorage.setItem('nce.auth.dodBannerAccepted', '1');
+  sessionStorage.setItem('nce.auth.wasAuthenticated', '1');
+} catch (e) {}
+"""
+
+
+def _new_app_page(browser, viewport):
+    """A page pre-seeded to clear the login gate, for authenticated app views."""
+    page = browser.new_page(viewport=viewport)
+    page.add_init_script(_SEED_AUTH_JS)
+    return page
+
 
 def _navigate(page, base_url, shot):
     page.goto(base_url, wait_until="networkidle", timeout=30000)
@@ -40,12 +62,12 @@ def _navigate(page, base_url, shot):
 def capture_ui_shot(browser, base_url, shot, out_dir, viewport):
     out = shot["out"]
 
-    page = browser.new_page(viewport=viewport)
+    page = _new_app_page(browser, viewport)
     _navigate(page, base_url, shot)
     page.screenshot(path=os.path.join(out_dir, f"{out}_dark.png"), full_page=True)
     page.close()
 
-    page = browser.new_page(viewport=viewport)
+    page = _new_app_page(browser, viewport)
     page.goto(base_url, wait_until="networkidle", timeout=30000)
     page.wait_for_timeout(1000)
     theme_btn = page.query_selector("button:has-text('Light'), button:has-text('Dark')")
@@ -72,7 +94,7 @@ def capture_live_run_shot(browser, base_url, shot, out_dir, viewport):
     (dark theme only) rather than twice, since this performs a real - if read-only -
     job execution against the target app each time it runs."""
     out = shot["out"]
-    page = browser.new_page(viewport=viewport)
+    page = _new_app_page(browser, viewport)
     page.goto(base_url, wait_until="networkidle", timeout=30000)
     page.wait_for_timeout(1000)
     for cat in shot.get("expand", []):
