@@ -4,10 +4,27 @@
      the bar the overlay covers (issue #185). Pure display — the caller owns the
      command string and any docking chrome (border, background). -->
 <template>
-  <div class="cmd-strip" :class="{ 'cmd-strip--empty': !command }">
+  <div class="cmd-strip" :class="{ 'cmd-strip--empty': !command, 'cmd-strip--expanded': expanded }">
     <span class="cmd-icon">&lt;/&gt;</span>
-    <code v-if="command" class="cmd-text">{{ command }}</code>
+    <code
+      v-if="command"
+      ref="textEl"
+      class="cmd-text"
+      :class="{ 'cmd-text--expanded': expanded }"
+    >{{ command }}</code>
     <span v-else class="cmd-hint">{{ emptyHint }}</span>
+    <!-- Long commands stay one line by default so they don't distort the
+         layout (or a presentation); the toggle reveals the full text on
+         demand. Only shown when the command actually overflows (issue #187). -->
+    <button
+      v-if="command && (expanded || overflowing)"
+      type="button"
+      class="cmd-expand"
+      :class="{ 'cmd-expand--open': expanded }"
+      :aria-expanded="expanded ? 'true' : 'false'"
+      :title="expanded ? 'Collapse command' : 'Show full command'"
+      @click="expanded = !expanded"
+    >▾</button>
     <button
       v-if="command"
       type="button"
@@ -20,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   command:   { type: String, default: '' },
@@ -29,6 +46,31 @@ const props = defineProps({
 
 const copied = ref(false)
 let copiedTimer = null
+
+// Collapsed by default; expand reveals the full, wrapped command. `overflowing`
+// gates the toggle so short commands that already fit show no chrome.
+const textEl = ref(null)
+const expanded = ref(false)
+const overflowing = ref(false)
+
+function measure() {
+  const el = textEl.value
+  if (!el || expanded.value) return   // only meaningful in the collapsed single-line state
+  overflowing.value = el.scrollWidth - el.clientWidth > 1
+}
+
+// A new command starts collapsed; re-measure once Vue has painted it.
+watch(() => props.command, async () => {
+  expanded.value = false
+  await nextTick()
+  measure()
+})
+
+onMounted(async () => {
+  await nextTick()
+  measure()
+  window.addEventListener('resize', measure)
+})
 
 async function copy() {
   const text = props.command
@@ -50,7 +92,10 @@ async function copy() {
   copiedTimer = setTimeout(() => { copied.value = false }, 1500)
 }
 
-onBeforeUnmount(() => clearTimeout(copiedTimer))
+onBeforeUnmount(() => {
+  clearTimeout(copiedTimer)
+  window.removeEventListener('resize', measure)
+})
 </script>
 
 <style scoped>
@@ -61,6 +106,9 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   padding: 0.4rem 0.75rem;
   min-height: 2.1rem;
 }
+/* When expanded the command wraps to several lines; keep the icon and buttons
+   pinned to the first line rather than floating to the vertical centre. */
+.cmd-strip--expanded { align-items: flex-start; }
 .cmd-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 700;
@@ -70,12 +118,19 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 }
 .cmd-text {
   flex: 1;
+  min-width: 0;               /* let the flex child shrink so the ellipsis engages */
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;
   color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-text--expanded {
   white-space: pre-wrap;
   word-break: break-all;
-  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 40vh;
 }
 .cmd-hint {
   flex: 1;
@@ -96,7 +151,27 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 .cmd-copy:hover { background: var(--border); color: var(--text-1); }
 .cmd-copy--done { color: var(--ok); border-color: var(--ok); }
 
+.cmd-expand {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--text-2);
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.cmd-expand:hover { background: var(--border); color: var(--text-1); }
+.cmd-expand--open { transform: rotate(180deg); }
+
 @media (pointer: coarse) {
   .cmd-copy { padding: 0.4rem 0.8rem; }
+  .cmd-expand { width: 2rem; height: 2rem; }
 }
 </style>

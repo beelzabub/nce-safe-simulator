@@ -62,4 +62,33 @@ test.describe('CLI command accessibility (#185)', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
   })
+
+  // Issue #187: the command strip stays a single line by default so a long
+  // command can't stretch the layout; a toggle expands it on demand.
+  test('the command collapses to one line with an expand toggle', async ({ page }) => {
+    await page.getByRole('button', { name: 'Run Reports…' }).first().click()
+    const dialog = page.locator('.overlay .dialog')
+    await expect(dialog).toBeVisible()
+
+    const text   = dialog.locator('.dialog-cmd .cmd-text')
+    const toggle = dialog.locator('.dialog-cmd .cmd-expand')
+    await expect(text).toBeVisible()
+
+    // Collapsed by default — one line, whatever the viewport width.
+    await expect(text).not.toHaveClass(/cmd-text--expanded/)
+    expect(await text.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('nowrap')
+
+    // When the command is too long to fit, the toggle is offered and expands
+    // the strip to the full wrapped command, then collapses it again.
+    if (await text.evaluate((el) => el.scrollWidth - el.clientWidth > 1)) {
+      await expect(toggle).toBeVisible()
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await toggle.click()
+      await expect(text).toHaveClass(/cmd-text--expanded/)
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(await text.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap')
+      await toggle.click()
+      await expect(text).not.toHaveClass(/cmd-text--expanded/)
+    }
+  })
 })
