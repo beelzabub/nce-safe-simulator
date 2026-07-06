@@ -119,7 +119,7 @@ HTML(html)
 ### ⛔ Blocked Epics
 
 ```{python}
-ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️"}
+ICONS = {"Epic": "⚡", "Capability": "💠", "Feature": "🔖"}
 
 if blocked:
     html = """
@@ -128,7 +128,7 @@ if blocked:
   <tbody>
 """
     for item in blocked:
-        icon = ICONS.get(item["type"], "🏆")
+        icon = ICONS.get(item["type"], "⚡")
         if item["url"]:
             link = f'<a href="{item["url"]}" target="_blank">{icon} {item["title"]}</a>'
         else:
@@ -152,7 +152,7 @@ if at_risk:
   <tbody>
 """
     for item in at_risk:
-        icon = ICONS.get(item["type"], "🏆")
+        icon = ICONS.get(item["type"], "⚡")
         if item["url"]:
             link = f'<a href="{item["url"]}" target="_blank">{icon} {item["title"]}</a>'
         else:
@@ -175,9 +175,9 @@ HTML(html)
 
 | Icon | Meaning |
 |------|---------|
-| 🏆 | Epic |
-| 🧩 | Capability |
-| 🛠️ | Feature |
+| ⚡ | Epic |
+| 💠 | Capability |
+| 🔖 | Feature |
 | 🟢 | On track — within threshold |
 | 🟡 | Watch — approaching threshold |
 | 🔴 | At risk — threshold exceeded |

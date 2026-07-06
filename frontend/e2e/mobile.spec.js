@@ -66,6 +66,49 @@ test.describe('login flow', () => {
   })
 })
 
+test.describe('DoD banner re-consent (#163)', () => {
+  // The banner ack lives in sessionStorage; only a real signed-in ->
+  // signed-out transition (session TTL lapse, server restart) may clear it.
+
+  async function mockExpiredBasicSession(page) {
+    await mockApi(page)
+    // Later-registered routes win: server-enforced mode, session gone.
+    await page.route('**/api/auth/session', (route) =>
+      route.fulfill({ json: { method: 'basic', authenticated: false } }))
+  }
+
+  test('session expiry -> guard redirect re-presents the banner', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')
+      sessionStorage.setItem('nce.auth.wasAuthenticated', '1')   // was signed in
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/')
+    await expect(page).toHaveURL(/\/app\/login$/)
+    await expect(page.getByRole('button', { name: 'OK' })).toBeVisible()
+  })
+
+  test('session expiry -> direct /login visit re-presents the banner', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')
+      sessionStorage.setItem('nce.auth.wasAuthenticated', '1')
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/login')
+    await expect(page.getByRole('button', { name: 'OK' })).toBeVisible()
+  })
+
+  test('reloading /login before ever signing in does not re-nag', async ({ page }) => {
+    await page.addInitScript(() => {
+      sessionStorage.setItem('nce.auth.dodBannerAccepted', '1')   // no wasAuthenticated
+    })
+    await mockExpiredBasicSession(page)
+    await page.goto('/app/login')
+    await expect(page.locator('.whisper')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'OK' })).toBeHidden()
+  })
+})
+
 test.describe('home workspace', () => {
   test.beforeEach(async ({ page }) => {
     await seedAuthedSession(page)
@@ -88,6 +131,18 @@ test.describe('home workspace', () => {
       const box = await sidebar.boundingBox()
       expect(box.width).toBe(340)
     }
+  })
+
+  test('version badge shows bottom-right on tablets/desktop (#173)', async ({ page }) => {
+    const badge = page.locator('.version-badge')
+    if (await phoneLayout(page)) {
+      await expect(badge).toBeHidden()   // corners are tap-targets on phones
+      return
+    }
+    await expect(badge).toHaveText('nce-abc1234')
+    const [box, viewport] = [await badge.boundingBox(), page.viewportSize()]
+    expect(box.x + box.width, 'anchored right').toBeGreaterThan(viewport.width * 0.8)
+    expect(box.y + box.height, 'anchored bottom').toBeGreaterThan(viewport.height * 0.9)
   })
 
   test('nav bar controls meet tap-target size', async ({ page }) => {
@@ -184,5 +239,136 @@ test.describe('home workspace', () => {
     expect(box.height).toBeLessThanOrEqual(viewport.height)
     await dialog.getByRole('button', { name: 'Cancel' }).tap()
     await expect(dialog).toBeHidden()
+  })
+
+  test('side panel tabs switch and persist (epic #165)', async ({ page }) => {
+    // Tools is the default tab and hosts the job picker
+    const tabs = page.locator('.side-panel .tab-btn')
+    await expect(tabs).toHaveCount(3)
+    await expect(page.locator('.picker')).toBeVisible()
+
+    // Reports lists the mocked snapshot run; Analysis lists its tools
+    await tabs.filter({ hasText: 'Reports' }).tap()
+    await expect(page.locator('.reports-tab .run-select')).toBeVisible()
+    await tabs.filter({ hasText: 'Analysis' }).tap()
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Portfolio Explorer')
+
+    // Active tab survives a reload (localStorage). On phones the drawer
+    // starts open after load, so the panel is already visible.
+    await page.reload()
+    await expect(page.locator('.nav-bar')).toBeVisible()
+    await expect(page.locator('.analysis-row .analysis-name')).toHaveText('Portfolio Explorer')
+
+    // Back to Tools: picker is intact
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
+    await expect(page.locator('.picker')).toBeVisible()
+  })
+
+  test('reports tab opens a wiki page in the markdown viewer (#167)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
+
+    // Page tree mirrors the wiki hierarchy from the mocked snapshot
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toBeVisible()
+
+    // Filter narrows across the tree and keeps wiki context; × clears it
+    await page.locator('.reports-filter .filter-input').fill('health')
+    await expect(page.locator('.page-row')).toHaveCount(1)
+    await expect(page.locator('.dir-label').filter({ hasText: '00 Executive Pulse' })).toBeVisible()
+    await expect(page.locator('.dir-label').filter({ hasText: '01 Program Management' })).toHaveCount(0)
+    await page.locator('.reports-filter .filter-clear').tap()
+    await expect(page.locator('.page-row')).toHaveCount(3)
+
+    // Run Reports is available here too, above the restored footer links
+    const reportsTab = page.locator('.reports-tab')
+    await expect(reportsTab.getByRole('button', { name: 'Run Reports…' })).toBeVisible()
+    await expect(page.locator('.panel-footer .footer-link', { hasText: 'Quarto' })).toBeVisible()
+    await reportsTab.getByRole('button', { name: 'Run Reports…' }).tap()
+    const rpDialog = page.locator('.overlay .dialog')
+    await expect(rpDialog).toBeVisible()
+    await rpDialog.getByRole('button', { name: 'Cancel' }).tap()
+    await expect(rpDialog).toBeHidden()
+
+    await page.locator('.page-row', { hasText: 'Portfolio Health Dashboard' }).tap()
+
+    // Main pane switches to the in-app viewer (drawer closes on phones)
+    const view = page.locator('.md-view')
+    await expect(view).toBeVisible()
+    await expect(view.locator('.md-title')).toHaveText('Portfolio Health Dashboard')
+    await expect(view.locator('.md-body table')).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+
+    // Reset the persisted tab so later tests start from Tools
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
+  })
+
+  test('portfolio explorer lists all epics and flags issues (#169)', async ({ page }) => {
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Analysis' }).tap()
+    await page.locator('.analysis-row').tap()
+
+    const pfx = page.locator('.pfx')
+    await expect(pfx).toBeVisible()
+
+    // Totals strip: whole portfolio, attention count, BV at risk
+    await expect(pfx.locator('.stat-value').nth(0)).toHaveText('13')
+    await expect(pfx.locator('.stat--attention .stat-value')).toHaveText('2')
+    await expect(pfx.locator('.stat--bv .stat-value')).toHaveText('5')
+
+    // Every portfolio epic renders; attention sorts first, healthy last
+    const cards = pfx.locator('.epic-card')
+    await expect(cards).toHaveCount(13)
+    await expect(cards.nth(0).locator('.card-title')).toContainText('Modernize Fleet Telemetry')
+    await expect(cards.nth(0).locator('.badge--blocked')).toContainText('2 blocked')
+    // Three-tier metrics (#178): direct + downstream on the badges…
+    await expect(cards.nth(0).locator('.badge--weight')).toHaveText(/21 · dn 13/)
+    await expect(cards.nth(0).locator('.badge--bv')).toHaveText(/5 · dn 5/)
+    // …downstream headline + direct/subtree sub-line in the totals strip
+    await expect(pfx.locator('.stat-sub').first()).toContainText('direct 21 · subtree 21')
+    await expect(cards.nth(1).locator('.badge--behind')).toBeVisible()
+    await expect(cards.nth(2).locator('.badge--ok')).toHaveText('on track')
+
+    // Top blocked card starts expanded: chains + blocked flags + blocker links
+    await expect(cards.nth(0).locator('.chain-node.blocked .node-title'))
+      .toHaveText(['Parse NMEA feeds', 'Deprecated Ingest Path'])
+    await expect(cards.nth(0).locator('.blocker-link'))
+      .toHaveText(['Upgrade message bus', 'Retired firewall rule review'])
+
+    // Untyped epics render in chains with a badge and a data-quality hint (#174)
+    await expect(cards.nth(0).locator('.untyped-flag')).toBeVisible()
+    await expect(pfx.locator('.dq-hint')).toContainText('no epic-type label')
+
+    // Closed blocked item stays visible with the cleanup-variant flag (#178)
+    const closedFlag = cards.nth(0).locator('.blocked-flag--closed')
+    await expect(closedFlag).toHaveText('blocked · closed')
+
+    // Help icon opens the metric definitions table (#178)
+    await pfx.locator('.help-btn').first().tap()
+    const help = pfx.locator('.metrics-help')
+    await expect(help).toBeVisible()
+    await expect(help.locator('.metrics-table th')).toHaveText(['Direct', 'Downstream', 'Subtree'])
+    await help.locator('.close-btn').tap()
+    await expect(help).toBeHidden()
+    await expectNoHorizontalOverflow(page)
+
+    // The expanded card must not be crushed by the flex column when the
+    // list outgrows the pane (clipped chains regression): its full content
+    // fits inside its own box.
+    const clipped = await cards.nth(0).evaluate(el => el.scrollHeight > el.clientHeight + 1)
+    expect(clipped, 'expanded epic card is vertically clipped').toBe(false)
+
+    // Collapse via the card head chevron
+    await cards.nth(0).locator('.card-head').tap()
+    await expect(cards.nth(0).locator('.chain-node')).toHaveCount(0)
+
+    // #171 regression: each tab owns its main-area view — Tools brings the
+    // job runner forward again, Reports shows its viewer pane.
+    if (await phoneLayout(page)) await page.locator('.jobs-btn').tap()
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Tools' }).tap()
+    await expect(page.locator('.runner')).toBeVisible()
+    await expect(pfx).toBeHidden()
+    await page.locator('.side-panel .tab-btn').filter({ hasText: 'Reports' }).tap()
+    await expect(page.locator('.md-view')).toBeVisible()
+
+    await page.evaluate(() => localStorage.removeItem('nce.sidepanel.tab'))
   })
 })

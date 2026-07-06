@@ -42,6 +42,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Version stamp (issue #173): the runtime container has no .git, so the
+# build injects it. NCE_VERSION carries an exact tag (release build); else
+# VCS_REF yields nce-<commit>. With neither, runtime falls back to VERSION.
+ARG VCS_REF=""
+ARG NCE_VERSION=""
+RUN python3 -c "import json, os; v = os.environ.get('NCE_VERSION') or ('nce-' + os.environ['VCS_REF'] if os.environ.get('VCS_REF') else ''); open('version.json', 'w').write(json.dumps({'version': v, 'commit': os.environ.get('VCS_REF', '')})) if v else None" \
+    && (cat version.json 2>/dev/null || echo "no version baked — runtime fallback")
+
 # Overlay the pre-built frontend from Stage 1 (vite outDir is ../public/app)
 COPY --from=frontend-builder /app/public/app ./public/app
 

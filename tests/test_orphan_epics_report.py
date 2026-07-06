@@ -55,7 +55,7 @@ class TestOrphanEpicsWithData:
 
     def test_feature_icon_present_for_feature_orphan(self):
         epic = make_epic(id=10, title="Orphan Feature", etype="Feature")
-        assert "🛠️" in _run(ReportsHarness(epics_all=[epic]))
+        assert "🔖" in _run(ReportsHarness(epics_all=[epic]))
 
     def test_multiple_orphans_all_listed(self):
         epics = [make_epic(id=i, title=f"Orphan {i}", etype="Feature") for i in range(1, 4)]
