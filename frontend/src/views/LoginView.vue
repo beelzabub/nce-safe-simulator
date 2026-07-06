@@ -14,6 +14,24 @@
     <div class="scrim" />
     <div class="focus-dim" :class="{ on: cardActive }" />
 
+    <!-- Subtle slideshow navigation (issue #187). Hidden while the sign-in card
+         is up or the DoD banner is showing so they never compete for attention.
+         @click.stop keeps a chevron press from also summoning the card. -->
+    <button
+      v-show="slideCount > 1 && !cardActive && !bannerVisible"
+      class="slide-nav slide-nav--prev"
+      type="button"
+      aria-label="Previous background"
+      @click.stop="manualNav(-1)"
+    >&#8249;</button>
+    <button
+      v-show="slideCount > 1 && !cardActive && !bannerVisible"
+      class="slide-nav slide-nav--next"
+      type="button"
+      aria-label="Next background"
+      @click.stop="manualNav(1)"
+    >&#8250;</button>
+
     <Transition name="brand-fade" appear>
       <img class="brand-mark" :class="{ dimmed: cardActive }" :src="brandSrc" alt="" aria-hidden="true" />
     </Transition>
@@ -164,6 +182,11 @@ function onCardActivity() {
 function onDocKeydown(e) {
   if (bannerVisible.value) return
   if (e.key === 'Escape') { retreatCard(); return }
+  // While the card is dissolved, the arrow keys drive the slideshow.
+  if (!cardActive.value && slideCount.value > 1 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    manualNav(e.key === 'ArrowRight' ? 1 : -1)
+    return
+  }
   if (!cardActive.value && (e.key === 'Enter' || e.key.length === 1)) summonCard()
 }
 
@@ -174,6 +197,11 @@ let poolIdx = 0
 let rotationMs = 20000
 let timer = null
 
+// Reactive mirror of the pool size so the nav chevrons appear only once there's
+// more than one loaded slide to move between (pool itself is a plain array
+// mutated as preloads complete).
+const slideCount = ref(0)
+
 function preload(img) {
   return new Promise((resolve) => {
     const el = new Image()
@@ -183,15 +211,27 @@ function preload(img) {
   })
 }
 
-function showNext() {
+function go(step) {
   if (pool.length < 2) return
-  poolIdx = (poolIdx + 1) % pool.length
+  poolIdx = (poolIdx + step + pool.length) % pool.length
   const next = pool[poolIdx]
   const hidden = activeLayer.value === 0 ? 1 : 0
   panDir.value[hidden] = pickPanDirection(panDir.value[activeLayer.value])
   layers.value[hidden] = next.url
   activeLayer.value = hidden
   currentCredit.value = next.credit || ''
+}
+
+function showNext() { go(1) }
+
+// A manual chevron / arrow-key move advances at once and restarts the auto
+// timer, so the slide the user picked gets its full dwell before rotation
+// resumes (issue #187).
+function manualNav(step) {
+  if (pool.length < 2) return
+  go(step)
+  stopTimer()
+  startTimer()
 }
 
 function startTimer() {
@@ -239,10 +279,11 @@ onMounted(async () => {
   ;(async () => {
     for (const img of images.slice(1)) {
       const ok = await preload(img)
-      if (ok) { pool.push(ok); startTimer() }
+      if (ok) { pool.push(ok); slideCount.value = pool.length; startTimer() }
     }
   })()
   pool.push(images[0])
+  slideCount.value = pool.length
 
   document.addEventListener('visibilitychange', onVisibility)
 })
@@ -335,6 +376,55 @@ async function onSubmit() {
   background:
     radial-gradient(ellipse at center, rgba(5, 8, 15, 0) 35%, rgba(5, 8, 15, 0.55) 100%),
     linear-gradient(180deg, rgba(5, 8, 15, 0.35) 0%, rgba(5, 8, 15, 0.15) 40%, rgba(5, 8, 15, 0.5) 100%);
+}
+
+/* ── Slideshow navigation chevrons (issue #187) ── */
+
+.slide-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;                  /* above the full-screen .card-wrap so it stays clickable */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0 0 3px;            /* nudge the glyph to optical centre */
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  color: rgba(230, 237, 243, 0.6);
+  background: rgba(5, 8, 15, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.25s ease, color 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+}
+
+.slide-nav--prev { left: 18px; }
+.slide-nav--next { right: 18px; }
+
+.slide-nav:hover,
+.slide-nav:focus-visible {
+  opacity: 1;
+  color: rgba(230, 237, 243, 0.95);
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(5, 8, 15, 0.45);
+  outline: none;
+}
+
+@media (pointer: coarse) {
+  .slide-nav { min-width: 44px; min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  .slide-nav { width: 38px; height: 38px; font-size: 22px; }
+  .slide-nav--prev { left: 8px; }
+  .slide-nav--next { right: 8px; }
 }
 
 /* ── Photo credit ── */
