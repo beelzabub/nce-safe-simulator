@@ -309,10 +309,22 @@ class TestCapacityMutation:
     """
 
     def _find_open_feature_with_weight(self, gl):
-        for e in gl._rd_metrics.get("Feature", []):
-            if (e.get("piid")
+        """An open Feature (planned > 5) whose team-PI bucket has non-zero total
+        actual weight. load_pct = actual / planned, so a zero-actual bucket sits
+        at 0% no matter the planned weight — doubling planned can't lower it and
+        the test's "load_pct decreases" assertion is unprovable there. Requiring
+        actual > 0 picks a Feature the test can actually exercise (Refs #189)."""
+        features = gl._rd_metrics.get("Feature", [])
+        for e in features:
+            if not (e.get("piid")
                     and (e.get("planned_weight") or 0) > 5
                     and e.get("state", "").lower() == "opened"):
+                continue
+            bucket_actual = sum(
+                f.get("actual_weight", 0) for f in features
+                if f.get("piid") == e["piid"] and f.get("group_id") == e.get("group_id")
+            )
+            if bucket_actual > 0:
                 return e
         return None
 
@@ -320,7 +332,7 @@ class TestCapacityMutation:
         gl     = _get_gl(gl_ctx)
         target = self._find_open_feature_with_weight(gl)
         if target is None:
-            pytest.skip("No open Feature with planned_weight > 5 in snapshot")
+            pytest.skip("No open Feature (planned > 5) whose team-PI has actual weight")
 
         orig_weight = target["planned_weight"]
         new_weight  = orig_weight * 2
