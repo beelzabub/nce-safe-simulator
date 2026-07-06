@@ -1241,15 +1241,23 @@ class DeckBuilder:
         accent = self.C["blue"]
         light = RGBColor(0xEA, 0xED, 0xF0)
         dim = RGBColor(0xA8, 0xB0, 0xB8)
-        # Timeline occupies y≈4.02M–5.02M on the left; mirror that band on the right.
-        size = Emu(1000000)
-        qr_x = self.SW - Emu(340000) - size
-        qr_y = Emu(4020000)
+        # Align the visible white card with the timeline's text band on the left
+        # (_cover_timeline at y=4.02M): card top = top of the "DEVELOPMENT
+        # TIMELINE" glyphs (add_text uses zero insets, so that's the box top),
+        # card bottom = baseline of the 8.5pt "latest commit" label (box top
+        # 4.80M + ~115k ascent; the label has no descenders). The card pads the
+        # QR by 90k per side (_qr_card), so the image shrinks by that much.
+        band_top = Emu(4020000)
+        band_bottom = Emu(4915000)
+        pad = Emu(90000)
+        size = band_bottom - band_top - 2 * pad
+        qr_x = self.SW - Emu(340000) - pad - size   # card right edge 340k off the slide edge
+        qr_y = band_top + pad
         caption_w = Emu(2500000)
-        caption_x = qr_x - Emu(180000) - caption_w
-        self.add_text(cover, caption_x, Emu(4200000), caption_w, Emu(320000),
+        caption_x = qr_x - pad - Emu(180000) - caption_w
+        self.add_text(cover, caption_x, band_top + Emu(150000), caption_w, Emu(320000),
                       "Try it live", 14, accent, bold=True, align=PP_ALIGN.RIGHT)
-        self.add_text(cover, caption_x, Emu(4570000), caption_w, Emu(260000),
+        self.add_text(cover, caption_x, band_top + Emu(520000), caption_w, Emu(260000),
                       "scan to open on your phone →", 9.5, dim, italic=True,
                       align=PP_ALIGN.RIGHT)
         self._qr_card(cover, qr_path, qr_x, qr_y, size)
