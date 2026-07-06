@@ -190,6 +190,10 @@ def fetch_sloc_by_week():
     commits = []
     for line in _git(["log", "--format=%H %cI"]).splitlines():
         h, iso = line.split(" ", 1)
+        # git emits a trailing 'Z' for UTC, which datetime.fromisoformat rejects
+        # before Python 3.11 — normalize it so the build runs on 3.9/3.10 too.
+        if iso.endswith("Z"):
+            iso = iso[:-1] + "+00:00"
         commits.append((h, datetime.fromisoformat(iso)))
     commits.sort(key=lambda c: c[1])
     if not commits:
