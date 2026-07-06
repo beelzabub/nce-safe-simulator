@@ -174,6 +174,62 @@ REPORTS = [
     },
 ]
 
+# ---------------------------------------------------------------------------
+# Selective data fetch (issue #183)
+# ---------------------------------------------------------------------------
+# The six snapshot files a report run can produce. A report run fetches in four
+# phases: A = portfolio metrics (epics.json + issues.json, always run), B = epic
+# blocking graph (blocking_graph.json), C = issue blocking graph
+# (issue_blocking.json), D = group/project walk (groups.json + projects.json).
+# Phases B/C/D are skipped when no selected report reads their output.
+SNAPSHOT_FILES = ("epics", "issues", "blocking_graph", "issue_blocking", "groups", "projects")
+
+# Snapshot files each report reads, traced statically from the `_rd_*` structures
+# its method (and helpers) consume. `epics`/`issues` are documented here even
+# though Phase A always writes them; only blocking_graph/issue_blocking/groups/
+# projects actually gate an optional phase. wiki-index (live group handle only)
+# and diagnostics (live API checks) read no snapshot.
+_REPORT_SNAPSHOT_NEEDS = {
+    "art-capacity-balance":    {"epics", "groups"},
+    "art-feature-status":      {"epics", "groups"},
+    "blocking":                {"epics", "blocking_graph", "groups"},
+    "issue-blocking":          {"issue_blocking"},
+    "epic-lifecycle":          {"epics", "groups"},
+    "flow-metrics":            {"epics"},
+    "health-dashboard":        {"epics", "blocking_graph", "groups"},
+    "orphan-epics":            {"epics"},
+    "orphan-issues":           {"issues", "projects"},
+    "premature-closures":      {"epics", "issues"},
+    "piid-project":            {"epics"},
+    "piid-project-detail":     {"epics"},
+    "pi-predictability":       {"epics", "groups"},
+    "portfolio":               {"epics"},
+    "portfolio-explorer":      {"epics", "blocking_graph"},
+    "risk-register":           {"epics", "issues", "groups"},
+    "team-backlog":            {"epics", "issues", "groups", "projects"},
+    "unassigned-pi":           {"epics"},
+    "vs-capability-dashboard": {"epics", "groups"},
+    "wiki-index":              set(),
+    "wsjf":                    {"epics", "blocking_graph"},
+    "workload":                {"epics", "groups"},
+    "diagnostics":             set(),
+}
+
+# Attach the snapshot-needs set to each registry entry as its `data` field.
+# Unknown/new keys default to a full fetch — safe, never under-fetches.
+for _r in REPORTS:
+    _r["data"] = _REPORT_SNAPSHOT_NEEDS.get(_r["key"], set(SNAPSHOT_FILES))
+del _r
+
+
+def snapshot_needs(reports):
+    """Union of snapshot files required by the given REPORTS entries (issue #183)."""
+    needed = set()
+    for r in reports:
+        needed |= set(r.get("data") or ())
+    return needed
+
+
 ALL_FORMATS = frozenset({"markdown", "plotly", "interactive"})
 
 # Wiki tier prefixes are set as instance attributes in _run_reports:
@@ -6871,19 +6927,19 @@ class ReportsMixin:
     def generate_all_reports(self, formats=None):
         self._run_reports(REPORTS, formats=formats)
 
-    def run_reports_menu(self, report_key=None, reuse_data=None, formats=None):
+    def run_reports_menu(self, report_key=None, reuse_data=None, formats=None, full_fetch=False):
         """Show the reports selection menu or run a specific report by key."""
         if formats is None:
             formats = {"markdown", "plotly", "interactive"}
         if report_key:
             if report_key == "all":
-                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats)
+                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
                 return
             report = next((r for r in REPORTS if r["key"] == report_key), None)
             if report is None:
                 print(f"Unknown report '{report_key}'. Available: all, " + ", ".join(r['key'] for r in REPORTS))
                 sys.exit(1)
-            self._run_reports([report], reuse_data=reuse_data, formats=formats)
+            self._run_reports([report], reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
             return
 
         while True:
@@ -6905,7 +6961,7 @@ class ReportsMixin:
                 sys.exit(0)
 
             if not raw:
-                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats)
+                self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
                 return True
 
             selected = []
@@ -6928,7 +6984,7 @@ class ReportsMixin:
             if not selected:
                 continue
 
-            self._run_reports(selected, reuse_data=reuse_data, formats=formats)
+            self._run_reports(selected, reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
             return True
 
     _EPIC_ISSUE_BLOCKERS_QUERY = """
@@ -7366,21 +7422,39 @@ class ReportsMixin:
         _walk(root_group, None, 0)
         return all_groups, all_projects
 
-    def _write_report_data(self, data_dir):
-        """Write epics.json, issues.json, blocking.json, groups.json, projects.json to data_dir."""
+    def _write_report_data(self, data_dir, needed=None):
+        """Write snapshot JSON to data_dir; return the set of file stems written.
+
+        needed=None fetches every phase (full snapshot). Otherwise it is a set of
+        required snapshot-file stems (see SNAPSHOT_FILES): Phase A (epics.json +
+        issues.json) always runs, while the epic blocking graph (B), issue
+        blocking graph (C), and group/project walk (D) are skipped when nothing
+        selected reads them (issue #183).
+        """
         group = self._rd_root_obj
         ts    = datetime.now().isoformat()
+
+        full           = needed is None
+        need_blocking  = full or "blocking_graph" in needed
+        need_issue_blk = full or "issue_blocking" in needed
+        need_hierarchy = full or "groups" in needed or "projects" in needed
+        written = set()
 
         print("  Collecting data snapshot...")
         metrics = self.calculate_portfolio_metrics(self.parent_group)
 
-        # Build the blocking graph up front so each epic's blocked_by_count is reconciled
-        # against the /related_epics detail before epics.json is serialized (Refs #107).
-        blocking = self._fetch_blocking_graph(group)
-        blocking["generated_at"] = ts
-        blocking["group"]        = self.parent_group
+        # Phase B (epic blocking graph). Built up front when needed so each epic's
+        # blocked_by_count is reconciled against the /related_epics detail before
+        # epics.json is serialized (Refs #107). Skipped when no selected report
+        # reads blocking_graph.json — epics.json then keeps blocked_by_count at
+        # its provisional GraphQL value, which nothing selected reads (#183).
+        blocking = None
+        if need_blocking:
+            blocking = self._fetch_blocking_graph(group)
+            blocking["generated_at"] = ts
+            blocking["group"]        = self.parent_group
 
-        # Epics: typed + untyped
+        # Phase A — epics (typed + untyped) and issues, always written.
         typed_epics = [e for bucket in metrics.values() for e in bucket]
         all_epics_raw = getattr(self, '_all_epics_cache', {}).get(self.parent_group, typed_epics)
         epics_payload = {
@@ -7396,6 +7470,7 @@ class ReportsMixin:
         (data_dir / "epics.json").write_text(
             json.dumps(epics_payload, indent=2, default=str), encoding="utf-8"
         )
+        written.add("epics")
 
         issues = getattr(self, '_issues_cache', {}).get(self.parent_group, [])
         issues_payload = {
@@ -7407,53 +7482,72 @@ class ReportsMixin:
         (data_dir / "issues.json").write_text(
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
+        written.add("issues")
 
         # Named blocking_graph.json: write_report_json() later drops the
         # Quarto/Grafana-layer blocking.json (a different schema with no
         # relationships) into this same directory, and it used to clobber
         # this file — silently blanking the blocking detail for snapshot
         # reuse and the Portfolio Explorer (Refs #172).
-        (data_dir / "blocking_graph.json").write_text(
-            json.dumps(blocking, indent=2, default=str), encoding="utf-8"
-        )
+        if need_blocking:
+            (data_dir / "blocking_graph.json").write_text(
+                json.dumps(blocking, indent=2, default=str), encoding="utf-8"
+            )
+            written.add("blocking_graph")
 
-        issue_blocking = self._fetch_issue_blocking_graph(group)
-        issue_blocking["generated_at"] = ts
-        issue_blocking["group"]        = self.parent_group
-        (data_dir / "issue_blocking.json").write_text(
-            json.dumps(issue_blocking, indent=2, default=str), encoding="utf-8"
-        )
+        # Phase C — issue-to-issue blocking graph.
+        issue_blocking = None
+        if need_issue_blk:
+            issue_blocking = self._fetch_issue_blocking_graph(group)
+            issue_blocking["generated_at"] = ts
+            issue_blocking["group"]        = self.parent_group
+            (data_dir / "issue_blocking.json").write_text(
+                json.dumps(issue_blocking, indent=2, default=str), encoding="utf-8"
+            )
+            written.add("issue_blocking")
 
-        print("  Collecting group/project hierarchy...")
-        all_groups, all_projects = self._collect_snapshot_groups_projects(group)
-        groups_payload = {
-            "generated_at": ts,
-            "group":        self.parent_group,
-            "total":        len(all_groups),
-            "groups":       all_groups,
-        }
-        (data_dir / "groups.json").write_text(
-            json.dumps(groups_payload, indent=2, default=str), encoding="utf-8"
-        )
-        projects_payload = {
-            "generated_at": ts,
-            "group":        self.parent_group,
-            "total":        len(all_projects),
-            "projects":     all_projects,
-        }
-        (data_dir / "projects.json").write_text(
-            json.dumps(projects_payload, indent=2, default=str), encoding="utf-8"
-        )
+        # Phase D — group/project hierarchy walk.
+        all_groups, all_projects = [], []
+        if need_hierarchy:
+            print("  Collecting group/project hierarchy...")
+            all_groups, all_projects = self._collect_snapshot_groups_projects(group)
+            groups_payload = {
+                "generated_at": ts,
+                "group":        self.parent_group,
+                "total":        len(all_groups),
+                "groups":       all_groups,
+            }
+            (data_dir / "groups.json").write_text(
+                json.dumps(groups_payload, indent=2, default=str), encoding="utf-8"
+            )
+            written.add("groups")
+            projects_payload = {
+                "generated_at": ts,
+                "group":        self.parent_group,
+                "total":        len(all_projects),
+                "projects":     all_projects,
+            }
+            (data_dir / "projects.json").write_text(
+                json.dumps(projects_payload, indent=2, default=str), encoding="utf-8"
+            )
+            written.add("projects")
 
-        n_blocked     = blocking["summary"].get("total_blocked", 0)
-        n_iss_blocked = issue_blocking["summary"].get("total_blocked", 0)
         print(f"\n  Data snapshot → {data_dir}/")
         print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
-        print(f"    blocking_graph.json ({n_blocked} blocked epics)")
-        print(f"    issue_blocking.json ({n_iss_blocked} blocked issues)")
-        print(f"    groups.json   ({len(all_groups)} groups)")
-        print(f"    projects.json ({len(all_projects)} projects)\n")
+        if need_blocking:
+            print(f"    blocking_graph.json ({blocking['summary'].get('total_blocked', 0)} blocked epics)")
+        if need_issue_blk:
+            print(f"    issue_blocking.json ({issue_blocking['summary'].get('total_blocked', 0)} blocked issues)")
+        if need_hierarchy:
+            print(f"    groups.json   ({len(all_groups)} groups)")
+            print(f"    projects.json ({len(all_projects)} projects)")
+        skipped = sorted(set(SNAPSHOT_FILES) - written)
+        if skipped:
+            print(f"    (skipped {', '.join(skipped)} — not needed by selected report(s))")
+        print()
+
+        return written
 
     # ------------------------------------------------------------------
     # Phase 4b Quarto data-layer methods
@@ -7825,8 +7919,14 @@ class ReportsMixin:
             "value_streams": value_streams,
         }
 
-    def write_report_json(self, *data_dirs):
-        """Write all Quarto/Marimo data-layer JSON files to one or more directories."""
+    def write_report_json(self, *data_dirs, keys=None):
+        """Write Quarto/Marimo data-layer JSON files to one or more directories.
+
+        keys=None writes every report's data-layer file. Otherwise only the given
+        report keys are written, so a selective run doesn't rebuild the whole data
+        layer (issue #183). Keys with no data-layer builder (wiki-index,
+        diagnostics) are silently ignored either way.
+        """
         dirs = [Path(d) for d in data_dirs]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -7853,6 +7953,8 @@ class ReportsMixin:
             ("team-backlog",             self._data_team_backlog),
             ("vs-capability-dashboard",  self._data_vs_capability_dashboard),
         ):
+            if keys is not None and key not in keys:
+                continue
             payload = json.dumps(fn(), indent=2, default=str)
             for d in dirs:
                 out = d / f"{key}.json"
@@ -7860,18 +7962,37 @@ class ReportsMixin:
                 print(f"  → {out}")
 
     def _load_report_data(self, data_dir):
-        """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
-        epics_data    = json.loads((data_dir / "epics.json").read_text(encoding="utf-8"))
-        issues_data   = json.loads((data_dir / "issues.json").read_text(encoding="utf-8"))
+        """Load JSON snapshot into self._rd_* lookup structures for use by all report methods.
+
+        A selective snapshot (issue #183) omits phases nothing selected reads, so
+        any file may be absent. Missing files degrade to empty structures with a
+        one-line notice rather than crashing — a report that doesn't need a phase
+        still runs, and the partial-snapshot guard keeps partials off shared
+        surfaces (see _write_snapshot_manifest).
+        """
+        data_dir = Path(data_dir)
+
+        def _load(name, empty):
+            path = data_dir / name
+            if not path.is_file():
+                print(f"  (snapshot: {name} absent — using empty data)")
+                return empty
+            return json.loads(path.read_text(encoding="utf-8"))
+
+        epics_data    = _load("epics.json",  {"epics": [], "all_epics_raw": []})
+        issues_data   = _load("issues.json", {"issues": []})
         # blocking_graph.json since #172; older runs only have blocking.json,
         # which the Quarto data writer overwrote with a schema that has no
-        # relationships — the .get() below degrades those to an empty graph.
-        blocking_path = data_dir / "blocking_graph.json"
-        if not blocking_path.is_file():
-            blocking_path = data_dir / "blocking.json"
-        blocking_data = json.loads(blocking_path.read_text(encoding="utf-8"))
-        groups_data   = json.loads((data_dir / "groups.json").read_text(encoding="utf-8"))
-        projects_data = json.loads((data_dir / "projects.json").read_text(encoding="utf-8"))
+        # relationships — degraded to an empty graph either way.
+        if (data_dir / "blocking_graph.json").is_file():
+            blocking_data = json.loads((data_dir / "blocking_graph.json").read_text(encoding="utf-8"))
+        elif (data_dir / "blocking.json").is_file():
+            blocking_data = json.loads((data_dir / "blocking.json").read_text(encoding="utf-8"))
+        else:
+            print("  (snapshot: blocking_graph.json absent — using empty graph)")
+            blocking_data = {"summary": {}, "epics": [], "relationships": []}
+        groups_data   = _load("groups.json",   {"groups": []})
+        projects_data = _load("projects.json", {"projects": []})
 
         # Groups
         all_groups = groups_data["groups"]
@@ -7949,12 +8070,66 @@ class ReportsMixin:
 
         return ok
 
-    def _run_reports(self, reports, reuse_data=None, formats=None):
+    def _write_snapshot_manifest(self, data_dir, reports):
+        """Record which snapshot files this run produced (issue #183).
+
+        snapshot.complete is touched ONLY for a full snapshot (all files present),
+        so a partial selective snapshot can never be silently picked up by --last,
+        the server's snapshot discovery, or the Portfolio Explorer. A partial
+        snapshot that covers a given report set can still be reused explicitly
+        with --reuse-data (see _warn_if_snapshot_incomplete).
+        """
+        data_dir = Path(data_dir)
+        present = {s for s in SNAPSHOT_FILES if (data_dir / f"{s}.json").is_file()}
+        is_full = present.issuperset(SNAPSHOT_FILES)
+        manifest = {
+            "generated_at": datetime.now().isoformat(),
+            "full":         is_full,
+            "files":        sorted(present),
+            "reports":      [r["key"] for r in reports],
+        }
+        (data_dir / "snapshot.manifest.json").write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
+        if is_full:
+            (data_dir / "snapshot.complete").touch()
+        else:
+            print(f"  Partial snapshot ({', '.join(sorted(present)) or 'none'}) — not marked "
+                  f"complete; excluded from --last, the server, and the live site.")
+        return is_full
+
+    def _warn_if_snapshot_incomplete(self, src, reports):
+        """Loudly warn when an explicitly reused snapshot doesn't cover the
+        selected reports' data needs (issue #183). Pre-#183 snapshots (no
+        manifest) are assumed full and pass silently.
+        """
+        manifest_path = Path(src) / "snapshot.manifest.json"
+        if not manifest_path.is_file():
+            return
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return
+        if manifest.get("full"):
+            return
+        have    = set(manifest.get("files") or ())
+        missing = snapshot_needs(reports) - have
+        if missing:
+            bar = "  " + "!" * 64
+            print(bar)
+            print(f"  WARNING: reusing a PARTIAL snapshot — missing {sorted(missing)}.")
+            print( "  Selected report(s) read files this snapshot doesn't have; those")
+            print( "  reports will render from EMPTY data. Re-run with --full-fetch")
+            print( "  (or reuse a complete snapshot) for correct output.")
+            print(bar)
+
+    def _run_reports(self, reports, reuse_data=None, formats=None, full_fetch=False):
         """Execute a list of report entries from the REPORTS registry.
 
         reuse_data: Path to an existing data/ directory whose JSON files
         should be loaded instead of hitting the API again.
         formats: set of output types to generate — markdown, plotly, interactive, grafana.
+        full_fetch: force every snapshot phase even for a partial selection (#183).
         """
         now      = datetime.now()
         run_dir  = Path("reports") / now.strftime("%Y%m%d") / now.strftime("%H%M%S")
@@ -7975,9 +8150,9 @@ class ReportsMixin:
 
         with _tee_to_log(log_path):
             print(f"  log → {log_path}\n")
-            self._run_reports_inner(reports, run_dir, data_dir, reuse_data, formats)
+            self._run_reports_inner(reports, run_dir, data_dir, reuse_data, formats, full_fetch)
 
-    def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data, formats=None):
+    def _run_reports_inner(self, reports, run_dir, data_dir, reuse_data, formats=None, full_fetch=False):
         if formats is None:
             formats = {"markdown"}
         do_markdown   = "markdown" in formats
@@ -8016,27 +8191,35 @@ class ReportsMixin:
                 print(f"  Warning: could not preload wiki page cache: {e}")
                 self._wiki_page_cache = {}
 
+        # Derive the minimal fetch/data-layer set from the selected reports. A
+        # full menu ("all") or --full-fetch forces every phase and every
+        # data-layer file, producing a complete, shareable snapshot (issue #183).
+        full_run   = full_fetch or len(reports) == len(REPORTS)
+        needed     = None if full_run else snapshot_needs(reports)
+        layer_keys = None if full_run else {r["key"] for r in reports}
+
         if reuse_data is not None:
             import shutil
             src = Path(reuse_data)
             print(f"  Reusing data snapshot from: {src}\n")
+            self._warn_if_snapshot_incomplete(src, reports)
             self._load_report_data(src)
             for f in src.iterdir():
                 if f.is_file():
                     shutil.copy2(f, data_dir / f.name)
         else:
-            self._write_report_data(data_dir)
+            self._write_report_data(data_dir, needed=needed)
             self._load_report_data(data_dir)
 
         print("Writing Grafana dashboard data files...")
         if do_site_build:
-            self.write_report_json(data_dir, Path("quarto-data"), Path("public/data"))
+            self.write_report_json(data_dir, Path("quarto-data"), Path("public/data"), keys=layer_keys)
             if not do_markdown:
                 self.generate_diagnostics_report()
         else:
-            self.write_report_json(data_dir)
+            self.write_report_json(data_dir, keys=layer_keys)
 
-        (data_dir / "snapshot.complete").touch()
+        self._write_snapshot_manifest(data_dir, reports)
 
         phases = []
 

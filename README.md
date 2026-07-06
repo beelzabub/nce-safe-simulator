@@ -381,12 +381,17 @@ Each phase logs start/stop times and elapsed duration. `--all` prints a consolid
 
 #### Data snapshots
 
-`-r` fetches live data from GitLab on every run and saves a timestamped JSON snapshot under `reports/YYYY-MM-DD/HH-MM-SS/data/`. Two flags let you skip the fetch and reuse a previous snapshot:
+`-r` fetches live data from GitLab on every run and saves a timestamped JSON snapshot under `reports/YYYY-MM-DD/HH-MM-SS/data/`. These flags control fetching and reuse:
 
 | Flag | Behaviour |
 |------|-----------|
-| `--last` | Automatically finds and loads the most recent saved snapshot |
+| `--last` | Automatically finds and loads the most recent **complete** snapshot |
 | `--reuse-data DIR` | Loads the snapshot from the directory you specify |
+| `--full-fetch` | Force every fetch phase even for a partial report selection (#183) |
+
+**Selective fetch (#183).** A report run fetches only the snapshot phases the selected reports actually read, derived automatically from the registry — no picker. The four phases are **A** portfolio metrics (`epics.json` + `issues.json`, always run), **B** epic blocking graph (`blocking_graph.json`), **C** issue blocking graph (`issue_blocking.json`), and **D** group/project walk (`groups.json` + `projects.json`). So `-r portfolio` skips B, C, and D — roughly half the API calls of a full run — while `-r blocking orphan-issues` runs A + B + D and skips C. Running **all** reports (or `--full-fetch`) fetches everything.
+
+A run that skips a phase writes a **partial** snapshot: it records a `snapshot.manifest.json` listing the files fetched but is *not* marked `snapshot.complete`, so `--last`, the server, and the Portfolio Explorer only ever pick up **complete** snapshots — a partial testing snapshot can never silently feed them. `--reuse-data DIR` will reuse a partial snapshot but warns loudly if it doesn't cover the reports you selected.
 
 A typical demo cycle:
 
@@ -676,7 +681,7 @@ home  (Portfolio Home index)
 
 ### Data Snapshot
 
-Every report run — whether a single report or all — makes **one pass through the GitLab API**, writes a complete data snapshot to disk, and then generates all wiki pages from that snapshot with no further API reads. This eliminates redundant queries across all reports.
+Every report run makes **one pass through the GitLab API**, writes a data snapshot to disk, and then generates all wiki pages from that snapshot with no further API reads. This eliminates redundant queries across all reports. Since #183 the pass fetches only the phases the selected reports read (see **Data snapshots** above); a full run (all reports, or `--full-fetch`) writes the complete six-file snapshot below and marks it `snapshot.complete`, while a selective run writes a partial snapshot plus a `snapshot.manifest.json` and is deliberately left un-marked so it can't feed `--last`, the server, or the Portfolio Explorer.
 
 ```
 reports/
