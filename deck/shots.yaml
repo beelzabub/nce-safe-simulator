@@ -12,9 +12,17 @@
 #
 # quarto_shots: a single screenshot of a rendered Quarto report page, no theme toggle
 #   (the Quarto site doesn't follow the app's dark/light toggle).
+#
+# login_shots: the /login front door itself — captured WITHOUT seeding the auth gate
+#   (unlike ui_shots) so the real background slideshow shows, with the DoD banner
+#   pre-acknowledged so the nav chevrons (issue #187) aren't hidden behind it.
 
 app_url: "https://nce-safe-sim.com/app/"
 quarto_base_url: "https://nce-safe-sim.com/quarto/"
+
+login_shots:
+  - out: 15-login-front-door
+    title: "Web UI — Login Front Door (background slideshow)"
 
 ui_shots:
   - out: 00-home

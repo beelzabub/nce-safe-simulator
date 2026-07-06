@@ -1195,6 +1195,13 @@ class DeckBuilder:
         appendix_div = self.new_slide(self.DIVIDER1)
         appendix_div.placeholders[0].text_frame.paragraphs[0].text = "Appendix\nFull UI & Report Reference"
 
+        # The login front door leads the UI reference — it's the first thing a
+        # user sees (single image, no dark/light toggle; it's a photo slideshow).
+        for shot in self.shots.get("login_shots", []):
+            path = os.path.join(self.screenshots_dir, f"{shot['out']}.png")
+            if os.path.exists(path):
+                self.full_bleed_image_slide(shot["title"], path, dark=True)
+
         for shot in self.shots.get("ui_shots", []):
             for variant, dark in (("dark", True), ("light", False)):
                 fname = f"{shot['out']}_{variant}.png"
