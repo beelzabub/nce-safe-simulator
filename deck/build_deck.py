@@ -219,7 +219,61 @@ class DeckBuilder:
     def new_slide(self, layout=None):
         return self.prs.slides.add_slide(layout or self.BLANK)
 
-    def capability_slide(self, title, blurb, bullets, image_path=None, caption=None):
+    def _resolve_asset(self, rel):
+        """Resolve a capability image path: first under the screenshots dir
+        (captures / diagrams / quarto), then repo-relative (so capabilities can
+        point at curated media/ imagery). Returns the first existing path, or the
+        screenshots-relative path unchanged so the caller's exists() check fails
+        cleanly."""
+        p = os.path.join(self.screenshots_dir, rel)
+        if os.path.exists(p):
+            return p
+        p2 = os.path.join(REPO_ROOT, rel)
+        return p2 if os.path.exists(p2) else p
+
+    def _ensure_version_closeup(self):
+        """Crop + upscale the deployed-version badge from the home screenshot into
+        a legible chip, so the web-frontend capability slide can call out the build
+        string the UI stamps (issue #186). Anchored to the badge's bottom-right
+        position; returns the path, or None if the source shot is missing."""
+        src = os.path.join(self.screenshots_dir, "00-home_dark.png")
+        out = os.path.join(self.screenshots_dir, "00-home-version-closeup.png")
+        if not os.path.exists(src):
+            return None
+        try:
+            with Image.open(src) as im:
+                W, H = im.size
+                crop = im.crop((W - 96, H - 33, W - 6, H - 8))
+                crop = crop.resize((crop.width * 6, crop.height * 6), Image.LANCZOS)
+                crop.save(out)
+            return out
+        except Exception as e:
+            print(f"  warn: version closeup skipped ({e})")
+            return None
+
+    def _add_image_inset(self, slide, inset, img_x, img_y, img_w, img_h):
+        """A magnifier-style closeup chip in the bottom-right of a slide's main
+        image, with a small label above it — calls out a detail that's tiny at
+        slide scale (e.g. the UI's deployed-version badge)."""
+        path, label = inset
+        if not path or not os.path.exists(path):
+            return
+        with Image.open(path) as im:
+            aw, ah = im.size
+        chip_w = Emu(1750000)
+        chip_h = int(chip_w * ah / aw)
+        cx = img_x + img_w - chip_w - Emu(40000)
+        cy = img_y + img_h - chip_h - Emu(60000)
+        card = self.add_rect(slide, cx - Emu(36000), cy - Emu(36000),
+                              chip_w + Emu(72000), chip_h + Emu(72000), WHITE)
+        card.line.color.rgb = self.C["blue"]
+        card.line.width = Pt(1.25)
+        self.add_picture_contain(slide, path, cx, cy, chip_w, chip_h)
+        if label:
+            self.add_text(slide, cx - Emu(36000), cy - Emu(250000), chip_w + Emu(72000), Emu(220000),
+                          label, 9, self.C["blue"], bold=True, align=PP_ALIGN.CENTER)
+
+    def capability_slide(self, title, blurb, bullets, image_path=None, caption=None, inset=None):
         s = self.new_slide()
         self.header_band(s, title, blurb)
         body_y = Emu(830000)
@@ -235,6 +289,8 @@ class DeckBuilder:
             if caption:
                 self.add_text(s, img_x, body_y + img_h + Emu(30000), img_w, Emu(200000), caption, 9,
                               GRAY, align=PP_ALIGN.CENTER, italic=True)
+            if inset:
+                self._add_image_inset(s, inset, img_x, body_y, img_w, img_h)
         else:
             if image_path:
                 print(f"  warn: image not found, falling back to text-only: {image_path}")
@@ -420,6 +476,9 @@ class DeckBuilder:
             cover.shapes.add_picture(nce_logo, Emu(320000), Emu(220000), height=Emu(500000))
         if os.path.exists(pmw_seal):
             cover.shapes.add_picture(pmw_seal, self.SW - Emu(900000), Emu(220000), height=Emu(650000))
+
+        # Live-simulator QR, bottom-right, balancing the timeline on the left.
+        self._add_cover_qr(cover)
 
     def _agenda_number(self, p, color):
         """Give an agenda paragraph a visible auto-number. The TOC layout numbers
@@ -878,13 +937,19 @@ class DeckBuilder:
                           f"({m['mrs_open']} open, {m['mrs_closed']} closed)")
 
     def build_capability_slides(self):
+        # Generate the version-badge closeup up front so any capability that
+        # references it as an inset resolves to a real file.
+        self._ensure_version_closeup()
         for cap in self.capabilities:
-            image_path = None
-            if cap.get("image"):
-                image_path = os.path.join(self.screenshots_dir, cap["image"])
+            image_path = self._resolve_asset(cap["image"]) if cap.get("image") else None
+            inset = None
+            if cap.get("inset_image"):
+                ip = self._resolve_asset(cap["inset_image"])
+                if os.path.exists(ip):
+                    inset = (ip, cap.get("inset_label", ""))
             self.capability_slide(
                 f"{cap['title']}  ({cap['count']} issues)", cap["blurb"], cap["bullets"],
-                image_path=image_path, caption=cap.get("caption"),
+                image_path=image_path, caption=cap.get("caption"), inset=inset,
             )
 
     # Technology stack: (category, [(technology, what it is, purpose), ...]). Pulled
@@ -1143,71 +1208,108 @@ class DeckBuilder:
         if rendered != total:
             print(f"  WARNING: rendered {rendered} != total {total} — some issues missing!")
 
-    def _add_live_qr(self, slide, x, y, w):
-        """A 'scan to open the live simulator' QR call-to-action centered in the
-        column [x, x+w]. The QR is generated at build time from shots.yaml's
-        app_url; if segno isn't installed the block degrades to the heading +
-        URL text so the slide is still useful."""
+    def _qr_png(self):
+        """Generate the live-simulator QR once and return its path, or None if
+        segno isn't available. Encodes shots.yaml's app_url."""
         url = self.shots.get("app_url", "https://nce-safe-sim.com/app/")
-        display = url.split("://", 1)[-1].rstrip("/")
-
-        self.add_text(slide, x, y, w, Emu(340000), "Try it live", 20, self.C["blue"],
-                       bold=True, align=PP_ALIGN.CENTER)
-        self.add_text(slide, x, y + Emu(360000), w, Emu(260000),
-                       "Scan with your phone camera", 11, GRAY, align=PP_ALIGN.CENTER)
-
-        qr_size = min(w - Emu(200000), Emu(2500000))
-        qr_x = x + (w - qr_size) // 2
-        qr_y = y + Emu(720000)
         try:
             import segno
             qr_path = os.path.join(self.screenshots_dir, "qr-live-sim.png")
             segno.make(url, error="h").save(qr_path, scale=20, border=2,
                                             dark="#14181C", light="#FFFFFF")
-            # white card behind the QR for reliable scanner contrast
-            card = self.add_rect(slide, qr_x - Emu(90000), qr_y - Emu(90000),
-                                  qr_size + Emu(180000), qr_size + Emu(180000), WHITE)
-            card.line.color.rgb = RGBColor(0xD5, 0xD9, 0xDD)
-            card.line.width = Pt(0.75)
-            self.add_picture_contain(slide, qr_path, qr_x, qr_y, qr_size, qr_size)
+            return qr_path
         except Exception as e:
             print(f"  warn: live-simulator QR skipped ({e})")
+            return None
 
-        self.add_text(slide, x, qr_y + qr_size + Emu(130000), w, Emu(300000),
-                       display, 13, RGBColor(0x2A, 0x2E, 0x32), bold=True,
-                       align=PP_ALIGN.CENTER)
+    def _qr_card(self, slide, qr_path, x, y, size):
+        """Place the QR on a white contrast card at [x, y], square `size` — the
+        white border keeps it scannable over dark backgrounds (e.g. the cover)."""
+        card = self.add_rect(slide, x - Emu(90000), y - Emu(90000),
+                              size + Emu(180000), size + Emu(180000), WHITE)
+        card.line.color.rgb = RGBColor(0xD5, 0xD9, 0xDD)
+        card.line.width = Pt(0.75)
+        self.add_picture_contain(slide, qr_path, x, y, size, size)
+
+    def _add_cover_qr(self, cover):
+        """A compact 'scan to try it live' QR at the cover's bottom-right, sitting
+        in the same vertical band as the development timeline on the left so the
+        two balance across the foot of the cover."""
+        qr_path = self._qr_png()
+        if not qr_path:
+            return
+        accent = self.C["blue"]
+        light = RGBColor(0xEA, 0xED, 0xF0)
+        dim = RGBColor(0xA8, 0xB0, 0xB8)
+        # Timeline occupies y≈4.02M–5.02M on the left; mirror that band on the right.
+        size = Emu(1000000)
+        qr_x = self.SW - Emu(340000) - size
+        qr_y = Emu(4020000)
+        caption_w = Emu(2500000)
+        caption_x = qr_x - Emu(180000) - caption_w
+        self.add_text(cover, caption_x, Emu(4200000), caption_w, Emu(320000),
+                      "Try it live", 14, accent, bold=True, align=PP_ALIGN.RIGHT)
+        self.add_text(cover, caption_x, Emu(4570000), caption_w, Emu(260000),
+                      "scan to open on your phone →", 9.5, dim, italic=True,
+                      align=PP_ALIGN.RIGHT)
+        self._qr_card(cover, qr_path, qr_x, qr_y, size)
+
+    def build_live_cta_slide(self):
+        """Standalone 'try me live' call-to-action: one big centered QR to the
+        running deployment, sitting between the wrap-up and the appendix."""
+        s = self.new_slide()
+        self.header_band(s, "Try Me — Live", "The running simulator, on your phone")
+        url = self.shots.get("app_url", "https://nce-safe-sim.com/app/")
+        display = url.split("://", 1)[-1].rstrip("/")
+        size = Emu(2500000)
+        qr_x = (self.SW - size) // 2
+        qr_y = Emu(1250000)
+        qr_path = self._qr_png()
+        if qr_path:
+            self._qr_card(s, qr_path, qr_x, qr_y, size)
+        base_y = qr_y + size
+        self.add_text(s, 0, base_y + Emu(240000), self.SW, Emu(360000),
+                      "Scan to open the live NCE Safe Simulator", 18, self.C["blue"],
+                      bold=True, align=PP_ALIGN.CENTER)
+        self.add_text(s, 0, base_y + Emu(620000), self.SW, Emu(300000),
+                      display, 14, RGBColor(0x2A, 0x2E, 0x32), bold=True,
+                      align=PP_ALIGN.CENTER)
+        self.add_text(s, 0, base_y + Emu(940000), self.SW, Emu(300000),
+                      "Runs live on AWS — point your phone camera at the code to explore it.",
+                      11.5, GRAY, italic=True, align=PP_ALIGN.CENTER)
 
     def build_wrapup(self):
         m = self.metrics
         wrap = self.new_slide()
         self.header_band(wrap, "Wrap-Up & Next Steps", None)
-        self.add_bullets(wrap, Emu(220000), Emu(950000), Emu(6900000), Emu(4200000), [
+        self.add_bullets(wrap, Emu(220000), Emu(950000), Emu(8700000), Emu(4200000), [
             f"{len(self.capabilities)} capability areas, {m['issues_total']} issues, {m['mrs_total']} MRs, "
             f"~{m['sloc']['grand_total']/1000:.1f}K lines of code, built {m['first_commit_date']} – {m['last_commit_date']}.",
             "Three deployment paths (single-box / ECS / EKS) sharing one CDK project and one Docker image.",
             "CLI and web UI are two front ends over the same tool registry — same commands, different guardrails.",
             "Full UI and report reference follows in the Appendix.",
         ], 14, RGBColor(0x2A, 0x2E, 0x32), space_after=14)
-        # Live-simulator QR call-to-action, right column.
-        self._add_live_qr(wrap, Emu(7550000), Emu(1150000), Emu(4350000))
+        # The live-simulator QR now lives on the cover and its own CTA slide
+        # (build_live_cta_slide), not here — it overflowed this two-column layout.
 
     def build_appendix(self):
         appendix_div = self.new_slide(self.DIVIDER1)
         appendix_div.placeholders[0].text_frame.paragraphs[0].text = "Appendix\nFull UI & Report Reference"
 
-        # The login front door leads the UI reference — it's the first thing a
-        # user sees (single image, no dark/light toggle; it's a photo slideshow).
+        # Grouped by theme, not by tool: all the dark-theme captures first, then
+        # all the light-theme ones — so the two never alternate on adjacent pages.
+
+        # ── Dark group: login front door + every UI dialog (dark) + the live run.
+        self._section_divider("Appendix — Dark Theme", "Login, UI dialogs, and the live job run")
         for shot in self.shots.get("login_shots", []):
             path = os.path.join(self.screenshots_dir, f"{shot['out']}.png")
             if os.path.exists(path):
                 self.full_bleed_image_slide(shot["title"], path, dark=True)
 
         for shot in self.shots.get("ui_shots", []):
-            for variant, dark in (("dark", True), ("light", False)):
-                fname = f"{shot['out']}_{variant}.png"
-                path = os.path.join(self.screenshots_dir, fname)
-                if os.path.exists(path):
-                    self.full_bleed_image_slide(f"{shot['title']} ({variant.capitalize()})", path, dark=dark)
+            path = os.path.join(self.screenshots_dir, f"{shot['out']}_dark.png")
+            if os.path.exists(path):
+                self.full_bleed_image_slide(f"{shot['title']} (Dark)", path, dark=True)
 
         for shot in self.shots.get("live_run_shots", []):
             for suffix, label in (("01-before-launch", "Before Launch"),
@@ -1217,6 +1319,13 @@ class DeckBuilder:
                 path = os.path.join(self.screenshots_dir, fname)
                 if os.path.exists(path):
                     self.full_bleed_image_slide(f"{shot['title']}: {label}", path, dark=True)
+
+        # ── Light group: every UI dialog (light) + the Quarto report pages.
+        self._section_divider("Appendix — Light Theme", "The same UI dialogs in light, and the Quarto reports")
+        for shot in self.shots.get("ui_shots", []):
+            path = os.path.join(self.screenshots_dir, f"{shot['out']}_light.png")
+            if os.path.exists(path):
+                self.full_bleed_image_slide(f"{shot['title']} (Light)", path, dark=False)
 
         for shot in self.shots.get("quarto_shots", []):
             base = os.path.join(self.screenshots_dir, "reports_quarto", shot["out"])
@@ -1249,6 +1358,7 @@ class DeckBuilder:
         self._section_divider("Capability Areas", "The same work, grouped by capability area")
         self.build_capability_slides()
         self.build_wrapup()
+        self.build_live_cta_slide()
         self.build_appendix()
         return self.prs
 

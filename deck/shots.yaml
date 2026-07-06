@@ -72,6 +72,9 @@ ui_shots:
     title: "Audit & Validation — Audit Hierarchy"
     expand: ["AUDIT & VALIDATION"]
     select: "Audit Hierarchy"
+  - out: 16-config-connection
+    title: "Web UI — Config: GitLab Connection & Private Token"
+    click: "button.config-btn"
 
 # "Other" only has one tool (Diagnose) and it's parameterless/read-only, so it belongs here,
 # not in ui_shots — selecting it launches the job immediately, there's no dialog to screenshot.
