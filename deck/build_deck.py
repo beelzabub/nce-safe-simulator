@@ -1143,17 +1143,53 @@ class DeckBuilder:
         if rendered != total:
             print(f"  WARNING: rendered {rendered} != total {total} — some issues missing!")
 
+    def _add_live_qr(self, slide, x, y, w):
+        """A 'scan to open the live simulator' QR call-to-action centered in the
+        column [x, x+w]. The QR is generated at build time from shots.yaml's
+        app_url; if segno isn't installed the block degrades to the heading +
+        URL text so the slide is still useful."""
+        url = self.shots.get("app_url", "https://nce-safe-sim.com/app/")
+        display = url.split("://", 1)[-1].rstrip("/")
+
+        self.add_text(slide, x, y, w, Emu(340000), "Try it live", 20, self.C["blue"],
+                       bold=True, align=PP_ALIGN.CENTER)
+        self.add_text(slide, x, y + Emu(360000), w, Emu(260000),
+                       "Scan with your phone camera", 11, GRAY, align=PP_ALIGN.CENTER)
+
+        qr_size = min(w - Emu(200000), Emu(2500000))
+        qr_x = x + (w - qr_size) // 2
+        qr_y = y + Emu(720000)
+        try:
+            import segno
+            qr_path = os.path.join(self.screenshots_dir, "qr-live-sim.png")
+            segno.make(url, error="h").save(qr_path, scale=20, border=2,
+                                            dark="#14181C", light="#FFFFFF")
+            # white card behind the QR for reliable scanner contrast
+            card = self.add_rect(slide, qr_x - Emu(90000), qr_y - Emu(90000),
+                                  qr_size + Emu(180000), qr_size + Emu(180000), WHITE)
+            card.line.color.rgb = RGBColor(0xD5, 0xD9, 0xDD)
+            card.line.width = Pt(0.75)
+            self.add_picture_contain(slide, qr_path, qr_x, qr_y, qr_size, qr_size)
+        except Exception as e:
+            print(f"  warn: live-simulator QR skipped ({e})")
+
+        self.add_text(slide, x, qr_y + qr_size + Emu(130000), w, Emu(300000),
+                       display, 13, RGBColor(0x2A, 0x2E, 0x32), bold=True,
+                       align=PP_ALIGN.CENTER)
+
     def build_wrapup(self):
         m = self.metrics
         wrap = self.new_slide()
         self.header_band(wrap, "Wrap-Up & Next Steps", None)
-        self.add_bullets(wrap, Emu(220000), Emu(950000), self.SW - Emu(440000), Emu(2800000), [
+        self.add_bullets(wrap, Emu(220000), Emu(950000), Emu(6900000), Emu(4200000), [
             f"{len(self.capabilities)} capability areas, {m['issues_total']} issues, {m['mrs_total']} MRs, "
             f"~{m['sloc']['grand_total']/1000:.1f}K lines of code, built {m['first_commit_date']} – {m['last_commit_date']}.",
             "Three deployment paths (single-box / ECS / EKS) sharing one CDK project and one Docker image.",
             "CLI and web UI are two front ends over the same tool registry — same commands, different guardrails.",
             "Full UI and report reference follows in the Appendix.",
         ], 14, RGBColor(0x2A, 0x2E, 0x32), space_after=14)
+        # Live-simulator QR call-to-action, right column.
+        self._add_live_qr(wrap, Emu(7550000), Emu(1150000), Emu(4350000))
 
     def build_appendix(self):
         appendix_div = self.new_slide(self.DIVIDER1)
