@@ -437,12 +437,15 @@ def _run_main_menu(gl):
 
 
 def _last_data_dir():
-    """Return the most recent reports/.../data directory that contains a valid snapshot."""
+    """Return the most recent reports/.../data directory holding a *complete*
+    snapshot. Selective/partial snapshots (issue #183) are never marked complete,
+    so --last only ever reuses a full snapshot — matching the server's discovery
+    and keeping a partial testing snapshot from silently feeding a report run."""
     root = Path("reports")
     if not root.exists():
         return None
     for d in sorted(root.glob("*/*/data"), reverse=True):
-        if (d / "epics.json").exists():
+        if (d / "snapshot.complete").exists():
             return d
     return None
 
@@ -533,6 +536,10 @@ def main():
                         help="Skip API fetch; load JSON snapshot from this directory instead")
     parser.add_argument("--last",                    action="store_true",
                         help="Reuse the most recently pulled data snapshot (no API fetch)")
+    parser.add_argument("--full-fetch",              action="store_true",
+                        help="Fetch every snapshot phase regardless of which reports are "
+                             "selected (issue #183); use to produce a complete snapshot "
+                             "while testing a single report")
     parser.add_argument("-a", "--all",               action="store_true", help="Run clean, create, and report in sequence")
     parser.add_argument("--formats",                 nargs="+", metavar="FORMAT",
                         help="Output formats: all markdown plotly interactive "
@@ -640,7 +647,7 @@ def main():
                 reuse = str(last)
             else:
                 print("  --last: no previous snapshot found — fetching live data.\n")
-        gl.run_reports_menu(report_key, reuse_data=reuse, formats=formats)
+        gl.run_reports_menu(report_key, reuse_data=reuse, formats=formats, full_fetch=args.full_fetch)
 
     # single-phase timing summary (--clean or --create alone)
     if not args.all and phases:
