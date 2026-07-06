@@ -159,17 +159,22 @@ class DeckBuilder:
         return tb
 
     def add_bullets(self, slide, x, y, w, h, items, size, color, space_after=8):
+        """Each item is a string, or a list of (text, italic) segments for
+        mixed formatting within one bullet (e.g. italicized dates)."""
         tb = slide.shapes.add_textbox(x, y, w, h)
         tf = tb.text_frame
         tf.word_wrap = True
         for i, item in enumerate(items):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.space_after = Pt(space_after)
-            r = p.add_run()
-            r.text = f"▪  {item}"
-            r.font.size = Pt(size)
-            r.font.color.rgb = color
-            r.font.name = FONT
+            segs = [(item, False)] if isinstance(item, str) else item
+            for j, (text, italic) in enumerate(segs):
+                r = p.add_run()
+                r.text = f"▪  {text}" if j == 0 else text
+                r.font.size = Pt(size)
+                r.font.italic = italic
+                r.font.color.rgb = color
+                r.font.name = FONT
         return tb
 
     def header_band(self, slide, title, subtitle=None):
@@ -549,9 +554,26 @@ class DeckBuilder:
              "were moved to environment variables.",
              "Stack: Python (python-gitlab REST + GraphQL, boto3, FastAPI, pandas, Plotly), Vue 3, Quarto, "
              "Marimo, Docker, AWS CDK, Helm, optional Grafana."],
-            image_path=os.path.join(self.screenshots_dir, "14-live-job-diagnose-03-completed.png"),
-            caption="Diagnose — live API/compatibility check output",
+            image_path=os.path.join(self.screenshots_dir, "git-workflow-compact.png"),
+            caption="The branch-per-issue loop — detailed on the next slide",
         )
+        self._build_dev_workflow_slide()
+
+    def _build_dev_workflow_slide(self):
+        """Full-width git-graph of the actual development loop (issue → UI-created
+        branch → Refs-#NNN commits → tests per push → MR review → merge to develop
+        → develop CI publish/deploy), rendered by capture_git_workflow.py."""
+        path = os.path.join(self.screenshots_dir, "git-workflow.png")
+        if not os.path.exists(path):
+            print("  warn: git-workflow.png missing (run deck/capture_git_workflow.py) — "
+                  "skipping the Development Workflow slide")
+            return
+        s = self.new_slide()
+        self.header_band(s, "Development Workflow",
+                         "Every change takes the same path from issue to deploy")
+        body_y = Emu(830000)
+        self.add_picture_contain(s, path, Emu(180000), body_y,
+                                 self.SW - Emu(360000), self.SH - body_y - Emu(220000))
 
     def _build_architecture_slide(self):
         arch = self.new_slide()
@@ -1291,8 +1313,12 @@ class DeckBuilder:
         wrap = self.new_slide()
         self.header_band(wrap, "Wrap-Up & Next Steps", None)
         self.add_bullets(wrap, Emu(220000), Emu(950000), Emu(8700000), Emu(4200000), [
-            f"{len(self.capabilities)} capability areas, {m['issues_total']} issues, {m['mrs_total']} MRs, "
-            f"~{m['sloc']['grand_total']/1000:.1f}K lines of code, built {m['first_commit_date']} – {m['last_commit_date']}.",
+            # The build window is the headline take-away — italicize the dates so
+            # they stand apart from the counts around them.
+            [(f"{len(self.capabilities)} capability areas, {m['issues_total']} issues, {m['mrs_total']} MRs, "
+              f"~{m['sloc']['grand_total']/1000:.1f}K lines of code, built ", False),
+             (f"{m['first_commit_date']} – {m['last_commit_date']}", True),
+             (".", False)],
             "Three deployment paths (single-box / ECS / EKS) sharing one CDK project and one Docker image.",
             "CLI and web UI are two front ends over the same tool registry — same commands, different guardrails.",
             "Full UI and report reference follows in the Appendix.",
@@ -1308,7 +1334,8 @@ class DeckBuilder:
         # all the light-theme ones — so the two never alternate on adjacent pages.
 
         # ── Dark group: login front door + every UI dialog (dark) + the live run.
-        self._section_divider("Appendix — Dark Theme", "Login, UI dialogs, and the live job run")
+        # (No "Appendix —" prefix: the appendix divider immediately precedes these.)
+        self._section_divider("Dark Theme", "Login, UI dialogs, and the live job run")
         for shot in self.shots.get("login_shots", []):
             path = os.path.join(self.screenshots_dir, f"{shot['out']}.png")
             if os.path.exists(path):
@@ -1329,12 +1356,14 @@ class DeckBuilder:
                     self.full_bleed_image_slide(f"{shot['title']}: {label}", path, dark=True)
 
         # ── Light group: every UI dialog (light) + the Quarto report pages.
-        self._section_divider("Appendix — Light Theme", "The same UI dialogs in light, and the Quarto reports")
+        self._section_divider("Light Theme", "The same UI dialogs in light")
         for shot in self.shots.get("ui_shots", []):
             path = os.path.join(self.screenshots_dir, f"{shot['out']}_light.png")
             if os.path.exists(path):
                 self.full_bleed_image_slide(f"{shot['title']} (Light)", path, dark=False)
 
+        # ── Quarto group: the published report site gets its own section.
+        self._section_divider("Quarto Reports", "The published report site, page by page")
         for shot in self.shots.get("quarto_shots", []):
             base = os.path.join(self.screenshots_dir, "reports_quarto", shot["out"])
             segs = sorted(glob.glob(f"{base}__seg*.png"),

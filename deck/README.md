@@ -36,6 +36,7 @@ python3 deck/capture_screenshots.py   # -> deck/screenshots/
 python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/DoDAF diagrams)
 python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu.png
 python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
+python3 deck/capture_git_workflow.py  # -> deck/screenshots/git-workflow{,-compact}.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx
 ```
@@ -60,6 +61,13 @@ terminal-style PNG for the "Test Coverage Program" capability slide. The command
 the rendered prompt is the command actually run; if the run doesn't pass cleanly the
 script warns and the image shows the failure — fix the tests, don't ship the deck. Same
 requirements as `capture_cli_menu.py` (Pillow + DejaVu Sans Mono).
+
+`capture_git_workflow.py` draws the development loop as a git-graph (issue → UI-created
+branch → `Refs #NNN` commits → tests on every push → MR review → merge to `develop` →
+develop CI publish/deploy) in the deck palette. The wide render gets its own
+"Development Workflow" slide; the compact render illustrates "Development Process &
+Tools". Keep it in step with the conventions it depicts if they ever change. Same
+requirements as `capture_cli_menu.py` (Pillow + DejaVu fonts).
 
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.
