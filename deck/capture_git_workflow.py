@@ -10,6 +10,10 @@ outputs are git-ignored and rebuilt on demand:
                                              (the dedicated "Development Workflow" slide)
   deck/screenshots/git-workflow-compact.png  graph only
                                              (the "Development Process & Tools" slide image)
+  deck/screenshots/git-workflow-epic.png     the epic-scale variant: an epic::epic issue's
+                                             own integration branch, child-issue branches
+                                             merging back to it, then one merge to develop
+                                             (the "Development Workflow — Epics" slide)
 
 The graph is illustrative but mirrors the real conventions: branches are created
 from the issue in the GitLab UI (so they link to the Work Item), named
@@ -34,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Deck palette (build_deck.py template colors) + neutrals for a white slide body.
 BLUE   = (0x00, 0x6B, 0xB5)   # develop lane
 GREEN  = (0x2E, 0x9E, 0x4F)   # issue branch lane
+VIOLET = (0x6B, 0x4F, 0xA0)   # epic integration branch lane
 YELLOW = (0xFD, 0xB9, 0x13)   # accent (step numbers)
 INK    = (0x2A, 0x2E, 0x32)
 GRAY   = (0x6B, 0x70, 0x78)
@@ -154,6 +159,87 @@ def draw_graph(d, W, top):
     chip(d, merge_x + 128, dev_y + 68, "✓ CI · pytest + Quarto → Pages", BLUE)
 
 
+def branch_bubble(d, bx, mx, from_y, lane_y, color, commits=2):
+    """A child branch: curve out of the parent lane at bx, run along lane_y with
+    commit dots, curve back in at mx. Also dots the merge point on the parent."""
+    d.line(bezier((bx, from_y), (bx + 70, from_y), (bx + 40, lane_y), (bx + 110, lane_y)),
+           fill=color, width=8, joint="curve")
+    d.line([(bx + 110, lane_y), (mx - 110, lane_y)], fill=color, width=8)
+    d.line(bezier((mx - 110, lane_y), (mx - 40, lane_y), (mx - 70, from_y), (mx, from_y)),
+           fill=color, width=8, joint="curve")
+    span = (mx - 110) - (bx + 110)
+    for i in range(commits):
+        commit_dot(d, bx + 110 + span * (i + 1) // (commits + 1), lane_y, color)
+    commit_dot(d, mx, from_y, color)
+
+
+# The epic-scale example mirrors the real Login & Authentication epic: issue #135
+# (labeled epic::epic) with child issues #146/#149/#150/#147, each on its own
+# branch off the epic's integration branch. Two waves of two parallel children.
+# (bx, mx, lane, branch, label_x) — label_x is hand-placed so no other child's
+# curve crosses the text (curves crossing *lines* is fine, metro-map style).
+EPIC_CHILDREN = [
+    (500,  1080, 0, "feature/146-auth-config", 750),
+    (620,  1200, 1, "feature/149-dod-banner", 750),
+    (1290, 1870, 1, "feature/150-session-gate", 1420),
+    (1410, 1990, 0, "feature/147-imagery", 1510),
+]
+
+
+def render_epic(out_path):
+    W, H = 2460, 1150
+    dev_y, epic_y = 170, 440
+    lane_ys = (680, 880)
+    x0, x1 = 90, W - 90
+    ebx, emx = 300, 2170          # epic branches out / merges back on develop
+
+    img = Image.new("RGB", (W, H), WHITE)
+    d = ImageDraw.Draw(img)
+
+    # develop lane.
+    d.line([(x0, dev_y), (x1 - 30, dev_y)], fill=BLUE, width=LINE_W)
+    d.polygon([(x1 - 34, dev_y - 22), (x1 - 34, dev_y + 22), (x1 + 6, dev_y)], fill=BLUE)
+    d.text((x0, dev_y - 78), "develop", font=F_TITLE(30), fill=BLUE)
+    d.text((x0 + 150, dev_y - 72), "— integration branch, merge-only", font=F_BODY(22), fill=GRAY)
+    commit_dot(d, 200, dev_y, BLUE)
+
+    # Epic integration branch off develop.
+    d.line(bezier((ebx, dev_y), (ebx + 80, dev_y), (ebx + 50, epic_y), (ebx + 130, epic_y)),
+           fill=VIOLET, width=LINE_W, joint="curve")
+    d.line([(ebx + 130, epic_y), (emx - 130, epic_y)], fill=VIOLET, width=LINE_W)
+    d.line(bezier((emx - 130, epic_y), (emx - 50, epic_y), (emx - 80, dev_y), (emx, dev_y)),
+           fill=VIOLET, width=LINE_W, joint="curve")
+    commit_dot(d, ebx, dev_y, BLUE)
+    commit_dot(d, emx, dev_y, BLUE)
+
+    chip(d, ebx + 20, epic_y - 190, "#135 · epic::epic — Login & Authentication", VIOLET)
+    d.line([(ebx + 200, epic_y - 140), (ebx + 200, epic_y - 14)], fill=EDGE, width=4)
+    d.text((ebx + 220, epic_y - 58), "feature/135-login-page", font=F_MONO(24), fill=VIOLET)
+
+    # Child-issue branches: out of and back into the epic branch, never develop.
+    for bx, mx, lane, name, label_x in EPIC_CHILDREN:
+        branch_bubble(d, bx, mx, epic_y, lane_ys[lane], GREEN)
+        d.text((label_x, lane_ys[lane] + 26), name, font=F_MONO(22), fill=GREEN)
+
+    # Final merge annotation.
+    chip(d, emx - 480, dev_y + 60, "MR → review · “Closes #135” closes the epic", BLUE)
+
+    # Take-away captions, color-keyed to the lanes.
+    notes = [
+        (VIOLET, "The epic issue gets its own integration branch — child work never targets develop directly"),
+        (GREEN, "Each child issue branches from the epic branch and merges back to it (Refs #146 / #149 / #150 / #147)"),
+        (BLUE, "One reviewed MR takes the whole epic to develop — “Closes #135” closes the epic issue"),
+    ]
+    ny = H - 170
+    for color, text in notes:
+        d.ellipse([x0, ny + 8, x0 + 20, ny + 28], fill=color)
+        d.text((x0 + 40, ny), text, font=F_BODY(24), fill=INK)
+        ny += 52
+
+    img.save(out_path)
+    print(f"OK   {out_path}  ({W}x{H})")
+
+
 def render(out_path, with_cards):
     W = 2460
     graph_top = 250
@@ -189,6 +275,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     render(os.path.join(args.out_dir, "git-workflow.png"), with_cards=True)
     render(os.path.join(args.out_dir, "git-workflow-compact.png"), with_cards=False)
+    render_epic(os.path.join(args.out_dir, "git-workflow-epic.png"))
 
 
 if __name__ == "__main__":
