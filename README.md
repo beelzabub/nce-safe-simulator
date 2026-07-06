@@ -649,7 +649,8 @@ Reports are organized into four tiers by audience and cadence. The wiki home pag
 ```
 home  (Portfolio Home index)
 ├── 00 Executive Pulse        — daily, executives
-│   └── Portfolio Health Dashboard
+│   ├── Portfolio Health Dashboard
+│   └── Portfolio Explorer
 ├── 01 Program Management     — weekly, RTEs and PMs
 │   ├── Program × PI Matrix
 │   ├── Program PI Detail
@@ -768,6 +769,7 @@ The deployed site is published at the project's GitLab Pages URL and mirrors the
 |---|---|---|---|
 | `wiki-index` | — | `home` | Four-tier navigation index linking all report pages |
 | `health-dashboard` | T1 | `00 Executive Pulse/Portfolio Health Dashboard` | Per-VS traffic-light status across Schedule, Capacity, Risk, and Blocking |
+| `portfolio-explorer` | T1 | `00 Executive Pulse/Portfolio Explorer` | Every portfolio epic, attention first — blocking chains (Portfolio Epic → … → blocked item, blockers linked, closed-blocked cleanup flags, untyped warnings) and three-tier BV/weight-at-risk rollups (direct / downstream / subtree, #178). Publishes exactly what the app's Portfolio Explorer shows — both surfaces are computed by `server/analysis.py:build_portfolio_view` from the same snapshot. Also available as a Quarto page (Executive menu) |
 | `piid-project` | T2 | `01 Program Management/Program × PI Matrix` | Project label vs PI quarter cross-tab with status and weights |
 | `piid-project-detail` | T2 | `01 Program Management/Program PI Detail` | Per-PI section view of program workload and status |
 | `pi-predictability` | T2 | `01 Program Management/PI Predictability Scorecard` | % of committed Features/Capabilities delivered per PI, trended by ART |

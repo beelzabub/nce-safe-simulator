@@ -8,6 +8,10 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .utils import _clear, _fmt_duration, _tee_to_log
+# Single source of truth for the Portfolio Explorer computation — the same
+# pure function backs /api/analysis/portfolio, the app UI, and the published
+# report surfaces, so the numbers can never drift apart (Refs #182).
+from server.analysis import build_portfolio_view
 
 
 
@@ -112,6 +116,12 @@ REPORTS = [
         "key":         "portfolio",
         "description": "SAFe Portfolio Report — Epic → Capability → Feature hierarchy with % complete",
         "method":      "generate_portfolio_report",
+        "needs_group": False,
+    },
+    {
+        "key":         "portfolio-explorer",
+        "description": "Portfolio Explorer — every portfolio epic with attention flags, blocking chains, and three-tier BV/weight-at-risk rollups",
+        "method":      "generate_portfolio_explorer_report",
         "needs_group": False,
     },
     {
@@ -6265,6 +6275,161 @@ class ReportsMixin:
                 *body, f"> {verdict_md}", "", "</details>"]
 
     # ------------------------------------------------------------------
+    # Portfolio Explorer report (Refs #182)
+    # ------------------------------------------------------------------
+
+    def _portfolio_explorer_view(self):
+        """Portfolio Explorer payload computed from the loaded snapshot.
+
+        Feeds the _rd_* snapshot structures into
+        server.analysis.build_portfolio_view so the wiki and Quarto surfaces
+        publish exactly what /api/analysis/portfolio serves the app.
+        """
+        raw_by_id = {e["id"]: e for e in self._rd_epics_all}
+        return build_portfolio_view(self._rd_epics_by_id, self._rd_blocking, raw_by_id)
+
+    _PFX_DEFINITIONS_MD = [
+        "| Metric | Counts | Reads as |",
+        "|--------|--------|----------|",
+        "| **Direct** | BV / weight on the blocked items themselves | \"the work items that can't move\" |",
+        "| **Downstream** | blocked items **plus their open descendants** | \"value that can't be delivered until this clears\" — closed value is already delivered, so it never counts as at risk |",
+        "| **Subtree** | blocked items plus **all** descendants, closed included | \"how big the threatened branch is\" — sizing and exposure, not risk |",
+    ]
+
+    def _pfx_chain_node_md(self, node):
+        """One chain node as markdown: icon + link, blocked/closed/untyped flags."""
+        icon = self.EPIC_TYPE_ICONS.get(node.get("type"), "❓")
+        text = f"{icon} {_mlink(node.get('title', '?'), node.get('web_url', ''))}"
+        if node.get("type") is None:
+            text += " *(untyped)*"
+        if not node.get("blocked"):
+            return text
+        if node.get("state") == "closed":
+            # Closed items still carrying blocking links are a data-cleanup
+            # signal, not delivery risk — they contribute 0 downstream.
+            # <s> rather than ~~: titles may themselves contain ~~, which
+            # would close the markdown strike early.
+            return f"⛔ <s>{text}</s> *(blocked · closed — consider clearing the blocking links)*"
+        return f"⛔ **{text}**"
+
+    def _pfx_blocker_md(self, blocker):
+        """A blocker reference as markdown (Issue-type blockers per #177)."""
+        item_type = blocker.get("item_type") or "Epic"
+        icon = (self.EPIC_TYPE_ICONS.get("Issue", "📋") if item_type == "Issue"
+                else self.EPIC_TYPE_ICONS.get(blocker.get("type"), "❓"))
+        return f"{icon} {_mlink(blocker.get('title', '?'), blocker.get('web_url', ''))}"
+
+    def _pfx_tier_table_md(self, sums, dedupe_note=False):
+        """Three-tier BV/weight table; downstream bolded (the headline figure)."""
+        title = "Value & weight at risk"
+        if dedupe_note:
+            title += " *(deduped across portfolio epics)*"
+        return [
+            f"**{title}**",
+            "",
+            "| | Direct | Downstream | Subtree |",
+            "|---|---|---|---|",
+            f"| ★ Business Value | {sums['blocked_business_value']} "
+            f"| **{sums['blocked_business_value_downstream']}** "
+            f"| {sums['blocked_business_value_subtree']} |",
+            f"| ⚓ Weight | {sums['blocked_weight']} "
+            f"| **{sums['blocked_weight_downstream']}** "
+            f"| {sums['blocked_weight_subtree']} |",
+            "",
+        ]
+
+    def generate_portfolio_explorer_report(self):
+        group = self._rd_root_obj
+        today = date.today()
+        view  = self._portfolio_explorer_view()
+        totals = view["totals"]
+        epics  = view["portfolio_epics"]
+
+        md = [
+            f"# 🧭 Portfolio Explorer — {group.name}",
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** {_mlink(group.name, group.web_url)}",
+            "",
+            "_Every portfolio epic, attention first — blocking chains and value at risk, "
+            "as shown in the app's Portfolio Explorer._",
+            "",
+            "## Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Portfolio Epics | {totals['portfolio_epics']} |",
+            f"| Need attention | {totals['needs_attention']} |",
+            f"| Blocked items (deduped) | {totals['blocked_items']} |",
+        ]
+        if totals.get("untyped_in_chains"):
+            md.append(
+                f"| ❓ Untyped epics in chains | {totals['untyped_in_chains']} "
+                f"— add a tier label so they type correctly |"
+            )
+        md.append("")
+        md.extend(self._pfx_tier_table_md(totals, dedupe_note=True))
+
+        md += ["## Metric definitions", ""] + self._PFX_DEFINITIONS_MD + [""]
+
+        md.append("## Portfolio Epics (attention first)")
+        md.append("")
+        if not epics:
+            md.append("No portfolio epics (`epic::epic` tier) found in the snapshot. "
+                      "Check epic type labels or run a bootstrap.")
+            md.append("")
+        for entry in epics:
+            epic   = entry["epic"]
+            flags  = entry["flags"]
+            rollup = entry["rollup"]
+            icon   = self.EPIC_TYPE_ICONS.get("Epic", "⚡")
+
+            md.append(f"### {icon} {_mlink(epic['title'], epic.get('web_url', ''))}")
+            md.append("")
+
+            state = {"opened": "Open", "closed": "Closed"}.get(epic.get("state"), "—")
+            done, through = epic.get("pct_complete"), epic.get("pct_through_pi")
+            # Coerce missing % complete to 0 like the app's Explorer does.
+            progress = f"{done or 0}% done"
+            if through is not None:
+                progress += f" / {through}% through PI"
+            md.append(f"- **State:** {state} · **PI:** {epic.get('piid') or '—'} "
+                      f"· **Progress:** {progress}")
+
+            flag_bits = []
+            if flags["blocked"]:
+                n = rollup["blocked_count"]
+                flag_bits.append(f"⛔ blocked ({n} item{'s' if n != 1 else ''})")
+            if flags["behind_schedule"]:
+                flag_bits.append("⏱ behind schedule")
+            md.append(f"- **Flags:** {' · '.join(flag_bits) if flag_bits else '✅ on track'}")
+            md.append("")
+
+            if flags["blocked"]:
+                md.extend(self._pfx_tier_table_md(rollup))
+                md.append("**Blocking chains**")
+                md.append("")
+                for chain in entry["chains"]:
+                    line = " → ".join(self._pfx_chain_node_md(n) for n in chain["nodes"])
+                    blockers = chain.get("blockers") or []
+                    if blockers:
+                        line += " — blocked by " + ", ".join(
+                            self._pfx_blocker_md(b) for b in blockers)
+                    md.append(f"- {line}")
+                md.append("")
+
+        self.upload_to_wiki(group, f"{self._wiki_t1}/Portfolio Explorer", "\n".join(md))
+
+    def _data_portfolio_explorer(self) -> dict:
+        """Portfolio Explorer: attention-ordered portfolio epics with chains and three-tier rollups."""
+        group = self._rd_root_obj
+        view  = self._portfolio_explorer_view()
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "totals":          view["totals"],
+            "portfolio_epics": view["portfolio_epics"],
+        }
+
+    # ------------------------------------------------------------------
     # Wiki Index
     # ------------------------------------------------------------------
 
@@ -6297,6 +6462,10 @@ class ReportsMixin:
         md.append(
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |"
+        )
+        md.append(
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Explorer', 'Portfolio Explorer')} "
+            f"| Every portfolio epic, attention first — blocking chains and three-tier BV/weight at risk |"
         )
         md.append("")
 
@@ -6452,9 +6621,9 @@ class ReportsMixin:
             "## Purpose",
             "",
             "Executive Pulse gives portfolio leadership an at-a-glance health check across all "
-            "Value Streams. The single report in this tier is designed to be consumed in under "
-            "two minutes — it surfaces traffic-light status rather than detail, so decision-makers "
-            "can quickly spot which Value Streams need attention before drilling into Tier 2.",
+            "Value Streams. The reports in this tier are designed to be consumed in under "
+            "two minutes — they surface status and attention flags rather than detail, so "
+            "decision-makers can quickly spot what needs attention before drilling into Tier 2.",
             "",
             "## Audience",
             "",
@@ -6466,11 +6635,14 @@ class ReportsMixin:
             "- Are any Value Streams behind schedule this PI?",
             "- Which ARTs are at capacity risk or blocked?",
             "- Has any high risk been raised since yesterday's briefing?",
+            "- Which portfolio epics need attention, and how much value is stuck behind blocks?",
             "",
             "| Report | What it conveys |",
             "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Explorer', 'Portfolio Explorer')} "
+            f"| Every portfolio epic, attention first — blocking chains and three-tier BV/weight at risk |",
             "",
             "## Metric Reference",
             "",
@@ -6485,6 +6657,12 @@ class ReportsMixin:
             "",
             "> **% elapsed through PI** is computed from the `PIID::YYYYQn` label mapped to its calendar quarter. "
             "A PI labelled `2026Q3` runs 1 Jul – 30 Sep; on 1 Aug the PI is ~48% elapsed.",
+            "",
+            "### Portfolio Explorer — value-at-risk tiers",
+            "",
+            "Blocked Business Value and weight each come in three tiers:",
+            "",
+        ] + self._PFX_DEFINITIONS_MD + [
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t1, "\n".join(t1_md))
@@ -7668,6 +7846,7 @@ class ReportsMixin:
             ("piid-project",             self._data_piid_project),
             ("piid-project-detail",      self._data_piid_project_detail),
             ("portfolio",                self._data_portfolio),
+            ("portfolio-explorer",       self._data_portfolio_explorer),
             ("workload",                 self._data_workload),
             ("flow-metrics",             self._data_flow_metrics),
             ("art-feature-status",       self._data_art_feature_status),
