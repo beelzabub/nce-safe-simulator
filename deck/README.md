@@ -16,7 +16,7 @@ playwright install chromium
 **System prerequisites** (not pip-installable — the pipeline shells out to these):
 
 - **Graphviz** — the `dot` binary on `PATH`, for the architecture diagrams (`capture_diagrams.py`). Debian/Ubuntu `apt-get install graphviz`, macOS `brew install graphviz`.
-- **DejaVu Sans Mono** font — for the CLI-menu render (`capture_cli_menu.py`). Present by default on most Linux (`fonts-dejavu`); the path is Debian-style (`/usr/share/fonts/truetype/dejavu/`).
+- **DejaVu Sans Mono** font — for the CLI-menu render (`capture_cli_menu.py`). Present by default on most Linux (`fonts-dejavu`); macOS `brew install font-dejavu`. The script locates it across distros/macOS (known dirs → recursive scan → fontconfig `fc-match`), so no fixed path is assumed.
 - **`glab`**, authenticated (`glab auth status`) — `build_deck.py` / `fetch_metrics.py` pull live issues & MRs.
 - **`aws`**, authenticated — `build_deck.py` fetches the SAIC template from S3.
 
