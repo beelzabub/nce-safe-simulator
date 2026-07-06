@@ -26,7 +26,7 @@ group   = d["group"]
 by_type = d["by_type"]
 total   = d["total"]
 
-ICONS = {"Epic": "🏆", "Capability": "🧩", "Feature": "🛠️", "Unknown": "❓"}
+ICONS = {"Epic": "⚡", "Capability": "💠", "Feature": "🔖", "Unknown": "❓"}
 ```
 
 ```{python}
@@ -69,9 +69,9 @@ else:
 
 | Icon | Type | Description |
 |------|------|-------------|
-| 🏆 | Epic | Portfolio-level initiative spanning multiple PIs and ARTs |
-| 🧩 | Capability | Large Solution deliverable sized to fit within a PI |
-| 🛠️ | Feature | Service or function delivered by a single ART within one PI |
+| ⚡ | Epic | Portfolio-level initiative spanning multiple PIs and ARTs |
+| 💠 | Capability | Large Solution deliverable sized to fit within a PI |
+| 🔖 | Feature | Service or function delivered by a single ART within one PI |
 
 **Parent** — direct parent epic in the hierarchy, if one exists. Items with no parent and no
 children are also captured by the Orphaned Epics report.

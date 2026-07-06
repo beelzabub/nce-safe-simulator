@@ -109,22 +109,22 @@ class TestVsCapabilityDashboardSections:
     def test_capability_section_rendered(self):
         h = _harness(capabilities=[_capability()])
         _run(h)
-        assert "🧩 Capabilities" in _vs_page(h)
+        assert "💠 Capabilities" in _vs_page(h)
 
     def test_direct_feature_section_rendered(self):
         h = _harness(features=[_direct_feature()])
         _run(h)
-        assert "🛠️ Direct Features" in _vs_page(h)
+        assert "🔖 Direct Features" in _vs_page(h)
 
     def test_capability_section_absent_when_no_capabilities(self):
         h = _harness(features=[_direct_feature()])
         _run(h)
-        assert "🧩 Capabilities" not in _vs_page(h)
+        assert "💠 Capabilities" not in _vs_page(h)
 
     def test_direct_feature_section_absent_when_no_direct_features(self):
         h = _harness(capabilities=[_capability()])
         _run(h)
-        assert "🛠️ Direct Features" not in _vs_page(h)
+        assert "🔖 Direct Features" not in _vs_page(h)
 
     def test_feature_with_capability_parent_excluded_from_direct(self):
         # parent_id resolves to a Capability → not a direct feature
@@ -133,7 +133,7 @@ class TestVsCapabilityDashboardSections:
                          parent_id=200)
         h = _harness(capabilities=[cap], features=[feat])
         _run(h)
-        assert "🛠️ Direct Features" not in _vs_page(h)
+        assert "🔖 Direct Features" not in _vs_page(h)
 
 
 # ---------------------------------------------------------------------------

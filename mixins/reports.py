@@ -8,6 +8,10 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .utils import _clear, _fmt_duration, _tee_to_log
+# Single source of truth for the Portfolio Explorer computation — the same
+# pure function backs /api/analysis/portfolio, the app UI, and the published
+# report surfaces, so the numbers can never drift apart (Refs #182).
+from server.analysis import build_portfolio_view
 
 
 
@@ -115,6 +119,12 @@ REPORTS = [
         "needs_group": False,
     },
     {
+        "key":         "portfolio-explorer",
+        "description": "Portfolio Explorer — every portfolio epic with attention flags, blocking chains, and three-tier BV/weight-at-risk rollups",
+        "method":      "generate_portfolio_explorer_report",
+        "needs_group": False,
+    },
+    {
         "key":         "risk-register",
         "description": "Risk Register — all risk-flagged epics grouped by level (High → Medium → Low) with PI, ART, and state",
         "method":      "generate_risk_register",
@@ -209,9 +219,9 @@ _TYPE_ICON_LEGEND = [
     "",
     "| Icon | Type |",
     "|------|------|",
-    "| 🏆 | Epic |",
-    "| 🧩 | Capability |",
-    "| 🛠️ | Feature |",
+    "| ⚡ | Epic |",
+    "| 💠 | Capability |",
+    "| 🔖 | Feature |",
     "",
 ]
 
@@ -824,7 +834,7 @@ class ReportsMixin:
                 nonlocal markdown_report
 
                 epic_type = self._epic_type_display(epic.get("labels", []))
-                icon      = _tip(self.EPIC_TYPE_ICONS.get(epic_type, "🏆"), epic_type)
+                icon      = _tip(self.EPIC_TYPE_ICONS.get(epic_type, "⚡"), epic_type)
                 children  = epic_hierarchy.get(epic['id'], [])
 
                 blocked    = epic.get('blocked_by_count', 0) > 0
@@ -865,9 +875,9 @@ class ReportsMixin:
                 render_epic_details(epic)
 
             markdown_report.extend(["", "", ""] + _LEGEND_OPEN + [
-                "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-                "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-                "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+                "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+                "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+                "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             ] + _LEGEND_CLOSE)
 
             md = "\n".join(markdown_report)
@@ -905,7 +915,7 @@ class ReportsMixin:
             risk_flag = " ⚠️" if avg_pi is not None and avg_done < avg_pi else ""
             pi_cell   = f"{avg_pi}%{risk_flag}" if avg_pi is not None else "—"
 
-            icon       = _tip(self.EPIC_TYPE_ICONS.get(metric_type, "🏆"), metric_type)
+            icon       = _tip(self.EPIC_TYPE_ICONS.get(metric_type, "⚡"), metric_type)
             lbl        = label_by_type.get(metric_type, metric_type)
             url_all    = f"{base}?label_name[]={lbl}&state=all"
             url_open   = f"{base}?label_name[]={lbl}&state=opened"
@@ -1046,9 +1056,9 @@ class ReportsMixin:
 
         md.extend(_LEGEND_OPEN + [
             "### SAFe Hierarchy",
-            "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-            "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-            "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+            "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+            "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+            "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             "",
             "### Column Definitions",
             "- **Epics** — count of Epics, Capabilities, and Features assigned to this group for the PI; links to the filtered work items board",
@@ -1121,7 +1131,7 @@ class ReportsMixin:
             state          = epic.get("state", "").upper()
             blocked_by_cnt = epic.get("blockedByCount", 0)
             etype          = epic_type(epic)
-            icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+            icon           = self.EPIC_TYPE_ICONS.get(etype, "⚡")
 
             print(f"⛔ {epic['title']}  [{icon} {etype}]")
             print(f"   State: {state}  |  Blocked by: {blocked_by_cnt}")
@@ -1133,7 +1143,7 @@ class ReportsMixin:
                 node      = edge["node"]
                 connector = "└─" if i == last else "├─"
                 btype     = epic_type(node)
-                bicon     = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                bicon     = self.EPIC_TYPE_ICONS.get(btype, "⚡")
                 print(f"   {connector} 🔒 {node['title']}  [{bicon} {btype}]")
                 print(f"        {node['webUrl']}")
             print()
@@ -1256,11 +1266,11 @@ class ReportsMixin:
             ):
                 anc_node   = id_to_ancestor[epic_id]
                 desc_links = ", ".join(
-                    f"{self.EPIC_TYPE_ICONS.get(d.get('type', 'Epic'), '🏆')} {link(_short(d['title']), d['web_url'])}"
+                    f"{self.EPIC_TYPE_ICONS.get(d.get('type', 'Epic'), '⚡')} {link(_short(d['title']), d['web_url'])}"
                     for d in descendants
                 )
                 md.append(
-                    f"| ⚠️ 🏆 **{link(anc_node['title'], anc_node['web_url'])}** "
+                    f"| ⚠️ ⚡ **{link(anc_node['title'], anc_node['web_url'])}** "
                     f"| **{len(descendants)}:** {desc_links} |"
                 )
             md.append("")
@@ -1294,7 +1304,7 @@ class ReportsMixin:
             for rel in rels:
                 epic           = rel["blocked_epic"]
                 etype          = epic.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                icon           = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon           = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 state          = epic.get("state", "").capitalize()
                 blocked_by_cnt = len(rel.get("blocked_by", []))
 
@@ -1308,7 +1318,7 @@ class ReportsMixin:
 
                 for blocker in rel.get("blocked_by", []):
                     btype = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                    bicon = self.EPIC_TYPE_ICONS.get(btype, "🏆")
+                    bicon = self.EPIC_TYPE_ICONS.get(btype, "⚡")
                     md.append(f"🔒 {bicon} **{link(blocker['title'], blocker['web_url'])}**")
                     md.append("")
 
@@ -1318,7 +1328,7 @@ class ReportsMixin:
                     md.append("")
                     for ancestor in ancestors:
                         atype = ancestor.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                        aicon = self.EPIC_TYPE_ICONS.get(atype, "🏆")
+                        aicon = self.EPIC_TYPE_ICONS.get(atype, "⚡")
                         md.append(f"⬆️ {aicon} **{link(ancestor['title'], ancestor['web_url'])}**")
                         md.append("")
 
@@ -1661,9 +1671,9 @@ class ReportsMixin:
             md.append("")
 
         md.extend(_LEGEND_OPEN + [
-            "- **🏆 Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
-            "- **🧩 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
-            "- **🛠️ Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
+            "- **⚡ Epic** — a Portfolio-level initiative that may span multiple Program Increments (PIs) and Agile Release Trains (ARTs)",
+            "- **💠 Capability** — a Large Solution-level deliverable decomposed from an Epic; sized to fit within a PI across one or more ARTs",
+            "- **🔖 Feature** — a service or function delivered by a single ART within one PI; directly enables business or technical outcomes",
             "- **Parent**: the direct parent epic in the hierarchy, if one exists",
             "- Items with no parent and no children are also captured by the Orphaned Epics report",
         ] + _LEGEND_CLOSE)
@@ -2293,7 +2303,7 @@ class ReportsMixin:
                 epic_title = epic_info.get("title", f"Epic {epic_id}") if epic_info else f"Epic {epic_id}"
 
                 md.append(
-                    f"<details open><summary>🛠️ "
+                    f"<details open><summary>🔖 "
                     f'<a href="{epic_url}" target="_blank" rel="noopener noreferrer">{epic_title}</a>'
                     f" — {f_open} open · {f_pct}% done · {f_closed}/{f_total} pt</summary>"
                 )
@@ -2768,8 +2778,8 @@ class ReportsMixin:
         md.append("")
         md.append("Delivery status per Value Stream, broken down by PI and ART.")
         md.append("")
-        md.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
-        md.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
+        md.append("- **💠 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md.append("- **🔖 Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
         md.append("")
 
         for vs_name, wiki_url, total_caps, total_direct, at_risk, blocked in index_entries:
@@ -2793,8 +2803,8 @@ class ReportsMixin:
         md_top.append("")
         md_top.append("Delivery status per Value Stream, broken down by PI and ART.")
         md_top.append("")
-        md_top.append("- **🧩 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
-        md_top.append("- **🛠️ Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
+        md_top.append("- **💠 Capabilities** — cross-ART/VS deliverables that may span multiple ARTs or Value Streams")
+        md_top.append("- **🔖 Direct Features** — Features parented directly to an Epic (no Capability wrapper), owned by a single ART")
         md_top.append("")
         md_top.append("## Value Streams")
         md_top.append("")
@@ -2881,7 +2891,7 @@ class ReportsMixin:
             # --- Capabilities section ---
             art_cap_buckets = cap_pi_buckets.get(piid, {})
             if art_cap_buckets:
-                md.append("### 🧩 Capabilities _(cross-ART/VS deliverables)_")
+                md.append("### 💠 Capabilities _(cross-ART/VS deliverables)_")
                 md.append("")
                 md.append("| ART | Capabilities | Planned | Actual | Δ | % Done | Status |")
                 md.append("|-----|-------------|---------|--------|---|--------|--------|")
@@ -2924,7 +2934,7 @@ class ReportsMixin:
             # --- Direct Features section ---
             art_direct_buckets = direct_pi_buckets.get(piid, {})
             if art_direct_buckets:
-                md.append("### 🛠️ Direct Features _(parented to Epic, no Capability wrapper)_")
+                md.append("### 🔖 Direct Features _(parented to Epic, no Capability wrapper)_")
                 md.append("")
                 md.append("| ART | Features | Planned | Actual | Δ | % Done | Status |")
                 md.append("|-----|----------|---------|--------|---|--------|--------|")
@@ -2965,8 +2975,8 @@ class ReportsMixin:
                     md.append("")
 
         md.extend(_LEGEND_OPEN + [
-            "- **🧩 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
-            "- **🛠️ Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
+            "- **💠 Capability** — cross-ART/VS deliverable that may span multiple ARTs or Value Streams; decomposed from a Portfolio Epic",
+            "- **🔖 Direct Feature** — Feature parented directly to an Epic (no Capability wrapper); owned and delivered by a single ART",
             "- **% Done** — closed issue weight ÷ total issue weight",
             "- **PI Elapsed** — `(today − PI start) ÷ (PI end − PI start) × 100`",
             "- **Weight** — Planned pt → Actual pt",
@@ -3147,8 +3157,8 @@ class ReportsMixin:
 
                 b_type  = blocked.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
                 bl_type = blocker.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0])
-                b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
-                bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "🏆")
+                b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "⚡")
+                bl_icon = self.EPIC_TYPE_ICONS.get(bl_type, "⚡")
 
                 b_link  = _mlink(f'{b_icon} {blocked["title"]}', blocked["web_url"])
                 bl_link = _mlink(f'{bl_icon} {blocker["title"]}', blocker["web_url"])
@@ -3866,7 +3876,7 @@ class ReportsMixin:
                 "title":   epic["title"],
                 "url":     epic.get("web_url", ""),
                 "type":    etype,
-                "icon":    self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":    self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "piid":    epic.get("piid"),
                 "value":   value,
                 "urgency": urgency,
@@ -3923,7 +3933,7 @@ class ReportsMixin:
                     "blocked_title": blocked["title"],
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
-                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "⚡"),
                     "blockers":      blocker_list,
                 })
                 continue
@@ -3939,7 +3949,7 @@ class ReportsMixin:
                     "blocked_title": blocked["title"],
                     "blocked_url":   blocked.get("web_url", ""),
                     "blocked_type":  b_type,
-                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "🏆"),
+                    "blocked_icon":  self.EPIC_TYPE_ICONS.get(b_type, "⚡"),
                     "blockers":      blocker_list,
                 })
                 if pe_id not in seen_pe_bv:
@@ -4056,7 +4066,7 @@ class ReportsMixin:
                         "title": d["title"],
                         "url":   d.get("web_url", ""),
                         "type":  d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]),
-                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(d.get("type", self.EPIC_TYPE_DISPLAY_NAMES[0]), "⚡"),
                     }
                     for d in descendants
                 ],
@@ -4075,14 +4085,14 @@ class ReportsMixin:
                 "title":  epic["title"],
                 "url":    epic.get("web_url", ""),
                 "type":   etype,
-                "icon":   self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":   self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "state":  epic.get("state", "").capitalize(),
                 "blockers": [
                     {
                         "title": b["title"],
                         "url":   b.get("web_url", ""),
                         "type":  b.get("type", t0),
-                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", t0), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(b.get("type", t0), "⚡"),
                     }
                     for b in rel.get("blocked_by", [])
                 ],
@@ -4091,7 +4101,7 @@ class ReportsMixin:
                         "title": a["title"],
                         "url":   a.get("web_url", ""),
                         "type":  a.get("type", t0),
-                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", t0), "🏆"),
+                        "icon":  self.EPIC_TYPE_ICONS.get(a.get("type", t0), "⚡"),
                     }
                     for a in rel.get("at_risk_portfolio_epics", [])
                 ],
@@ -4644,7 +4654,7 @@ class ReportsMixin:
             avg_pi     = round(sum(pcts_pi) / len(pcts_pi)) if pcts_pi else None
             summary.append({
                 "type":        metric_type,
-                "icon":        self.EPIC_TYPE_ICONS.get(metric_type, "🏆"),
+                "icon":        self.EPIC_TYPE_ICONS.get(metric_type, "⚡"),
                 "total":       total,
                 "open":        open_cnt,
                 "closed":      closed_cnt,
@@ -4681,7 +4691,7 @@ class ReportsMixin:
                 "title":          epic["title"],
                 "url":            epic.get("web_url", ""),
                 "type":           etype,
-                "icon":           self.EPIC_TYPE_ICONS.get(etype, "🏆"),
+                "icon":           self.EPIC_TYPE_ICONS.get(etype, "⚡"),
                 "state":          epic.get("state", ""),
                 "pct_done":       pct_done,
                 "pct_pi":         pct_pi,
@@ -5085,7 +5095,7 @@ class ReportsMixin:
             md.append("|------|---------|-----|")
             for item in top_blocked:
                 etype = item["type"]
-                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 link  = (
                     f'[{icon} {item["title"]}]({item["url"]})'
                     if item["url"] else f'{icon} {item["title"]}'
@@ -5102,7 +5112,7 @@ class ReportsMixin:
             md.append("|------|------|-----------|-----|--------|-----|")
             for item in at_risk_epics:
                 etype = item["type"]
-                icon  = self.EPIC_TYPE_ICONS.get(etype, "🏆")
+                icon  = self.EPIC_TYPE_ICONS.get(etype, "⚡")
                 link  = (
                     f'[{icon} {item["title"]}]({item["url"]})'
                     if item["url"] else f'{icon} {item["title"]}'
@@ -5799,7 +5809,7 @@ class ReportsMixin:
 
             for rank, c in enumerate(candidates, 1):
                 epic   = c["epic"]
-                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "🏆")
+                icon   = self.EPIC_TYPE_ICONS.get(c["type"], "⚡")
                 link   = _mlink(epic['title'], epic['web_url'])
                 piid   = c["piid"] or "_backlog_"
                 v_str  = str(c["value"])   if c["value"]   is not None else "—"
@@ -5851,7 +5861,7 @@ class ReportsMixin:
                 for b in blockers
             )
             b_type  = blocked.get("type", _t0)
-            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "🏆")
+            b_icon  = self.EPIC_TYPE_ICONS.get(b_type, "⚡")
             bl_link = (_mlink(blocked['title'], blocked['web_url'])
                        if blocked.get("web_url") else blocked["title"])
 
@@ -6265,6 +6275,161 @@ class ReportsMixin:
                 *body, f"> {verdict_md}", "", "</details>"]
 
     # ------------------------------------------------------------------
+    # Portfolio Explorer report (Refs #182)
+    # ------------------------------------------------------------------
+
+    def _portfolio_explorer_view(self):
+        """Portfolio Explorer payload computed from the loaded snapshot.
+
+        Feeds the _rd_* snapshot structures into
+        server.analysis.build_portfolio_view so the wiki and Quarto surfaces
+        publish exactly what /api/analysis/portfolio serves the app.
+        """
+        raw_by_id = {e["id"]: e for e in self._rd_epics_all}
+        return build_portfolio_view(self._rd_epics_by_id, self._rd_blocking, raw_by_id)
+
+    _PFX_DEFINITIONS_MD = [
+        "| Metric | Counts | Reads as |",
+        "|--------|--------|----------|",
+        "| **Direct** | BV / weight on the blocked items themselves | \"the work items that can't move\" |",
+        "| **Downstream** | blocked items **plus their open descendants** | \"value that can't be delivered until this clears\" — closed value is already delivered, so it never counts as at risk |",
+        "| **Subtree** | blocked items plus **all** descendants, closed included | \"how big the threatened branch is\" — sizing and exposure, not risk |",
+    ]
+
+    def _pfx_chain_node_md(self, node):
+        """One chain node as markdown: icon + link, blocked/closed/untyped flags."""
+        icon = self.EPIC_TYPE_ICONS.get(node.get("type"), "❓")
+        text = f"{icon} {_mlink(node.get('title', '?'), node.get('web_url', ''))}"
+        if node.get("type") is None:
+            text += " *(untyped)*"
+        if not node.get("blocked"):
+            return text
+        if node.get("state") == "closed":
+            # Closed items still carrying blocking links are a data-cleanup
+            # signal, not delivery risk — they contribute 0 downstream.
+            # <s> rather than ~~: titles may themselves contain ~~, which
+            # would close the markdown strike early.
+            return f"⛔ <s>{text}</s> *(blocked · closed — consider clearing the blocking links)*"
+        return f"⛔ **{text}**"
+
+    def _pfx_blocker_md(self, blocker):
+        """A blocker reference as markdown (Issue-type blockers per #177)."""
+        item_type = blocker.get("item_type") or "Epic"
+        icon = (self.EPIC_TYPE_ICONS.get("Issue", "📋") if item_type == "Issue"
+                else self.EPIC_TYPE_ICONS.get(blocker.get("type"), "❓"))
+        return f"{icon} {_mlink(blocker.get('title', '?'), blocker.get('web_url', ''))}"
+
+    def _pfx_tier_table_md(self, sums, dedupe_note=False):
+        """Three-tier BV/weight table; downstream bolded (the headline figure)."""
+        title = "Value & weight at risk"
+        if dedupe_note:
+            title += " *(deduped across portfolio epics)*"
+        return [
+            f"**{title}**",
+            "",
+            "| | Direct | Downstream | Subtree |",
+            "|---|---|---|---|",
+            f"| ★ Business Value | {sums['blocked_business_value']} "
+            f"| **{sums['blocked_business_value_downstream']}** "
+            f"| {sums['blocked_business_value_subtree']} |",
+            f"| ⚓ Weight | {sums['blocked_weight']} "
+            f"| **{sums['blocked_weight_downstream']}** "
+            f"| {sums['blocked_weight_subtree']} |",
+            "",
+        ]
+
+    def generate_portfolio_explorer_report(self):
+        group = self._rd_root_obj
+        today = date.today()
+        view  = self._portfolio_explorer_view()
+        totals = view["totals"]
+        epics  = view["portfolio_epics"]
+
+        md = [
+            f"# 🧭 Portfolio Explorer — {group.name}",
+            f"**Updated:** {today.strftime('%Y-%m-%d')}  |  **Group:** {_mlink(group.name, group.web_url)}",
+            "",
+            "_Every portfolio epic, attention first — blocking chains and value at risk, "
+            "as shown in the app's Portfolio Explorer._",
+            "",
+            "## Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Portfolio Epics | {totals['portfolio_epics']} |",
+            f"| Need attention | {totals['needs_attention']} |",
+            f"| Blocked items (deduped) | {totals['blocked_items']} |",
+        ]
+        if totals.get("untyped_in_chains"):
+            md.append(
+                f"| ❓ Untyped epics in chains | {totals['untyped_in_chains']} "
+                f"— add a tier label so they type correctly |"
+            )
+        md.append("")
+        md.extend(self._pfx_tier_table_md(totals, dedupe_note=True))
+
+        md += ["## Metric definitions", ""] + self._PFX_DEFINITIONS_MD + [""]
+
+        md.append("## Portfolio Epics (attention first)")
+        md.append("")
+        if not epics:
+            md.append("No portfolio epics (`epic::epic` tier) found in the snapshot. "
+                      "Check epic type labels or run a bootstrap.")
+            md.append("")
+        for entry in epics:
+            epic   = entry["epic"]
+            flags  = entry["flags"]
+            rollup = entry["rollup"]
+            icon   = self.EPIC_TYPE_ICONS.get("Epic", "⚡")
+
+            md.append(f"### {icon} {_mlink(epic['title'], epic.get('web_url', ''))}")
+            md.append("")
+
+            state = {"opened": "Open", "closed": "Closed"}.get(epic.get("state"), "—")
+            done, through = epic.get("pct_complete"), epic.get("pct_through_pi")
+            # Coerce missing % complete to 0 like the app's Explorer does.
+            progress = f"{done or 0}% done"
+            if through is not None:
+                progress += f" / {through}% through PI"
+            md.append(f"- **State:** {state} · **PI:** {epic.get('piid') or '—'} "
+                      f"· **Progress:** {progress}")
+
+            flag_bits = []
+            if flags["blocked"]:
+                n = rollup["blocked_count"]
+                flag_bits.append(f"⛔ blocked ({n} item{'s' if n != 1 else ''})")
+            if flags["behind_schedule"]:
+                flag_bits.append("⏱ behind schedule")
+            md.append(f"- **Flags:** {' · '.join(flag_bits) if flag_bits else '✅ on track'}")
+            md.append("")
+
+            if flags["blocked"]:
+                md.extend(self._pfx_tier_table_md(rollup))
+                md.append("**Blocking chains**")
+                md.append("")
+                for chain in entry["chains"]:
+                    line = " → ".join(self._pfx_chain_node_md(n) for n in chain["nodes"])
+                    blockers = chain.get("blockers") or []
+                    if blockers:
+                        line += " — blocked by " + ", ".join(
+                            self._pfx_blocker_md(b) for b in blockers)
+                    md.append(f"- {line}")
+                md.append("")
+
+        self.upload_to_wiki(group, f"{self._wiki_t1}/Portfolio Explorer", "\n".join(md))
+
+    def _data_portfolio_explorer(self) -> dict:
+        """Portfolio Explorer: attention-ordered portfolio epics with chains and three-tier rollups."""
+        group = self._rd_root_obj
+        view  = self._portfolio_explorer_view()
+        return {
+            "report_date": date.today().isoformat(),
+            "group":       {"name": group.name, "url": group.web_url},
+            "totals":          view["totals"],
+            "portfolio_epics": view["portfolio_epics"],
+        }
+
+    # ------------------------------------------------------------------
     # Wiki Index
     # ------------------------------------------------------------------
 
@@ -6297,6 +6462,10 @@ class ReportsMixin:
         md.append(
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |"
+        )
+        md.append(
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Explorer', 'Portfolio Explorer')} "
+            f"| Every portfolio epic, attention first — blocking chains and three-tier BV/weight at risk |"
         )
         md.append("")
 
@@ -6452,9 +6621,9 @@ class ReportsMixin:
             "## Purpose",
             "",
             "Executive Pulse gives portfolio leadership an at-a-glance health check across all "
-            "Value Streams. The single report in this tier is designed to be consumed in under "
-            "two minutes — it surfaces traffic-light status rather than detail, so decision-makers "
-            "can quickly spot which Value Streams need attention before drilling into Tier 2.",
+            "Value Streams. The reports in this tier are designed to be consumed in under "
+            "two minutes — they surface status and attention flags rather than detail, so "
+            "decision-makers can quickly spot what needs attention before drilling into Tier 2.",
             "",
             "## Audience",
             "",
@@ -6466,11 +6635,14 @@ class ReportsMixin:
             "- Are any Value Streams behind schedule this PI?",
             "- Which ARTs are at capacity risk or blocked?",
             "- Has any high risk been raised since yesterday's briefing?",
+            "- Which portfolio epics need attention, and how much value is stuck behind blocks?",
             "",
             "| Report | What it conveys |",
             "|--------|-----------------|",
             f"| {_wl(f'{self._wiki_t1}/Portfolio Health Dashboard', 'Portfolio Health Dashboard')} "
             f"| Traffic-light status per Value Stream — Schedule, Capacity, Risk, Blocking |",
+            f"| {_wl(f'{self._wiki_t1}/Portfolio Explorer', 'Portfolio Explorer')} "
+            f"| Every portfolio epic, attention first — blocking chains and three-tier BV/weight at risk |",
             "",
             "## Metric Reference",
             "",
@@ -6485,6 +6657,12 @@ class ReportsMixin:
             "",
             "> **% elapsed through PI** is computed from the `PIID::YYYYQn` label mapped to its calendar quarter. "
             "A PI labelled `2026Q3` runs 1 Jul – 30 Sep; on 1 Aug the PI is ~48% elapsed.",
+            "",
+            "### Portfolio Explorer — value-at-risk tiers",
+            "",
+            "Blocked Business Value and weight each come in three tiers:",
+            "",
+        ] + self._PFX_DEFINITIONS_MD + [
             "",
         ]
         self.upload_to_wiki(group, self._wiki_t1, "\n".join(t1_md))
@@ -6753,6 +6931,109 @@ class ReportsMixin:
             self._run_reports(selected, reuse_data=reuse_data, formats=formats)
             return True
 
+    _EPIC_ISSUE_BLOCKERS_QUERY = """
+    query($path: ID!, $cursor: String) {
+      group(fullPath: $path) {
+        workItems(types: [EPIC], includeDescendants: true, first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            iid
+            namespace { fullPath }
+            widgets {
+              ... on WorkItemWidgetLinkedItems {
+                linkedItems {
+                  nodes {
+                    linkType
+                    workItem {
+                      id iid title webUrl
+                      workItemType { name }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }"""
+
+    def _fetch_epic_issue_blockers(self, group):
+        """Issue-type blockers of epics, invisible to /related_epics (Refs #177).
+
+        GitLab's work-items model creates cross-type blocking links; an epic
+        blocked by an Issue appears in neither the epic->epic REST graph nor
+        the issue->issue links. This pass reads the linked-items widget over
+        every epic work item and keeps is_blocked_by targets of type Issue
+        (epic-type blockers stay with the reconciled REST path).
+
+        Returns {(group_id, epic_iid): [blocker dict, ...]}. Fails soft: any
+        GraphQL trouble returns what was collected so far with a warning —
+        a hiccup degrades to the epic-only graph rather than blanking it.
+        """
+        path_to_gid = {group.full_path: group.id}
+        try:
+            for g in group.descendant_groups.list(all=True):
+                path_to_gid[g.full_path] = g.id
+        except Exception as e:
+            print(f"  WARNING: descendant group listing failed ({e}) — "
+                  "issue-blocker namespaces limited to the root group.")
+
+        blockers_by_key = {}
+        cursor = None
+        while True:
+            try:
+                data = self.graphql_query(
+                    self._EPIC_ISSUE_BLOCKERS_QUERY,
+                    variables={"path": group.full_path, "cursor": cursor},
+                    retries=1,
+                )
+            except Exception as e:
+                data = None
+                print(f"  WARNING: issue-blocker GraphQL pass failed ({e}).")
+            if not data or not data.get("group"):
+                if data is None:
+                    print("  WARNING: issue-blocker pass incomplete — "
+                          "epics blocked only by issues may be missing.")
+                break
+
+            page = data["group"]["workItems"]
+            for node in page.get("nodes", []):
+                gid = path_to_gid.get((node.get("namespace") or {}).get("fullPath"))
+                if gid is None:
+                    continue
+                items = []
+                for w in node.get("widgets", []):
+                    linked = (w or {}).get("linkedItems")
+                    if linked:
+                        items = linked.get("nodes", [])
+                        break
+                found = []
+                for li in items:
+                    wi = li.get("workItem") or {}
+                    if li.get("linkType") != "is_blocked_by":
+                        continue
+                    if (wi.get("workItemType") or {}).get("name") != "Issue":
+                        continue   # epic blockers come from the REST graph
+                    raw_id = str(wi.get("id", ""))
+                    num_id = int(raw_id.rsplit("/", 1)[-1]) if raw_id.rsplit("/", 1)[-1].isdigit() else None
+                    found.append({
+                        "id":        num_id,
+                        "id_int":    num_id,
+                        "title":     wi.get("title", ""),
+                        "type":      "Issue",
+                        "item_type": "Issue",
+                        "web_url":   wi.get("webUrl", ""),
+                    })
+                if found:
+                    blockers_by_key[(gid, int(node["iid"]))] = found
+
+            info = page.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                break
+            cursor = info.get("endCursor")
+
+        return blockers_by_key
+
     def _fetch_blocking_graph(self, group):
         """Return the raw blocking relationship graph via the REST related_epics API.
 
@@ -6770,11 +7051,13 @@ class ReportsMixin:
         epic_by_id = {e["id"]: e for e in all_epics_raw}
         parent_of  = {e["id"]: e["parent_id"] for e in all_epics_raw if e.get("parent_id")}
 
+        # Resolve tier from raw labels via the canonical resolver — scoped
+        # (epic::epic), single-colon, and plain label styles all map to the
+        # display name. Comparing display names against raw labels (the old
+        # local helper) never matched scoped configs, so every blocked epic
+        # lost its portfolio ancestors and typed as Unknown (Refs #172).
         def _etype(labels):
-            for t in self.EPIC_TYPE_DISPLAY_NAMES:
-                if t in labels:
-                    return t
-            return "Unknown"
+            return self._epic_type_display(labels)
 
         def _portfolio_ancestors(epic_id):
             result, cur, seen = [], epic_id, set()
@@ -6791,6 +7074,10 @@ class ReportsMixin:
         relationships = []
         total_rels    = 0
         fetch_failed  = set()   # epic ids whose /related_epics call failed (Refs #107)
+
+        # Issue-type blockers live only in the work-items linked-items widget;
+        # merge them alongside each epic's REST epic-blockers (Refs #177).
+        issue_blockers = self._fetch_epic_issue_blockers(group)
 
         for epic in all_epics_raw:
             grp_id = epic.get("group_id")
@@ -6816,12 +7103,15 @@ class ReportsMixin:
                 rel_id   = rel["id"]
                 rel_info = epic_by_id.get(rel_id, {})
                 blockers.append({
-                    "id":      rel_id,
-                    "id_int":  rel_id,
-                    "title":   rel.get("title", rel_info.get("title", "")),
-                    "type":    _etype(rel_info.get("labels", [])),
-                    "web_url": rel.get("web_url", rel_info.get("web_url", "")),
+                    "id":        rel_id,
+                    "id_int":    rel_id,
+                    "title":     rel.get("title", rel_info.get("title", "")),
+                    "type":      _etype(rel_info.get("labels", [])),
+                    "item_type": "Epic",
+                    "web_url":   rel.get("web_url", rel_info.get("web_url", "")),
                 })
+
+            blockers.extend(issue_blockers.get((grp_id, iid), []))
 
             if not blockers:
                 continue
@@ -7118,7 +7408,12 @@ class ReportsMixin:
             json.dumps(issues_payload, indent=2, default=str), encoding="utf-8"
         )
 
-        (data_dir / "blocking.json").write_text(
+        # Named blocking_graph.json: write_report_json() later drops the
+        # Quarto/Grafana-layer blocking.json (a different schema with no
+        # relationships) into this same directory, and it used to clobber
+        # this file — silently blanking the blocking detail for snapshot
+        # reuse and the Portfolio Explorer (Refs #172).
+        (data_dir / "blocking_graph.json").write_text(
             json.dumps(blocking, indent=2, default=str), encoding="utf-8"
         )
 
@@ -7155,7 +7450,7 @@ class ReportsMixin:
         print(f"\n  Data snapshot → {data_dir}/")
         print(f"    epics.json    ({len(typed_epics)} typed + {len(all_epics_raw) - len(typed_epics)} untyped)")
         print(f"    issues.json   ({len(issues)} issues)")
-        print(f"    blocking.json ({n_blocked} blocked epics)")
+        print(f"    blocking_graph.json ({n_blocked} blocked epics)")
         print(f"    issue_blocking.json ({n_iss_blocked} blocked issues)")
         print(f"    groups.json   ({len(all_groups)} groups)")
         print(f"    projects.json ({len(all_projects)} projects)\n")
@@ -7551,6 +7846,7 @@ class ReportsMixin:
             ("piid-project",             self._data_piid_project),
             ("piid-project-detail",      self._data_piid_project_detail),
             ("portfolio",                self._data_portfolio),
+            ("portfolio-explorer",       self._data_portfolio_explorer),
             ("workload",                 self._data_workload),
             ("flow-metrics",             self._data_flow_metrics),
             ("art-feature-status",       self._data_art_feature_status),
@@ -7567,7 +7863,13 @@ class ReportsMixin:
         """Load JSON snapshot into self._rd_* lookup structures for use by all report methods."""
         epics_data    = json.loads((data_dir / "epics.json").read_text(encoding="utf-8"))
         issues_data   = json.loads((data_dir / "issues.json").read_text(encoding="utf-8"))
-        blocking_data = json.loads((data_dir / "blocking.json").read_text(encoding="utf-8"))
+        # blocking_graph.json since #172; older runs only have blocking.json,
+        # which the Quarto data writer overwrote with a schema that has no
+        # relationships — the .get() below degrades those to an empty graph.
+        blocking_path = data_dir / "blocking_graph.json"
+        if not blocking_path.is_file():
+            blocking_path = data_dir / "blocking.json"
+        blocking_data = json.loads(blocking_path.read_text(encoding="utf-8"))
         groups_data   = json.loads((data_dir / "groups.json").read_text(encoding="utf-8"))
         projects_data = json.loads((data_dir / "projects.json").read_text(encoding="utf-8"))
 

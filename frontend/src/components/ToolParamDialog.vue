@@ -218,6 +218,11 @@
           </div>
         </template>
 
+        <!-- Equivalent CLI command, live as params change — pinned inside the
+             dialog so it stays visible while the modal covers the docked bar
+             (issue #185). -->
+        <CliCommandStrip class="dialog-cmd" :command="cliCommand" />
+
       </div>
     </div>
   </Teleport>
@@ -228,6 +233,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConflictBanner from './ConflictBanner.vue'
 import PathSelect from './PathSelect.vue'
 import HelpTip from './HelpTip.vue'
+import CliCommandStrip from './CliCommandStrip.vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { buildToolCommand } from '../composables/useCliCommand.js'
 import { useCommandPreview } from '../composables/useCommandPreview.js'
@@ -390,11 +396,13 @@ const confirmRows = computed(() => {
 })
 
 // The equivalent CLI one-liner for the current choices — rebuilt live as the
-// user edits params (#140) and pushed to the docked CommandBar while the dialog
-// is open. Cleared when the dialog unmounts.
-const { setPreview, clearPreview } = useCommandPreview()
+// user edits params (#140), shown in the in-dialog CliCommandStrip and mirrored
+// to the docked CommandBar. Only non-empty commands are mirrored, so closing the
+// dialog (tool → null, cliCommand → '') leaves the last command on the bar for
+// later reference instead of wiping it (issue #185).
+const { setPreview } = useCommandPreview()
 const cliCommand = computed(() => buildToolCommand(props.tool, values.value))
-watch(cliCommand, cmd => setPreview(cmd), { immediate: true })
+watch(cliCommand, cmd => { if (cmd) setPreview(cmd) }, { immediate: true })
 
 function onKeydown(e) {
   if (e.key === 'Escape' && props.tool) {
@@ -405,7 +413,6 @@ function onKeydown(e) {
 onMounted(() => document.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
-  clearPreview()
 })
 
 // First click: show confirmation step (if tool.confirm); second click: launch.
@@ -754,6 +761,13 @@ async function doLaunch() {
   background: var(--action-off);
   color: var(--action-off-text);
   cursor: not-allowed;
+}
+
+/* ── In-dialog CLI command strip (issue #185) ── */
+.dialog-cmd {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt);
 }
 
 /* ── Mobile (issue #160): the dialog takes the whole screen ── */

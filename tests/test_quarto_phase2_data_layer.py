@@ -59,7 +59,7 @@ class TestDataOrphanEpics:
         epic = make_epic(id=1, etype="Epic", parent_id=None)
         row = _h(epics=[epic])._data_orphan_epics()["orphans"][0]
         assert row["type"] == "Epic"
-        assert row["icon"] == "🏆"
+        assert row["icon"] == "⚡"
 
     def test_json_serializable(self):
         epic = make_epic(id=1, etype="Epic")

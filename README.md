@@ -8,15 +8,15 @@ Python automation for GitLab groups organised around the **Scaled Agile Framewor
 
 ```
 Root Group  (Portfolio)
-│   Portfolio Epics  🏆
-│   Direct Features  🛠️  ← Features parented straight to a Portfolio Epic
+│   Portfolio Epics  ⚡
+│   Direct Features  🔖  ← Features parented straight to a Portfolio Epic
 │
 ├── Value Stream 01
-│   Capabilities  🧩  ← cross-ART/VS deliverables
+│   Capabilities  💠  ← cross-ART/VS deliverables
 │   ├── ART 01
-│   │   Capabilities  🧩
+│   │   Capabilities  💠
 │   │   ├── Team 01
-│   │   │   Features  🛠️
+│   │   │   Features  🔖
 │   │   │   Team Backlog project  (Issues linked to Features)
 │   │   └── Team 02  ...
 │   └── ART 02  ...
@@ -442,18 +442,27 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 `/app/login` is the UI's front door: a full-viewport slideshow of the committed U.S. Navy imagery (crossfading every `auth.background.rotation_seconds`, with a slow Ken Burns drift and the photographer's credit in the corner) with the sign-in form fully dissolved at rest — only a faint "Sign in" affordance remains. A faint NCE mark floats top-center (the NavBar's white emblem, ~40% opacity, dimming further once the card is summoned) so the resting page still identifies the site. Any intent signal (hovering or focusing the affordance, clicking the page, Tab, or typing) materializes the card with the username field focused; Escape or ~25 s of inactivity with untouched fields dissolves it back, while typed content keeps it up. The server picks the first image at random and the client lazily preloads the rest; with no images configured the page falls back to the bundled hero image. The backend serves the app shell for hard loads of client-side routes (SPA history fallback), so deep links like `/app/login` work in production.
 
-Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment (per browser session). Toggle it with `auth.dod_banner_enabled` in `config.json`.
+Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment **per logon attempt**: it reappears after an explicit sign-out and after any other end of access — the 12-hour session TTL lapsing or a server restart wiping the session store (#163) — while a mid-form reload before ever signing in does not re-nag. Toggle it with `auth.dod_banner_enabled` in `config.json`.
 
-Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior depends on `auth.method`: with `none` the gate is cosmetic (any non-empty credentials accepted, client-side session flag, no security); with `basic` the sign-in card round-trips to `POST /api/auth/login`, wrong credentials are rejected inline, and the server enforces authentication on every endpoint and the jobs WebSocket (see the Authentication section above). The NavBar's **Sign out** control ends the session and returns to `/login` without closing the browser — the DoD banner acknowledgment survives sign-out (consent is per browser session; authentication is not). Gate logic lives in `frontend/src/composables/useAuthGate.js`, where the AAA methods will plug in. Login-page settings, including the auth method, are editable in the Config dialog's **Auth** tab.
+Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior depends on `auth.method`: with `none` the gate is cosmetic (any non-empty credentials accepted, client-side session flag, no security); with `basic` the sign-in card round-trips to `POST /api/auth/login`, wrong credentials are rejected inline, and the server enforces authentication on every endpoint and the jobs WebSocket (see the Authentication section above). The NavBar's **Sign out** control ends the session and returns to `/login` without closing the browser; sign-out (like any end of access) clears the DoD banner acknowledgment so the next logon attempt re-presents consent. Gate logic lives in `frontend/src/composables/useAuthGate.js`, where the AAA methods will plug in. Login-page settings, including the auth method, are editable in the Config dialog's **Auth** tab.
 
 #### Layout
 
 | Area | Content |
 |------|---------|
 | Top nav | PMW 120 / NCE Safe Simulator wordmark; running-job count badge; dark ↔ light theme toggle; Status panel toggle |
-| Left sidebar | Job picker (collapsible groups) + Run Reports button + footer links: **Quarto ↗**, **Wiki ↗**, **GitLab ↗**, **AMG ↗** (shown only when Grafana URL is configured) |
-| Main pane | Job runner — one tab per launched job with streaming log output |
+| Left sidebar | Multi-function side panel with **Tools / Reports / Analysis** tabs (active tab persists across reloads; epic #165). **Tools** hosts the job picker (collapsible groups) + Run Reports button. **Reports** browses snapshot runs and opens wiki pages in the in-app markdown viewer, with its own Run Reports… button. **Analysis** hosts portfolio analysis tools computed from snapshots — first up, the **Portfolio Explorer** |
+| Main pane | Owned by the active side-panel tab: **Tools** shows the job runner (one card per launched job with streaming log output, plus the docked CLI command bar), **Reports** the markdown viewer, **Analysis** the Portfolio Explorer. Launching a job pulls the runner forward from any tab |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
+
+#### Version badge
+
+The bottom-right corner shows the running build's version (hidden at phone widths; it shifts left of the AWS button on ECS/EKS). Resolution order, computed once per server process and served via `GET /api/config`:
+
+1. `NCE_VERSION` env var — explicit deploy-time override
+2. `version.json` — baked at image build (`docker build` receives `VCS_REF` / `NCE_VERSION` args from the Makefile and deploy scripts; a tagged release shows the tag, a branch build shows `nce-<commit>`)
+3. Live git (local checkouts): exact tag on HEAD → the tag; otherwise `nce-<short-hash>`
+4. The committed `VERSION` file (source-tarball fallback)
 
 #### Mobile support
 
@@ -490,7 +499,7 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 The UI shows the **equivalent command line** for the operation, so a run you set up in the browser can be scripted, scheduled, or reproduced on another machine. The CLI accepts operations non-interactively — after `-ut <tool>` (tools) or `-r <report>` (reports), `--param value` / `--flag` tokens are applied as prefills without prompting — so the displayed command is a runnable one-liner, not a template. Two surfaces cover every operation:
 
-- A **docked command bar** along the bottom of the window shows the command for whatever you are currently looking at — a hovered job row, or a tool dialog / report picker rebuilding **live** as you edit parameters — with a **Copy** button. Only set values contribute: a checked boolean becomes `--flag`, text/number values become `--name "value"` (shell-quoted when needed), and blank optionals are omitted so the CLI falls back to its own defaults. Values that begin with `-` (e.g. a negative count) use the `--name=value` form, and a default-on boolean turned off is stated explicitly (`--flag=false`), so the command always reproduces the exact operation.
+- A **docked command bar** along the bottom of the window shows the command for whatever you are currently looking at — a hovered job row, or a tool dialog / report picker rebuilding **live** as you edit parameters — with a **Copy** button. Because a modal dialog covers the docked bar, the **tool dialog and report picker carry the same live command strip inline**, pinned to the bottom of the dialog, so the command stays visible and copyable while you configure it. The docked bar also **keeps the last command after a dialog closes**, so a command you just built stays reachable. Only set values contribute: a checked boolean becomes `--flag`, text/number values become `--name "value"` (shell-quoted when needed), and blank optionals are omitted so the CLI falls back to its own defaults. Values that begin with `-` (e.g. a negative count) use the `--name=value` form, and a default-on boolean turned off is stated explicitly (`--flag=false`), so the command always reproduces the exact operation.
 - When a job **launches**, the server echoes the exact command it runs as the first line of that run's output (`$ python3 NceGitLab.py …`). Because the job log is recallable from the session/status window, every run — instant-launch utilities like `diagnose` included — carries the command that reproduces it, permanently.
 
 The generated flags are contract-tested against the real CLI parser both from the browser builder (`tests/test_cli_command_preview.py`, via Node) and the server builder (`tests/test_cli_command_server.py`), so a command shown in the UI parses back to exactly the parameters it was launched with.
@@ -530,11 +539,17 @@ Dark palette is default (GitLab shell colours + SAFe blue + GitLab orange accent
 
 #### Reports
 
-The sidebar footer contains four links. **Quarto ↗** opens the static Quarto report site (`/quarto/`) in a new tab. **Wiki ↗** opens the GitLab group wiki. **GitLab ↗** opens the root GitLab group. **AMG ↗** opens the Amazon Managed Grafana workspace (only shown when `grafana_url` is set in config). Reports and interactive pages must be built first:
+The side panel's **Reports** tab is the in-app reading surface: it lists report snapshot runs (newest first, switchable), mirrors each run's **GitLab wiki hierarchy** exactly (page paths persisted per run in `wiki/pages.json`; legacy runs fall back to flat tier grouping), offers a filter box like the Tools tab's, carries its own **Run Reports…** button (pinned at the bottom, same as the Tools tab), and opens any page in a themed in-app markdown viewer in the main pane (server-rendered via `GET /api/runs/{date}/{time}/wiki/index.json` and `.../{slug}.json` — same python-markdown renderer as the standalone `/api/runs/.../wiki/{slug}` pages, so there is exactly one renderer). The side panel footer (visible on every tab) carries the external links: **Quarto ↗** opens the static Quarto report site (`/quarto/`; each report page there toggles to its Marimo interactive counterpart), **GitLab ↗** the group wiki, **Grafana ↗** the Amazon Managed Grafana workspace (only when `grafana_url` is set), **Raw ↗** the latest run's raw wiki index. Reports and interactive pages must be built first:
 
 ```bash
 python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo outputs
 ```
+
+#### Analysis API
+
+`GET /api/analysis/portfolio` (epic #165) computes a **portfolio-level view** from the newest complete report snapshot on disk — no GitLab calls, so it responds instantly and works offline. Every portfolio epic (the `epic::epic` tier) is listed with attention flags: **blocked** (a blocked descendant anywhere in its chain, with the full hierarchy path Epic → Capability → Feature → blocked item, the blockers, and a rollup of `blocked_count` plus **three-tier weight/BV metrics**, #178) and **behind_schedule** (open epic whose `pct_complete` trails `pct_through_pi` — the standard At Risk rule). Each of weight and BV comes in three tiers answering different questions: **direct** (`blocked_weight` / `blocked_business_value` — on the blocked items themselves: "the work that can't move"), **downstream** (`*_downstream` — blocked items plus their *open* descendants: "value that can't be delivered until this clears"; closed items are excluded because delivered value can't be held hostage, so the number shrinks as teams deliver around the block), and **subtree** (`*_subtree` — the whole subtree, closed included: sizing/exposure of the threatened branch, not risk). Blocked weight prefers `planned_weight` and falls back to `actual_weight`. A blocked item counts toward every portfolio epic it threatens, while the grand `totals` dedupe blocked items — and overlapping blocked subtrees sum over the union of nodes — so portfolio-wide numbers aren't inflated. A *closed* epic still carrying `is_blocked_by` links stays in the chain (a data-cleanup signal) but contributes 0 to downstream at-risk figures. Chains traverse **untyped epics** (no `epic_type_labels` tier label — common when child epics are created by hand, since GitLab doesn't inherit labels) rather than dropping them: untyped nodes render with an `untyped` badge, their weight/BV still counts, and a data-quality hint totals them — a labeling slip degrades the display instead of hiding risk. Epics needing attention sort first (by downstream BV at risk, then downstream blocked weight); returns 404 with a hint when no snapshot exists yet.
+
+The **Portfolio Explorer** (Analysis tab) renders this: a totals strip (portfolio epics · need attention · weight at risk · BV at risk — the headline numbers are the **downstream** figures, with direct and subtree on a sub-line, and ⓘ help icons opening a definitions panel so the metrics are self-explaining), then one GitLab-style card per portfolio epic — state, linked title, PIID/project chips, and a progress bar with a **PI-clock notch** (fill short of the notch = visibly behind schedule). Attention cards carry a red edge and issue badges (⛔ blocked count, ⚓ weight and ★ BV badges each showing `direct · dn downstream` with all three tiers in the tooltip, ⏱ behind schedule); healthy epics read "on track" at a glance. A closed-but-still-blocked node renders a muted struck-through `blocked · closed` flag with a "consider clearing links" tooltip. Blocked cards expand to the hierarchy chains — rendered in the UI with Jira-style tier badges (purple bolt Epic, teal layered-diamond Capability, blue bookmark Feature; `TierIcon.vue`), while text surfaces use the matching emoji (⚡ Epic → 💠 Capability → 🔖 Feature) — with the blocked node flagged, its blockers linked, and per-node weight/BV figures; the top blocked card starts expanded. Empty states cover no-snapshot (with a call-to-action to run reports) and a portfolio with no `epic::epic` items.
 
 ---
 
@@ -542,11 +557,11 @@ python3 NceGitLab.py -r all --formats all   # builds markdown + quarto + Marimo 
 
 `create_all_lorem_objects()` builds a full SAFe group hierarchy under the configured root group:
 
-- Root group with **Portfolio Epics** (🏆)
-- *N* Value Stream subgroups, each with **Capabilities** (🧩)
-- *N* ART subgroups per Value Stream, each with **Capabilities** (🧩)
+- Root group with **Portfolio Epics** (⚡)
+- *N* Value Stream subgroups, each with **Capabilities** (💠)
+- *N* ART subgroups per Value Stream, each with **Capabilities** (💠)
 - *N* Team subgroups per ART, each with:
-  - **Features** (🛠️)
+  - **Features** (🔖)
   - A `Team Backlog` GitLab project
   - 8–15 Issues per Feature, with Fibonacci weights
 
@@ -634,7 +649,8 @@ Reports are organized into four tiers by audience and cadence. The wiki home pag
 ```
 home  (Portfolio Home index)
 ├── 00 Executive Pulse        — daily, executives
-│   └── Portfolio Health Dashboard
+│   ├── Portfolio Health Dashboard
+│   └── Portfolio Explorer
 ├── 01 Program Management     — weekly, RTEs and PMs
 │   ├── Program × PI Matrix
 │   ├── Program PI Detail
@@ -668,7 +684,8 @@ reports/
     HHMMSS/
       epics.json      # typed epics (full fields + rollups) + all_epics_raw (includes untyped)
       issues.json     # all issues: full fields including assignees, milestone, epic link
-      blocking.json   # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+      blocking_graph.json # blocking graph: blocked epics, blockers, at-risk ancestry, id_int mappings
+                      # (named to avoid the Quarto data layer's blocking.json, written to the same dir — Refs #172)
       issue_blocking.json # issue→issue blocking graph: blocked issues, blockers, parent epic
       groups.json     # SAFe group hierarchy: portfolio → VS → ART → Team, each with level tag
       projects.json   # Team Backlog projects with namespace_id, path, and issues_enabled flag
@@ -680,7 +697,7 @@ The directory is printed to the console at the start of every run:
 Data snapshot → reports/20260525/143022/
   epics.json    (47 typed + 2 untyped)
   issues.json   (312 issues)
-  blocking.json (5 blocked epics)
+  blocking_graph.json (5 blocked epics)
   issue_blocking.json (3 blocked issues)
   groups.json   (15 groups)
   projects.json (8 projects)
@@ -690,9 +707,9 @@ Data snapshot → reports/20260525/143022/
 
 **`issues.json` fields:** `id`, `iid`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `assignees`, `epic_id`, `epic_iid`, `project_path`, `web_url`, `created_at`, `updated_at`, `closed_at`
 
-**`blocking.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int`), and `at_risk_portfolio_epics` list.
+**`blocking_graph.json` structure:** `summary` (total blocked, total relationships, portfolio epics at risk) + `relationships` array where each entry has `blocked_epic` (with `id_int` integer), `blocked_by` list (each with `id_int` and an `item_type` of `Epic` or `Issue` — epic blockers come from the REST `related_epics` graph, while **issue-type blockers** are collected from the work-items linked-items widget via GraphQL, since GitLab's cross-type blocking links appear in neither the epic→epic nor the issue→issue APIs, #177), and `at_risk_portfolio_epics` list.
 
-> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
+> **`blocked_by_count` is reconciled against this graph (Refs #107).** Once the blocking relationships are built, each epic's `blocked_by_count` is recomputed from `blocking_graph.json` — so the summary tables and the blocking detail can never disagree (they previously came from the legacy GraphQL `blockedByCount` and the REST `/related_epics` view independently). If an epic's blocking fetch fails, its prior value is kept rather than reset to `0`, and a warning is printed, so a transient API error can't silently mark a blocked epic as unblocked.
 
 **`issue_blocking.json` structure:** `summary` (total blocked, total relationships) + `relationships` array where each entry has `blocked_issue` (`id`, `iid`, `title`, `web_url`, `project_path`, `state`, `epic_iid`, `epic_title`) and a `blocked_by` list (each `id`, `iid`, `title`, `web_url`, `project_path`). Blocked issues are flagged via a bulk GraphQL `Issue.blocked` query; only flagged issues are then REST-fetched (`GET /projects/:id/issues/:iid/links`, keeping `is_blocked_by` links).
 
@@ -752,6 +769,7 @@ The deployed site is published at the project's GitLab Pages URL and mirrors the
 |---|---|---|---|
 | `wiki-index` | — | `home` | Four-tier navigation index linking all report pages |
 | `health-dashboard` | T1 | `00 Executive Pulse/Portfolio Health Dashboard` | Per-VS traffic-light status across Schedule, Capacity, Risk, and Blocking |
+| `portfolio-explorer` | T1 | `00 Executive Pulse/Portfolio Explorer` | Every portfolio epic, attention first — blocking chains (Portfolio Epic → … → blocked item, blockers linked, closed-blocked cleanup flags, untyped warnings) and three-tier BV/weight-at-risk rollups (direct / downstream / subtree, #178). Publishes exactly what the app's Portfolio Explorer shows — both surfaces are computed by `server/analysis.py:build_portfolio_view` from the same snapshot. Also available as a Quarto page (Executive menu) |
 | `piid-project` | T2 | `01 Program Management/Program × PI Matrix` | Project label vs PI quarter cross-tab with status and weights |
 | `piid-project-detail` | T2 | `01 Program Management/Program PI Detail` | Per-PI section view of program workload and status |
 | `pi-predictability` | T2 | `01 Program Management/PI Predictability Scorecard` | % of committed Features/Capabilities delivered per PI, trended by ART |
@@ -1216,11 +1234,11 @@ Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/sai
 
 **Config-driven defaults** — All numeric defaults for bootstrap counts and tool parameters live in `config.json` under `defaults.bootstrap` and `defaults.tools`. Function signatures use `None` sentinels and resolve from `self.default_*` at runtime, so callers can still override individual values programmatically. Structure count keys (`num_value_streams`, `num_arts`, `num_teams`, etc.) accept a plain integer, `{"desired": N}`, or `{"min": M, "max": N}` range object. `_resolve_range()` in `mixins/bootstrap.py` handles all three forms; `_range_label()` produces a human-readable annotation for the run summary.
 
-**API session** — All HTTP calls route through a shared `requests.Session` configured by `_make_session()` in `mixins/utils.py`. The session mounts a `_TimeoutAdapter` that enforces `api_timeout` (default 300 s, configurable in `config.json`) on every request and auto-retries 429 responses up to 5 times with exponential backoff (1 → 2 → 4 → 8 → 16 s). This prevents report runs from hanging silently on slow GitLab responses.
+**API session** — All HTTP calls route through a shared `requests.Session` configured by `_make_session()` in `mixins/utils.py`. The session mounts a `_TimeoutAdapter` that enforces `api_timeout` (default 300 s, configurable in `config.json`) on every request and auto-retries 429 and transient 5xx (500/502/503/504) responses up to 5 times with exponential backoff (1 → 2 → 4 → 8 → 16 s) — idempotent methods only, so mutations keep fail-fast semantics. The python-gitlab client is likewise constructed with `retry_transient_errors=True`. This prevents report runs from hanging on slow GitLab responses or dying minutes into a snapshot because of one passing gateway error (#176).
 
 **Job timing** — Each phase (clean, create, individual reports, all) logs start/stop times and elapsed duration via `_print_timing_table()` in `mixins/utils.py`. `--all` aggregates all phases into a consolidated summary table.
 
-**Data snapshots** — Every report run writes six files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking.json`, `issue_blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
+**Data snapshots** — Every report run writes six files to `reports/YYYYMMDD/HHMMSS/` — `epics.json`, `issues.json`, `blocking_graph.json`, `issue_blocking.json`, `groups.json`, and `projects.json` — before generating any wiki pages. All report methods read exclusively from this snapshot; no further API calls are made after the snapshot is written. Multiple runs per day each get their own timestamped subdirectory.
 
 ---
 

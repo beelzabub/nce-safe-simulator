@@ -17,7 +17,10 @@ NETWORK="nce-net"
 APP="nce-safe-sim"
 
 echo "==> Building image ($IMAGE)..."
-docker build -t "$IMAGE" .
+docker build \
+  --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
+  --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
+  -t "$IMAGE" .
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 

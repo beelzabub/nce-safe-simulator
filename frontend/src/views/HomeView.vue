@@ -7,34 +7,31 @@
       <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
 
       <aside class="sidebar" :class="{ 'sidebar--open': sidebarOpen }">
-        <div class="sidebar-picker">
-          <JobPicker :running-jobs="runningJobKeys" @launch="onLaunch" @launch-reports="onLaunchReports" />
-        </div>
-        <div class="sidebar-footer">
-          <a href="/quarto/" target="_blank" rel="noopener" class="reports-link">
-            Quarto&thinsp;↗
-          </a>
-          <a v-if="gitlabWikiUrl" :href="gitlabWikiUrl" target="_blank" rel="noopener" class="reports-link">
-            GitLab&thinsp;↗
-          </a>
-          <a v-if="grafanaUrl" :href="grafanaUrl" target="_blank" rel="noopener" class="reports-link">
-            Grafana&thinsp;↗
-          </a>
-          <a href="/api/wiki" target="_blank" rel="noopener" class="reports-link">
-            Raw&thinsp;↗
-          </a>
-        </div>
+        <SidePanel
+          :running-jobs="runningJobKeys"
+          :gitlab-wiki-url="gitlabWikiUrl"
+          :grafana-url="grafanaUrl"
+          @launch="onLaunch"
+          @launch-reports="onLaunchReports"
+        />
       </aside>
 
       <main class="main-pane">
-        <JobRunner />
+        <!-- JobRunner stays mounted (v-show) so live job streams never
+             unmount; report/analysis panes are siblings (#167 / #169).
+             The CLI command bar belongs to the job runner, so it hides
+             with it rather than docking under every view. -->
+        <JobRunner v-show="mainView === 'jobs'" />
+        <CommandBar v-show="mainView === 'jobs'" />
+        <MarkdownView v-if="mainView === 'report'" />
+        <PortfolioExplorer v-if="mainView === 'analysis'" />
       </main>
 
       <StatusSidebar :open="showStatus" @close="showStatus = false" />
 
     </div>
 
-    <CommandBar />
+    <span v-if="appVersion" class="version-badge" :class="{ 'version-badge--shifted': deploymentType }">{{ appVersion }}</span>
 
     <ConfigDialog       v-if="showConfig"       @close="showConfig = false" />
     <HelpDialog         v-if="showHelp"         @close="showHelp = false" />
@@ -44,10 +41,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import NavBar        from '../components/NavBar.vue'
-import JobPicker     from '../components/JobPicker.vue'
+import SidePanel     from '../components/SidePanel.vue'
 import JobRunner     from './JobRunner.vue'
+import MarkdownView  from './MarkdownView.vue'
+import PortfolioExplorer from './PortfolioExplorer.vue'
 import StatusSidebar from '../components/StatusSidebar.vue'
 import CommandBar    from '../components/CommandBar.vue'
 import HelpDialog          from '../components/HelpDialog.vue'
@@ -55,8 +54,17 @@ import ConfigDialog        from '../components/ConfigDialog.vue'
 import ArchitectureButton  from '../components/ArchitectureButton.vue'
 import ArchitectureDialog  from '../components/ArchitectureDialog.vue'
 import { useJobs }         from '../composables/useJobs.js'
+import { useMainView }     from '../composables/useMainView.js'
 
 const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
+const { mainView, contentEpoch, showMain } = useMainView()
+
+// Opening a report page or an analysis reveals the main pane on phones,
+// same as launching a job. Tab switches don't bump the epoch — the drawer
+// stays open while browsing tabs (#171).
+watch(contentEpoch, () => {
+  if (isMobile.matches) sidebarOpen.value = false
+})
 
 // Below the mobile breakpoint the sidebar is an off-canvas drawer; start it
 // open there so first-time phone users land on the job list, not an empty
@@ -71,6 +79,7 @@ const showArchitecture = ref(false)
 const gitlabWikiUrl  = ref('')
 const grafanaUrl     = ref('')
 const deploymentType = ref('')
+const appVersion     = ref('')
 
 onMounted(async () => {
   loadDiskHistory()
@@ -81,16 +90,19 @@ onMounted(async () => {
       gitlabWikiUrl.value  = data.wiki_url        || ''
       grafanaUrl.value     = data.grafana_url     || ''
       deploymentType.value = data.deployment_type || ''
+      appVersion.value     = data.version         || ''
     }
   } catch { /* server not yet ready */ }
 })
 
 function onLaunch(job, params) {
   launch(job, params)
+  showMain('jobs')   // a fresh run always surfaces the runner pane
   if (isMobile.matches) sidebarOpen.value = false   // reveal the runner pane
 }
 function onLaunchReports(reports, fmts, useLast) {
   launchReports(reports, fmts, useLast)
+  showMain('jobs')
   if (isMobile.matches) sidebarOpen.value = false
 }
 </script>
@@ -120,31 +132,6 @@ function onLaunchReports(reports, fmts, useLast) {
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
-
-.sidebar-picker {
-  flex: 1;
-  overflow: hidden;   /* JobPicker manages its own internal scroll */
-}
-
-.sidebar-footer {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  padding: 0.6rem 1rem;
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-}
-.reports-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.82rem;
-  font-weight: 400;
-  color: var(--text-3);
-  text-decoration: none;
-  transition: color 0.15s;
-}
-.reports-link:hover { color: var(--text-1); }
 
 /* ── Main pane ── */
 .main-pane {
@@ -214,5 +201,25 @@ function onLaunchReports(reports, fmts, useLast) {
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
+}
+
+/* ── Version badge (issue #173) — bottom-right, unobtrusive ── */
+.version-badge {
+  position: fixed;
+  bottom: 0.35rem;
+  right: 0.75rem;
+  z-index: 140;
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-3);
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: text;
+}
+/* The AWS architecture button occupies the corner on ECS/EKS — sit left of it */
+.version-badge--shifted { right: calc(1.1rem + 56px + 12px); bottom: 1.35rem; }
+
+@media (max-width: 768px) {
+  .version-badge { display: none; }   /* corners are tap-targets on phones */
 }
 </style>

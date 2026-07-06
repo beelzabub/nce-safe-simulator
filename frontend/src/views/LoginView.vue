@@ -213,6 +213,10 @@ function acceptBanner() {
 }
 
 onMounted(async () => {
+  // Run the gate's transition check before consulting the ack: a direct
+  // visit to /login after the session lapsed (bypassing the router guard's
+  // redirect) must also clear a stale banner acknowledgment (#163).
+  await gate.accepted()
   if (!sessionStorage.getItem(BANNER_ACK_KEY)) {
     getConfig().then((cfg) => {
       bannerVisible.value = cfg.dod_banner_enabled !== false

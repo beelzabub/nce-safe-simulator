@@ -35,7 +35,9 @@ from server.auth_gate import (
     session_valid,
     verify_credentials,
 )
+from server.analysis import portfolio_payload
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.version import app_version
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
 
@@ -181,7 +183,8 @@ def get_config(request: Request):
     dod_banner = bool(load_auth_config(gl).get("dod_banner_enabled", True))
     if gl is None:
         return {"target_group": "", "wiki_url": "", "grafana_url": "",
-                "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner}
+                "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner,
+                "version": app_version()}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
@@ -204,6 +207,7 @@ def get_config(request: Request):
         "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
         "deployment_type": _deployment_type(),
         "dod_banner_enabled": dod_banner,
+        "version": app_version(),
     }
 
 
@@ -441,6 +445,24 @@ def list_history():
     return runs
 
 
+@app.get("/api/analysis/portfolio")
+def analysis_portfolio():
+    """Portfolio-level analysis view (epic #165).
+
+    Every portfolio epic (epic::epic tier) with attention flags — blocked
+    descendants (with chains and weight/BV rollups) and behind-schedule.
+    Reads the newest complete report snapshot from disk — no GitLab calls.
+    404s with a hint when no snapshot exists yet.
+    """
+    data_dir = _resolve_reuse_data("last")
+    if data_dir is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No complete report snapshot found — run reports first.",
+        )
+    return portfolio_payload(data_dir)
+
+
 @app.get("/api/runs")
 def list_runs():
     """List report run directories, newest first.
@@ -466,6 +488,7 @@ def list_runs():
                 "has_log":  bool(log_files),
                 "log_name": log_files[0].name if log_files else None,
                 "has_data": (time_dir / "data").is_dir(),
+                "has_wiki": (time_dir / "wiki").is_dir(),
             })
     return runs
 
@@ -618,6 +641,91 @@ def browse_run_wiki(date: str, time: str):
   <h1>Wiki pages &mdash; {d} &nbsp; {t} &nbsp; ({len(pages)} pages)</h1>
   <ul>{items}</ul>
 </body></html>"""
+
+
+_TIER_NAMES = {
+    "00": "Executive Pulse",
+    "01": "Program Management",
+    "02": "Operational Detail",
+    "03": "Data Quality",
+}
+
+
+def _wiki_page_tier(slug_or_path: str) -> "str | None":
+    """Tier number ("00".."03") from a wiki page path or slug, or None.
+
+    Works on real page paths ("… Portfolio Home/01 Program Management/…")
+    and on slugs, where dash collapsing has erased the '/' separators
+    (…portfolio-home-01-program-management-…).
+    """
+    m = re.search(r"(?:^|[/-])(0[0-3])[ -]", slug_or_path)
+    return m.group(1) if m else None
+
+
+@app.get("/api/runs/{date}/{time}/wiki/index.json")
+def wiki_index_json(date: str, time: str):
+    """Wiki pages of a run as JSON for the in-app Reports tab (epic #165).
+
+    Each entry carries the page's real GitLab wiki path (from the run's
+    pages.json manifest) split into segments, so the Reports tab can mirror
+    the wiki hierarchy exactly. Runs from before the manifest fall back to
+    the leaf H1 title with no nesting.
+    """
+    wiki_dir = Path("reports") / date / time / "wiki"
+    if not wiki_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Wiki directory not found")
+
+    manifest = {}
+    manifest_path = wiki_dir / "pages.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except ValueError:
+            manifest = {}
+
+    pages = []
+    for f in sorted(wiki_dir.glob("*.md")):
+        path = manifest.get(f.stem)
+        if path:
+            segments = path.split("/")
+            title = segments[-1]
+            tier = _wiki_page_tier(path)
+        else:
+            segments = None
+            title = _wiki_page_title(f)
+            tier = _wiki_page_tier(f.stem)
+        pages.append({
+            "slug": f.stem,
+            "title": title,
+            "path": path,
+            "segments": segments,
+            "tier": tier,
+            "tier_name": _TIER_NAMES.get(tier),
+        })
+    # Wiki order: by full path where known (home page naturally precedes the
+    # numbered tier folders), legacy entries by tier then title.
+    pages.sort(key=lambda p: (
+        (p["path"] or "").lower() or (p["tier"] or "") + p["title"].lower(),
+    ))
+    return pages
+
+
+@app.get("/api/runs/{date}/{time}/wiki/{slug}.json")
+def wiki_page_json(date: str, time: str, slug: str):
+    """A wiki page rendered to an HTML fragment for the in-app viewer.
+
+    Same renderer as the standalone HTML route; the SPA styles the fragment
+    with its own theme variables.
+    """
+    md_path = Path("reports") / date / time / "wiki" / f"{slug}.md"
+    if not md_path.is_file():
+        raise HTTPException(status_code=404, detail="Wiki page not found")
+    content = md_path.read_text(encoding="utf-8")
+    return {
+        "slug": slug,
+        "title": _wiki_page_title(md_path),
+        "html": _md.markdown(content, extensions=["extra", "toc"]),
+    }
 
 
 @app.get("/api/runs/{date}/{time}/wiki/{slug}", response_class=HTMLResponse)
