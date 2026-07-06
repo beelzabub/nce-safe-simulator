@@ -9,9 +9,18 @@ of the live web UI and Quarto reports captured with Playwright.
 ```bash
 python3 -m venv .venv-deck
 source .venv-deck/bin/activate
-pip install -r deck/requirements-deck.txt
+pip install -r deck/requirements-deck.txt   # playwright, python-pptx, Pillow, PyYAML, segno
 playwright install chromium
 ```
+
+**System prerequisites** (not pip-installable — the pipeline shells out to these):
+
+- **Graphviz** — the `dot` binary on `PATH`, for the architecture diagrams (`capture_diagrams.py`). Debian/Ubuntu `apt-get install graphviz`, macOS `brew install graphviz`.
+- **DejaVu Sans Mono** font — for the CLI-menu render (`capture_cli_menu.py`). Present by default on most Linux (`fonts-dejavu`); macOS `brew install font-dejavu`. The script locates it across distros/macOS (known dirs → recursive scan → fontconfig `fc-match`), so no fixed path is assumed.
+- **`glab`**, authenticated (`glab auth status`) — `build_deck.py` / `fetch_metrics.py` pull live issues & MRs.
+- **`aws`**, authenticated — `build_deck.py` fetches the SAIC template from S3.
+
+If Graphviz or the font is missing, `build_deck.py` skips those slides with a warning rather than failing; `glab`/`aws` are hard requirements for the build.
 
 ## Pipeline
 
@@ -20,13 +29,50 @@ make deck-screenshots   # Playwright: capture UI dialogs + Quarto reports (~10-1
 make deck               # fetch live metrics, then build the .pptx
 ```
 
-Or run the three steps directly:
+Or run the steps directly:
 
 ```bash
 python3 deck/capture_screenshots.py   # -> deck/screenshots/
+python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/DoDAF diagrams)
+python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu.png
+python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
+python3 deck/capture_git_workflow.py  # -> deck/screenshots/git-workflow{,-compact,-epic}.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx
 ```
+
+`capture_diagrams.py` renders the architecture view set (`diagrams/*.py` — the same
+OV-1 / SV-1 / SV-2 / data-flow / DevSecOps views the container builds at image time)
+into `deck/screenshots/architecture/`, where `build_deck.py` drops them onto the DoD
+architecture slides. It needs the `diagrams` package (in `requirements.txt`) and the
+Graphviz `dot` binary on PATH. If those images are absent, `build_deck.py` simply skips
+the diagram slides (with a warning) — the rest of the deck still builds.
+
+`capture_cli_menu.py` renders the CLI interactive main menu (`NceGitLab.py`'s
+`_run_main_menu`) as a terminal-style PNG for the "CLI vs. UI" slide. The live menu is
+interactive and prints runtime GitLab/server state, so this is a faithful static render
+(menu rows mirror `_run_main_menu`; the status block uses sample values) — keep its `MENU`
+list in sync if that menu changes. Needs only Pillow and the DejaVu Sans Mono system font;
+if the image is absent, `build_deck.py` skips it and the slide keeps the UI half.
+
+`capture_test_log.py` runs the Test Coverage Program's unit tests (report / tool /
+pipeline — issues #24–#26) via pytest and renders an excerpt of the **real** output as a
+terminal-style PNG for the "Test Coverage Program" capability slide. The command shown in
+the rendered prompt is the command actually run; if the run doesn't pass cleanly the
+script warns and the image shows the failure — fix the tests, don't ship the deck. Same
+requirements as `capture_cli_menu.py` (Pillow + DejaVu Sans Mono).
+
+`capture_git_workflow.py` draws the development loop as a git-graph (issue → UI-created
+branch → `Refs #NNN` commits → tests on every push → MR review → merge to `develop` →
+develop CI publish/deploy) in the deck palette. The wide render gets its own
+"Development Workflow" slide; the compact render illustrates "Development Process &
+Tools"; the epic render ("Development Workflow — Epics") shows an epic::epic issue's
+own integration branch collecting its child-issue branches before merging to develop
+once. Keep it in step with the conventions it depicts if they ever change. Same
+requirements as `capture_cli_menu.py` (Pillow + DejaVu fonts).
+
+`build_deck.py` also pulls **every** project issue live via `glab` for the paginated
+Issues table, so `glab` must be authenticated when building.
 
 All three are read-only against the target app **except one deliberate exception**:
 `live_run_shots` in `shots.yaml` selects a parameterless, explicitly read-only tool
@@ -37,9 +83,24 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 ## Config files
 
 - **`shots.yaml`** — the screenshot shot list: which UI dialogs to open (`ui_shots`),
-  the one live-run demo (`live_run_shots`), and which Quarto report pages to capture
-  (`quarto_shots`). Add a new tool or report page here and re-run `capture_screenshots.py`
-  with `--only <name>` to add just that one shot without a full re-capture.
+  the one live-run demo (`live_run_shots`), which Quarto report pages to capture
+  (`quarto_shots`), and the `/login` front door (`login_shots`). Add a new tool or
+  report page here and re-run `capture_screenshots.py` with `--only <name>` to add just
+  that one shot without a full re-capture, or `--section quarto` / `--section login` to
+  refresh just those (skips the other sections).
+
+  `login_shots` is captured differently from `ui_shots`: it does **not** seed the auth
+  gate (so the real background slideshow shows) but pre-acknowledges the DoD banner so
+  the slideshow nav chevrons (issue #187) aren't hidden behind it. One full-bleed image,
+  no dark/light toggle — the front door is always the photographic dark theme.
+
+  Report pages are long scrollable documents, so a single full-page screenshot is
+  unreadable on a slide. Tall `quarto_shots` are therefore **also** captured as 2–4
+  readable, viewport-height crops taken down the page (portrait frame, 2× device
+  scale); `build_deck.py` lays those out as a centered row of cards in the Appendix
+  (`report_segments_slide`), while short pages keep the single full-bleed image. The
+  crop count is automatic from page height; override per shot with `segments: <n>`
+  (or `segments: false` to force a single image).
 - **`capabilities.yaml`** — the deck's capability-area content: title, issue count, blurb,
   flagship-issue bullets, and (optionally) which captured screenshot to embed. This is a
   **maintained mapping, not re-derived automatically** — clustering issues into capability

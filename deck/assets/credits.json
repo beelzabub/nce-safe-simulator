@@ -1,0 +1,8 @@
+{
+  "grafana-logo.png": {
+    "source": "https://commons.wikimedia.org/wiki/File:Grafana_logo.svg",
+    "license": "AGPL (Grafana Labs open-source project logo)",
+    "use": "Grafana Observability Integration capability slide (deck/capabilities.yaml)",
+    "note": "960px PNG render of the official Grafana logo; nominative use identifying the Grafana product."
+  }
+}

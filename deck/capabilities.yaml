@@ -1,14 +1,18 @@
 # Capability-area content for deck/build_deck.py.
 #
-# This is a maintained mapping, not re-derived from GitLab on every build: clustering 142
+# This is a maintained mapping, not re-derived from GitLab on every build: clustering 160+
 # issues into capability areas is a judgment call, and re-running a semantic pass each
 # build would be non-deterministic and cost an LLM call for no real benefit. When new
 # issues land that don't fit an existing area, add them here by hand (or bump `count` and
 # add a bullet) rather than regenerating this file wholesale.
 #
-# image: relative path under the screenshots dir (produced by capture_screenshots.py),
-#   either "<name>_dark.png" / "<name>_light.png" from ui_shots/live_run_shots, or
-#   "reports_quarto/<name>.png" from quarto_shots. Omit for text-only slides.
+# image: path resolved first under the screenshots dir (produced by capture_screenshots.py) —
+#   "<name>_dark.png" / "<name>_light.png" from ui_shots/live_run_shots, "reports_quarto/<name>.png"
+#   from quarto_shots, or "architecture/<name>.png" from capture_diagrams.py — then, if not found
+#   there, repo-relative (so a capability can point at curated media/ imagery). Omit for text-only.
+# inset_image / inset_label: optional — a small magnifier-style closeup chip pinned to the bottom-
+#   right of the main image (e.g. the deployed-version badge). "00-home-version-closeup.png" is
+#   generated at build time by build_deck.py.
 
 capabilities:
   - title: "CI/CD Pipeline Foundation"
@@ -18,6 +22,8 @@ capabilities:
       - "#1 Setup basic pipeline to execute NceGitLab"
       - "#52 Fix SSL cert verification failure in CI/CD containers"
       - "#56 Fix CI/CD pipeline for GitLab Pages deployment"
+    image: "architecture/devsecops-architecture.png"
+    caption: "DevSecOps pipeline — pytest on every push, Pages on develop"
 
   - title: "SAFe Bootstrap & Portfolio Scaffolding"
     count: 13
@@ -27,7 +33,7 @@ capabilities:
       - "#82 Make stuck-item thresholds configurable + creation-date distribution"
       - "#119 Verify epic created_at backdating feasibility"
       - "#3 Expand PIID labels to cover 2–3 years of PI history"
-    image: "10-initial-setup-create-lorem-data_dark.png"
+    image: "10-initial-setup-create-lorem-data_light.png"
     caption: "Initial Setup — Create Lorem Data"
 
   - title: "WSJF, Business Value & Risk Reporting"
@@ -57,7 +63,7 @@ capabilities:
     bullets:
       - "#6 Wiki pages not updating on subsequent runs (slug regression)"
       - "#9 Fix wiki slug mismatch and duplicate-page upload failure"
-    image: "12-wiki-management-list-wikis_dark.png"
+    image: "12-wiki-management-list-wikis_light.png"
     caption: "Wiki Management — List Wikis"
 
   - title: "Test Coverage Program"
@@ -67,6 +73,8 @@ capabilities:
       - "#23 Analyze current test coverage and develop a plan"
       - "#24 / #25 / #26 Test coverage phases 1–3 (report / tool / pipeline unit tests)"
       - "Result: test suite scales with the automation core it covers (see Metrics)"
+    image: "pytest-run.png"
+    caption: "The coverage program's unit tests — a real run, excerpted (capture_test_log.py)"
 
   - title: "Reporting Platform Migration: Wiki → Quarto → Marimo"
     count: 16
@@ -86,6 +94,8 @@ capabilities:
       - "#57 Grafana PoC: Infinity datasource + Flow Metrics dashboard"
       - "#93 Generate Grafana JSON data files during report run"
       - "#96 Make AMG (Amazon Managed Grafana) optional, off by default"
+    image: "deck/assets/grafana-logo.png"
+    caption: "Grafana (open source) — deployed as Amazon Managed Grafana, optional and off by default (#96)"
 
   - title: "Web Server & Vue Frontend Build-out"
     count: 15
@@ -95,8 +105,35 @@ capabilities:
       - "#67 Phase 2(C) WebSocket job streaming"
       - "#71 Phase 2(E3) JobRunner tabbed interface + streaming LogPane"
       - "#72 Phase 2(F) Site theme, dark/light toggle, professional job picker UI"
-    image: "00-home_dark.png"
+    image: "00-home_light.png"
     caption: "Web UI — job picker home"
+    inset_image: "00-home-version-closeup.png"
+    inset_label: "Deployed build, stamped in the UI (#186)"
+
+  - title: "Login & Authentication (DoD-grade)"
+    count: 18
+    blurb: "A full login experience plus a pluggable enterprise-auth roadmap"
+    bullets:
+      - "#135 Login page (epic) — a themed sign-in card over a rotating fleet-imagery slideshow (#148, #158, #162)."
+      - "#149 DoD Notice & Consent banner (DTM 08-060), acknowledged once per browser session; #163 tracks a session-expiry re-prompt defect."
+      - "#150 Session gate + Vue Router guard; #146 Auth config tab and login-backgrounds API; #157 server-wide basic-auth enforcement with auth.method dispatch."
+      - "#147 Login imagery curated via an S3 staging bucket + sync tooling; #159 / #161 Operation Epic Fury imagery and a faint NCE logo for site identity."
+      - "Pluggable auth methods on the roadmap (#152–#156): CAC/PIV via DoD PKI, OIDC / OAuth 2.0, SAML 2.0, LDAP / Active Directory, and STIG break-glass local accounts."
+    image: "15-login-front-door.png"
+    caption: "Login front door — themed sign-in over a rotating fleet-imagery slideshow"
+
+  - title: "In-App Reports & Analysis Panel"
+    count: 6
+    blurb: "Reports and portfolio analysis brought into the app itself — and back out as published reports"
+    bullets:
+      - "#165 / #166 New Reports section and a multi-tab side-panel shell (Tools / Reports / Analysis)."
+      - "#167 Reports tab with an in-app Markdown viewer — read generated reports without leaving the UI."
+      - "#168 Analysis API — a blocked-chains endpoint with weight / Business-Value rollups."
+      - "#169 Analysis tab — a Blocked Work Explorer that grew into a portfolio-level Portfolio Explorer (three-tier BV/weight-at-risk, untyped-epic warnings)."
+      - "#182 Portfolio Explorer published as a report — the same view now renders to a Tier-1 wiki page and a Quarto Executive page, with numbers pinned to the app's own analysis engine so they can't drift."
+      - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). The panel work has started landing (#182 merged); the rest is the project's current momentum."
+    image: "17-analysis-portfolio-explorer_light.png"
+    caption: "Portfolio Explorer — the in-app Analysis panel, live (#169)"
 
   - title: "Cloud Deployment & Infrastructure"
     count: 16
@@ -106,6 +143,8 @@ capabilities:
       - "#85 Transition containerized version to run in Kubernetes"
       - "#97 Auto-generate architecture diagram for ECS/EKS"
       - "#100 Restore split-config loading, fix EKS namespace ordering, add deploy/validate loop"
+    image: "architecture/sv2-eks-architecture.png"
+    caption: "EKS deployment architecture (SV-2, auto-generated)"
 
   - title: "Security & Credential Hygiene"
     count: 3
@@ -114,6 +153,8 @@ capabilities:
       - "#111 Scrub leaked GitLab token from git history"
       - "#110 Remove private_token from tracked config.json + resolve token from env"
       - "#109 Explore self-signed cert for the simulator"
+    image: "16-config-connection_light.png"
+    caption: "Config — GitLab connection & Private Token (resolved from env)"
 
   - title: "Import/Export Epics & Issues (UI)"
     count: 15
@@ -135,13 +176,15 @@ capabilities:
       - "#104 Evaluate PMW framework transition"
       - "#121 Integrate NCE logo"
       - "#114 Document the issue-block seeding capability"
-    image: "13-audit-validation-audit-hierarchy_dark.png"
+    image: "13-audit-validation-audit-hierarchy_light.png"
     caption: "Audit & Validation — Audit Hierarchy"
 
   - title: "Open & Future Work"
-    count: 3
-    blurb: "Still open at time of this review"
+    count: 2
+    blurb: "Remaining evaluation work; the active roadmap now has its own slides"
     bullets:
-      - "#84 Analyze the use of S3 for the safe simulator"
-      - "#135 Create a login page for nce-safe-sim (epic)"
-      - "Plus in-flight web-UI forward work folded into the frontend arc above"
+      - "#84 Evaluate the use of S3 for the safe simulator (analysis spike)."
+      - "Enterprise authentication methods (#152–#156) — see the Login & Authentication slide."
+      - "In-app Analysis panel (#165–#169) — see the In-App Reports & Analysis slide."
+    image: "media/login-backgrounds/carrier-flight-deck-sunset.jpg"
+    caption: "U.S. Navy photo — carrier flight deck at sunset"

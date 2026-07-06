@@ -2,3 +2,4 @@ playwright
 python-pptx
 Pillow
 PyYAML
+segno
