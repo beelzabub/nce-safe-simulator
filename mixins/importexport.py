@@ -11,7 +11,7 @@ from pathlib import Path
 EPIC_EXPORT_FIELDS = [
     "group_path", "source_root", "iid", "id", "title", "description", "state",
     "labels", "start_date", "due_date", "parent_id", "parent_iid",
-    "planned_weight", "author", "web_url",
+    "planned_weight", "business_value", "author", "web_url",
     "created_at", "updated_at", "closed_at",
 ]
 
@@ -26,7 +26,7 @@ ISSUE_EXPORT_FIELDS = [
 EPIC_IMPORT_KNOWN = {
     "title", "group_path", "description", "labels",
     "start_date", "due_date", "end_date", "parent_id",
-    "planned_weight", "state",
+    "planned_weight", "business_value", "state",
     # read-only / reference columns carried from export — silently ignored
     "iid", "id", "author", "web_url", "created_at", "updated_at",
     "closed_at", "parent_iid", "work_item_id",
@@ -419,6 +419,44 @@ class ImportExportMixin:
                 return None, False
         return ("/".join(common) or None), False
 
+    def _ensure_group_chain(self, root_group, rel, group_cache, dry_run, planned):
+        """Create (or, under dry run, plan) the subgroup chain for ``rel``.
+
+        Walks ``rel`` segment by segment under ``root_group``, creating each
+        missing subgroup (mkdir -p style) and adding it to ``group_cache`` so
+        later rows land in it without re-creating. Segments come from a real
+        exported full_path, so they are already valid URL slugs; the display
+        name is the slug (the export doesn't carry display names). Under dry
+        run nothing is created — planned paths are reported once each and a
+        lightweight stub keeps the preview showing the intended placement.
+
+        Returns the (created/stubbed/existing) group for the full chain.
+        """
+        class _Planned:
+            def __init__(self, full_path):
+                self.full_path = full_path
+
+        parent = root_group
+        cur = root_group.full_path
+        for seg in rel.strip("/").split("/"):
+            cur = f"{cur}/{seg}"
+            g = group_cache.get(cur)
+            if g is None:
+                if dry_run:
+                    if cur not in planned:
+                        planned.add(cur)
+                        print(f"  [dry] would create group '{cur}'")
+                    g = _Planned(cur)
+                else:
+                    g = self.gl.groups.create({
+                        "name": seg, "path": seg, "parent_id": parent.id,
+                    })
+                    planned.add(cur)
+                    print(f"  created group '{cur}'")
+                group_cache[cur] = g
+            parent = g
+        return parent
+
     def _reconcile_path(self, own, source_root, target_root_path, cache, allow_root=True):
         """Resolve `own` (a source-rooted path) under `target_root_path`.
 
@@ -473,6 +511,10 @@ class ImportExportMixin:
         print("  Fetching planned weights via GraphQL...")
         weights = self._fetch_epic_weights(all_epics)
 
+        # Business Value custom field (#196) — prioritization signal; without
+        # it a transferred portfolio loses WSJF scores and BV-at-risk metrics.
+        bv_values = self._fetch_epic_business_values(all_epics, root_namespace=group)
+
         rows = []
         for epic in all_epics:
             rows.append({
@@ -489,6 +531,7 @@ class ImportExportMixin:
                 "parent_id":      getattr(epic, "parent_id",  "") or "",
                 "parent_iid":     getattr(epic, "parent_iid", "") or "",
                 "planned_weight": weights.get(epic.web_url, ""),
+                "business_value": bv_values.get(epic.id, ""),
                 "author":         (epic.author or {}).get("name", ""),
                 "web_url":        epic.web_url or "",
                 "created_at":     getattr(epic, "created_at", "") or "",
@@ -564,6 +607,7 @@ class ImportExportMixin:
             self._coerce_int(row.get("id"),           "id",            i, errors)
             self._coerce_int(row.get("parent_id"),    "parent_id",     i, errors)
             self._coerce_int(row.get("planned_weight"), "planned_weight", i, errors)
+            self._coerce_int(row.get("business_value"), "business_value", i, errors)
 
             state = str(row.get("state", "")).strip().lower()
             if state and state not in VALID_STATES:
@@ -722,6 +766,53 @@ class ImportExportMixin:
                 pass
             print(f"  Please enter a number between 0 and {len(choices)}.")
 
+    # ── Business Value on import (#196) ────────────────────────────────────────
+
+    def _resolve_import_bv_field(self, rows, root_group):
+        """Resolve the target's Business Value field once, iff any row needs it.
+
+        Returns {"field_gid", "options": {int value: option gid}} when the
+        field exists, {} when rows carry BV but the target has no such field
+        (WARNed once — import continues, values are dropped), or None when no
+        row carries a business_value at all (no GraphQL spent).
+        """
+        needs_bv = any(
+            str(r.get("business_value", "")).strip() not in ("", "None", "none")
+            for r in rows
+        )
+        if not needs_bv:
+            return None
+        bv_field = self._find_bv_field(group=root_group)
+        if not bv_field:
+            print(f"  WARN: Business Value custom field "
+                  f"('{self.BUSINESS_VALUE_FIELD['name']}') not found on the "
+                  f"target — business_value values will be ignored.")
+            return {}
+        options = {}
+        for opt in bv_field.get("selectOptions") or []:
+            try:
+                options[int(opt["value"])] = opt["id"]
+            except (KeyError, ValueError, TypeError):
+                pass
+        return {"field_gid": bv_field["id"], "options": options}
+
+    def _import_set_bv(self, epic, bv, bv_ctx, row_num):
+        """Set the BV custom field on a created/updated epic; WARN, never raise."""
+        opt_gid = bv_ctx["options"].get(bv)
+        if opt_gid is None:
+            print(f"  row {row_num}: WARN business_value {bv} is not an option "
+                  f"of the target field ({sorted(bv_ctx['options'])}) — not set")
+            return
+        wid = getattr(epic, "work_item_id", None)
+        if not wid:
+            print(f"  row {row_num}: WARN epic has no work_item_id — "
+                  f"business_value not set")
+            return
+        try:
+            self._set_work_item_business_value(wid, bv_ctx["field_gid"], opt_gid)
+        except Exception as ex:
+            print(f"  row {row_num}: WARN business_value set failed — {ex}")
+
     def _resolve_parent_ids(self, rows, valid_epic_ids, root_group, unresolved_parent,
                             file_ids=frozenset(), cross_root=False):
         """
@@ -806,14 +897,15 @@ class ImportExportMixin:
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                      group=None, create_missing=False, dest_group=None, on_existing="skip",
-                     source_root=None):
+                     source_root=None, create_missing_groups=False):
         with self._group_override(group):
             return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
-                                      dest_group, on_existing, source_root)
+                                      dest_group, on_existing, source_root,
+                                      create_missing_groups)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                       create_missing=False, dest_group=None, on_existing="skip",
-                      source_root=None):
+                      source_root=None, create_missing_groups=False):
         """
         Import epics from a CSV or JSON file.
 
@@ -944,6 +1036,10 @@ class ImportExportMixin:
         created = skipped = updated = failed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
         id_map = {}           # source id → new/matched target id (#194)
+        groups_created = set()   # full paths created (or planned, dry run) (#195)
+        # Business Value context (#196): resolved once, only when needed and
+        # not under dry run (dry runs preview the value without GraphQL).
+        bv_ctx = None if dry_run else self._resolve_import_bv_field(cleaned, root_group)
 
         for i in ordered:
             row = cleaned[i - 1]
@@ -958,14 +1054,18 @@ class ImportExportMixin:
             due_date    = self._coerce_date(row.get("due_date") or row.get("end_date"),  "due_date",   i, [])
             orig_pid    = self._coerce_int(row.get("parent_id"),     "parent_id",     i, [])
             weight      = self._coerce_int(row.get("planned_weight"), "planned_weight", i, [])
+            bv          = self._coerce_int(row.get("business_value"), "business_value", i, [])
             state       = str(row.get("state", "")).strip().lower()
             # Placement precedence: (1) the row's own group_path when it resolves
             # directly under the target root (same-root import); (2) #139 relative
             # reconcile — strip the source root and re-resolve the structural path
-            # under this target root (cross-enclave); (3) #138 picked dest_group as
-            # the fallback when structure can't be honored; (4) the target root —
-            # a valid epic container (unlike issues, where a missing project has no
-            # root fallback and the row is skipped).
+            # under this target root (cross-enclave); (2b) #195 create the missing
+            # subgroup chain for that structural path, when enabled and the source
+            # root is TRUSTED (stamp/override — never the LCP guess, which could
+            # mint a wrong tree); (3) #138 picked dest_group as the fallback when
+            # structure can't be honored; (4) the target root — a valid epic
+            # container (unlike issues, where a missing project has no root
+            # fallback and the row is skipped).
             own = str(row.get("group_path", "")).strip()
             reconciled = (
                 self._reconcile_path(own, src_root, root_group.full_path, group_cache,
@@ -976,10 +1076,19 @@ class ImportExportMixin:
                 gpath = own
             elif reconciled:
                 gpath = reconciled
-            elif dest_group:
-                gpath = dest_group
             else:
-                gpath = own or root_group.full_path
+                chain_rel = (
+                    self._strip_source_root(own, src_root)
+                    if create_missing_groups and own and src_trusted else None
+                )
+                if chain_rel:
+                    grp = self._ensure_group_chain(
+                        root_group, chain_rel, group_cache, dry_run, groups_created)
+                    gpath = grp.full_path
+                elif dest_group:
+                    gpath = dest_group
+                else:
+                    gpath = own or root_group.full_path
 
             target = group_cache.get(gpath)
             if not target:
@@ -1051,6 +1160,7 @@ class ImportExportMixin:
                 if existing:      parts.append(f"#{existing.iid}")
                 if labels:        parts.append(f"labels={labels}")
                 if weight:        parts.append(f"weight={weight}")
+                if bv is not None: parts.append(f"bv={bv}")
                 if symbolic:      parts.append(f"parent=(epic from row {resolved_pid[1]})")
                 elif resolved_pid: parts.append(f"parent_id={resolved_pid}")
                 if is_orphan:     parts.append("⚑ needs-parent")
@@ -1068,6 +1178,8 @@ class ImportExportMixin:
             try:
                 if existing and on_existing == "update":
                     self._update_epic(existing, payload, weight, state)
+                    if bv is not None and bv_ctx:
+                        self._import_set_bv(existing, bv, bv_ctx, i)
                     print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
                     if src_id is not None:
                         id_map[src_id] = existing.id
@@ -1076,6 +1188,8 @@ class ImportExportMixin:
                     epic = target.epics.create(payload)
                     if weight is not None:
                         self._set_epic_weight(epic, weight)
+                    if bv is not None and bv_ctx:
+                        self._import_set_bv(epic, bv, bv_ctx, i)
                     if state == "closed":
                         epic.state_event = "close"
                         epic.save()
@@ -1092,6 +1206,10 @@ class ImportExportMixin:
 
         print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
+        if groups_created:
+            verb = "would be created" if dry_run else "created"
+            print(f"  {len(groups_created)} missing subgroup(s) {verb} along "
+                  f"reconciled paths (create-missing-groups)")
 
         # Paired import (#197): persist the source_id → new id map so a
         # following issues import can resolve its epic_id references to the
