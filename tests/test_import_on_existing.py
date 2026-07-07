@@ -134,6 +134,7 @@ def _epic_setup():
     existing = MagicMock()
     existing.iid = 7
     existing.title = "Epic A"
+    existing.group_id = root.id      # same container (#199 scoping)
     root.epics.list.return_value = [existing]
     cache = {"ns/root": root}
     rows = [{"title": "Epic A", "group_path": "ns/root", "description": "new"}]

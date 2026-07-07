@@ -46,6 +46,8 @@ class RemapHarness(ImportExportMixin, BootstrapMixin):
             self.created.append(dict(payload, _new_id=e.id))
             return e
         self.root.epics.create.side_effect = _create
+        for _ex in self._existing.values():
+            _ex.group_id = self.root.id    # same container (#199 scoping)
         self.root.epics.list.return_value = list(self._existing.values())
 
     # plumbing stubs
@@ -301,6 +303,7 @@ class TestMultiTitleMatchWarn:
         a.iid, b.iid = 1, 2
         grp = MagicMock()
         grp.full_path = ROOT_PATH
+        a.group_id = b.group_id = grp.id   # same container (#199 scoping)
         grp.epics.list.return_value = [a, b]
         found = h._find_epic_by_title(grp, "Twin")
         assert found is a
