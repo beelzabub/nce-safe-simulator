@@ -81,7 +81,7 @@ _report_data_lock = threading.Lock()
 # Browser-uploaded import files land here so the import tools can read them by
 # server path. File extensions are restricted to the formats the importer reads.
 _UPLOADS_DIR = Path("uploads")
-_ALLOWED_UPLOAD_EXT = {".csv", ".json"}
+_ALLOWED_UPLOAD_EXT = {".csv", ".json", ".zip"}
 
 # Set of currently-running job keys (used for conflict checking).
 _running_jobs: set = set()
@@ -137,6 +137,7 @@ def _tool_payload(tool: dict, gl=None) -> dict:
             "section":  p.get("section"),
             "help":     p.get("help"),
             "hint":     hint,
+            "accept":   p.get("accept"),
             "default":  default,
             "optional": p.get("optional", False),
         })
