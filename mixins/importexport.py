@@ -58,8 +58,22 @@ ISSUE_ONLY_COLS = ISSUE_IMPORT_KNOWN - EPIC_IMPORT_KNOWN
 VALID_DATE_FMT = "%Y-%m-%d"
 VALID_STATES   = {"opened", "open", "closed"}
 
+LINK_EXPORT_FIELDS = [
+    "link_type", "source_type", "source_id", "source_iid", "source_title",
+    "source_container", "target_type", "target_id", "target_iid",
+    "target_title", "target_container", "source_root",
+]
+
 # Exports land here so FastAPI's static server can serve them for download.
 _EXPORTS_DIR = Path("public/exports")
+
+
+def _gid_int(gid):
+    """'gid://gitlab/WorkItem/123' -> 123 (or None); plain ints pass through."""
+    try:
+        return int(str(gid).rsplit("/", 1)[-1])
+    except (ValueError, AttributeError):
+        return None
 
 
 class ImportExportMixin:
@@ -1424,17 +1438,51 @@ class ImportExportMixin:
         print(f"  Validation passed — {len(rows)} row(s) ready")
         return rows, 0
 
+    def _ensure_project(self, root_group, rel, group_cache, project_cache,
+                        dry_run, planned):
+        """Create (or, under dry run, plan) the project for ``rel`` (#198).
+
+        ``rel`` is a source-relative project path: the last segment is the
+        project slug, everything before it the subgroup chain — created via
+        _ensure_group_chain under the same trusted-root guardrail. Returns
+        the (created/stubbed) project, cached so later rows reuse it.
+        """
+        class _Planned:
+            def __init__(self, pwn):
+                self.path_with_namespace = pwn
+                self.id = None
+
+        rel = rel.strip("/")
+        group_rel, _, proj_slug = rel.rpartition("/")
+        parent = (self._ensure_group_chain(root_group, group_rel, group_cache,
+                                           dry_run, planned)
+                  if group_rel else root_group)
+        pwn = f"{root_group.full_path}/{rel}"
+        if dry_run:
+            if pwn not in planned:
+                planned.add(pwn)
+                print(f"  [dry] would create project '{pwn}'")
+            proj = _Planned(pwn)
+        else:
+            proj = self.gl.projects.create({
+                "name": proj_slug, "path": proj_slug, "namespace_id": parent.id,
+            })
+            planned.add(pwn)
+            print(f"  created project '{pwn}'")
+        project_cache[pwn] = proj
+        return proj
+
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
                       group=None, create_missing=False, on_existing="skip",
-                      source_root=None, epic_id_map=None):
+                      source_root=None, epic_id_map=None, create_missing_projects=False):
         with self._group_override(group):
             return self._import_issues(input_path, target_project_path, dry_run,
                                        create_missing, on_existing, source_root,
-                                       epic_id_map)
+                                       epic_id_map, create_missing_projects)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
                        create_missing=False, on_existing="skip", source_root=None,
-                       epic_id_map=None):
+                       epic_id_map=None, create_missing_projects=False):
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -1511,6 +1559,8 @@ class ImportExportMixin:
         username_cache = {}
 
         created = skipped = updated = failed = 0
+        projects_created = set()   # paths created (or planned, dry run) (#198)
+        group_cache = None         # built lazily, only when creating projects
 
         for i, row in enumerate(cleaned, 1):
             title       = str(row.get("title", "")).strip()
@@ -1529,7 +1579,9 @@ class ImportExportMixin:
             # (same-root); (2) #139 relative reconcile under this target root
             # (cross-enclave); (3) #138 picked target_project_path as the fallback;
             # (4) skip — issues have no root fallback, so an unresolvable row with
-            # no destination is dropped.
+            # no destination is dropped. (3b, #198): with create_missing_projects
+            # and a TRUSTED source root, the missing group chain + project are
+            # created along the reconciled path instead of falling back.
             own = str(row.get("project_path", "")).strip()
             reconciled = (
                 self._reconcile_path(own, src_root, root_group.full_path, project_cache,
@@ -1540,10 +1592,28 @@ class ImportExportMixin:
                 ppath = own
             elif reconciled:
                 ppath = reconciled
-            elif target_project_path:
-                ppath = target_project_path
             else:
-                ppath = own
+                proj_rel = (
+                    self._strip_source_root(own, src_root)
+                    if create_missing_projects and own and src_trusted else None
+                )
+                if proj_rel:
+                    if group_cache is None:
+                        group_cache = self._build_group_cache(root_group)
+                    try:
+                        proj = self._ensure_project(
+                            root_group, proj_rel, group_cache, project_cache,
+                            dry_run, projects_created)
+                        ppath = proj.path_with_namespace
+                    except Exception as ex:
+                        print(f"  row {i}: FAILED — could not create container "
+                              f"for '{own}' — {ex}")
+                        failed += 1
+                        continue
+                elif target_project_path:
+                    ppath = target_project_path
+                else:
+                    ppath = own
 
             if not ppath:
                 print(f"  row {i}: SKIP — no project path")
@@ -1570,12 +1640,20 @@ class ImportExportMixin:
             # milestones inherited from the parent groups (PI milestones live at
             # the ART/portfolio level, not on the project) — GitLab lets a group
             # milestone be assigned to an issue in a project under that group.
-            if milestone:
+            if milestone and not hasattr(project, "milestones"):
+                # A planned (dry-run) project stub — the milestone can only
+                # resolve once the project exists.
+                print(f"  row {i}: [dry] milestone '{milestone}' will resolve "
+                      f"after the project is created")
+            elif milestone:
                 try:
                     ms_list = project.milestones.list(
                         search=milestone, include_ancestors=True, all=True)
                 except Exception:
-                    ms_list = project.milestones.list(search=milestone)
+                    try:
+                        ms_list = project.milestones.list(search=milestone)
+                    except Exception:
+                        ms_list = []
                 # search is a substring match and may return several (e.g. a
                 # project and a group milestone of the same name) — prefer an
                 # exact title match.
@@ -1656,4 +1734,396 @@ class ImportExportMixin:
                 failed += 1
 
         print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
+              + ("  (dry run — no changes made)" if dry_run else ""))
+        if projects_created:
+            verb = "would be created" if dry_run else "created"
+            print(f"  {len(projects_created)} missing container(s) {verb} along "
+                  f"reconciled paths (create-missing-projects)")
+
+    # ── Blocking-link export / import (#198) ───────────────────────────────────
+
+    _LINK_EPIC_ISSUE_BLOCKERS_QUERY = """
+    query($path: ID!, $cursor: String) {
+      group(fullPath: $path) {
+        workItems(types: [EPIC], includeDescendants: true, first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id iid title
+            namespace { fullPath }
+            widgets {
+              ... on WorkItemWidgetLinkedItems {
+                linkedItems(first: 100) {
+                  pageInfo { hasNextPage }
+                  nodes {
+                    linkType
+                    workItem {
+                      id iid title
+                      namespace { fullPath }
+                      workItemType { name }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }"""
+
+    _LINK_ISSUE_FLAG_QUERY = """
+    query($path: ID!, $cursor: String) {
+      group(fullPath: $path) {
+        issues(includeSubgroups: true, first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes { iid title blocked blockedByCount projectId }
+        }
+      }
+    }"""
+
+    def export_links(self, output_path=None, group=None, fmt="csv"):
+        with self._group_override(group):
+            return self._export_links(output_path, fmt)
+
+    def _export_links(self, output_path=None, fmt="csv"):
+        """Export every is_blocked_by relationship under the group (#198).
+
+        Three kinds, one row each (source is_blocked_by target):
+        epic ← epic (REST related_epics), issue ← issue (bulk GraphQL flag +
+        REST links for flagged issues only), and epic ← Issue (the cross-type
+        work-items links invisible to both REST graphs, #177). Containers are
+        exported as full paths so import can reconcile them structurally.
+        """
+        group = self.get_group_by_name(self.parent_group)
+        if not group:
+            print(f"ERROR: group '{self.parent_group}' not found.")
+            return
+
+        if output_path:
+            path = self._resolve_path(output_path)
+            fmt  = self._detect_format(path)
+        else:
+            fmt  = "json" if str(fmt).lower() == "json" else "csv"
+            path = self._default_export_name("links-export", fmt)
+
+        print(f"\nExporting blocking links from '{group.full_path}'...")
+        session = self._make_session()
+        gid_map = self._build_gid_path_map(group)
+        rows    = []
+
+        def _row(src_t, src, src_container, tgt_t, tgt, tgt_container):
+            rows.append({
+                "link_type":        "is_blocked_by",
+                "source_type":      src_t,
+                "source_id":        src.get("id", ""),
+                "source_iid":       src.get("iid", ""),
+                "source_title":     src.get("title", ""),
+                "source_container": src_container,
+                "target_type":      tgt_t,
+                "target_id":        tgt.get("id", ""),
+                "target_iid":       tgt.get("iid", ""),
+                "target_title":     tgt.get("title", ""),
+                "target_container": tgt_container,
+                "source_root":      group.full_path,
+            })
+
+        # ── epic ← epic (REST) ────────────────────────────────────────────
+        print("  Collecting epic blocking links...")
+        # (container path, iid) → legacy REST epic id, so cross-type rows can
+        # carry the SAME id space the paired-import id map is keyed on.
+        legacy_epic_id = {}
+        for epic in group.epics.list(all=True):
+            grp_id = getattr(epic, "group_id", None)
+            legacy_epic_id[(gid_map.get(grp_id, ""), epic.iid)] = epic.id
+            url = f"{self.url}/api/v4/groups/{grp_id}/epics/{epic.iid}/related_epics"
+            try:
+                resp = session.get(url)
+                if not resp.ok:
+                    continue
+                for rel in resp.json():
+                    if rel.get("link_type") != "is_blocked_by":
+                        continue
+                    _row("Epic",
+                         {"id": epic.id, "iid": epic.iid, "title": epic.title},
+                         gid_map.get(grp_id, ""),
+                         "Epic",
+                         {"id": rel.get("id"), "iid": rel.get("iid"),
+                          "title": rel.get("title")},
+                         gid_map.get(rel.get("group_id"), ""))
+            except Exception as ex:
+                print(f"  WARN: related_epics fetch failed for #{epic.iid} — {ex}")
+        n_epic = len(rows)
+        print(f"    {n_epic} epic←epic link(s)")
+
+        # ── epic ← Issue (work-items GraphQL, #177) ───────────────────────
+        print("  Collecting cross-type (epic←issue) blocking links...")
+        cursor = None
+        try:
+            while True:
+                data = self.graphql_query(
+                    self._LINK_EPIC_ISSUE_BLOCKERS_QUERY,
+                    variables={"path": group.full_path, "cursor": cursor}, retries=1)
+                conn = ((data or {}).get("group") or {}).get("workItems") or {}
+                for node in conn.get("nodes", []):
+                    for widget in node.get("widgets", []):
+                        _li_conn = (widget or {}).get("linkedItems") or {}
+                        if (_li_conn.get("pageInfo") or {}).get("hasNextPage"):
+                            print(f"  WARN: epic #{node.get('iid')} has more than "
+                                  f"100 linked items — some links may be missing")
+                        for li in _li_conn.get("nodes", []):
+                            wi = li.get("workItem") or {}
+                            if (li.get("linkType") != "is_blocked_by"
+                                    or (wi.get("workItemType") or {}).get("name") != "Issue"):
+                                continue
+                            ns_path = (node.get("namespace") or {}).get("fullPath", "")
+                            _row("Epic",
+                                 {"id": legacy_epic_id.get((ns_path, node.get("iid"))),
+                                  "iid": node.get("iid"),
+                                  "title": node.get("title")},
+                                 ns_path,
+                                 "Issue",
+                                 {"id": _gid_int(wi.get("id")), "iid": wi.get("iid"),
+                                  "title": wi.get("title")},
+                                 (wi.get("namespace") or {}).get("fullPath", ""))
+                page = conn.get("pageInfo") or {}
+                if not page.get("hasNextPage"):
+                    break
+                cursor = page.get("endCursor")
+        except Exception as ex:
+            print(f"  WARN: cross-type link pass failed — {ex}")
+        n_cross = len(rows) - n_epic
+        print(f"    {n_cross} epic←issue link(s)")
+
+        # ── issue ← issue (bulk flag + REST links) ────────────────────────
+        print("  Collecting issue blocking links...")
+        pid_map = self._build_pid_path_map(group)
+        flagged = []
+        cursor = None
+        try:
+            while True:
+                data = self.graphql_query(
+                    self._LINK_ISSUE_FLAG_QUERY,
+                    variables={"path": group.full_path, "cursor": cursor}, retries=1)
+                conn = ((data or {}).get("group") or {}).get("issues") or {}
+                for n in conn.get("nodes", []):
+                    if n.get("blocked") or (n.get("blockedByCount") or 0) > 0:
+                        flagged.append(n)
+                page = conn.get("pageInfo") or {}
+                if not page.get("hasNextPage"):
+                    break
+                cursor = page.get("endCursor")
+        except Exception as ex:
+            print(f"  WARN: issue flag pass failed — {ex}")
+        for n in flagged:
+            pid = _gid_int(n.get("projectId")) or n.get("projectId")
+            url = f"{self.url}/api/v4/projects/{pid}/issues/{n.get('iid')}/links"
+            try:
+                resp = session.get(url)
+                if not resp.ok:
+                    continue
+                for link in resp.json():
+                    if link.get("link_type") != "is_blocked_by":
+                        continue
+                    _row("Issue",
+                         {"id": None, "iid": n.get("iid"),
+                          "title": n.get("title", "")},
+                         pid_map.get(int(pid), "") if pid else "",
+                         "Issue",
+                         {"id": link.get("id"), "iid": link.get("iid"),
+                          "title": link.get("title")},
+                         pid_map.get(link.get("project_id"), ""))
+            except Exception as ex:
+                print(f"  WARN: issue links fetch failed for #{n.get('iid')} — {ex}")
+        print(f"    {len(rows) - n_epic - n_cross} issue←issue link(s)")
+
+        if not rows:
+            print("  No blocking links found — nothing written.")
+            return
+        self._write_file(path, fmt, rows, LINK_EXPORT_FIELDS)
+        print(f"  Exported {len(rows)} link(s) → {path}")
+        url = self._export_url(path)
+        if url:
+            print(f"  Download: {url}")
+
+    def import_links(self, input_path=None, group=None, epic_id_map=None,
+                     source_root=None, dry_run=False):
+        with self._group_override(group):
+            return self._import_links(input_path, epic_id_map, source_root, dry_run)
+
+    def _import_links(self, input_path=None, epic_id_map=None, source_root=None,
+                      dry_run=False):
+        """Recreate exported is_blocked_by links on the target (#198).
+
+        Endpoints resolve like the issue→epic links (#197): epics via the
+        paired-import id map, then exact title; issues via the reconciled
+        project path + exact title. Raw source ids are never used to address
+        target objects. Existing links are skipped (409/422), unresolvable
+        endpoints WARN and drop the link — never mis-link.
+        """
+        if not input_path:
+            print("ERROR: input_path is required.")
+            return
+        path = self._resolve_path(input_path)
+        if not path.exists():
+            print(f"ERROR: file not found: '{path}'")
+            return
+
+        print(f"\nImporting blocking links from '{path}'"
+              + ("  [DRY RUN]" if dry_run else ""))
+        rows = self._load_file(path)
+        if rows is None:
+            return
+        if not rows:
+            print("  File is empty — nothing to import.")
+            return
+        columns = set(rows[0].keys())
+        if not {"source_type", "target_type"} <= columns:
+            print("  INVALID: this does not look like a links export "
+                  "(missing source_type/target_type columns).")
+            return
+        print(f"  {len(rows)} link record(s) in file")
+
+        root_group = self.get_group_by_name(self.parent_group)
+        if root_group is None:
+            print(f"ERROR: target group '{self.parent_group}' not found.")
+            return
+
+        id_map = self._load_epic_id_map(epic_id_map)
+        src_root, _trusted = self._infer_source_root(rows, "source_container", source_root)
+
+        print("  Building target lookups...")
+        epic_by_id, epic_titles = {}, {}
+        for ep in root_group.epics.list(all=True):
+            epic_by_id[ep.id] = ep
+            epic_titles.setdefault(getattr(ep, "title", ""), []).append(ep)
+        project_cache = self._build_project_cache(root_group)
+        session = self._make_session()
+
+        def _epic_end(ref_id, title, row_num):
+            if ref_id is not None and str(ref_id) in id_map:
+                ep = epic_by_id.get(id_map[str(ref_id)])
+                if ep is not None:
+                    return ep
+            hits = epic_titles.get(title, [])
+            if len(hits) > 1:
+                print(f"  row {row_num}: WARN {len(hits)} target epics titled "
+                      f"'{title}' — using the first")
+            return hits[0] if hits else None
+
+        def _issue_end(container, title, iid, row_num):
+            ppath = container if container in project_cache else (
+                self._reconcile_path(container, src_root, root_group.full_path,
+                                     project_cache, allow_root=False))
+            proj = project_cache.get(ppath) if ppath else None
+            if proj is None:
+                return None, None
+            if title:
+                return self._find_issue_by_title(proj, title), proj
+            # No title (a legacy titleless export) — iids on a re-imported
+            # project are NOT stable (skips/failures/pre-existing issues all
+            # shift them), so addressing by iid could silently link the wrong
+            # issue. Drop instead; re-export with a current build to fix.
+            return None, proj
+
+        created = skipped = dropped = failed = 0
+        for i, row in enumerate(rows, 1):
+            s_type = str(row.get("source_type", "")).strip()
+            t_type = str(row.get("target_type", "")).strip()
+            s_id   = self._coerce_int(row.get("source_id"), "source_id", i, [])
+            t_id   = self._coerce_int(row.get("target_id"), "target_id", i, [])
+            s_iid  = self._coerce_int(row.get("source_iid"), "source_iid", i, [])
+            t_iid  = self._coerce_int(row.get("target_iid"), "target_iid", i, [])
+            s_title = str(row.get("source_title", "")).strip()
+            t_title = str(row.get("target_title", "")).strip()
+            s_cont  = str(row.get("source_container", "")).strip()
+            t_cont  = str(row.get("target_container", "")).strip()
+
+            label = f"{s_type} '{s_title or s_iid}' ←blocked by← {t_type} '{t_title or t_iid}'"
+
+            if s_type == "Epic":
+                src = _epic_end(s_id, s_title, i)
+            else:
+                src, _sp = _issue_end(s_cont, s_title, s_iid, i)
+            if t_type == "Epic":
+                tgt = _epic_end(t_id, t_title, i)
+            else:
+                tgt, _tp = _issue_end(t_cont, t_title, t_iid, i)
+
+            if src is None or tgt is None:
+                print(f"  row {i}: WARN link dropped — "
+                      f"{'source' if src is None else 'target'} not found on "
+                      f"target ({label})")
+                dropped += 1
+                continue
+
+            if dry_run:
+                print(f"  [dry] row {i}: would link {label}")
+                created += 1
+                continue
+
+            try:
+                if s_type == "Epic" and t_type == "Epic":
+                    url = (f"{self.url}/api/v4/groups/{src.group_id}"
+                           f"/epics/{src.iid}/related_epics")
+                    resp = session.post(url, json={
+                        "target_group_id": tgt.group_id,
+                        "target_epic_iid": tgt.iid,
+                        "link_type": "is_blocked_by",
+                    })
+                elif s_type == "Issue" and t_type == "Issue":
+                    url = (f"{self.url}/api/v4/projects/{src.project_id}"
+                           f"/issues/{src.iid}/links")
+                    resp = session.post(url, json={
+                        "target_project_id": tgt.project_id,
+                        "target_issue_iid": tgt.iid,
+                        "link_type": "is_blocked_by",
+                    })
+                else:
+                    # Cross-type (epic ← Issue, #177): only expressible via the
+                    # work-items GraphQL mutation.
+                    src_wid = getattr(src, "work_item_id", None)
+                    if not src_wid:
+                        # A legacy epic id is NOT in the WorkItem id space —
+                        # guessing would address a different work item.
+                        print(f"  row {i}: FAILED {label} — epic has no "
+                              f"work_item_id (cross-type links need it)")
+                        failed += 1
+                        continue
+                    mutation = """
+                    mutation($id: WorkItemID!, $items: [WorkItemID!]!) {
+                      workItemAddLinkedItems(input: {
+                        id: $id, workItemsIds: $items, linkType: BLOCKED_BY
+                      }) { errors }
+                    }"""
+                    data = self.graphql_query(mutation, variables={
+                        "id": f"gid://gitlab/WorkItem/{src_wid}",
+                        "items": [f"gid://gitlab/WorkItem/{tgt.id}"],
+                    })
+                    errors = ((data or {}).get("workItemAddLinkedItems") or {}).get("errors") or []
+                    if errors and any("already" in str(e).lower() for e in errors):
+                        print(f"  row {i}: SKIP (exists) {label}")
+                        skipped += 1
+                    elif errors:
+                        print(f"  row {i}: FAILED {label} — {errors}")
+                        failed += 1
+                    else:
+                        print(f"  row {i}: linked {label}")
+                        created += 1
+                    continue
+
+                if resp.status_code in (200, 201):
+                    print(f"  row {i}: linked {label}")
+                    created += 1
+                elif resp.status_code in (409, 422):
+                    print(f"  row {i}: SKIP (exists) {label}")
+                    skipped += 1
+                else:
+                    print(f"  row {i}: FAILED [{resp.status_code}] {label} — "
+                          f"{resp.text[:100]}")
+                    failed += 1
+            except Exception as ex:
+                print(f"  row {i}: FAILED {label} — {ex}")
+                failed += 1
+
+        print(f"\n  Done — {created} linked  |  {skipped} already existed  |  "
+              f"{dropped} dropped (unresolved)  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
