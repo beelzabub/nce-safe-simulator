@@ -51,7 +51,7 @@ class LinkHarness(ImportExportMixin, BootstrapMixin):
     def _load_file(self, path):                                return self._rows
     def _resolve_import_target(self, create_missing, dry_run): return self.root
     def _build_project_cache(self, root_group):                return {PROJ_PATH: self.proj}
-    def _find_issue_by_title(self, project, title):            return None
+    def _find_issue_by_title(self, project, title, cache=None):            return None
 
 
 def _run(h, tmp_path, **kw):
@@ -141,7 +141,7 @@ class TestUpdatePath:
         existing = MagicMock()
         existing.iid, existing.title = 42, "I1"
         h = LinkHarness([_row(epic_title="Epic X")], target_epics=[(9, "Epic X")])
-        h._find_issue_by_title = lambda project, title: existing
+        h._find_issue_by_title = lambda project, title, cache=None: existing
         _run(h, tmp_path, on_existing="update")
         assert existing.epic_id == 9
         existing.save.assert_called()
