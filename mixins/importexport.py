@@ -1393,16 +1393,31 @@ class ImportExportMixin:
                 print(f"  {row_num:<5} {str(orig_pid):<20} {gpath[:35]:<35} {etitle[:50]}")
             print(f"\n  Filter by label 'import::needs-parent' in GitLab to find and re-parent these epics.")
 
+        # The id map is also the success signal (#206): every abort path above
+        # returns None, so a dict — possibly empty under dry run — means the
+        # import ran. import_bundle threads it straight into the issues/links
+        # phases without a file round-trip.
+        return real_map
+
     # ── Issue → epic link resolution (#197) ───────────────────────────────────
 
     def _load_epic_id_map(self, path_str):
         """Load a paired-import id map ({source epic id: new target id}).
 
-        Produced by a preceding epics import. Returns {} on any problem, with
-        a WARN — a bad map degrades to title/raw-id resolution, never aborts.
+        Produced by a preceding epics import. Also accepts the map itself as a
+        dict (#206: import_bundle threads the in-memory map returned by
+        _import_epics). Returns {} on any problem, with a WARN — a bad map
+        degrades to title/raw-id resolution, never aborts.
         """
         if not path_str:
             return {}
+        if isinstance(path_str, dict):
+            try:
+                return {str(k): int(v) for k, v in path_str.items()}
+            except (TypeError, ValueError) as ex:
+                print(f"  WARN: in-memory epic id map is malformed ({ex}) — "
+                      f"falling back to title/raw-id resolution.")
+                return {}
         path = self._resolve_path(path_str)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -2104,8 +2119,7 @@ class ImportExportMixin:
         root_path = group.full_path
 
         def _external(container):
-            return not (container == root_path
-                        or str(container).startswith(root_path + "/"))
+            return self._container_external(container, root_path)
 
         external = [r for r in rows
                     if _external(r["source_container"]) or _external(r["target_container"])]
@@ -2313,3 +2327,281 @@ class ImportExportMixin:
         print(f"\n  Done — {created} linked  |  {skipped} already existed  |  "
               f"{dropped} dropped (unresolved)  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
+
+    # ── Transfer bundle (#206) ─────────────────────────────────────────────────
+    #
+    # One artifact, one action in each direction: export-bundle zips the three
+    # exports plus a merged group-names sidecar and a manifest; import-bundle
+    # unpacks it on an isolated system and runs the proven sequence — epics
+    # (id map captured in-memory) → issues → links — creating the group /
+    # project containers along the way.
+
+    BUNDLE_FORMAT  = "nce-bundle"
+    BUNDLE_VERSION = 1
+
+    @staticmethod
+    def _container_external(container, root_path):
+        """True when a link endpoint's container lies outside ``root_path``.
+
+        Shared by the export-time WARN (#202) and the bundle manifest's
+        external_links count so the two can never drift. Segment-aware:
+        ``ns/source-old`` is not inside ``ns/source``.
+        """
+        return not (container == root_path
+                    or str(container).startswith(root_path + "/"))
+
+    def export_bundle(self, output_path=None, group=None):
+        with self._group_override(group):
+            return self._export_bundle(output_path)
+
+    def _export_bundle(self, output_path=None):
+        import shutil
+        import tempfile
+        import zipfile
+
+        group = self.get_group_by_name(self.parent_group)
+        if not group:
+            print(f"ERROR: group '{self.parent_group}' not found.")
+            return
+
+        print(f"\nExporting transfer bundle from '{group.full_path}'...")
+        tmp = Path(tempfile.mkdtemp(prefix="nce-bundle-"))
+        try:
+            epics_p  = tmp / "epics.csv"
+            issues_p = tmp / "issues.csv"
+            links_p  = tmp / "links.csv"
+
+            self._export_epics(output_path=str(epics_p))
+            self._export_issues(output_path=str(issues_p))
+            self._export_links(output_path=str(links_p))
+
+            if not epics_p.exists() and not issues_p.exists():
+                print("ERROR: bundle aborted — neither the epics nor the issues "
+                      "export produced a file (see messages above).")
+                return
+
+            # Merge the two sidecars (#200) into one names file both importers
+            # can consume: the issues sidecar carries groups AND projects, the
+            # epics one groups only — the union covers every container.
+            names = {"groups": {}, "projects": {}}
+            for export_p in (epics_p, issues_p):
+                sidecar = export_p.with_name(export_p.stem + "-group-names.json")
+                if sidecar.exists():
+                    part = self._load_group_names(str(sidecar))
+                    names["groups"].update(part["groups"])
+                    names["projects"].update(part["projects"])
+            names_p = None
+            if names["groups"] or names["projects"]:
+                names_p = tmp / "group-names.json"
+                names_p.write_text(json.dumps(names, indent=2), encoding="utf-8")
+
+            def _rows(p):
+                if not p.exists():
+                    return []
+                with p.open(newline="", encoding="utf-8") as f:
+                    return list(csv.DictReader(f))
+
+            link_rows = _rows(links_p)
+            root_path = group.full_path
+            external_links = sum(
+                1 for r in link_rows
+                if self._container_external(r.get("source_container", ""), root_path)
+                or self._container_external(r.get("target_container", ""), root_path))
+
+            manifest = {
+                "format":         self.BUNDLE_FORMAT,
+                "format_version": self.BUNDLE_VERSION,
+                "created_at":     datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source_root":    root_path,
+                "files": {
+                    **({"epics": epics_p.name} if epics_p.exists() else {}),
+                    **({"issues": issues_p.name} if issues_p.exists() else {}),
+                    **({"links": links_p.name} if links_p.exists() else {}),
+                    **({"group_names": names_p.name} if names_p else {}),
+                },
+                "counts": {
+                    "epics":          len(_rows(epics_p)),
+                    "issues":         len(_rows(issues_p)),
+                    "links":          len(link_rows),
+                    "external_links": external_links,
+                },
+            }
+            manifest_p = tmp / "manifest.json"
+            manifest_p.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+            if output_path:
+                zip_path = self._resolve_path(output_path)
+            else:
+                zip_path = self._default_export_name("bundle-export", "zip")
+            members = [p for p in (epics_p, issues_p, links_p) if p.exists()]
+            members.append(manifest_p)
+            if names_p:
+                members.append(names_p)
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for m in members:
+                    zf.write(m, arcname=m.name)
+
+            c = manifest["counts"]
+            print(f"\n  Bundle: {c['epics']} epic(s), {c['issues']} issue(s), "
+                  f"{c['links']} link(s)"
+                  + (f" ({c['external_links']} with external endpoints — "
+                     f"dropped on a cross-system import)" if c["external_links"] else ""))
+            print(f"  Exported bundle → {zip_path}")
+            url = self._export_url(zip_path)
+            if url:
+                print(f"  Download: {url}")
+            return zip_path
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def import_bundle(self, input_path=None, group=None, create_missing=True,
+                      on_existing="skip", dry_run=False):
+        with self._group_override(group):
+            return self._import_bundle(input_path, create_missing, on_existing,
+                                       dry_run)
+
+    def _import_bundle(self, input_path=None, create_missing=True,
+                       on_existing="skip", dry_run=False):
+        """Import a transfer bundle: containers, epics, issues, links (#206).
+
+        Runs the proven sequence with transfer-tuned defaults — containers are
+        created along reconciled paths (still gated on the bundle's trusted
+        source_root stamp) and the epic id map is threaded in-memory between
+        the phases. on_existing=skip makes a partially-failed bundle
+        recoverable by simply re-running it (all phases are idempotent).
+        """
+        import shutil
+        import tempfile
+        import zipfile
+
+        if not input_path:
+            print("ERROR: input_path is required.")
+            return
+        path = self._resolve_path(input_path)
+        if not path.exists():
+            print(f"ERROR: file not found: '{path}'")
+            return
+        if not zipfile.is_zipfile(path):
+            print(f"INVALID: '{path.name}' is not a zip file — expected a "
+                  f"bundle produced by export-bundle.")
+            return
+
+        tmp = Path(tempfile.mkdtemp(prefix="nce-bundle-"))
+        try:
+            with zipfile.ZipFile(path) as zf:
+                for m in zf.namelist():
+                    # Bundles are flat by construction; a nested or absolute
+                    # member means this isn't ours (and guards zip-slip).
+                    if m != Path(m).name:
+                        print(f"INVALID: unexpected member path '{m}' — not a "
+                              f"bundle produced by export-bundle.")
+                        return
+                zf.extractall(tmp)
+
+            manifest_p = tmp / "manifest.json"
+            if not manifest_p.exists():
+                print("INVALID: bundle has no manifest.json — not a bundle "
+                      "produced by export-bundle.")
+                return
+            try:
+                manifest = json.loads(manifest_p.read_text(encoding="utf-8"))
+            except Exception as ex:
+                print(f"INVALID: manifest.json could not be parsed ({ex}).")
+                return
+            if manifest.get("format") != self.BUNDLE_FORMAT:
+                print(f"INVALID: manifest format is "
+                      f"'{manifest.get('format')}', expected "
+                      f"'{self.BUNDLE_FORMAT}'.")
+                return
+            try:
+                version = int(manifest.get("format_version", 0))
+            except (TypeError, ValueError):
+                print(f"INVALID: bundle format_version "
+                      f"{manifest.get('format_version')!r} is not a number.")
+                return
+            if version > self.BUNDLE_VERSION:
+                print(f"INVALID: bundle format_version {version} is newer than "
+                      f"this tool supports ({self.BUNDLE_VERSION}) — update the "
+                      f"simulator.")
+                return
+
+            # Epics-only and issues-only hierarchies are legitimate bundles
+            # (a subtree can have no projects, or no epics) — require at least
+            # one of the two, and every file the manifest names must exist.
+            files = manifest.get("files") or {}
+            if not files.get("epics") and not files.get("issues"):
+                print("INVALID: bundle contains neither an epics nor an "
+                      "issues file.")
+                return
+            for role in ("epics", "issues", "links", "group_names"):
+                fn = files.get(role)
+                if fn and not (tmp / fn).exists():
+                    print(f"INVALID: bundle is missing its {role} file "
+                          f"('{fn}' named in the manifest but absent).")
+                    return
+
+            c = manifest.get("counts") or {}
+            print(f"\nImporting bundle '{path.name}'"
+                  + ("  [DRY RUN]" if dry_run else ""))
+            print(f"  source: {manifest.get('source_root', '?')}  "
+                  f"({c.get('epics', '?')} epics, {c.get('issues', '?')} issues, "
+                  f"{c.get('links', '?')} links)")
+            if c.get("external_links"):
+                print(f"  note: {c['external_links']} link(s) have endpoints "
+                      f"outside the source tree and will be dropped.")
+
+            names_fn = files.get("group_names")
+            names_path = str(tmp / names_fn) if names_fn and (tmp / names_fn).exists() else None
+
+            if files.get("epics"):
+                print(f"\n── Phase 1/3: epics ──")
+                id_map = self._import_epics(
+                    input_path=str(tmp / files["epics"]),
+                    unresolved_parent="label", dry_run=dry_run,
+                    create_missing=create_missing, on_existing=on_existing,
+                    create_missing_groups=True, group_names=names_path)
+                if id_map is None:
+                    if dry_run:
+                        print("\n[dry run] preview stopped after the epics phase "
+                              "(see the message above). A dry run cannot preview "
+                              "into a target root that does not exist yet — the "
+                              "real import would create it. Create the root group "
+                              "first to preview the full sequence, or run without "
+                              "dry run.")
+                    else:
+                        print("\nBundle import aborted — the epics phase did not "
+                              "run (see messages above). Nothing further was "
+                              "attempted.")
+                    return
+                if dry_run and not id_map:
+                    print("  [dry run] no epic id map yet — the next phases "
+                          "preview epic references by title instead.")
+            else:
+                id_map = {}
+                print(f"\n── Phase 1/3: epics — none in bundle, skipped ──")
+
+            if files.get("issues"):
+                print(f"\n── Phase 2/3: issues ──")
+                self._import_issues(
+                    input_path=str(tmp / files["issues"]), dry_run=dry_run,
+                    create_missing=not files.get("epics") and create_missing,
+                    on_existing=on_existing,
+                    epic_id_map=id_map, create_missing_projects=True,
+                    group_names=names_path)
+            else:
+                print(f"\n── Phase 2/3: issues — none in bundle, skipped ──")
+
+            links_fn = files.get("links")
+            if links_fn and (tmp / links_fn).exists():
+                print(f"\n── Phase 3/3: blocking links ──")
+                self._import_links(input_path=str(tmp / links_fn),
+                                   epic_id_map=id_map, dry_run=dry_run)
+            else:
+                print(f"\n── Phase 3/3: blocking links — none in bundle, skipped ──")
+
+            print(f"\nBundle import complete"
+                  + ("  (dry run — no changes made)" if dry_run else "")
+                  + ".  Re-running the same bundle is safe: existing objects "
+                    "are skipped.")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

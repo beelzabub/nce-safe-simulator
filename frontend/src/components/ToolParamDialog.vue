@@ -99,13 +99,13 @@
                 <input
                   type="file"
                   class="field-input file-input"
-                  accept=".csv,.json"
+                  :accept="fileAccept(param)"
                   @change="onFileChange($event, param)"
                 />
                 <span v-if="values[param.name]" class="field-hint">
                   Selected: {{ values[param.name] }}
                 </span>
-                <span v-else class="field-hint">Choose a .csv or .json file to upload</span>
+                <span v-else class="field-hint">Choose a {{ fileAccept(param).replaceAll(',', ' or ') }} file to upload</span>
               </template>
 
               <!-- select → dropdown (explicit enum choice, e.g. CSV/JSON) -->
@@ -130,6 +130,7 @@
                   <input type="checkbox" class="toggle-input" v-model="values[param.name]" />
                   <span class="toggle-track"><span class="toggle-thumb" /></span>
                   <span class="toggle-text">{{ param.prompt }}</span>
+                  <HelpTip v-if="param.help" :text="param.help" />
                 </label>
               </template>
 
@@ -352,6 +353,12 @@ function onFileChange(event, param) {
   const file = event.target.files?.[0] || null
   fileObjects.value[param.name] = file
   values.value[param.name] = file ? file.name : ''
+}
+
+// Per-param upload filter — the bundle import takes a .zip, everything else
+// the importer's native .csv/.json.
+function fileAccept(param) {
+  return param.accept || '.csv,.json'
 }
 
 function formatKey(key) {
