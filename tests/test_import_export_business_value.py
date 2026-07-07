@@ -12,6 +12,7 @@ from mixins.importexport import (
     ImportExportMixin, EPIC_EXPORT_FIELDS, EPIC_IMPORT_KNOWN,
 )
 from mixins.bootstrap import BootstrapMixin
+from mixins.utils import UtilitiesMixin
 
 pytestmark = pytest.mark.unit
 
@@ -53,6 +54,7 @@ class BVHarness(ImportExportMixin, BootstrapMixin):
             e.title = payload["title"]
             return e
         self.root.epics.create.side_effect = _create
+        self.bv_result = True  # what the BV setter reports (#202: False = miss)
 
     def _load_file(self, path):                                return self._rows
     def _resolve_import_target(self, create_missing, dry_run): return self.root
@@ -63,6 +65,7 @@ class BVHarness(ImportExportMixin, BootstrapMixin):
     def _find_bv_field(self, group=None):                      return self._bv_field
     def _set_work_item_business_value(self, wid, field_gid, option_gid):
         self.bv_sets.append((wid, field_gid, option_gid))
+        return self.bv_result
 
 
 def _run(h, tmp_path, **kw):
@@ -184,3 +187,74 @@ class TestImport:
         _run(h, tmp_path)
         assert h.bv_sets == []
         assert "no work_item_id" in capsys.readouterr().out
+
+
+class TestMissSummary:
+    """A BV value the mutation could not set must surface in the run summary
+    (Refs #202: a transient GraphQL failure lost a value while the summary
+    still said '0 failed')."""
+
+    def test_setter_failure_warns_and_counts_in_summary(self, tmp_path, capsys):
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "business_value": 5}])
+        h.bv_result = False
+        _run(h, tmp_path)
+        out = capsys.readouterr().out
+        assert "GraphQL mutation failed after retries" in out
+        assert "1 business_value value(s) could not be set" in out
+        assert "1 created" in out                    # the epic itself still imports
+
+    def test_success_leaves_summary_clean(self, tmp_path, capsys):
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "business_value": 5}])
+        _run(h, tmp_path)
+        assert "could not be set" not in capsys.readouterr().out
+
+    def test_update_path_miss_also_counted(self, tmp_path, capsys):
+        existing = MagicMock()
+        existing.id, existing.iid = 7777, 42
+        existing.title = "E1"
+        existing.work_item_id = 555
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "business_value": 3}])
+        h._find_epic_by_title = lambda group, title, cache=None: existing
+        h.bv_result = False
+        _run(h, tmp_path, on_existing="update")
+        assert "1 business_value value(s) could not be set" in capsys.readouterr().out
+
+    def test_option_and_wid_misses_count_too(self, tmp_path, capsys):
+        h = BVHarness(
+            [{"title": "E1", "group_path": ROOT_PATH, "business_value": 99},
+             {"title": "E2", "group_path": ROOT_PATH, "business_value": 5}])
+        _run(h, tmp_path)
+        # E1's value isn't an option → miss; E2 succeeds.
+        assert "1 business_value value(s) could not be set" in capsys.readouterr().out
+
+
+class _SetterHarness(UtilitiesMixin):
+    """Real _set_work_item_business_value over a stubbed graphql_query."""
+
+    def __init__(self, reply):
+        self._reply = reply
+        self.calls = []        # (retries,)
+
+    def graphql_query(self, query, variables=None, retries=0):
+        self.calls.append(retries)
+        return self._reply
+
+
+class TestSetterReturnValue:
+    def test_success_returns_true(self):
+        h = _SetterHarness({"workItemUpdate": {"workItem": {"id": "x"}, "errors": []}})
+        assert h._set_work_item_business_value(1, "f", "o") is True
+
+    def test_graphql_none_returns_false(self):
+        h = _SetterHarness(None)
+        assert h._set_work_item_business_value(1, "f", "o") is False
+
+    def test_mutation_errors_return_false(self, capsys):
+        h = _SetterHarness({"workItemUpdate": {"workItem": None, "errors": ["nope"]}})
+        assert h._set_work_item_business_value(1, "f", "o") is False
+        assert "Business Value set error" in capsys.readouterr().out
+
+    def test_uses_two_retries(self):
+        h = _SetterHarness(None)
+        h._set_work_item_business_value(1, "f", "o")
+        assert h.calls == [2]
