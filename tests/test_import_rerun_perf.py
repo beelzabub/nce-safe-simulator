@@ -2,26 +2,83 @@
 
 Field finding (2026-07-07 JamieGroup case-1 re-import): the run stalled
 silently on GitLab 429 backoff, and the per-row existence searches were what
-tripped the rate limit. Fixes: a visible 429 hook, one existence listing per
+tripped the rate limit. Fixes: visible 429 backoff, one existence listing per
 container instead of one search per row, and container-qualified SKIP lines.
+The visibility print lives inside the urllib3 retry machinery (_RetryWithLog)
+because retried responses never reach the requests hook layer (Refs #207).
 """
 import json
 
 import pytest
 from unittest.mock import MagicMock
+from urllib3.exceptions import MaxRetryError
 
 from mixins.importexport import ImportExportMixin
 from mixins.bootstrap import BootstrapMixin
-from mixins.utils import UtilitiesMixin
+from mixins.utils import UtilitiesMixin, _RetryWithLog, _TimeoutAdapter
 
 pytestmark = pytest.mark.unit
 
 ROOT_PATH = "ns/target"
 
 
-# ─── 429 visibility ───────────────────────────────────────────────────────────
+# ─── 429 / transient-error visibility ─────────────────────────────────────────
+
+class _U3Resp:
+    """Minimal stand-in for the urllib3 response increment() inspects."""
+    def __init__(self, status, retry_after=None):
+        self.status = status
+        self.headers = {"Retry-After": retry_after} if retry_after else {}
+
+    def get_redirect_location(self):
+        return None
+
+
+class TestRetryWithLog:
+    def _retry(self, total=5):
+        return _RetryWithLog(total=total,
+                             status_forcelist=[429, 500, 502, 503, 504],
+                             raise_on_status=False)
+
+    def test_prints_on_429_with_retry_after(self, capsys):
+        self._retry().increment(method="GET", url="/x", response=_U3Resp(429, "45"))
+        assert "rate limit hit (429) — retrying after 45s" in capsys.readouterr().out
+
+    def test_prints_unknown_delay_without_header(self, capsys):
+        self._retry().increment(method="GET", url="/x", response=_U3Resp(429))
+        assert "retrying after ?s" in capsys.readouterr().out
+
+    def test_prints_status_on_transient_5xx(self, capsys):
+        self._retry().increment(method="GET", url="/x", response=_U3Resp(502))
+        assert "transient error (502) — retrying" in capsys.readouterr().out
+
+    def test_silent_when_budget_exhausted(self, capsys):
+        # An exhausted budget means the response is handed back, not retried —
+        # printing "retrying" here would be a lie.
+        with pytest.raises(MaxRetryError):
+            self._retry(total=0).increment(method="GET", url="/x",
+                                           response=_U3Resp(429, "45"))
+        assert capsys.readouterr().out == ""
+
+    def test_increment_preserves_subclass(self):
+        new = self._retry().increment(method="GET", url="/x", response=_U3Resp(502))
+        assert isinstance(new, _RetryWithLog)
+        assert new.total == 4
+
+    def test_make_session_mounts_logging_retry(self):
+        class H(UtilitiesMixin):
+            private_token = "x"
+        sess = H()._make_session()
+        adapter = sess.get_adapter("https://gitlab.com")
+        assert isinstance(adapter, _TimeoutAdapter)
+        assert isinstance(adapter.max_retries, _RetryWithLog)
+
 
 class TestRateLimitHook:
+    """python-gitlab's obey_rate_limit silently sleeps and re-sends 429s for
+    ALL verbs regardless of retry_transient_errors — the hook on the client
+    session is what keeps that backoff visible (Refs #201, #207)."""
+
     def _resp(self, status, retry_after=None):
         r = MagicMock()
         r.status_code = status
@@ -43,12 +100,6 @@ class TestRateLimitHook:
     def test_returns_response_unchanged(self):
         r = self._resp(200)
         assert UtilitiesMixin._rate_limit_hook(r) is r
-
-    def test_make_session_attaches_hook(self):
-        class H(UtilitiesMixin):
-            private_token = "x"
-        sess = H()._make_session()
-        assert UtilitiesMixin._rate_limit_hook in sess.hooks["response"]
 
 
 # ─── Batched existence checks ─────────────────────────────────────────────────
