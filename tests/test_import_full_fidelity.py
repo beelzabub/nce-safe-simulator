@@ -408,3 +408,77 @@ class TestLinkExport:
         ii = next(r for r in h.written
                   if (r["source_type"], r["target_type"]) == ("Issue", "Issue"))
         assert ii["source_title"] == "Blocked I"
+
+
+class TestLinkExportExternalFlag:
+    """Endpoints outside the exported tree are flagged at export time (#202):
+    they have no counterpart on a target system, so a cross-system import will
+    drop them — the export should say so up front, not surprise mid-import."""
+
+    def test_all_internal_no_warn(self, tmp_path, capsys):
+        h = ExportLinksHarness()
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        assert "outside" not in capsys.readouterr().out
+
+    def test_unknown_group_endpoint_flagged(self, tmp_path, capsys):
+        h = ExportLinksHarness()
+        # Group 6 (the epic←epic blocker's group) is outside the tree: the
+        # gid→path map only covers the exported hierarchy, so its container
+        # resolves to "" — exactly what a stale link into a foreign or
+        # deletion-scheduled group looks like.
+        h._build_gid_path_map = lambda group: {5: "ns/source/vs-01"}
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        out = capsys.readouterr().out
+        assert "1 link(s) reference an endpoint outside 'ns/source'" in out
+        assert "unknown group" in out
+        assert "'Blocked E' ←blocked by← Epic 'Blocker E'" in out
+        # flagged, not filtered — the row still exports
+        assert any(r["target_title"] == "Blocker E" for r in h.written)
+
+    def test_foreign_path_endpoint_flagged(self, tmp_path, capsys):
+        h = ExportLinksHarness()
+        # The cross-type blocker issue lives in another hierarchy entirely.
+        pages = list(h._gql_pages)
+        node = pages[0]["group"]["workItems"]["nodes"][0]
+        wi = node["widgets"][0]["linkedItems"]["nodes"][0]["workItem"]
+        wi["namespace"]["fullPath"] = "other/enclave/team/backlog"
+        h._gql_pages = iter(pages)
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        out = capsys.readouterr().out
+        assert "1 link(s) reference an endpoint outside 'ns/source'" in out
+        assert "external: other/enclave/team/backlog" in out
+
+    def test_prefix_sibling_root_is_external(self, tmp_path, capsys):
+        h = ExportLinksHarness()
+        # "ns/source-old" shares the string prefix but is a different root —
+        # the boundary check must be path-segment aware.
+        h._build_gid_path_map = lambda group: {5: "ns/source/vs-01",
+                                               6: "ns/source-old/vs-02"}
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        assert "outside 'ns/source'" in capsys.readouterr().out
+
+    def test_endpoint_directly_in_root_is_internal(self, tmp_path, capsys):
+        # container == root_path (no trailing segment) is inside the tree —
+        # pins the equality clause of the boundary check.
+        h = ExportLinksHarness()
+        h._build_gid_path_map = lambda group: {5: "ns/source", 6: "ns/source"}
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        assert "outside" not in capsys.readouterr().out
+
+    def test_listing_capped_at_twenty(self, tmp_path, capsys):
+        h = ExportLinksHarness()
+        h._build_gid_path_map = lambda group: {5: "ns/source/vs-01"}
+        blockers = [{"id": 200 + i, "iid": 2 + i, "title": f"Blocker {i}",
+                     "group_id": 6, "link_type": "is_blocked_by"}
+                    for i in range(25)]
+
+        def _get(url):
+            resp = MagicMock()
+            resp.ok = True
+            resp.json.return_value = blockers if "related_epics" in url else []
+            return resp
+        h.session.get.side_effect = _get
+        h._export_links(output_path=str(tmp_path / "links.json"))
+        out = capsys.readouterr().out
+        assert "25 link(s) reference an endpoint outside" in out
+        assert "… and 5 more" in out

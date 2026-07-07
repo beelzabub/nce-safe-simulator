@@ -65,6 +65,17 @@ class BootstrapMixin:
 
         if self.gitlab_namespace:
             parent = self.get_group_by_name(self.gitlab_namespace)
+            if parent is None and "/" in self.gitlab_namespace:
+                # The namespace may be a full URL-slug path rather than a
+                # display name (#202) — resolve it directly before giving up.
+                # Gated on '/' (never legal in a display name) so an ambiguous
+                # or stale display name can't silently resolve to an unrelated
+                # group that happens to share the string as its path.
+                try:
+                    parent = self.gl.groups.get(self.gitlab_namespace)
+                except Exception as ex:
+                    print(f"  (full-path lookup failed: {ex})")
+                    parent = None
             if parent is None:
                 print(f"Root namespace '{self.gitlab_namespace}' not found. Aborting.")
                 return None
