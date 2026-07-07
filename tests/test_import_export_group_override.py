@@ -201,7 +201,8 @@ def _tool(key):
 
 
 @pytest.mark.parametrize("key", ["export-epics", "export-issues",
-                                 "import-epics", "import-issues"])
+                                 "import-epics", "import-issues",
+                                 "export-bundle", "import-bundle"])
 def test_group_widget_param_prefilled_with_active_group(key):
     payload = _tool_payload(_tool(key), _gl_stub())
     grp = next(p for p in payload["params"] if p["name"] == "group")
@@ -280,3 +281,12 @@ def test_display_name_resolution_wins_over_path_lookup():
     h.gl.groups.get.assert_not_called()
     h.gl.groups.create.assert_called_once()
     assert h.gl.groups.create.call_args[0][0]["parent_id"] == 42
+
+
+def test_import_bundle_create_missing_defaults_on():
+    """The bundle is a full-mirror transfer (#206) — unlike the standalone
+    importers, create_missing defaults ON."""
+    payload = _tool_payload(_tool("import-bundle"), _gl_stub())
+    cm = next(p for p in payload["params"] if p["name"] == "create_missing")
+    assert cm["type"] == "bool"
+    assert cm["default"] is True

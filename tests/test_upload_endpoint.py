@@ -78,3 +78,15 @@ def test_upload_strips_path_traversal(client, tmp_path):
     # Must remain inside the uploads dir, not escape upward.
     uploads = (tmp_path / "uploads").resolve()
     assert str(saved).startswith(str(uploads))
+
+
+def test_zip_upload_accepted(client):
+    """#206: bundle zips are an allowed import upload."""
+    import io, zipfile as _zf
+    buf = io.BytesIO()
+    with _zf.ZipFile(buf, "w") as z:
+        z.writestr("manifest.json", "{}")
+    r = client.post("/api/upload",
+                    files={"file": ("bundle.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 200
+    assert r.json()["path"].endswith(".zip")

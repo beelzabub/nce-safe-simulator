@@ -217,6 +217,30 @@ TOOLS = [
         ],
     },
     {
+        "key":         "export-bundle",
+        "description": "Export epics, issues, blocking links, and container names as one transfer bundle (zip)",
+        "method":      "export_bundle",
+        "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "import-bundle",
+        "description": "Import a transfer bundle (zip) in one run: group/project containers, epics, issues, and blocking links",
+        "method":      "import_bundle",
+        "confirm":     True,
+        "params": [
+            {"name": "input_path",     "prompt": "Bundle file path (.zip from export-bundle)", "type": str, "widget": "file", "accept": ".zip", "optional": False},
+            {"name": "group",          "prompt": "Target group (import into)", "type": str, "widget": "group", "optional": True},
+            {"name": "create_missing", "prompt": "Create the target root group if it doesn't exist", "type": bool, "default": True,
+             "help": "The bundle is a full-mirror transfer, so this defaults ON (unlike the standalone importers). Subgroups and projects along each row's reconciled path are always created — that's the point of the bundle — gated on the bundle's trusted source_root stamp."},
+            {"name": "on_existing",    "prompt": "If an epic/issue with the same title exists (create / skip / update)", "type": str, "widget": "select", "options": ["create", "skip", "update"], "default": "skip",
+             "help": "skip (default) makes re-running the same bundle a safe no-op — which is also the recovery story for a partially-failed import: just run it again; everything already created is skipped."},
+            {"name": "dry_run",        "prompt": "Preview (dry run) — validate and preview all three phases, nothing is created", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
         "key":         "list-wikis",
         "description": "List all wiki pages for: 'portfolio' (root), 'teams' (all team wikis), 'all' (every group), or an explicit group path",
         "method":      "_tool_list_wikis",
@@ -563,7 +587,9 @@ TOOL_CATEGORIES = [
     {
         "name":        "Import / Export",
         "description": "Move epics and issues in and out of GitLab",
-        "tools": ["export-epics", "export-issues", "import-epics", "import-issues"],
+        "tools": ["export-bundle", "import-bundle",
+                  "export-epics", "export-issues", "import-epics", "import-issues",
+                  "export-links", "import-links"],
     },
 ]
 

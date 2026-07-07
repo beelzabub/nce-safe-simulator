@@ -258,3 +258,28 @@ class TestSetterReturnValue:
         h = _SetterHarness(None)
         h._set_work_item_business_value(1, "f", "o")
         assert h.calls == [2]
+
+
+class TestImportReturnsIdMap:
+    """#206: _import_epics returns the source→new id map (the bundle importer
+    threads it in-memory); abort paths return None."""
+
+    def test_success_returns_map(self, tmp_path):
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "id": 100}])
+        f = tmp_path / "epics.json"
+        f.write_text(json.dumps(h._rows))
+        result = h._import_epics(input_path=str(f))
+        assert result == {"100": 9001}
+
+    def test_abort_returns_none(self, tmp_path):
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH}])
+        h._resolve_import_target = lambda create_missing, dry_run: None
+        f = tmp_path / "epics.json"
+        f.write_text(json.dumps(h._rows))
+        assert h._import_epics(input_path=str(f)) is None
+
+    def test_dry_run_returns_empty_map_not_none(self, tmp_path):
+        h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "id": 100}])
+        f = tmp_path / "epics.json"
+        f.write_text(json.dumps(h._rows))
+        assert h._import_epics(input_path=str(f), dry_run=True) == {}
