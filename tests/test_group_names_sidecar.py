@@ -114,7 +114,7 @@ class NamedCMGHarness(ImportExportMixin, BootstrapMixin):
     def _resolve_import_target(self, create_missing, dry_run): return self.root
     def _build_group_cache(self, root_group):                  return self.cache
     def _build_valid_epic_ids(self, root_group):               return set()
-    def _find_epic_by_title(self, group, title):               return None
+    def _find_epic_by_title(self, group, title, cache=None):               return None
     def _set_epic_weight(self, epic, weight):                  pass
     def sanitize_name(self, s):                                return s.lower()
     def _default_export_name(self, stem, fmt):

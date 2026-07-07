@@ -100,6 +100,10 @@ class NceGitLab(
                 retry_transient_errors=True,
             )
             self.gl.auth()
+            # Surface 429 backoff in job logs (#201) — python-gitlab retries
+            # silently; the hook prints why the run is waiting.
+            self.gl.session.hooks.setdefault("response", []).append(
+                self._rate_limit_hook)
 
             version, _ = self.gl.version()
             print(f"GitLab server : {self.gl.api_url}  (v{version})")
