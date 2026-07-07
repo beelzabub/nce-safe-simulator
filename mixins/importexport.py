@@ -445,7 +445,72 @@ class ImportExportMixin:
                 return None, False
         return ("/".join(common) or None), False
 
-    def _ensure_group_chain(self, root_group, rel, group_cache, dry_run, planned):
+    # ── Group/project display names across systems (#200) ─────────────────────
+
+    def _write_group_names_sidecar(self, group, export_path):
+        """Write <export>-group-names.json next to an export (#200).
+
+        Maps each descendant group's and project's RELATIVE path to its
+        display name, so create_missing_groups / create_missing_projects can
+        name recreated containers like the source instead of using slugs.
+        A convenience artifact: failure WARNs and never breaks the export.
+        """
+        try:
+            root = group.full_path
+
+            def _rel(p):
+                # Import-side lookups are always root-relative; anything not
+                # under the root would be a dead key, so it is skipped.
+                return p[len(root) + 1:] if p.startswith(root + "/") else None
+
+            # NOTE: this re-walks descendants/projects even though the export
+            # body built path maps moments earlier — those maps are path-only
+            # (no names), and fetching here keeps the sidecar fully inside
+            # this try/except so it can never break an export. Typical
+            # hierarchies are tens of containers; the extra listing is cheap.
+            groups = {}
+            for g in self.list_descendant_groups(group):
+                rel = _rel(getattr(g, "full_path", ""))
+                nm = getattr(g, "name", "")
+                if rel and nm:
+                    groups[rel] = nm
+            projects = {}
+            for pr in group.projects.list(all=True, include_subgroups=True):
+                rel = _rel(getattr(pr, "path_with_namespace", ""))
+                nm = getattr(pr, "name", "")
+                if rel and nm:
+                    projects[rel] = nm
+            if not groups and not projects:
+                return None
+            sidecar = export_path.with_name(export_path.stem + "-group-names.json")
+            sidecar.write_text(
+                json.dumps({"groups": groups, "projects": projects}, indent=2),
+                encoding="utf-8")
+            print(f"  Group names sidecar: {sidecar}")
+            url = self._export_url(sidecar)
+            if url:
+                print(f"  Download: {url}   — pass to imports as 'Group names file'")
+            return sidecar
+        except Exception as ex:
+            print(f"  WARN: could not write the group-names sidecar — {ex}")
+            return None
+
+    def _load_group_names(self, path_str):
+        """Load a group-names sidecar; tolerant — {} mappings on any problem."""
+        empty = {"groups": {}, "projects": {}}
+        if not path_str:
+            return empty
+        try:
+            data = json.loads(self._resolve_path(path_str).read_text(encoding="utf-8"))
+            return {"groups":   dict(data.get("groups")   or {}),
+                    "projects": dict(data.get("projects") or {})}
+        except Exception as ex:
+            print(f"  WARN: group-names file '{path_str}' could not be loaded "
+                  f"({ex}) — created containers will use path segments as names.")
+            return empty
+
+    def _ensure_group_chain(self, root_group, rel, group_cache, dry_run, planned,
+                            names=None):
         """Create (or, under dry run, plan) the subgroup chain for ``rel``.
 
         Walks ``rel`` segment by segment under ``root_group``, creating each
@@ -462,23 +527,29 @@ class ImportExportMixin:
             def __init__(self, full_path):
                 self.full_path = full_path
 
+        names = names or {}
         parent = root_group
         cur = root_group.full_path
+        rel_prefix = []
         for seg in rel.strip("/").split("/"):
+            rel_prefix.append(seg)
             cur = f"{cur}/{seg}"
             g = group_cache.get(cur)
             if g is None:
+                # Display name from the sidecar (#200); slug fallback.
+                display = names.get("/".join(rel_prefix), seg)
+                note = f" (name '{display}')" if display != seg else ""
                 if dry_run:
                     if cur not in planned:
                         planned.add(cur)
-                        print(f"  [dry] would create group '{cur}'")
+                        print(f"  [dry] would create group '{cur}'{note}")
                     g = _Planned(cur)
                 else:
                     g = self.gl.groups.create({
-                        "name": seg, "path": seg, "parent_id": parent.id,
+                        "name": display, "path": seg, "parent_id": parent.id,
                     })
                     planned.add(cur)
-                    print(f"  created group '{cur}'")
+                    print(f"  created group '{cur}'{note}")
                 group_cache[cur] = g
             parent = g
         return parent
@@ -570,6 +641,7 @@ class ImportExportMixin:
         url = self._export_url(path)
         if url:
             print(f"  Download: {url}")
+        self._write_group_names_sidecar(group, path)
 
     # ── Epic import ───────────────────────────────────────────────────────────
 
@@ -923,15 +995,15 @@ class ImportExportMixin:
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                      group=None, create_missing=False, dest_group=None, on_existing="skip",
-                     source_root=None, create_missing_groups=False):
+                     source_root=None, create_missing_groups=False, group_names=None):
         with self._group_override(group):
             return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
                                       dest_group, on_existing, source_root,
-                                      create_missing_groups)
+                                      create_missing_groups, group_names)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                       create_missing=False, dest_group=None, on_existing="skip",
-                      source_root=None, create_missing_groups=False):
+                      source_root=None, create_missing_groups=False, group_names=None):
         """
         Import epics from a CSV or JSON file.
 
@@ -1063,6 +1135,9 @@ class ImportExportMixin:
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
         id_map = {}           # source id → new/matched target id (#194)
         groups_created = set()   # full paths created (or planned, dry run) (#195)
+        # Display names (#200) — only relevant when groups can be created.
+        names_ctx = (self._load_group_names(group_names) if create_missing_groups
+                     else {"groups": {}, "projects": {}})
         # Business Value context (#196): resolved once, only when needed and
         # not under dry run (dry runs preview the value without GraphQL).
         bv_ctx = None if dry_run else self._resolve_import_bv_field(cleaned, root_group)
@@ -1109,7 +1184,8 @@ class ImportExportMixin:
                 )
                 if chain_rel:
                     grp = self._ensure_group_chain(
-                        root_group, chain_rel, group_cache, dry_run, groups_created)
+                        root_group, chain_rel, group_cache, dry_run, groups_created,
+                        names=names_ctx["groups"])
                     gpath = grp.full_path
                 elif dest_group:
                     gpath = dest_group
@@ -1381,6 +1457,7 @@ class ImportExportMixin:
         url = self._export_url(path)
         if url:
             print(f"  Download: {url}")
+        self._write_group_names_sidecar(group, path)
 
     # ── Issue import ──────────────────────────────────────────────────────────
 
@@ -1451,7 +1528,7 @@ class ImportExportMixin:
         return rows, 0
 
     def _ensure_project(self, root_group, rel, group_cache, project_cache,
-                        dry_run, planned):
+                        dry_run, planned, names=None):
         """Create (or, under dry run, plan) the project for ``rel`` (#198).
 
         ``rel`` is a source-relative project path: the last segment is the
@@ -1464,37 +1541,42 @@ class ImportExportMixin:
                 self.path_with_namespace = pwn
                 self.id = None
 
+        names = names or {}
         rel = rel.strip("/")
         group_rel, _, proj_slug = rel.rpartition("/")
         parent = (self._ensure_group_chain(root_group, group_rel, group_cache,
-                                           dry_run, planned)
+                                           dry_run, planned,
+                                           names=names.get("groups"))
                   if group_rel else root_group)
         pwn = f"{root_group.full_path}/{rel}"
+        display = (names.get("projects") or {}).get(rel, proj_slug)
+        note = f" (name '{display}')" if display != proj_slug else ""
         if dry_run:
             if pwn not in planned:
                 planned.add(pwn)
-                print(f"  [dry] would create project '{pwn}'")
+                print(f"  [dry] would create project '{pwn}'{note}")
             proj = _Planned(pwn)
         else:
             proj = self.gl.projects.create({
-                "name": proj_slug, "path": proj_slug, "namespace_id": parent.id,
+                "name": display, "path": proj_slug, "namespace_id": parent.id,
             })
             planned.add(pwn)
-            print(f"  created project '{pwn}'")
+            print(f"  created project '{pwn}'{note}")
         project_cache[pwn] = proj
         return proj
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
                       group=None, create_missing=False, on_existing="skip",
-                      source_root=None, epic_id_map=None, create_missing_projects=False):
+                      source_root=None, epic_id_map=None, create_missing_projects=False,
+                      group_names=None):
         with self._group_override(group):
             return self._import_issues(input_path, target_project_path, dry_run,
                                        create_missing, on_existing, source_root,
-                                       epic_id_map, create_missing_projects)
+                                       epic_id_map, create_missing_projects, group_names)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
                        create_missing=False, on_existing="skip", source_root=None,
-                       epic_id_map=None, create_missing_projects=False):
+                       epic_id_map=None, create_missing_projects=False, group_names=None):
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -1573,6 +1655,9 @@ class ImportExportMixin:
         created = skipped = updated = failed = 0
         projects_created = set()   # paths created (or planned, dry run) (#198)
         group_cache = None         # built lazily, only when creating projects
+        # Display names (#200) — only relevant when containers can be created.
+        names_ctx = (self._load_group_names(group_names) if create_missing_projects
+                     else {"groups": {}, "projects": {}})
 
         for i, row in enumerate(cleaned, 1):
             title       = str(row.get("title", "")).strip()
@@ -1615,7 +1700,7 @@ class ImportExportMixin:
                     try:
                         proj = self._ensure_project(
                             root_group, proj_rel, group_cache, project_cache,
-                            dry_run, projects_created)
+                            dry_run, projects_created, names=names_ctx)
                         ppath = proj.path_with_namespace
                     except Exception as ex:
                         print(f"  row {i}: FAILED — could not create container "

@@ -128,18 +128,20 @@ def test_import_epics_wrapper_threads_override_and_create_missing():
     captured = {}
 
     def fake_impl(input_path, unresolved_parent, dry_run, create_missing, dest_group,
-                  on_existing, source_root, create_missing_groups):
+                  on_existing, source_root, create_missing_groups, group_names):
         captured["args"] = (input_path, unresolved_parent, dry_run, create_missing,
-                            dest_group, on_existing, source_root, create_missing_groups)
+                            dest_group, on_existing, source_root, create_missing_groups,
+                            group_names)
         captured["parent_group"] = h.parent_group
         captured["ns"] = h.gitlab_namespace
 
     h._import_epics = fake_impl
     h.import_epics(input_path="x.json", unresolved_parent="skip", dry_run=True,
                    group="ns2/Group B", create_missing=True, dest_group="ns2/Group B/team",
-                   on_existing="update", source_root="ns-a/port", create_missing_groups=True)
+                   on_existing="update", source_root="ns-a/port", create_missing_groups=True,
+                   group_names="names.json")
     assert captured["args"] == ("x.json", "skip", True, True, "ns2/Group B/team", "update",
-                                "ns-a/port", True)
+                                "ns-a/port", True, "names.json")
     assert captured["parent_group"] == "Group B"      # override active during call
     assert captured["ns"] == "ns2"
     assert h.parent_group == "Configured Group"        # restored after
@@ -151,18 +153,19 @@ def test_import_issues_wrapper_threads_override_and_create_missing():
     captured = {}
 
     def fake_impl(input_path, target_project_path, dry_run, create_missing, on_existing,
-                  source_root, epic_id_map, create_missing_projects):
+                  source_root, epic_id_map, create_missing_projects, group_names):
         captured["args"] = (input_path, target_project_path, dry_run, create_missing,
-                            on_existing, source_root, epic_id_map, create_missing_projects)
+                            on_existing, source_root, epic_id_map, create_missing_projects,
+                            group_names)
         captured["parent_group"] = h.parent_group
 
     h._import_issues = fake_impl
     h.import_issues(input_path="i.csv", target_project_path="team/backlog",
                     dry_run=False, group="Group C", create_missing=True, on_existing="skip",
                     source_root="ns-a/port", epic_id_map="map.json",
-                    create_missing_projects=True)
+                    create_missing_projects=True, group_names="names.json")
     assert captured["args"] == ("i.csv", "team/backlog", False, True, "skip", "ns-a/port",
-                                "map.json", True)
+                                "map.json", True, "names.json")
     assert captured["parent_group"] == "Group C"
     assert h.parent_group == "Configured Group"
 
