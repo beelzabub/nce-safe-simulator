@@ -320,13 +320,25 @@ class ImportExportMixin:
             return None
 
     def _find_epic_by_title(self, group, title):
-        """First epic in `group` with an exact matching title, else None.
+        """First epic in `group` ITSELF with an exact matching title, else None.
+
+        The group-epics endpoint includes descendant groups' epics by
+        default, which made same-titled epics in *different* containers
+        collide on re-import — a row targeting the root skipped because its
+        twin lived in a subgroup (#199). on_existing semantics are
+        per-container, so matches filter to this exact group; whole-tree
+        searches (e.g. import-links endpoint resolution) intentionally use
+        _target_epic_titles instead.
 
         WARNs on multiple exact matches — see _find_issue_by_title (#194).
         """
         try:
-            matches = [ep for ep in group.epics.list(search=title, all=True)
-                       if getattr(ep, "title", "") == title]
+            gid = getattr(group, "id", None)
+            matches = [
+                ep for ep in group.epics.list(search=title, all=True)
+                if getattr(ep, "title", "") == title
+                and (gid is None or getattr(ep, "group_id", gid) == gid)
+            ]
             if len(matches) > 1:
                 print(f"  WARN: {len(matches)} epics titled '{title}' in "
                       f"'{getattr(group, 'full_path', '?')}' — using #{matches[0].iid}")
