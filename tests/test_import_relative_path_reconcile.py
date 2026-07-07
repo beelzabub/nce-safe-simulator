@@ -76,7 +76,7 @@ class PlacementHarness(ImportExportMixin, BootstrapMixin):
     def _build_valid_epic_ids(self, root_group):
         return set()
 
-    def _resolve_parent_ids(self, cleaned, valid_ids, root_group, unresolved_parent):
+    def _resolve_parent_ids(self, cleaned, valid_ids, root_group, unresolved_parent, **kw):
         return ({}, set())
 
     def _validate_epics(self, rows):
