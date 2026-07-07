@@ -287,24 +287,36 @@ class ImportExportMixin:
     # ── Re-import handling (on_existing: create | skip | update) ───────────────
 
     def _find_issue_by_title(self, project, title):
-        """First issue in `project` with an exact matching title, else None."""
+        """First issue in `project` with an exact matching title, else None.
+
+        WARNs when several issues share the title — title is the de-facto
+        identity key for re-import matching, so ambiguity is worth surfacing
+        rather than silently picking one (#194).
+        """
         try:
-            for iss in project.issues.list(search=title, all=True):
-                if getattr(iss, "title", "") == title:
-                    return iss
+            matches = [iss for iss in project.issues.list(search=title, all=True)
+                       if getattr(iss, "title", "") == title]
+            if len(matches) > 1:
+                print(f"  WARN: {len(matches)} issues titled '{title}' in "
+                      f"'{getattr(project, 'path_with_namespace', '?')}' — using #{matches[0].iid}")
+            return matches[0] if matches else None
         except Exception:
-            pass
-        return None
+            return None
 
     def _find_epic_by_title(self, group, title):
-        """First epic in `group` with an exact matching title, else None."""
+        """First epic in `group` with an exact matching title, else None.
+
+        WARNs on multiple exact matches — see _find_issue_by_title (#194).
+        """
         try:
-            for ep in group.epics.list(search=title, all=True):
-                if getattr(ep, "title", "") == title:
-                    return ep
+            matches = [ep for ep in group.epics.list(search=title, all=True)
+                       if getattr(ep, "title", "") == title]
+            if len(matches) > 1:
+                print(f"  WARN: {len(matches)} epics titled '{title}' in "
+                      f"'{getattr(group, 'full_path', '?')}' — using #{matches[0].iid}")
+            return matches[0] if matches else None
         except Exception:
-            pass
-        return None
+            return None
 
     def _update_issue(self, issue, payload, state, epic_id):
         """Apply an import payload to an existing issue (merge — omitted fields
@@ -547,6 +559,7 @@ class ImportExportMixin:
 
             self._coerce_date(row.get("start_date"),                   "start_date",     i, errors)
             self._coerce_date(row.get("due_date") or row.get("end_date"), "due_date",    i, errors)
+            self._coerce_int(row.get("id"),           "id",            i, errors)
             self._coerce_int(row.get("parent_id"),    "parent_id",     i, errors)
             self._coerce_int(row.get("planned_weight"), "planned_weight", i, errors)
 
@@ -565,6 +578,93 @@ class ImportExportMixin:
 
         print(f"  Validation passed — {len(rows)} row(s) ready")
         return rows, 0
+
+    # ── Within-file parent mapping (#194) ─────────────────────────────────────
+
+    def _map_file_ids(self, rows):
+        """Return {source_id: 1-based row index} from the rows' own 'id' column.
+
+        The export stamps each epic's source-system id; together with
+        parent_id this makes the file self-describing — the hierarchy can be
+        rebuilt on any target without the source ids existing there. First
+        occurrence wins on duplicates (WARNed once).
+        """
+        row_of_id, dups = {}, 0
+        for i, r in enumerate(rows, 1):
+            rid = self._coerce_int(r.get("id"), "id", i, [])
+            if rid is None:
+                continue
+            if rid in row_of_id:
+                dups += 1
+            else:
+                row_of_id[rid] = i
+        if dups:
+            print(f"  WARN: {dups} duplicate 'id' value(s) in file — first "
+                  f"occurrence wins for parent mapping")
+        return row_of_id
+
+    def _order_rows_for_import(self, rows, row_of_id):
+        """Return (ordered 1-based row indices, cycle_rows) — parents first.
+
+        When a row's parent_id references another row in the file, that parent
+        must be created first so the child can link to its NEW id (#194).
+        Order is otherwise stable (file order); each in-file parent's subtree
+        is emitted depth-first in file order. cycle_rows are rows whose
+        in-file ancestor chain never reaches a root (a parent_id cycle in the
+        file data); they are appended in file order, which breaks each cycle
+        at its first row (created parentless + labeled) while later members
+        still link to the cycle members created before them — minimal
+        structure loss rather than orphaning the whole cycle.
+        """
+        parent_row = {}
+        for i, r in enumerate(rows, 1):
+            pid = self._coerce_int(r.get("parent_id"), "parent_id", i, [])
+            p = row_of_id.get(pid)
+            if p is not None and p != i:
+                parent_row[i] = p
+
+        children = {}
+        for c, p in parent_row.items():
+            children.setdefault(p, []).append(c)
+        for kids in children.values():
+            kids.sort()
+
+        ordered, placed = [], set()
+
+        def _emit(root):
+            stack = [root]
+            while stack:
+                cur = stack.pop()
+                if cur in placed:
+                    continue
+                placed.add(cur)
+                ordered.append(cur)
+                stack.extend(reversed(children.get(cur, [])))
+
+        for i in range(1, len(rows) + 1):
+            if i not in parent_row:
+                _emit(i)    # a root; its subtree follows depth-first
+
+        # Anything unplaced hangs off a parent_id cycle. Break each cycle at
+        # its lowest-index member, then emit that subtree normally so every
+        # descendant (and the other cycle members) still follows its parent.
+        cycle_breaks = set()
+        while len(placed) < len(rows):
+            start = min(i for i in range(1, len(rows) + 1) if i not in placed)
+            chain, cur = [], start
+            while cur is not None and cur not in placed and cur not in chain:
+                chain.append(cur)
+                cur = parent_row.get(cur)
+            members = chain[chain.index(cur):] if cur in chain else [start]
+            breaker = min(members)
+            cycle_breaks.add(breaker)
+            _emit(breaker)
+
+        if cycle_breaks:
+            print(f"  WARN: parent_id cycle(s) in the file — broken at row(s) "
+                  f"{', '.join(str(r) for r in sorted(cycle_breaks))} "
+                  f"('import::needs-parent'); all other rows keep their parent link")
+        return ordered, cycle_breaks
 
     # ── Unresolvable parent helpers ───────────────────────────────────────────
 
@@ -620,11 +720,18 @@ class ImportExportMixin:
                 pass
             print(f"  Please enter a number between 0 and {len(choices)}.")
 
-    def _resolve_parent_ids(self, rows, valid_epic_ids, root_group, unresolved_parent):
+    def _resolve_parent_ids(self, rows, valid_epic_ids, root_group, unresolved_parent,
+                            file_ids=frozenset(), cross_root=False):
         """
         Pre-flight parent_id resolution pass — runs before any creation.
 
-        Scans every row for a parent_id that is not present in valid_epic_ids.
+        Scans every row for a parent_id that resolves neither within the file
+        (file_ids — those link through the source_id→new_id map, #194) nor
+        against the live target (valid_epic_ids). With cross_root True the
+        live-target match is NOT accepted: the file comes from a different
+        root, so a raw id equal to some target epic's id is coincidence, not
+        a link — silently attaching to it would corrupt the tree.
+
         If any are found, reports them all, then asks the user once how to
         proceed (unless unresolved_parent is already 'label' or 'skip').
 
@@ -634,10 +741,21 @@ class ImportExportMixin:
         caller should abort.
         """
         unresolvable = []   # (row_index_1based, title, raw_parent_id)
+        distrusted   = 0
         for i, row in enumerate(rows, 1):
             pid = self._coerce_int(row.get("parent_id"), "parent_id", i, [])
-            if pid is not None and pid not in valid_epic_ids:
-                unresolvable.append((i, str(row.get("title", "")).strip(), pid))
+            if pid is None or pid in file_ids:
+                continue
+            if pid in valid_epic_ids:
+                if not cross_root:
+                    continue
+                distrusted += 1
+            unresolvable.append((i, str(row.get("title", "")).strip(), pid))
+
+        if distrusted:
+            print(f"\n  NOTE: {distrusted} parent_id(s) match a live epic id on the "
+                  f"target, but the file comes from a different root — raw ids "
+                  f"are not trusted cross-root (they would attach to unrelated epics).")
 
         if not unresolvable:
             return {}, set()
@@ -697,10 +815,16 @@ class ImportExportMixin:
         """
         Import epics from a CSV or JSON file.
 
-        unresolved_parent controls what happens when a parent_id from the file
-        does not match any epic in the target hierarchy.  The check runs in the
-        pre-flight pass — before any epic is created — so the user decides once
-        and the import runs without interruption:
+        Hierarchy: a parent_id that references another row in the file (by
+        that row's own 'id' column) is resolved through the source_id→new_id
+        map — parents are created first, so the exported tree is rebuilt on
+        the target regardless of what ids exist there (#194). Cross-root
+        imports never trust raw target-id matches.
+
+        unresolved_parent controls what happens when a parent_id resolves
+        neither within the file nor against the target hierarchy.  The check
+        runs in the pre-flight pass — before any epic is created — so the
+        user decides once and the import runs without interruption:
 
           'ask'   – show the live hierarchy grouped by group, let the user pick
                     a single fallback parent for all affected rows; choosing 0
@@ -770,9 +894,42 @@ class ImportExportMixin:
         valid_epic_ids = self._build_valid_epic_ids(root_group)
         print(f"  {len(valid_epic_ids)} epic(s) in target hierarchy")
 
-        parent_map, orphan_rows = self._resolve_parent_ids(
-            cleaned, valid_epic_ids, root_group, unresolved_parent
+        # Within-file hierarchy (#194): the rows' own id column + parent_id
+        # make the file self-describing. Parents in the file are created
+        # first and children link through the source_id → new_id map, so the
+        # exported tree is rebuilt even though none of the source ids exist
+        # on the target. Cross-root, raw target-id matches are distrusted —
+        # equal ids on different systems are coincidence, not links.
+        row_of_file_id = self._map_file_ids(cleaned)
+        # Distrust raw target-id parent matches ONLY when we positively know
+        # the file came from a disjoint root: a trusted source root (explicit
+        # override or export stamp) that neither equals, contains, nor sits
+        # under the target root. An LCP-guessed root is exactly that — a
+        # guess — and a same-system subtree export must keep resolving its
+        # live parent ids (the guess would otherwise orphan them); overlapping
+        # roots mean the same group tree, hence the same id space.
+        tgt = root_group.full_path
+        overlap = (
+            src_root == tgt
+            or (src_root or "").startswith(tgt + "/")
+            or tgt.startswith((src_root or "") + "/")
         )
+        cross_root = bool(src_root) and src_trusted and not overlap
+        in_file_parents = sum(
+            1 for i, r in enumerate(cleaned, 1)
+            if row_of_file_id.get(
+                self._coerce_int(r.get("parent_id"), "parent_id", i, []), i) != i
+        )
+        if in_file_parents:
+            print(f"  {in_file_parents} row(s) reference parents within the file — "
+                  f"importing parents first and remapping to their new ids")
+
+        parent_map, orphan_rows = self._resolve_parent_ids(
+            cleaned, valid_epic_ids, root_group, unresolved_parent,
+            file_ids=frozenset(row_of_file_id), cross_root=cross_root,
+        )
+
+        ordered, _cycle_breaks = self._order_rows_for_import(cleaned, row_of_file_id)
 
         skip_rows = {r for r, resolved in parent_map.items() if resolved is None and r not in orphan_rows}
 
@@ -784,8 +941,10 @@ class ImportExportMixin:
 
         created = skipped = updated = failed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
+        id_map = {}           # source id → new/matched target id (#194)
 
-        for i, row in enumerate(cleaned, 1):
+        for i in ordered:
+            row = cleaned[i - 1]
             if i in skip_rows:
                 skipped += 1
                 continue
@@ -825,28 +984,62 @@ class ImportExportMixin:
                 print(f"  row {i}: WARN group_path '{gpath}' not found — using root group")
                 target = root_group
 
-            is_orphan = i in orphan_rows
-            if is_orphan and "import::needs-parent" not in labels:
-                labels = labels + ["import::needs-parent"]
-
-            # Determine resolved parent_id
-            if orig_pid is not None and orig_pid in valid_epic_ids:
+            # Resolved parent precedence (#194): ① another row in the file →
+            # the id map (its NEW id — recorded on create, update, or
+            # skip-as-existing); ② a live target id, same-root imports only;
+            # ③ the pre-flight fallback/label decision. An in-file parent
+            # that never materialized (failed create, cycle) degrades to the
+            # needs-parent label at runtime rather than silently mis-linking.
+            parent_row = row_of_file_id.get(orig_pid)
+            runtime_orphan = False
+            if parent_row is not None and parent_row != i:
+                resolved_pid = id_map.get(orig_pid)
+                if resolved_pid is None:
+                    runtime_orphan = True
+            elif orig_pid is not None and orig_pid in valid_epic_ids and not cross_root:
                 resolved_pid = orig_pid
             else:
                 resolved_pid = parent_map.get(i)  # fallback or None
+
+            if runtime_orphan and unresolved_parent == "skip":
+                # Honor the user's choice for parents that fell through at
+                # runtime too (failed create, cycle break, skipped chain).
+                print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — in-file parent "
+                      f"(id {orig_pid}) was not created")
+                skipped += 1
+                continue
+
+            is_orphan = i in orphan_rows or runtime_orphan
+            if is_orphan and "import::needs-parent" not in labels:
+                labels = labels + ["import::needs-parent"]
+
+            # This row's own source id — recorded into the id map once the
+            # row materializes, so in-file children can link to it (#194).
+            src_id = self._coerce_int(row.get("id"), "id", i, [])
+            if src_id is not None and row_of_file_id.get(src_id) != i:
+                src_id = None   # duplicate id — first occurrence owns the map slot
+
+            # In a dry run, in-file parents resolve to a ("dry", row) sentinel
+            # instead of a real id; it never reaches the API.
+            symbolic = isinstance(resolved_pid, tuple)
 
             payload = {"title": title}
             if description:       payload["description"] = description
             if labels:            payload["labels"]      = labels
             if start_date:        payload["start_date"]  = start_date
             if due_date:          payload["end_date"]    = due_date
-            if resolved_pid:      payload["parent_id"]   = resolved_pid
+            if resolved_pid and not symbolic:
+                payload["parent_id"] = resolved_pid
 
             # Re-import handling: match an existing epic by title in the target.
             existing = self._find_epic_by_title(target, title) if on_existing != "create" else None
             if existing and on_existing == "skip":
                 print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — epic '{title}' "
                       f"already exists (#{existing.iid})")
+                if src_id is not None:
+                    # existing.id is a real target id even under dry run, so
+                    # children preview their concrete parent_id.
+                    id_map[src_id] = existing.id
                 skipped += 1
                 continue
 
@@ -856,11 +1049,14 @@ class ImportExportMixin:
                 if existing:      parts.append(f"#{existing.iid}")
                 if labels:        parts.append(f"labels={labels}")
                 if weight:        parts.append(f"weight={weight}")
-                if resolved_pid:  parts.append(f"parent_id={resolved_pid}")
+                if symbolic:      parts.append(f"parent=(epic from row {resolved_pid[1]})")
+                elif resolved_pid: parts.append(f"parent_id={resolved_pid}")
                 if is_orphan:     parts.append("⚑ needs-parent")
                 if start_date:    parts.append(f"start={start_date}")
                 if due_date:      parts.append(f"due={due_date}")
                 print(f"  [dry] row {i}: {' | '.join(parts)}")
+                if src_id is not None:
+                    id_map[src_id] = ("dry", i)
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
                 if action == "update":  updated += 1
@@ -871,6 +1067,8 @@ class ImportExportMixin:
                 if existing and on_existing == "update":
                     self._update_epic(existing, payload, weight, state)
                     print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
+                    if src_id is not None:
+                        id_map[src_id] = existing.id
                     updated += 1
                 else:
                     epic = target.epics.create(payload)
@@ -880,6 +1078,8 @@ class ImportExportMixin:
                         epic.state_event = "close"
                         epic.save()
                     print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
+                    if src_id is not None:
+                        id_map[src_id] = epic.id
                     created += 1
                 if is_orphan:
                     orphan_summary.append((i, title, target.full_path, orig_pid))
