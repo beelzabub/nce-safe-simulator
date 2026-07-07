@@ -235,6 +235,16 @@ class TestImportBundle:
         assert epics["on_existing"] == "update"
         assert issues["on_existing"] == "update"
 
+    def test_on_missing_bv_field_threads_to_epics(self, tmp_path):
+        # Transfer default is create; an explicit choice must reach phase 1 (#204).
+        h = ImportBundleHarness()
+        h.import_bundle(input_path=str(make_bundle(tmp_path)))
+        assert h.calls[0][1]["on_missing_bv_field"] == "create"
+        h.calls.clear()
+        h.import_bundle(input_path=str(make_bundle(tmp_path)),
+                        on_missing_bv_field="fail")
+        assert h.calls[0][1]["on_missing_bv_field"] == "fail"
+
     def test_bundle_without_links_skips_phase_3(self, tmp_path, capsys):
         members = {"epics.csv": "title\nE1\n", "issues.csv": "title\nI1\n"}
         manifest = {"format": "nce-bundle", "format_version": 1,
