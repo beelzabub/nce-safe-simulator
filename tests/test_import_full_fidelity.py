@@ -64,7 +64,7 @@ class CMPHarness(ImportExportMixin, BootstrapMixin):
     def _resolve_import_target(self, create_missing, dry_run): return self.root
     def _build_group_cache(self, root_group):                  return self.group_cache
     def _build_project_cache(self, root_group):                return self.project_cache
-    def _find_issue_by_title(self, project, title):            return None
+    def _find_issue_by_title(self, project, title, cache=None):            return None
 
 
 def _run_issues(h, tmp_path, **kw):

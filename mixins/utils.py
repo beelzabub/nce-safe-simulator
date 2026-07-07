@@ -138,6 +138,21 @@ class UtilitiesMixin:
                     errors += 1
         return done, errors
 
+    @staticmethod
+    def _rate_limit_hook(resp, *args, **kwargs):
+        """requests response hook: make 429 rate-limit backoff visible (#201).
+
+        python-gitlab's retry_transient_errors honors Retry-After by sleeping
+        SILENTLY, so a rate-limited run is indistinguishable from a hung one
+        in the job log. This prints the reason the moment the 429 arrives;
+        the retry/sleep behavior itself is unchanged.
+        """
+        if getattr(resp, "status_code", None) == 429:
+            ra = resp.headers.get("Retry-After", "?")
+            print(f"  GitLab rate limit hit (429) — retrying after {ra}s...",
+                  flush=True)
+        return resp
+
     def _make_session(self):
         """Return a requests.Session pre-configured with auth and the configured timeout."""
         sess = requests.Session()
@@ -146,6 +161,7 @@ class UtilitiesMixin:
         adapter = _TimeoutAdapter(timeout=getattr(self, "api_timeout", 300))
         sess.mount("https://", adapter)
         sess.mount("http://",  adapter)
+        sess.hooks.setdefault("response", []).append(self._rate_limit_hook)
         return sess
 
     def _epic_save_with_reopen(self, epic, new_labels):

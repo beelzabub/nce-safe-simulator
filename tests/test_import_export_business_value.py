@@ -58,7 +58,7 @@ class BVHarness(ImportExportMixin, BootstrapMixin):
     def _resolve_import_target(self, create_missing, dry_run): return self.root
     def _build_group_cache(self, root_group):                  return {ROOT_PATH: self.root}
     def _build_valid_epic_ids(self, root_group):               return set()
-    def _find_epic_by_title(self, group, title):               return None
+    def _find_epic_by_title(self, group, title, cache=None):               return None
     def _set_epic_weight(self, epic, weight):                  pass
     def _find_bv_field(self, group=None):                      return self._bv_field
     def _set_work_item_business_value(self, wid, field_gid, option_gid):
@@ -160,7 +160,7 @@ class TestImport:
         existing.title = "E1"
         existing.work_item_id = 555
         h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "business_value": 3}])
-        h._find_epic_by_title = lambda group, title: existing
+        h._find_epic_by_title = lambda group, title, cache=None: existing
         _run(h, tmp_path, on_existing="update")
         assert h.bv_sets == [(555, BV_FIELD["id"], "gid://opt/3")]
 
