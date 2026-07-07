@@ -320,6 +320,9 @@ class _ExportHarness(ImportExportMixin):
     def _fetch_epic_weights(self, epics):
         return self._weights
 
+    def _fetch_epic_business_values(self, epics, root_namespace=None):
+        return {}
+
     def _write_file(self, path, fmt, rows, field_order):
         self.written = rows
 
