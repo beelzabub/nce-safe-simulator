@@ -988,7 +988,7 @@ Resolution precedence per row: (1) a parent that is **another row in the file** 
 
 #### Re-import behaviour (`on_existing`)
 
-Re-running the same file could otherwise create duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics):
+Re-running the same file could otherwise create duplicates. The `on_existing` parameter (web UI: a dropdown; CLI: a prompt accepting `create` / `skip` / `update`) controls this, matching an existing item by **exact title** within the target project (issues) or group (epics) — the group's **own** epics only, so same-titled epics in different subgroups never collide (#199):
 
 - **`skip`** (default) — if a same-title item exists, leave it untouched and report `SKIP — already exists (#iid)`; create it otherwise. Safe to re-run.
 - **`update`** — apply the row's fields to the existing item (merge — omitted fields are left as-is; the matched title is not rewritten); create it if there's no match.
