@@ -62,6 +62,10 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "export-issues",
         "import-epics",
         "import-issues",
+        "export-links",
+        "import-links",
+        "export-bundle",
+        "import-bundle",
     ],
 }
 
