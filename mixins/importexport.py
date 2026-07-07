@@ -896,13 +896,31 @@ class ImportExportMixin:
 
     # ── Business Value on import (#196) ────────────────────────────────────────
 
-    def _resolve_import_bv_field(self, rows, root_group):
+    def _resolve_import_bv_field(self, rows, root, on_missing="create",
+                                 dry_run=False):
         """Resolve the target's Business Value field once, iff any row needs it.
 
+        root is the target root group object or its full path as a string —
+        the path form lets the check run before the root group is (or would
+        be) created, so 'fail' can abort with zero mutations.
+
+        on_missing (#204) decides what to do when rows carry BV but the field
+        doesn't exist on the target:
+          'create' – create it from the configured definition at the target
+                     root's top-level namespace; a failed create (no Ultimate
+                     license, no Owner) degrades to 'ignore' with a WARN
+          'ignore' – WARN once; the import continues and drops the values
+                     (the caller counts them into the run summary)
+          'fail'   – abort before anything is touched
+
+        An existing field is never modified — values outside its option set
+        keep their per-row WARN. Dry runs only read: 'create' previews the
+        field it would create instead of creating it.
+
         Returns {"field_gid", "options": {int value: option gid}} when the
-        field exists, {} when rows carry BV but the target has no such field
-        (WARNed once — import continues, values are dropped), or None when no
-        row carries a business_value at all (no GraphQL spent).
+        field is available, {} when values will be dropped, "abort" under
+        'fail', or None when no row carries a business_value (no GraphQL
+        spent).
         """
         needs_bv = any(
             str(r.get("business_value", "")).strip() not in ("", "None", "none")
@@ -910,12 +928,27 @@ class ImportExportMixin:
         )
         if not needs_bv:
             return None
-        bv_field = self._find_bv_field(group=root_group)
+        bv_field = self._find_bv_field(group=root)
         if not bv_field:
-            print(f"  WARN: Business Value custom field "
-                  f"('{self.BUSINESS_VALUE_FIELD['name']}') not found on the "
-                  f"target — business_value values will be ignored.")
-            return {}
+            name = self.BUSINESS_VALUE_FIELD["name"]
+            if on_missing == "fail":
+                print(f"\n  ERROR: Business Value custom field ('{name}') not "
+                      f"found on the target and on_missing_bv_field=fail — "
+                      f"nothing was imported.\n"
+                      f"         Create it (setup-bv-field tool) or re-run "
+                      f"with on_missing_bv_field=create.")
+                return "abort"
+            if on_missing == "create":
+                bv_field = self._import_create_bv_field(root, dry_run)
+                if bv_field == "dry":
+                    return {}
+            if not bv_field:
+                tail = ("." if dry_run
+                        else " (counted in the run summary).")
+                print(f"  WARN: Business Value custom field ('{name}') not "
+                      f"available on the target — business_value values will "
+                      f"be dropped{tail}")
+                return {}
         options = {}
         for opt in bv_field.get("selectOptions") or []:
             try:
@@ -923,6 +956,52 @@ class ImportExportMixin:
             except (KeyError, ValueError, TypeError):
                 pass
         return {"field_gid": bv_field["id"], "options": options}
+
+    def _import_create_bv_field(self, root, dry_run=False):
+        """Create the Business Value field for a target that lacks it (#204).
+
+        root is the target root group object or its full path as a string.
+        Custom fields live at the top-level group and apply only within it, so
+        the field is created at the target root's top-level ancestor — NOT the
+        configured gitlab_namespace, which can be a different tree on a
+        cross-instance import. The configured definition is used (options
+        outside it keep their per-row WARN; #196).
+
+        Returns the created field dict (re-fetched so selectOptions carry
+        their option gids), "dry" under dry run (announce only), or None when
+        creation isn't possible — creating custom fields needs GitLab Ultimate
+        and Owner on the top-level group; the caller degrades to warn-and-drop.
+        """
+        cfg = self.BUSINESS_VALUE_FIELD
+        full_path = root if isinstance(root, str) else (getattr(root, "full_path", "") or "")
+        ns = full_path.split("/")[0]
+        if not ns:
+            return None
+        label = (f"custom field '{cfg['name']}' ({cfg['field_type']}, options "
+                 f"{', '.join(cfg['select_options'])}) at top-level group '{ns}'")
+        if dry_run:
+            print(f"  [dry] would create {label}")
+            return "dry"
+        try:
+            type_id = self._get_epic_work_item_type_id(ns)
+            if not type_id:
+                print(f"  WARN: could not resolve the Epic work item type on "
+                      f"'{ns}' — cannot create the Business Value field.")
+                return None
+            self._custom_field_create(ns, cfg["name"], cfg["field_type"],
+                                      cfg["select_options"], [type_id])
+            # Re-fetch: the create mutation doesn't return option gids, which
+            # _import_set_bv needs to map values onto.
+            fields = self._fetch_custom_fields(ns)
+            field = next((f for f in fields if f["name"] == cfg["name"]), None)
+            if field:
+                print(f"  Created {label}")
+            return field
+        except Exception as ex:
+            print(f"  WARN: could not create {label} — {ex}")
+            print(f"         (creating custom fields requires GitLab Ultimate "
+                  f"and Owner on '{ns}')")
+            return None
 
     def _import_set_bv(self, epic, bv, bv_ctx, row_num):
         """Set the BV custom field on a created/updated epic; WARN, never raise.
@@ -1036,15 +1115,18 @@ class ImportExportMixin:
 
     def import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                      group=None, create_missing=False, dest_group=None, on_existing="skip",
-                     source_root=None, create_missing_groups=False, group_names=None):
+                     source_root=None, create_missing_groups=False, group_names=None,
+                     on_missing_bv_field="create"):
         with self._group_override(group):
             return self._import_epics(input_path, unresolved_parent, dry_run, create_missing,
                                       dest_group, on_existing, source_root,
-                                      create_missing_groups, group_names)
+                                      create_missing_groups, group_names,
+                                      on_missing_bv_field)
 
     def _import_epics(self, input_path=None, unresolved_parent="label", dry_run=False,
                       create_missing=False, dest_group=None, on_existing="skip",
-                      source_root=None, create_missing_groups=False, group_names=None):
+                      source_root=None, create_missing_groups=False, group_names=None,
+                      on_missing_bv_field="create"):
         """
         Import epics from a CSV or JSON file.
 
@@ -1070,6 +1152,10 @@ class ImportExportMixin:
             return
         if on_existing not in ("create", "skip", "update"):
             print(f"ERROR: on_existing must be 'create', 'skip', or 'update' (got '{on_existing}')")
+            return
+        if on_missing_bv_field not in ("create", "ignore", "fail"):
+            print(f"ERROR: on_missing_bv_field must be 'create', 'ignore', or 'fail' "
+                  f"(got '{on_missing_bv_field}')")
             return
         if not input_path:
             print("ERROR: input_path is required.")
@@ -1097,6 +1183,22 @@ class ImportExportMixin:
         print("\n  Pre-flight validation...")
         cleaned, err_count = self._validate_epics(rows)
         if cleaned is None:
+            return
+
+        # Business Value field (#196/#204) — resolved BEFORE the target root
+        # can be created, so on_missing_bv_field=fail aborts with zero
+        # mutations ('nothing was imported' must stay literally true, even
+        # with create_missing on). The intended root path stands in for the
+        # group object: custom fields live at the top-level group, which must
+        # already exist. Under 'create' the field can therefore be minted
+        # even when a later pre-flight check aborts the import — harmless, it
+        # is exactly the field the retry needs. Dry runs only ever read.
+        ns = getattr(self, "gitlab_namespace", None)
+        intended_root = f"{ns}/{self.parent_group}" if ns else self.parent_group
+        bv_ctx = self._resolve_import_bv_field(cleaned, intended_root,
+                                               on_missing=on_missing_bv_field,
+                                               dry_run=dry_run)
+        if bv_ctx == "abort":
             return
 
         root_group = self._resolve_import_target(create_missing, dry_run)
@@ -1172,7 +1274,7 @@ class ImportExportMixin:
         if orphan_rows:
             print(f"  ({len(orphan_rows)} row(s) will receive 'import::needs-parent' label)")
 
-        created = skipped = updated = failed = bv_missed = 0
+        created = skipped = updated = failed = bv_missed = bv_dropped = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
         id_map = {}           # source id → new/matched target id (#194)
         existing_cache = {}   # container id → {title: [epics]} — one list per container (#201)
@@ -1180,9 +1282,6 @@ class ImportExportMixin:
         # Display names (#200) — only relevant when groups can be created.
         names_ctx = (self._load_group_names(group_names) if create_missing_groups
                      else {"groups": {}, "projects": {}})
-        # Business Value context (#196): resolved once, only when needed and
-        # not under dry run (dry runs preview the value without GraphQL).
-        bv_ctx = None if dry_run else self._resolve_import_bv_field(cleaned, root_group)
 
         for i in ordered:
             row = cleaned[i - 1]
@@ -1323,9 +1422,12 @@ class ImportExportMixin:
             try:
                 if existing and on_existing == "update":
                     self._update_epic(existing, payload, weight, state)
-                    if bv is not None and bv_ctx:
-                        if not self._import_set_bv(existing, bv, bv_ctx, i):
-                            bv_missed += 1
+                    if bv is not None:
+                        if bv_ctx:
+                            if not self._import_set_bv(existing, bv, bv_ctx, i):
+                                bv_missed += 1
+                        else:
+                            bv_dropped += 1
                     print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
                     if src_id is not None:
                         id_map[src_id] = existing.id
@@ -1334,9 +1436,12 @@ class ImportExportMixin:
                     epic = target.epics.create(payload)
                     if weight is not None:
                         self._set_epic_weight(epic, weight)
-                    if bv is not None and bv_ctx:
-                        if not self._import_set_bv(epic, bv, bv_ctx, i):
-                            bv_missed += 1
+                    if bv is not None:
+                        if bv_ctx:
+                            if not self._import_set_bv(epic, bv, bv_ctx, i):
+                                bv_missed += 1
+                        else:
+                            bv_dropped += 1
                     if state == "closed":
                         epic.state_event = "close"
                         epic.save()
@@ -1363,6 +1468,11 @@ class ImportExportMixin:
             print(f"  WARN: {bv_missed} business_value value(s) could not be set "
                   f"(see row WARNs above) — transient GraphQL failures can be "
                   f"retried by re-importing the affected rows with on_existing=update")
+        if bv_dropped:
+            print(f"  WARN: {bv_dropped} business_value value(s) dropped — the "
+                  f"Business Value field is missing on the target (see WARN "
+                  f"above). Create it (setup-bv-field, or on_missing_bv_field="
+                  f"create), then re-import with on_existing=update to backfill.")
         if groups_created:
             verb = "would be created" if dry_run else "created"
             print(f"  {len(groups_created)} missing subgroup(s) {verb} along "
@@ -2455,13 +2565,15 @@ class ImportExportMixin:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def import_bundle(self, input_path=None, group=None, create_missing=True,
-                      on_existing="skip", dry_run=False):
+                      on_existing="skip", on_missing_bv_field="create",
+                      dry_run=False):
         with self._group_override(group):
             return self._import_bundle(input_path, create_missing, on_existing,
-                                       dry_run)
+                                       on_missing_bv_field, dry_run)
 
     def _import_bundle(self, input_path=None, create_missing=True,
-                       on_existing="skip", dry_run=False):
+                       on_existing="skip", on_missing_bv_field="create",
+                       dry_run=False):
         """Import a transfer bundle: containers, epics, issues, links (#206).
 
         Runs the proven sequence with transfer-tuned defaults — containers are
@@ -2559,14 +2671,16 @@ class ImportExportMixin:
                     input_path=str(tmp / files["epics"]),
                     unresolved_parent="label", dry_run=dry_run,
                     create_missing=create_missing, on_existing=on_existing,
-                    create_missing_groups=True, group_names=names_path)
+                    create_missing_groups=True, group_names=names_path,
+                    on_missing_bv_field=on_missing_bv_field)
                 if id_map is None:
                     if dry_run:
                         print("\n[dry run] preview stopped after the epics phase "
-                              "(see the message above). A dry run cannot preview "
-                              "into a target root that does not exist yet — the "
-                              "real import would create it. Create the root group "
-                              "first to preview the full sequence, or run without "
+                              "— the reason is in the message above. One common "
+                              "cause: a dry run cannot preview into a target "
+                              "root that does not exist yet (the real import "
+                              "would create it) — create the root group first "
+                              "to preview the full sequence, or run without "
                               "dry run.")
                     else:
                         print("\nBundle import aborted — the epics phase did not "
