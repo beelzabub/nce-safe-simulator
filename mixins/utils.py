@@ -362,7 +362,12 @@ class UtilitiesMixin:
         return result.get("customField")
 
     def _set_work_item_business_value(self, work_item_id, field_gid, option_gid):
-        """Set a SINGLE_SELECT custom field value on a work item."""
+        """Set a SINGLE_SELECT custom field value on a work item.
+
+        Returns True on success, False when the mutation failed (GraphQL
+        errors exhausted retries, or workItemUpdate reported errors) so
+        callers can count/report the miss instead of losing it silently.
+        """
         mutation = """
         mutation {
           workItemUpdate(input: {
@@ -377,10 +382,17 @@ class UtilitiesMixin:
           }
         }
         """ % (f"gid://gitlab/WorkItem/{work_item_id}", field_gid, option_gid)
-        data   = self.graphql_query(mutation, retries=1)
-        errors = (data or {}).get("workItemUpdate", {}).get("errors", [])
+        # retries=2: a work item created moments ago (possibly in a subgroup
+        # created moments before that) can be briefly invisible to GraphQL;
+        # one 1.5s retry was observed losing a value in the field (#202).
+        data = self.graphql_query(mutation, retries=2)
+        if data is None:
+            return False
+        errors = data.get("workItemUpdate", {}).get("errors", [])
         if errors:
             print(f"  Business Value set error: {errors}")
+            return False
+        return True
 
     def _clear_work_item_business_value(self, work_item_id, field_gid):
         """Clear a SINGLE_SELECT custom field on a work item (sets selectedOptionIds to [])."""

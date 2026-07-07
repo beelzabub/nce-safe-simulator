@@ -222,3 +222,61 @@ def test_import_has_create_missing_bool(key):
 def test_export_has_no_create_missing(key):
     payload = _tool_payload(_tool(key), _gl_stub())
     assert all(p["name"] != "create_missing" for p in payload["params"])
+
+
+# ─── namespace resolution in _get_or_create_root_group (#202) ─────────────────
+
+def test_create_missing_namespace_falls_back_to_full_path():
+    """A namespace given as a URL-slug path (no display-name match) must still
+    resolve — the CLI form 'a/b/c/Group' aborted here in the #202 field test."""
+    h = IEHarness()
+    h.gitlab_namespace = "a/b/c"          # full path, not a display name
+    parent = MagicMock()
+    parent.id, parent.visibility = 42, "private"
+    h.gl.groups.get.return_value = parent
+    group = h._get_or_create_root_group()
+    h.gl.groups.get.assert_called_once_with("a/b/c")
+    h.gl.groups.create.assert_called_once()
+    assert h.gl.groups.create.call_args[0][0]["parent_id"] == 42
+    assert group is h.gl.groups.create.return_value
+
+
+def test_create_missing_namespace_unresolvable_aborts(capsys):
+    h = IEHarness()
+    h.gitlab_namespace = "no/such/path"
+    h.gl.groups.get.side_effect = Exception("404")
+    assert h._get_or_create_root_group() is None
+    out = capsys.readouterr().out
+    assert "Root namespace 'no/such/path' not found" in out
+    assert "full-path lookup failed: 404" in out
+    h.gl.groups.create.assert_not_called()
+
+
+def test_display_name_without_slash_never_tries_path_lookup():
+    """The path fallback is gated on '/' (illegal in display names): a stale or
+    ambiguous display name must abort, not silently resolve to some unrelated
+    group whose URL path happens to equal the string."""
+    h = IEHarness()
+    h.gitlab_namespace = "Sandbox"        # no slash → display name only
+    assert h._get_or_create_root_group() is None
+    h.gl.groups.get.assert_not_called()
+    h.gl.groups.create.assert_not_called()
+
+
+def test_display_name_resolution_wins_over_path_lookup():
+    """Display-name resolution is tried first; the path fallback must not fire
+    when it succeeds (pins the documented order)."""
+    h = IEHarness()
+    h.gitlab_namespace = "a/b/c"
+    parent = MagicMock()
+    parent.id, parent.visibility = 42, "private"
+    root = MagicMock()
+
+    def _by_name(name):
+        # parent_group misses (forcing creation); the namespace resolves.
+        return parent if name == "a/b/c" else None
+    h.get_group_by_name = _by_name
+    h._get_or_create_root_group()
+    h.gl.groups.get.assert_not_called()
+    h.gl.groups.create.assert_called_once()
+    assert h.gl.groups.create.call_args[0][0]["parent_id"] == 42

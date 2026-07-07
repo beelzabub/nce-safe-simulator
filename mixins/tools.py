@@ -2715,9 +2715,13 @@ class ToolsMixin:
                 updated += 1
             else:
                 try:
-                    self._set_work_item_business_value(wid, field_gid, opt_gid)
-                    print(f"  SET  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
-                    updated += 1
+                    if self._set_work_item_business_value(wid, field_gid, opt_gid):
+                        print(f"  SET  [BV={opt_val}]  #{epic.iid} '{epic.title[:45]}'")
+                        updated += 1
+                    else:
+                        print(f"  ERROR #{epic.iid}: Business Value mutation "
+                              f"failed after retries")
+                        errors += 1
                 except Exception as e:
                     print(f"  ERROR #{epic.iid}: {e}")
                     errors += 1
