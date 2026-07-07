@@ -151,16 +151,17 @@ def test_import_issues_wrapper_threads_override_and_create_missing():
     captured = {}
 
     def fake_impl(input_path, target_project_path, dry_run, create_missing, on_existing,
-                  source_root):
+                  source_root, epic_id_map):
         captured["args"] = (input_path, target_project_path, dry_run, create_missing,
-                            on_existing, source_root)
+                            on_existing, source_root, epic_id_map)
         captured["parent_group"] = h.parent_group
 
     h._import_issues = fake_impl
     h.import_issues(input_path="i.csv", target_project_path="team/backlog",
                     dry_run=False, group="Group C", create_missing=True, on_existing="skip",
-                    source_root="ns-a/port")
-    assert captured["args"] == ("i.csv", "team/backlog", False, True, "skip", "ns-a/port")
+                    source_root="ns-a/port", epic_id_map="map.json")
+    assert captured["args"] == ("i.csv", "team/backlog", False, True, "skip", "ns-a/port",
+                                "map.json")
     assert captured["parent_group"] == "Group C"
     assert h.parent_group == "Configured Group"
 

@@ -54,6 +54,14 @@ class RemapHarness(ImportExportMixin, BootstrapMixin):
     def _build_group_cache(self, root_group):                return {ROOT_PATH: self.root}
     def _build_valid_epic_ids(self, root_group):             return set(self._target_ids)
     def _set_epic_weight(self, epic, weight):                pass
+    def sanitize_name(self, s):                              return s.lower()
+    def _default_export_name(self, stem, fmt):
+        import tempfile, pathlib
+        return pathlib.Path(tempfile.mkdtemp()) / f"{stem}.{fmt}"
+    def sanitize_name(self, s):                              return s.lower()
+    def _default_export_name(self, stem, fmt):
+        import tempfile, pathlib
+        return pathlib.Path(tempfile.mkdtemp()) / f"{stem}.{fmt}"
 
 
 def _run(h, tmp_path, **kw):
