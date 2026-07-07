@@ -18,7 +18,7 @@ EPIC_EXPORT_FIELDS = [
 ISSUE_EXPORT_FIELDS = [
     "project_path", "source_root", "iid", "id", "title", "description", "state",
     "labels", "weight", "due_date", "milestone", "assignees",
-    "epic_id", "epic_iid", "author", "web_url",
+    "epic_id", "epic_iid", "epic_title", "author", "web_url",
     "created_at", "updated_at", "closed_at",
 ]
 
@@ -39,6 +39,8 @@ EPIC_IMPORT_REQUIRED = {"title"}
 ISSUE_IMPORT_KNOWN = {
     "title", "project_path", "description", "labels", "weight",
     "due_date", "milestone", "assignees", "epic_id", "state",
+    # epic link resolution across systems (#197) — title beats raw id
+    "epic_title",
     # read-only reference columns
     "iid", "id", "author", "web_url", "created_at", "updated_at",
     "closed_at", "epic_iid",
@@ -1209,6 +1211,23 @@ class ImportExportMixin:
             print(f"  {len(groups_created)} missing subgroup(s) {verb} along "
                   f"reconciled paths (create-missing-groups)")
 
+        # Paired import (#197): persist the source_id → new id map so a
+        # following issues import can resolve its epic_id references to the
+        # epics just created here. Real ids only — dry sentinels excluded.
+        real_map = {str(k): v for k, v in id_map.items() if isinstance(v, int)}
+        if real_map and not dry_run:
+            try:
+                map_path = self._default_export_name("epic-id-map", "json")
+                map_path.write_text(json.dumps(real_map, indent=2), encoding="utf-8")
+                print(f"  Epic id map (source id → new id): {map_path}")
+                url = self._export_url(map_path)
+                if url:
+                    print(f"  Download: {url}   — pass to import-issues as 'Epic id map file'")
+            except Exception as ex:
+                # The map is a convenience artifact — its failure must never
+                # taint an import that already succeeded.
+                print(f"  WARN: could not write the epic id map — {ex}")
+
         if orphan_summary:
             print(f"\n  ── Orphan summary ({len(orphan_summary)} epic(s) created without intended parent) ──")
             print(f"  {'Row':<5} {'Original parent_id':<20} {'Group':<35} Title")
@@ -1216,6 +1235,63 @@ class ImportExportMixin:
             for row_num, etitle, gpath, orig_pid in orphan_summary:
                 print(f"  {row_num:<5} {str(orig_pid):<20} {gpath[:35]:<35} {etitle[:50]}")
             print(f"\n  Filter by label 'import::needs-parent' in GitLab to find and re-parent these epics.")
+
+    # ── Issue → epic link resolution (#197) ───────────────────────────────────
+
+    def _load_epic_id_map(self, path_str):
+        """Load a paired-import id map ({source epic id: new target id}).
+
+        Produced by a preceding epics import. Returns {} on any problem, with
+        a WARN — a bad map degrades to title/raw-id resolution, never aborts.
+        """
+        if not path_str:
+            return {}
+        path = self._resolve_path(path_str)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {str(k): int(v) for k, v in data.items()}
+        except Exception as ex:
+            print(f"  WARN: epic id map '{path}' could not be loaded ({ex}) — "
+                  f"falling back to title/raw-id resolution.")
+            return {}
+
+    def _target_epic_titles(self, root_group):
+        """Return {title: [epic ids]} for every epic under the target root."""
+        titles = {}
+        try:
+            for ep in root_group.epics.list(all=True):
+                titles.setdefault(getattr(ep, "title", ""), []).append(ep.id)
+        except Exception as ex:
+            print(f"  WARN: could not list target epics for title resolution — {ex}")
+        return titles
+
+    def _resolve_issue_epic(self, epic_id, epic_title, id_map, epic_titles,
+                            same_root, row_num):
+        """Resolve a row's epic reference to a TARGET epic id, or None.
+
+        Precedence: ① the paired-import id map (source id → new id);
+        ② exact epic_title match among the target's epics (first wins,
+        ambiguity WARNs); ③ the raw id — same-root imports only, since an
+        equal id on a different system is coincidence and linking to it
+        would attach the issue to an unrelated epic. An unresolvable
+        reference WARNs and the link is dropped (the issue still imports).
+        """
+        if epic_id is not None and str(epic_id) in id_map:
+            return id_map[str(epic_id)]
+        if epic_title and epic_titles is not None:
+            hits = epic_titles.get(epic_title, [])
+            if len(hits) > 1:
+                print(f"  row {row_num}: WARN {len(hits)} target epics titled "
+                      f"'{epic_title}' — using the first")
+            if hits:
+                return hits[0]
+        if epic_id is not None and same_root:
+            return epic_id
+        if epic_id is not None or epic_title:
+            print(f"  row {row_num}: WARN epic link dropped — "
+                  f"'{epic_title or epic_id}' matches no target epic "
+                  f"(cross-root raw ids are not trusted)")
+        return None
 
     # ── Issue export ──────────────────────────────────────────────────────────
 
@@ -1266,6 +1342,7 @@ class ImportExportMixin:
                                 ),
                 "epic_id":      epic_attr.get("id",  ""),
                 "epic_iid":     epic_attr.get("iid", ""),
+                "epic_title":   epic_attr.get("title", ""),
                 "author":       (issue.author or {}).get("name", ""),
                 "web_url":      issue.web_url or "",
                 "created_at":   getattr(issue, "created_at", "") or "",
@@ -1349,13 +1426,15 @@ class ImportExportMixin:
 
     def import_issues(self, input_path=None, target_project_path=None, dry_run=False,
                       group=None, create_missing=False, on_existing="skip",
-                      source_root=None):
+                      source_root=None, epic_id_map=None):
         with self._group_override(group):
             return self._import_issues(input_path, target_project_path, dry_run,
-                                       create_missing, on_existing, source_root)
+                                       create_missing, on_existing, source_root,
+                                       epic_id_map)
 
     def _import_issues(self, input_path=None, target_project_path=None, dry_run=False,
-                       create_missing=False, on_existing="skip", source_root=None):
+                       create_missing=False, on_existing="skip", source_root=None,
+                       epic_id_map=None):
         if not input_path:
             print("ERROR: input_path is required.")
             return
@@ -1407,6 +1486,27 @@ class ImportExportMixin:
             print(f"  Reconciling source root '{src_root}' → '{root_group.full_path}' "
                   f"for unresolved paths")
 
+        # Epic link resolution context (#197). same_root mirrors the epics
+        # importer's cross-root rule: raw epic ids are only trusted when the
+        # file does NOT positively come from a disjoint root (trusted stamp/
+        # override naming a non-overlapping tree).
+        tgt = root_group.full_path
+        overlap = (
+            src_root == tgt
+            or (src_root or "").startswith(tgt + "/")
+            or tgt.startswith((src_root or "") + "/")
+        )
+        same_root = not (bool(src_root) and src_trusted and not overlap)
+        id_map = self._load_epic_id_map(epic_id_map)
+        # Target epic titles: one listing, only when some row needs title or
+        # cross-root resolution (i.e. the id map alone can't settle it).
+        _needs_titles = any(
+            str(r.get("epic_title", "")).strip()
+            or (not same_root and str(r.get("epic_id", "")).strip() not in ("", "None", "none"))
+            for r in cleaned
+        )
+        epic_titles = self._target_epic_titles(root_group) if _needs_titles else {}
+
         # Username → user ID cache (populated on demand)
         username_cache = {}
 
@@ -1420,7 +1520,10 @@ class ImportExportMixin:
             due_date    = self._coerce_date(row.get("due_date"), "due_date", i, [])
             milestone   = str(row.get("milestone", "")).strip()
             assignees   = self._coerce_usernames(row.get("assignees"))
-            epic_id     = self._coerce_int(row.get("epic_id"),  "epic_id", i, [])
+            src_epic_id = self._coerce_int(row.get("epic_id"),  "epic_id", i, [])
+            epic_title  = str(row.get("epic_title", "")).strip()
+            epic_id     = self._resolve_issue_epic(
+                src_epic_id, epic_title, id_map, epic_titles, same_root, i)
             state       = str(row.get("state", "")).strip().lower()
             # Placement precedence: (1) own project_path when it resolves directly
             # (same-root); (2) #139 relative reconcile under this target root
