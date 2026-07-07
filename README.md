@@ -918,12 +918,12 @@ Both CSV and JSON are supported. Format is inferred from the file extension (`.j
 
 | Key | Scope | Key fields |
 |---|---|---|
-| `export-epics` | All epics across the full group hierarchy | `group_path`, `source_root`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `author`, `web_url`, timestamps |
+| `export-epics` | All epics across the full group hierarchy | `group_path`, `source_root`, `iid`, `id`, `title`, `description`, `state`, `labels`, `start_date`, `due_date`, `parent_id`, `parent_iid`, `planned_weight`, `business_value`, `author`, `web_url`, timestamps |
 | `export-issues` | All issues across the full group hierarchy | `project_path`, `source_root`, `iid`, `id`, `title`, `description`, `state`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `epic_iid`, `author`, `web_url`, timestamps |
-| `import-epics` | Create epics from file with pre-flight validation | Required: `title` — Optional: `group_path`, `source_root`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `state` |
+| `import-epics` | Create epics from file with pre-flight validation | Required: `title` — Optional: `group_path`, `source_root`, `labels`, `start_date`, `due_date`, `parent_id`, `planned_weight`, `business_value`, `state` |
 | `import-issues` | Create issues from file with pre-flight validation | Required: `title`, `project_path` — Optional: `source_root`, `labels`, `weight`, `due_date`, `milestone`, `assignees`, `epic_id`, `state` |
 
-`planned_weight` on epics is fetched/set via GraphQL (the REST API does not expose it).
+`planned_weight` on epics is fetched/set via GraphQL (the REST API does not expose it). `business_value` round-trips the Business Value custom field the same way: exports carry each epic's value, and the importer sets it on created/updated epics by matching the value against the target field's select options — a value that isn't an option WARNs per row, and a target without the field WARNs once and imports everything else normally (the values are dropped). Dry runs preview `bv=N` without touching GraphQL.
 
 Both importers run a full validation pass before creating anything — errors are reported upfront and the import aborts if any are found. Pass `dry_run: yes` to validate and preview without creating. When `parent_id` values from an external system don't match live IDs, the epic importer's `unresolved_parent` action decides how to handle them: `label` (create without parent and tag `import::needs-parent`, default), `skip` (skip the affected rows), or `ask` (pick one fallback parent interactively). In the web dialog this is a dropdown (offering `label`/`skip`) with a `?` help tooltip describing each option; `ask` is CLI-only because it prompts on the live hierarchy, and a non-interactive run that requests `ask` degrades to `label` with a note rather than blocking.
 
