@@ -1,7 +1,10 @@
-"""Business Value round-trip on epic export/import (Refs #196).
+"""Business Value round-trip on epic export/import (Refs #196, #204).
 
 BV drives WSJF scoring and the Portfolio Explorer's at-risk metrics; it was
-silently dropped on every transfer because the export never carried it.
+silently dropped on every transfer because the export never carried it (#196).
+A cross-instance target may lack the custom field entirely — the
+on_missing_bv_field policy (create / ignore / fail, #204) decides whether the
+import creates it, drops the values (counted), or aborts pre-flight.
 """
 import json
 
@@ -31,7 +34,11 @@ BV_FIELD = {
 
 
 class BVHarness(ImportExportMixin, BootstrapMixin):
-    BUSINESS_VALUE_FIELD = {"name": "Business Value"}
+    BUSINESS_VALUE_FIELD = {
+        "name":           "Business Value",
+        "field_type":     "SINGLE_SELECT",
+        "select_options": ["1", "2", "3", "5", "8"],
+    }
 
     def __init__(self, rows, bv_field=BV_FIELD):
         self.gl = MagicMock()
@@ -143,10 +150,10 @@ class TestImport:
              {"title": "E2", "group_path": ROOT_PATH, "business_value": 3}],
             bv_field=None,
         )
-        _run(h, tmp_path)
+        _run(h, tmp_path, on_missing_bv_field="ignore")
         out = capsys.readouterr().out
         assert h.bv_sets == []
-        assert out.count("not found on the target") == 1
+        assert out.count("not available on the target") == 1
         assert "created #" in out          # rows still imported
 
     def test_rows_without_bv_never_resolve_field(self, tmp_path):
@@ -167,14 +174,16 @@ class TestImport:
         _run(h, tmp_path, on_existing="update")
         assert h.bv_sets == [(555, BV_FIELD["id"], "gid://opt/3")]
 
-    def test_dry_run_previews_bv_without_graphql(self, tmp_path, capsys):
+    def test_dry_run_previews_bv_reads_only(self, tmp_path, capsys):
+        # Dry runs resolve the field (a read — needed to preview the #204
+        # missing-field policy) but never mutate anything.
         h = BVHarness([{"title": "E1", "group_path": ROOT_PATH, "business_value": 5}])
         calls = []
         h._find_bv_field = lambda group=None: calls.append(1) or BV_FIELD
         _run(h, tmp_path, dry_run=True)
         out = capsys.readouterr().out
         assert "bv=5" in out
-        assert calls == []
+        assert calls == [1]
         assert h.bv_sets == []
 
     def test_epic_without_work_item_id_warns(self, tmp_path, capsys):
@@ -226,6 +235,102 @@ class TestMissSummary:
         _run(h, tmp_path)
         # E1's value isn't an option → miss; E2 succeeds.
         assert "1 business_value value(s) could not be set" in capsys.readouterr().out
+
+
+class TestMissingFieldPolicy:
+    """on_missing_bv_field = create / ignore / fail (Refs #204)."""
+
+    ROWS = [{"title": "E1", "group_path": ROOT_PATH, "business_value": 5},
+            {"title": "E2", "group_path": ROOT_PATH, "business_value": 3}]
+
+    def _harness(self, bv_field=None):
+        h = BVHarness(list(self.ROWS), bv_field=bv_field)
+        h.created_fields = []   # (namespace, name, field_type, options, type_ids)
+        h._get_epic_work_item_type_id = lambda ns: "gid://type/1"
+
+        def _create_field(ns, name, ftype, opts, type_ids):
+            h.created_fields.append((ns, name, ftype, opts, type_ids))
+        h._custom_field_create = _create_field
+        h._fetch_custom_fields = lambda ns: (
+            [dict(BV_FIELD, name="Business Value")] if h.created_fields else [])
+        return h
+
+    def test_fail_aborts_before_any_row(self, tmp_path, capsys):
+        h = self._harness()
+        _run(h, tmp_path, on_missing_bv_field="fail")
+        out = capsys.readouterr().out
+        assert "nothing was imported" in out
+        assert h.root.epics.create.call_count == 0
+        assert "created #" not in out
+
+    def test_fail_aborts_before_target_root_can_be_created(self, tmp_path):
+        # 'nothing was imported' must be literally true: the abort has to fire
+        # BEFORE _resolve_import_target, which creates the root group when
+        # create_missing is on (the import-bundle default).
+        h = self._harness()
+        resolved = []
+        h._resolve_import_target = (
+            lambda *a: resolved.append(1) or h.root)
+        _run(h, tmp_path, on_missing_bv_field="fail", create_missing=True)
+        assert resolved == []
+
+    def test_ignore_drops_and_counts_in_summary(self, tmp_path, capsys):
+        h = self._harness()
+        _run(h, tmp_path, on_missing_bv_field="ignore")
+        out = capsys.readouterr().out
+        assert h.bv_sets == []
+        assert h.created_fields == []
+        assert "2 business_value value(s) dropped" in out
+        assert "2 created" in out          # the epics themselves land
+
+    def test_create_makes_field_at_top_level_group(self, tmp_path, capsys):
+        h = self._harness()
+        _run(h, tmp_path, on_missing_bv_field="create")
+        out = capsys.readouterr().out
+        # Created at the top-level ancestor of ns/target — not a subgroup.
+        assert [f[0] for f in h.created_fields] == ["ns"]
+        assert h.created_fields[0][1] == "Business Value"
+        # Values then map through the re-fetched field's option gids.
+        assert [gid for _, _, gid in h.bv_sets] == ["gid://opt/5", "gid://opt/3"]
+        assert "dropped" not in out
+
+    def test_create_is_the_default(self, tmp_path):
+        h = self._harness()
+        _run(h, tmp_path)
+        assert [f[0] for f in h.created_fields] == ["ns"]
+
+    def test_existing_field_is_never_touched(self, tmp_path):
+        h = self._harness(bv_field=BV_FIELD)
+        _run(h, tmp_path, on_missing_bv_field="create")
+        assert h.created_fields == []
+        assert len(h.bv_sets) == 2
+
+    def test_create_failure_degrades_to_drop(self, tmp_path, capsys):
+        h = self._harness()
+        def _boom(*a, **kw):
+            raise RuntimeError("customFieldCreate errors: ['forbidden']")
+        h._custom_field_create = _boom
+        _run(h, tmp_path, on_missing_bv_field="create")
+        out = capsys.readouterr().out
+        assert "could not create" in out
+        assert "GitLab Ultimate" in out
+        assert "2 business_value value(s) dropped" in out
+        assert "2 created" in out          # import still lands
+
+    def test_create_dry_run_announces_without_creating(self, tmp_path, capsys):
+        h = self._harness()
+        _run(h, tmp_path, on_missing_bv_field="create", dry_run=True)
+        out = capsys.readouterr().out
+        assert "would create custom field 'Business Value'" in out
+        assert h.created_fields == []
+        assert h.bv_sets == []
+
+    def test_invalid_policy_rejected(self, tmp_path, capsys):
+        h = self._harness()
+        _run(h, tmp_path, on_missing_bv_field="explode")
+        out = capsys.readouterr().out
+        assert "on_missing_bv_field must be" in out
+        assert h.root.epics.create.call_count == 0
 
 
 class _SetterHarness(UtilitiesMixin):
