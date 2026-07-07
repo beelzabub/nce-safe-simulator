@@ -128,18 +128,18 @@ def test_import_epics_wrapper_threads_override_and_create_missing():
     captured = {}
 
     def fake_impl(input_path, unresolved_parent, dry_run, create_missing, dest_group,
-                  on_existing, source_root):
+                  on_existing, source_root, create_missing_groups):
         captured["args"] = (input_path, unresolved_parent, dry_run, create_missing,
-                            dest_group, on_existing, source_root)
+                            dest_group, on_existing, source_root, create_missing_groups)
         captured["parent_group"] = h.parent_group
         captured["ns"] = h.gitlab_namespace
 
     h._import_epics = fake_impl
     h.import_epics(input_path="x.json", unresolved_parent="skip", dry_run=True,
                    group="ns2/Group B", create_missing=True, dest_group="ns2/Group B/team",
-                   on_existing="update", source_root="ns-a/port")
+                   on_existing="update", source_root="ns-a/port", create_missing_groups=True)
     assert captured["args"] == ("x.json", "skip", True, True, "ns2/Group B/team", "update",
-                                "ns-a/port")
+                                "ns-a/port", True)
     assert captured["parent_group"] == "Group B"      # override active during call
     assert captured["ns"] == "ns2"
     assert h.parent_group == "Configured Group"        # restored after
