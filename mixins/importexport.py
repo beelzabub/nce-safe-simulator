@@ -122,10 +122,12 @@ class ImportExportMixin:
     def _group_override(self, group):
         """Temporarily retarget parent_group / gitlab_namespace for one run.
 
-        Accepts an override of the form ``namespace/group`` (URL-slug namespace
-        plus group display-name, e.g. ``saic-study-group/My Portfolio``) or just
-        ``group`` (display-name only — the configured namespace is kept). An
-        empty / None value leaves the configured group untouched.
+        Accepts an override of the form ``namespace/group`` or just ``group``
+        (the configured namespace is kept). The group part is always a display
+        name. The namespace part may be a display name (``TWA-122 -
+        PlatformEngineering/JamieGroup``) or a full URL-slug path (``a/b/c``) —
+        lookups resolve display names first and fall back to the path (#202).
+        An empty / None value leaves the configured group untouched.
 
         The override is per-run only: the original instance state is always
         restored on exit, so config.json is never mutated and other tools are
@@ -923,21 +925,32 @@ class ImportExportMixin:
         return {"field_gid": bv_field["id"], "options": options}
 
     def _import_set_bv(self, epic, bv, bv_ctx, row_num):
-        """Set the BV custom field on a created/updated epic; WARN, never raise."""
+        """Set the BV custom field on a created/updated epic; WARN, never raise.
+
+        Returns True when the value was set, False on any miss — the caller
+        tallies misses so the run summary reflects them (#202: a transient
+        GraphQL failure used to lose the value with no trace in the summary).
+        """
         opt_gid = bv_ctx["options"].get(bv)
         if opt_gid is None:
             print(f"  row {row_num}: WARN business_value {bv} is not an option "
                   f"of the target field ({sorted(bv_ctx['options'])}) — not set")
-            return
+            return False
         wid = getattr(epic, "work_item_id", None)
         if not wid:
             print(f"  row {row_num}: WARN epic has no work_item_id — "
                   f"business_value not set")
-            return
+            return False
         try:
-            self._set_work_item_business_value(wid, bv_ctx["field_gid"], opt_gid)
+            if self._set_work_item_business_value(wid, bv_ctx["field_gid"], opt_gid):
+                return True
+            print(f"  row {row_num}: WARN business_value {bv} not set on "
+                  f"'{getattr(epic, 'title', '?')}' — GraphQL mutation failed "
+                  f"after retries")
+            return False
         except Exception as ex:
             print(f"  row {row_num}: WARN business_value set failed — {ex}")
+            return False
 
     def _resolve_parent_ids(self, rows, valid_epic_ids, root_group, unresolved_parent,
                             file_ids=frozenset(), cross_root=False):
@@ -1159,7 +1172,7 @@ class ImportExportMixin:
         if orphan_rows:
             print(f"  ({len(orphan_rows)} row(s) will receive 'import::needs-parent' label)")
 
-        created = skipped = updated = failed = 0
+        created = skipped = updated = failed = bv_missed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
         id_map = {}           # source id → new/matched target id (#194)
         existing_cache = {}   # container id → {title: [epics]} — one list per container (#201)
@@ -1311,7 +1324,8 @@ class ImportExportMixin:
                 if existing and on_existing == "update":
                     self._update_epic(existing, payload, weight, state)
                     if bv is not None and bv_ctx:
-                        self._import_set_bv(existing, bv, bv_ctx, i)
+                        if not self._import_set_bv(existing, bv, bv_ctx, i):
+                            bv_missed += 1
                     print(f"  row {i}: updated #{existing.iid} '{title}' → {target.full_path}")
                     if src_id is not None:
                         id_map[src_id] = existing.id
@@ -1321,7 +1335,8 @@ class ImportExportMixin:
                     if weight is not None:
                         self._set_epic_weight(epic, weight)
                     if bv is not None and bv_ctx:
-                        self._import_set_bv(epic, bv, bv_ctx, i)
+                        if not self._import_set_bv(epic, bv, bv_ctx, i):
+                            bv_missed += 1
                     if state == "closed":
                         epic.state_event = "close"
                         epic.save()
@@ -1344,6 +1359,10 @@ class ImportExportMixin:
 
         print(f"\n  Done — {created} created  |  {updated} updated  |  {skipped} skipped  |  {failed} failed"
               + ("  (dry run — no changes made)" if dry_run else ""))
+        if bv_missed:
+            print(f"  WARN: {bv_missed} business_value value(s) could not be set "
+                  f"(see row WARNs above) — transient GraphQL failures can be "
+                  f"retried by re-importing the affected rows with on_existing=update")
         if groups_created:
             verb = "would be created" if dry_run else "created"
             print(f"  {len(groups_created)} missing subgroup(s) {verb} along "
@@ -2076,6 +2095,32 @@ class ImportExportMixin:
         if not rows:
             print("  No blocking links found — nothing written.")
             return
+
+        # Flag endpoints outside the exported tree up front (#202): the blocker
+        # side of a link can live in another hierarchy (e.g. a stale link into a
+        # deletion-scheduled group). Such rows have no counterpart on a target
+        # system, so import-links will drop them — make that predictable at
+        # export time instead of a surprise WARN mid-import.
+        root_path = group.full_path
+
+        def _external(container):
+            return not (container == root_path
+                        or str(container).startswith(root_path + "/"))
+
+        external = [r for r in rows
+                    if _external(r["source_container"]) or _external(r["target_container"])]
+        if external:
+            print(f"  WARN: {len(external)} link(s) reference an endpoint outside "
+                  f"'{root_path}' — a cross-system import will drop them "
+                  f"(no counterpart exists on the target):")
+            for r in external[:20]:
+                ext = (r["target_container"] if _external(r["target_container"])
+                       else r["source_container"]) or "unknown group"
+                print(f"    {r['source_type']} '{r['source_title']}' ←blocked by← "
+                      f"{r['target_type']} '{r['target_title']}'  (external: {ext})")
+            if len(external) > 20:
+                print(f"    … and {len(external) - 20} more")
+
         self._write_file(path, fmt, rows, LINK_EXPORT_FIELDS)
         print(f"  Exported {len(rows)} link(s) → {path}")
         url = self._export_url(path)
