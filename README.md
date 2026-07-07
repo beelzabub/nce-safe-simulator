@@ -998,6 +998,8 @@ Re-running the same file could otherwise create duplicates. The `on_existing` pa
 - **`update`** — apply the row's fields to the existing item (merge — omitted fields are left as-is; the matched title is not rewritten); create it if there's no match.
 - **`create`** — always create, never match; the original create-only behaviour (may duplicate on re-import).
 
+Existence checks are **batched per container** (#201): each target group/project's items are listed once per run and looked up locally, instead of one search call per row — large re-imports no longer hammer the API into rate limiting. Items created during the run join the cache, so intra-run duplicates (the same title twice in one container in one file) are still caught. SKIP lines name the matched container (`already exists (#4 in …/team-07)`) since iids are only unique per group. When GitLab does rate-limit a run (HTTP 429), the retry backoff is now announced in the job log (`GitLab rate limit hit (429) — retrying after 45s...`) instead of sleeping silently.
+
 The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
 
 ### Test Data Seeding Pattern

@@ -302,16 +302,31 @@ class ImportExportMixin:
 
     # ── Re-import handling (on_existing: create | skip | update) ───────────────
 
-    def _find_issue_by_title(self, project, title):
+    def _find_issue_by_title(self, project, title, cache=None):
         """First issue in `project` with an exact matching title, else None.
+
+        With ``cache`` (a per-run dict), the project's issues are listed ONCE
+        and looked up locally — O(containers) API calls instead of one search
+        per row, which is what rate-limited large re-imports (#201). Without
+        it, the original per-call search is used.
 
         WARNs when several issues share the title — title is the de-facto
         identity key for re-import matching, so ambiguity is worth surfacing
         rather than silently picking one (#194).
         """
         try:
-            matches = [iss for iss in project.issues.list(search=title, all=True)
-                       if getattr(iss, "title", "") == title]
+            if cache is not None:
+                key = getattr(project, "id", None)
+                titles = cache.get(key)
+                if titles is None:
+                    titles = {}
+                    for iss in project.issues.list(all=True):
+                        titles.setdefault(getattr(iss, "title", ""), []).append(iss)
+                    cache[key] = titles
+                matches = titles.get(title, [])
+            else:
+                matches = [iss for iss in project.issues.list(search=title, all=True)
+                           if getattr(iss, "title", "") == title]
             if len(matches) > 1:
                 print(f"  WARN: {len(matches)} issues titled '{title}' in "
                       f"'{getattr(project, 'path_with_namespace', '?')}' — using #{matches[0].iid}")
@@ -319,8 +334,11 @@ class ImportExportMixin:
         except Exception:
             return None
 
-    def _find_epic_by_title(self, group, title):
+    def _find_epic_by_title(self, group, title, cache=None):
         """First epic in `group` ITSELF with an exact matching title, else None.
+
+        With ``cache`` (a per-run dict) the container's own epics are listed
+        once and looked up locally — see _find_issue_by_title (#201).
 
         The group-epics endpoint includes descendant groups' epics by
         default, which made same-titled epics in *different* containers
@@ -334,11 +352,21 @@ class ImportExportMixin:
         """
         try:
             gid = getattr(group, "id", None)
-            matches = [
-                ep for ep in group.epics.list(search=title, all=True)
-                if getattr(ep, "title", "") == title
-                and (gid is None or getattr(ep, "group_id", gid) == gid)
-            ]
+            if cache is not None:
+                titles = cache.get(gid)
+                if titles is None:
+                    titles = {}
+                    for ep in group.epics.list(all=True):
+                        if gid is None or getattr(ep, "group_id", gid) == gid:
+                            titles.setdefault(getattr(ep, "title", ""), []).append(ep)
+                    cache[gid] = titles
+                matches = titles.get(title, [])
+            else:
+                matches = [
+                    ep for ep in group.epics.list(search=title, all=True)
+                    if getattr(ep, "title", "") == title
+                    and (gid is None or getattr(ep, "group_id", gid) == gid)
+                ]
             if len(matches) > 1:
                 print(f"  WARN: {len(matches)} epics titled '{title}' in "
                       f"'{getattr(group, 'full_path', '?')}' — using #{matches[0].iid}")
@@ -1134,6 +1162,7 @@ class ImportExportMixin:
         created = skipped = updated = failed = 0
         orphan_summary = []   # (row_num, title, group_path, original_parent_id)
         id_map = {}           # source id → new/matched target id (#194)
+        existing_cache = {}   # container id → {title: [epics]} — one list per container (#201)
         groups_created = set()   # full paths created (or planned, dry run) (#195)
         # Display names (#200) — only relevant when groups can be created.
         names_ctx = (self._load_group_names(group_names) if create_missing_groups
@@ -1245,10 +1274,11 @@ class ImportExportMixin:
                 payload["parent_id"] = resolved_pid
 
             # Re-import handling: match an existing epic by title in the target.
-            existing = self._find_epic_by_title(target, title) if on_existing != "create" else None
+            existing = (self._find_epic_by_title(target, title, cache=existing_cache)
+                        if on_existing != "create" else None)
             if existing and on_existing == "skip":
                 print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — epic '{title}' "
-                      f"already exists (#{existing.iid})")
+                      f"already exists (#{existing.iid} in {target.full_path})")
                 if src_id is not None:
                     # existing.id is a real target id even under dry run, so
                     # children preview their concrete parent_id.
@@ -1296,6 +1326,12 @@ class ImportExportMixin:
                         epic.state_event = "close"
                         epic.save()
                     print(f"  row {i}: created #{epic.iid} '{title}' → {target.full_path}")
+                    # Keep the existence cache truthful for intra-run
+                    # duplicates: a later same-title row in this container
+                    # must still see this epic (#201).
+                    _tgt_titles = existing_cache.get(getattr(target, "id", None))
+                    if _tgt_titles is not None:
+                        _tgt_titles.setdefault(title, []).append(epic)
                     if src_id is not None:
                         id_map[src_id] = epic.id
                     created += 1
@@ -1651,6 +1687,7 @@ class ImportExportMixin:
 
         # Username → user ID cache (populated on demand)
         username_cache = {}
+        existing_cache = {}   # project id → {title: [issues]} — one list per project (#201)
 
         created = skipped = updated = failed = 0
         projects_created = set()   # paths created (or planned, dry run) (#198)
@@ -1783,10 +1820,11 @@ class ImportExportMixin:
                     payload["assignee_ids"] = ids
 
             # Re-import handling: match an existing issue by title in the target.
-            existing = self._find_issue_by_title(project, title) if on_existing != "create" else None
+            existing = (self._find_issue_by_title(project, title, cache=existing_cache)
+                        if on_existing != "create" else None)
             if existing and on_existing == "skip":
                 print(f"  row {i}: {'[dry] ' if dry_run else ''}SKIP — issue '{title}' "
-                      f"already exists (#{existing.iid})")
+                      f"already exists (#{existing.iid} in {ppath})")
                 skipped += 1
                 continue
 
@@ -1825,6 +1863,9 @@ class ImportExportMixin:
                     issue.save()
 
                 print(f"  row {i}: created #{issue.iid} '{title}' → {ppath}")
+                _prj_titles = existing_cache.get(getattr(project, "id", None))
+                if _prj_titles is not None:
+                    _prj_titles.setdefault(title, []).append(issue)
                 created += 1
             except Exception as ex:
                 print(f"  row {i}: FAILED '{title}' — {ex}")
@@ -2106,6 +2147,8 @@ class ImportExportMixin:
                       f"'{title}' — using the first")
             return hits[0] if hits else None
 
+        _issue_title_cache = {}   # one issues listing per project (#201)
+
         def _issue_end(container, title, iid, row_num):
             ppath = container if container in project_cache else (
                 self._reconcile_path(container, src_root, root_group.full_path,
@@ -2114,7 +2157,8 @@ class ImportExportMixin:
             if proj is None:
                 return None, None
             if title:
-                return self._find_issue_by_title(proj, title), proj
+                return self._find_issue_by_title(proj, title,
+                                                 cache=_issue_title_cache), proj
             # No title (a legacy titleless export) — iids on a re-imported
             # project are NOT stable (skips/failures/pre-existing issues all
             # shift them), so addressing by iid could silently link the wrong
