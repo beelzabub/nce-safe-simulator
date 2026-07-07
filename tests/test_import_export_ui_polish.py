@@ -57,6 +57,9 @@ class ExportHarness(ImportExportMixin):
     def _fetch_epic_weights(self, epics):
         return {}
 
+    def _fetch_epic_business_values(self, epics, root_namespace=None):
+        return {}
+
     # Capture the write instead of touching disk.
     def _write_file(self, path, fmt, rows, field_order):
         self.written = (path, fmt, rows, field_order)
