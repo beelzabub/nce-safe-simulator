@@ -1,12 +1,15 @@
-"""Tests for transient-5xx retry on the shared REST session (issue #176).
+"""Tests for transient-5xx retry on the shared REST session (issues #176, #207).
 
 A single passing 502 from gitlab.com aborted a whole report run minutes into
-the snapshot fetch. The session adapter now retries transient 5xx (matching
+the snapshot fetch (#176). The session adapter retries transient 5xx (matching
 python-gitlab's retry_transient_errors set) for idempotent methods only —
-mutation POSTs keep fail-fast semantics.
+mutation POSTs keep fail-fast semantics. The python-gitlab client itself must
+follow the same policy: its own retry_transient_errors re-POSTs creates whose
+response was lost, silently duplicating objects on the target (#207).
 """
 
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -25,6 +28,8 @@ class _FlakyHandler(BaseHTTPRequestHandler):
         path = self.path
         n = _FlakyHandler.hits.get(path, 0)
         _FlakyHandler.hits[path] = n + 1
+        if path == "/slow":
+            time.sleep(1)
         seq = _FlakyHandler.script.get(path, [200])
         status = seq[min(n, len(seq) - 1)]
         self.send_response(status)
@@ -98,9 +103,66 @@ def test_429_still_retries(flaky_server):
     assert handler.hits["/e"] == 2
 
 
-def test_gitlab_client_retries_transient_errors():
-    # The python-gitlab path (which the observed 502 killed) must be
-    # constructed with retry_transient_errors=True (Refs #176).
+def test_retry_policy_excludes_mutation_methods():
+    # The retry policy must never re-send a POST: a create whose response was
+    # lost would be silently duplicated on the target (Refs #207).
+    retry = _TimeoutAdapter(timeout=1).max_retries
+    assert "POST" not in retry.allowed_methods
+    assert "GET" in retry.allowed_methods
+
+
+def test_429_retry_is_announced(flaky_server, capsys):
+    # Retried responses never reach the requests hook layer, so the backoff
+    # visibility (#201) must come from inside the retry machinery.
+    base, handler = flaky_server
+    handler.script["/f"] = [429, 200]
+    assert _session().get(f"{base}/f").status_code == 200
+    assert "rate limit hit (429)" in capsys.readouterr().out
+
+
+def test_5xx_retries_are_announced(flaky_server, capsys):
+    base, handler = flaky_server
+    handler.script["/g"] = [502, 502, 200]
+    assert _session().get(f"{base}/g").status_code == 200
+    assert capsys.readouterr().out.count("transient error (502)") == 2
+
+
+def test_post_429_reaches_the_visibility_hook(flaky_server, capsys):
+    # urllib3 never retries POSTs, so a mutation's 429 surfaces at the
+    # requests layer, where the hook announces the backoff that python-gitlab's
+    # obey_rate_limit is about to sleep through silently (Refs #201, #207).
+    from mixins.utils import UtilitiesMixin
+    base, handler = flaky_server
+    handler.script["/h"] = [429]
+    sess = _session()
+    sess.hooks.setdefault("response", []).append(UtilitiesMixin._rate_limit_hook)
+    resp = sess.post(f"{base}/h")
+    assert resp.status_code == 429
+    assert handler.hits["/h"] == 1                      # no HTTP-layer re-POST
+    assert "rate limit hit (429)" in capsys.readouterr().out
+
+
+def test_default_timeout_is_enforced(flaky_server):
+    # Session.request always passes timeout= explicitly (None when unset), so
+    # the adapter must not rely on setdefault to apply its default.
+    base, _ = flaky_server
+    sess = requests.Session()
+    adapter = _TimeoutAdapter(timeout=0.2)
+    # read=False: surface the first timeout instead of retrying it away.
+    adapter.max_retries = adapter.max_retries.new(read=False)
+    sess.mount("http://", adapter)
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        sess.get(f"{base}/slow")
+
+
+def test_gitlab_client_does_not_retry_mutations():
+    # python-gitlab's retry_transient_errors covers ALL methods including the
+    # POST behind .create() — it must stay off; the mounted _TimeoutAdapter
+    # provides idempotent-only retries instead, and the response hook keeps
+    # obey_rate_limit's 429 backoff visible (Refs #207).
     import pathlib
     src = pathlib.Path("NceGitLab.py").read_text()
-    assert "retry_transient_errors=True" in src
+    assert "retry_transient_errors=False" in src
+    assert "retry_transient_errors=True" not in src
+    assert 'self.gl.session.mount("https://", adapter)' in src
+    assert "self._rate_limit_hook" in src

@@ -25,7 +25,7 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
-from mixins.utils import _clear, _pause, _tee_to_log
+from mixins.utils import _TimeoutAdapter, _clear, _pause, _tee_to_log
 
 
 class NceGitLab(
@@ -95,15 +95,25 @@ class NceGitLab(
         try:
             self.gl = gitlab.Gitlab(
                 self.url, private_token=self.private_token, ssl_verify=self.ssl_verify,
-                # Transient GitLab 5xx (and 429) retry with backoff instead of
-                # aborting a long snapshot fetch minutes in (Refs #176).
-                retry_transient_errors=True,
+                # python-gitlab's own retry re-sends ALL methods, including the
+                # POST behind every .create() — a create whose response is lost
+                # to a gateway blip gets re-POSTed and silently duplicated on
+                # the target (Refs #207). Transient 429/5xx resilience lives in
+                # the adapter below instead, idempotent methods only.
+                retry_transient_errors=False,
             )
-            self.gl.auth()
-            # Surface 429 backoff in job logs (#201) — python-gitlab retries
-            # silently; the hook prints why the run is waiting.
+            # Retry-with-backoff for GET-heavy snapshot/list traffic (Refs #176),
+            # announced per retry in the job log (Refs #201); mutation POSTs
+            # fail fast on 5xx and are counted by their callers (Refs #207).
+            adapter = _TimeoutAdapter(timeout=self.api_timeout)
+            self.gl.session.mount("https://", adapter)
+            self.gl.session.mount("http://",  adapter)
+            # 429s are exempt from fail-fast: python-gitlab's obey_rate_limit
+            # sleeps and re-sends them for all verbs — silently. The hook keeps
+            # that backoff visible (Refs #201, #207).
             self.gl.session.hooks.setdefault("response", []).append(
                 self._rate_limit_hook)
+            self.gl.auth()
 
             version, _ = self.gl.version()
             print(f"GitLab server : {self.gl.api_url}  (v{version})")

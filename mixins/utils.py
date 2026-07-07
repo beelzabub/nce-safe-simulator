@@ -13,15 +13,42 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+class _RetryWithLog(Retry):
+    """urllib3 Retry that announces each retry it schedules (Refs #201, #207).
+
+    urllib3 consumes retried responses below the requests hook layer, so a
+    response hook never sees the intermediate 429/5xx — a rate-limited or
+    flaky run is indistinguishable from a hung one in the job log. increment()
+    is the one place a scheduled retry is observable; it raises (and therefore
+    prints nothing) when the budget is exhausted and the response will be
+    handed back instead of retried.
+    """
+
+    def increment(self, method=None, url=None, response=None, error=None,
+                  *args, **kwargs):
+        new = super().increment(method=method, url=url, response=response,
+                                error=error, *args, **kwargs)
+        status = getattr(response, "status", None)
+        if status == 429:
+            ra = response.headers.get("Retry-After", "?")
+            print(f"  GitLab rate limit hit (429) — retrying after {ra}s...",
+                  flush=True)
+        elif status is not None:
+            print(f"  GitLab transient error ({status}) — retrying...",
+                  flush=True)
+        return new
+
+
 class _TimeoutAdapter(HTTPAdapter):
     """HTTPAdapter with a default timeout plus retry-with-backoff on 429 and
     transient 5xx (matching python-gitlab's retry_transient_errors set). The
     urllib3 default allowed_methods restricts retries to idempotent methods,
     so mutation POSTs keep fail-fast semantics while the GET-heavy snapshot
-    fetches survive a passing gateway error (Refs #176)."""
+    fetches survive a passing gateway error (Refs #176, #207). Each scheduled
+    retry is announced in the job log via _RetryWithLog (Refs #201)."""
     def __init__(self, timeout, **kwargs):
         self.timeout = timeout
-        retry = Retry(
+        retry = _RetryWithLog(
             total=5,
             backoff_factor=1,          # sleeps 1 2 4 8 16 s between retries
             status_forcelist=[429, 500, 502, 503, 504],
@@ -31,7 +58,10 @@ class _TimeoutAdapter(HTTPAdapter):
         super().__init__(max_retries=retry, **kwargs)
 
     def send(self, *args, **kwargs):
-        kwargs.setdefault("timeout", self.timeout)
+        # Session.request always passes timeout explicitly (None when the
+        # caller set nothing), so setdefault() would never apply the default.
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self.timeout
         return super().send(*args, **kwargs)
 
 
@@ -140,12 +170,15 @@ class UtilitiesMixin:
 
     @staticmethod
     def _rate_limit_hook(resp, *args, **kwargs):
-        """requests response hook: make 429 rate-limit backoff visible (#201).
+        """requests response hook: announce 429s that reach the requests layer (#201).
 
-        python-gitlab's retry_transient_errors honors Retry-After by sleeping
-        SILENTLY, so a rate-limited run is indistinguishable from a hung one
-        in the job log. This prints the reason the moment the 429 arrives;
-        the retry/sleep behavior itself is unchanged.
+        python-gitlab's obey_rate_limit sleeps and re-sends on 429 for ALL
+        verbs regardless of retry_transient_errors — silently (Refs #207;
+        duplication-safe, since a 429 means the mutation was rejected).
+        urllib3 never retries mutation POSTs, so their 429s surface here
+        directly; a GET 429 arrives only after _RetryWithLog's budget is
+        spent, right before python-gitlab's own sleep-retry takes over.
+        Either way, a 429 seen here is about to be slept on and re-sent.
         """
         if getattr(resp, "status_code", None) == 429:
             ra = resp.headers.get("Retry-After", "?")
@@ -161,7 +194,6 @@ class UtilitiesMixin:
         adapter = _TimeoutAdapter(timeout=getattr(self, "api_timeout", 300))
         sess.mount("https://", adapter)
         sess.mount("http://",  adapter)
-        sess.hooks.setdefault("response", []).append(self._rate_limit_hook)
         return sess
 
     def _epic_save_with_reopen(self, epic, new_labels):
