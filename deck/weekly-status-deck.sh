@@ -18,7 +18,10 @@ GEN_SPOTLIGHTS="$REPO/deck/dist/latest-work-spotlights.gen.yaml"
 LOGDIR="$REPO/deck/dist/weekly-logs"
 
 export HOME=/root
-export PATH="/usr/local/bin:/usr/bin:/bin"
+# The deck's Python deps (playwright, python-pptx, Pillow, segno, …) live in the
+# /root/.venv virtualenv, not system Python — put it first so `python3` and the
+# playwright browsers resolve there. git/make/aws/glab/docker/claude come from /usr/bin.
+export PATH="/root/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 export AWS_DEFAULT_REGION=us-east-1
 # Which ref to build from. Production is develop; a validation run can point this
 # at a feature branch (WEEKLY_REF=feature/...) before the automation is merged.
