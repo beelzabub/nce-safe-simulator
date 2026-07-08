@@ -67,6 +67,29 @@ class TestRoamSection:
         md = _render([epic])
         assert "Feature Alpha" in md
 
+
+class TestPartialSnapshotNoRoot:
+    """A snapshot with epics.json but no groups.json leaves _rd_root None.
+    Both risk-register surfaces must degrade to the group-name fallback in
+    _group_path rather than crash on _rd_root['id'] (#212)."""
+
+    def _harness(self):
+        rpt = ReportsHarness(epics_all=[make_epic(id=1, title="Feature Alpha",
+                                                  roam_risks=[make_risk()])])
+        rpt._rd_root = None            # groups.json absent; _rd_root_obj still set
+        return rpt
+
+    def test_wiki_generator_does_not_crash(self):
+        rpt = self._harness()
+        rpt.generate_risk_register()   # must not raise TypeError
+        md = rpt._uploaded.get("Portfolio/01 Program Management/Risk Register", "")
+        assert "## ⚠️ ROAM Risk Issues" in md
+        assert "Feature Alpha" in md
+
+    def test_data_builder_does_not_crash(self):
+        data = self._harness()._data_risk_register()
+        assert isinstance(data, dict)
+
     def test_assignee_appears_in_row(self):
         risk  = make_risk(assignee="Carol")
         epics = [make_epic(id=1, roam_risks=[risk])]
