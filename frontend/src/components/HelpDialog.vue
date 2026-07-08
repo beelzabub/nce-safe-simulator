@@ -305,7 +305,7 @@ const CATEGORY_DEFS = [
   { name: 'Weights',        description: 'Manage epic and issue story-point weights',              tools: ['set-issue-weights', 'strip-issue-weights', 'update-weights', 'validate-weights', 'weight-drift-check'] },
   { name: 'Reset / Clean',  description: 'Remove seeded data and restore a clean state',           tools: ['clean-roam-risks', 'clean-epic-blocks', 'reset-pi-progress', 'clean-wikis', 'clean-reports', 'clean-logs'] },
   { name: 'Audit',          description: 'Inspect data quality, labels, and hierarchy',            tools: ['audit-hierarchy', 'audit-labels', 'list-wikis'] },
-  { name: 'Import / Export',description: 'Move epics and issues in and out of GitLab',             tools: ['export-epics', 'export-issues', 'import-epics', 'import-issues'] },
+  { name: 'Import / Export',description: 'Move epics and issues in and out of GitLab',             tools: ['export-bundle', 'import-bundle', 'export-epics', 'import-epics', 'export-issues', 'import-issues', 'export-links', 'import-links'] },
 ]
 
 const REPORTS = [
