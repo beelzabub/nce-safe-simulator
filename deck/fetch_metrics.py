@@ -1,5 +1,5 @@
 """
-Fetch live project metrics for the sprint-review deck (deck/build_deck.py): issue/MR
+Fetch live project metrics for the status deck (deck/build_deck.py): issue/MR
 counts, commit velocity, and SLOC breakdown. Writes deck/metrics.json.
 
 Run this from within the repo (uses `glab api projects/:id/...`, which resolves the

@@ -1,21 +1,33 @@
 """
-Build the sprint-review .pptx from the SAIC template + live metrics + capability config +
+Build the status .pptx from the SAIC template + live metrics + capability config +
 screenshots. See deck/README.md for the full pipeline.
 
 Usage:
-  python3 deck/build_deck.py [--template-s3-path s3://...] [--screenshots-dir deck/screenshots]
+  python3 deck/build_deck.py [--template deck/assets/template.pptx] [--screenshots-dir deck/screenshots]
                              [--metrics deck/metrics.json] [--capabilities deck/capabilities.yaml]
-                             [--shots deck/shots.yaml] [--out deck/dist/NCE-Safe-Simulator-Sprint-Review.pptx]
+                             [--shots deck/shots.yaml] [--out deck/dist/NCE-Safe-Simulator-Status.pptx]
+                             [--since YYYY-MM-DD] [--review-date YYYY-MM-DD]
 
 Requires deck/metrics.json (run fetch_metrics.py first) and deck/screenshots/ (run
 capture_screenshots.py first, or point --screenshots-dir at an existing set).
+
+--since sets the Latest Work window start (default: Monday of the current Pacific work
+week); --review-date sets the cover/closing date (default: today, Pacific). The saved
+filename always ends with a -YYYYMMDD (review-date) postfix.
 """
 import argparse
 import glob
 import json
 import os
+import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+    _PACIFIC = ZoneInfo("America/Los_Angeles")
+except Exception:  # pragma: no cover - zoneinfo/tzdata unavailable
+    _PACIFIC = None
 
 import yaml
 from PIL import Image
@@ -31,6 +43,13 @@ from pptx.util import Emu, Pt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+# The status deck is built from a template of record committed in the repo — no
+# external fetch at build time. It carries only the slide masters, layouts, and
+# theme (no content slides); build_cover creates the cover from the Cover 1
+# layout. Regenerate it with deck/make_template.py. An S3-hosted template can
+# still be supplied explicitly (--template-s3-path / DECK_TEMPLATE_S3) to
+# re-bootstrap the committed one.
+DEFAULT_TEMPLATE = os.path.join(HERE, "assets", "template.pptx")
 DEFAULT_TEMPLATE_S3 = "s3://workflow-bootstrap-20260626-055227-881490118830/x-bookmarks-obsidian/Powerpoint Template SAIC copy.pptx"
 
 # Theme colors are read from the template's own theme XML at build time (see
@@ -107,6 +126,59 @@ def fetch_issues():
     return rows
 
 
+def _now_pacific():
+    """Current time in America/Los_Angeles (the user's timezone). The deck's
+    dates are stated in Pacific even though builds run on UTC hosts, so the
+    review date and the Latest-Work window boundary are both computed here."""
+    now = datetime.now(timezone.utc)
+    return now.astimezone(_PACIFIC) if _PACIFIC else now
+
+
+def _week_start_pacific():
+    """Monday 00:00 of the current work week, in Pacific — the default 'since'
+    boundary for the Latest Work section."""
+    d = _now_pacific()
+    monday = d - timedelta(days=d.weekday())
+    return monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _long_date(d):
+    """'July 6, 2026' — %-d isn't portable, so build the day without it."""
+    return f"{d.strftime('%B')} {d.day}, {d.year}"
+
+
+def fetch_completed_since(since_dt):
+    """Issue numbers whose feature branch merged into develop on/after since_dt —
+    the 'work done this week' set for the Latest Work section. Parses merge-commit
+    subjects for `<type>/<iid>-slug` branch names. `git log --since` prunes
+    traversal when merge dates are out of order, so the cutoff is applied in
+    Python instead. The bundle feature merged from a placeholder
+    `feature/NNN-bundle-export-import` branch (no issue number in the slug), so
+    that slug is mapped to its issue (#206) explicitly."""
+    out = subprocess.run(["git", "log", "--merges", "--format=%cI|%s"],
+                         cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout
+    if since_dt.tzinfo is None:
+        since_dt = since_dt.replace(tzinfo=timezone.utc)
+    ids = set()
+    for line in out.splitlines():
+        iso, _, subj = line.partition("|")
+        iso = iso.strip()
+        if iso.endswith("Z"):
+            iso = iso[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(iso)
+        except ValueError:
+            continue
+        if dt < since_dt:
+            continue
+        for _pre, num, slug in re.findall(r"'?([a-z]+)/(\d+|NNN)-([^' ]*)", subj):
+            if num.isdigit():
+                ids.add(int(num))
+            elif "bundle-export-import" in slug:
+                ids.add(206)
+    return ids
+
+
 def ensure_template(s3_path, cache_dir):
     os.makedirs(cache_dir, exist_ok=True)
     local_path = os.path.join(cache_dir, "template.pptx")
@@ -117,12 +189,17 @@ def ensure_template(s3_path, cache_dir):
 
 
 class DeckBuilder:
-    def __init__(self, template_path, screenshots_dir, metrics, capabilities, shots):
+    def __init__(self, template_path, screenshots_dir, metrics, capabilities, shots,
+                 review_date=None, since_dt=None):
         self.prs = Presentation(template_path)
         self.screenshots_dir = screenshots_dir
         self.metrics = metrics
         self.capabilities = capabilities
         self.shots = shots
+        # Both stated in Pacific (see _now_pacific): the review date stamped on
+        # the cover, and the Latest-Work window start.
+        self.review_date = review_date or _now_pacific()
+        self.since_dt = since_dt or _week_start_pacific()
         self.C = _load_theme_colors(self.prs)
         self.SW = self.prs.slide_width
         self.SH = self.prs.slide_height
@@ -278,11 +355,38 @@ class DeckBuilder:
             self.add_text(slide, cx - Emu(36000), cy - Emu(250000), chip_w + Emu(72000), Emu(220000),
                           label, 9, self.C["blue"], bold=True, align=PP_ALIGN.CENTER)
 
-    def capability_slide(self, title, blurb, bullets, image_path=None, caption=None, inset=None):
+    def _curated_footer(self, slide, count, all_issues):
+        """Bottom-of-slide note (issue #210 req): the bullets above are curated
+        highlights; then the full comma-separated list of every issue in the area
+        (the curated bullets are a subset — the real total is `count`)."""
+        y = self.SH - Emu(560000)
+        self.add_rect(slide, Emu(180000), y, self.SW - Emu(360000), Emu(9000), self.C["lgray"])
+        label = (f"Curated highlights above — all {count} issues in this area:  "
+                 if count else "All issues in this area:  ")
+        tb = slide.shapes.add_textbox(Emu(180000), y + Emu(70000), self.SW - Emu(360000), Emu(440000))
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+        p = tf.paragraphs[0]
+        r1 = p.add_run()
+        r1.text = label
+        r1.font.size = Pt(8.5); r1.font.bold = True; r1.font.italic = True
+        r1.font.color.rgb = self.C["blue"]; r1.font.name = FONT
+        r2 = p.add_run()
+        r2.text = all_issues
+        r2.font.size = Pt(8.5); r2.font.italic = True
+        r2.font.color.rgb = GRAY; r2.font.name = FONT
+        return tb
+
+    def capability_slide(self, title, blurb, bullets, image_path=None, caption=None,
+                         inset=None, all_issues=None, count=None):
         s = self.new_slide()
         self.header_band(s, title, blurb)
         body_y = Emu(830000)
-        body_h = self.SH - body_y - Emu(120000)
+        # Reserve a strip at the bottom for the curated-issues footer so the body
+        # (bullets / image) never runs into it.
+        footer_h = Emu(600000) if all_issues else Emu(0)
+        body_h = self.SH - body_y - Emu(120000) - footer_h
         if image_path and os.path.exists(image_path):
             bullets_w = Emu(4550000)
             self.add_bullets(s, Emu(180000), body_y, bullets_w, body_h, bullets, 13,
@@ -301,6 +405,8 @@ class DeckBuilder:
                 print(f"  warn: image not found, falling back to text-only: {image_path}")
             self.add_bullets(s, Emu(180000), body_y, self.SW - Emu(360000), body_h, bullets, 13,
                               RGBColor(0x2A, 0x2E, 0x32), space_after=10)
+        if all_issues:
+            self._curated_footer(s, count, all_issues)
         return s
 
     def full_bleed_image_slide(self, title, img_path, dark=True):
@@ -412,10 +518,9 @@ class DeckBuilder:
                       "latest commit", 8.5, dim, align=PP_ALIGN.RIGHT)
 
     def build_cover(self):
-        # slide 1 in the template is an unrelated leftover sales slide - drop it.
-        if len(self.prs.slides) > 1:
-            self.remove_slide(1)
-        cover = self.prs.slides[0]
+        # The committed template of record carries no content slides, so the cover
+        # is created fresh from the Cover 1 layout (rather than reusing a seed slide).
+        cover = self.new_slide(self.COVER1)
 
         # The template's "Cover 1" layout decorates the right half with two
         # groups of faceted freeform triangles instead of a photo slot. Strip
@@ -450,8 +555,13 @@ class DeckBuilder:
             run.font.color.theme_color = MSO_THEME_COLOR.BACKGROUND_1
             run.font.color.brightness = -0.25
 
-        cover.placeholders[0].text_frame.paragraphs[0].runs[0].text = "NCE Safe Simulator"
-        cover_color(cover.placeholders[0].text_frame.paragraphs[0].runs[0])
+        # A freshly-created cover has an empty title placeholder (no run yet); a
+        # seed cover would carry one. Handle both.
+        title_para = cover.placeholders[0].text_frame.paragraphs[0]
+        title_run = title_para.runs[0] if title_para.runs else title_para.add_run()
+        title_run.text = "NCE Safe Simulator"
+        title_run.font.name = FONT
+        cover_color(title_run)
 
         # The template subtitle placeholder held a vague "Simulator Overview:"
         # line. Remove it entirely (an *emptied* placeholder renders PowerPoint's
@@ -463,6 +573,10 @@ class DeckBuilder:
         left = Emu(340000)
         white_hi = RGBColor(0xF2, 0xF4, 0xF6)   # bright — the tagline stands out
         light = RGBColor(0xC8, 0xCC, 0xD0)
+        # Review date, stamped just above the tagline (Pacific — see _now_pacific).
+        self.add_text(cover, left, Emu(2255000), Emu(7000000), Emu(260000),
+                      f"STATUS UPDATE  ·  {_long_date(self.review_date)}", 12.5,
+                      self.C["blue"], bold=True)
         self.add_text(cover, left, Emu(2560000), Emu(7000000), Emu(430000),
                       "SAFe portfolio automation for GitLab", 21, white_hi, bold=True)
         self.add_text(cover, left, Emu(3030000), Emu(6650000), Emu(760000),
@@ -505,7 +619,8 @@ class DeckBuilder:
     def build_agenda(self):
         agenda = self.new_slide(self.TOC)
         agenda.placeholders[0].text_frame.paragraphs[0].text = "Agenda"
-        items = ["Project Overview", "Architecture", "DoD Architecture Views",
+        items = [f"Latest Work — since {self.since_dt.strftime('%b')} {self.since_dt.day}",
+                 "Project Overview", "Architecture", "DoD Architecture Views",
                  "Deployment Methods", "CLI vs. UI",
                  "Development Process & Tools", "Technology Stack",
                  "By the Numbers — Metrics",
@@ -777,7 +892,7 @@ class DeckBuilder:
             "make static — quarto render (build the Quarto report site).",
             "make serve — serve the built site locally on :4645.",
             "make deploy-local / redeploy — single-box EC2 bring-up (image + app + Caddy TLS), then hot-swap the app container.",
-            "make deck-screenshots / deck — regenerate this sprint-review deck.",
+            "make deck-screenshots / deck — regenerate this status deck.",
         ], 10.5, body_color, space_after=7)
 
         self.add_rect(s, rx, head_y, panel_w, Emu(260000), self.C["green"])
@@ -984,6 +1099,7 @@ class DeckBuilder:
             self.capability_slide(
                 f"{cap['title']}  ({cap['count']} issues)", cap["blurb"], cap["bullets"],
                 image_path=image_path, caption=cap.get("caption"), inset=inset,
+                all_issues=cap.get("all_issues"), count=cap.get("count"),
             )
 
     # Technology stack: (category, [(technology, what it is, purpose), ...]). Pulled
@@ -1320,6 +1436,127 @@ class DeckBuilder:
                       "Runs live on AWS — point your phone camera at the code to explore it.",
                       11.5, GRAY, italic=True, align=PP_ALIGN.CENTER)
 
+    def build_latest_work(self):
+        """New 'Latest Work' section (issue #210): everything merged into develop
+        since the start of the work week, grouped by type of work, plus a spotlight
+        on the new bundle export/import capability (#206) with screenshots."""
+        since_str = _long_date(self.since_dt)
+        self._section_divider("Latest Work", f"New work completed since {since_str}")
+
+        completed = fetch_completed_since(self.since_dt)
+        by_iid = {i["iid"]: i for i in self.issues}
+        items = [by_iid[i] for i in sorted(completed)
+                 if i in by_iid and not by_iid[i]["title"].startswith("Work state sync")]
+
+        # type:: label -> (section heading, matching label set, accent). The last
+        # group (types=None) sweeps up everything untyped/unmatched.
+        GROUPS = [
+            ("New Features",             {"feature"},                self.C["green"]),
+            ("Enhancements",             {"enhance", "enhancement"}, self.C["blue"]),
+            ("Bugs Fixed",               {"bug"},                    self.C["teal"]),
+            ("Infrastructure & Chores",  {"chore", "infra"},         self.C["yellow"]),
+            ("Other Work",               None,                       GRAY),
+        ]
+        used, grouped = set(), []
+        for heading, types, color in GROUPS:
+            bucket = [it for it in items
+                      if (it["iid"] not in used) and (types is None or it["type"] in types)]
+            used.update(it["iid"] for it in bucket)
+            if bucket:
+                grouped.append((heading, color, bucket))
+
+        s = self.new_slide()
+        self.header_band(s, "Latest Work",
+                         f"Merged to develop since {since_str}  ·  {len(items)} issues")
+        margin, col_gap = Emu(180000), Emu(220000)
+        col_w = (self.SW - 2 * margin - col_gap) // 2
+        top, bottom = Emu(880000), self.SH - Emu(160000)
+        col2_x = margin + col_w + col_gap
+        mid = top + int((bottom - top) * 0.52)
+        body_color = RGBColor(0x2A, 0x2E, 0x32)
+
+        def render_group(x, y, heading, color, bucket):
+            self.add_rect(s, x, y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
+            self.add_text(s, x + Emu(190000), y, col_w - Emu(190000), Emu(280000),
+                          f"{heading}  ({len(bucket)})", 13, color, bold=True)
+            y += Emu(330000)
+            for it in bucket:
+                title = it["title"]
+                title = (title[:60] + "…") if len(title) > 61 else title
+                self.add_text(s, x + Emu(60000), y, col_w - Emu(60000), Emu(230000),
+                              f"#{it['iid']}   {title}", 9, body_color,
+                              anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+                y += Emu(232000)
+            return y + Emu(150000)
+
+        cur_x, cur_y = margin, top
+        for heading, color, bucket in grouped:
+            if cur_x == margin and cur_y > mid:
+                cur_x, cur_y = col2_x, top   # spill into the second column
+            cur_y = render_group(cur_x, cur_y, heading, color, bucket)
+
+        self._build_bundle_slide()
+
+    def _build_bundle_slide(self):
+        """Spotlight on the flagship new capability (#206): how the bundle
+        export/import works, with the two new UI dialogs shown."""
+        exp = self._resolve_asset("05a-import-export-export-bundle_light.png")
+        imp = self._resolve_asset("05b-import-export-import-bundle_light.png")
+        s = self.new_slide()
+        self.header_band(s, "New Capability — Bundle Export / Import  (#206)",
+                         "One-file transfer of an entire portfolio slice, end to end")
+        body_y = Emu(830000)
+        body_h = self.SH - body_y - Emu(160000)
+        self.add_bullets(s, Emu(180000), body_y, Emu(4550000), body_h, [
+            "One .zip carries the whole slice — group/project containers, epics, issues, "
+            "blocking links, and container display names — instead of juggling separate "
+            "epic / issue / link exports.",
+            "Import runs three phases in a single pass: rebuild the container tree, create "
+            "the epics and issues, then re-link blocking relationships — no manual ordering.",
+            "Cross-instance safe: create_missing rebuilds subgroup / project chains from the "
+            "bundle's trusted source root; on_missing_bv_field can create the Business Value "
+            "field on the target when it's absent (#204).",
+            "Idempotent recovery: on_existing = skip makes a re-run a no-op, so a partially "
+            "failed import just gets run again (#207).",
+            "Ships as two UI tools under Import / Export — Export Bundle and Import Bundle — "
+            "plus the equivalent export-bundle / import-bundle CLI commands.",
+        ], 12, RGBColor(0x2A, 0x2E, 0x32), space_after=10)
+
+        img_x = Emu(4850000)
+        img_w = self.SW - img_x - Emu(180000)
+        half_h = (body_h - Emu(120000)) // 2
+        for path, label, y in ((exp, "Export Bundle dialog", body_y),
+                               (imp, "Import Bundle dialog", body_y + half_h + Emu(120000))):
+            if path and os.path.exists(path):
+                self.add_picture_contain(s, path, img_x, y, img_w, half_h - Emu(230000))
+                self.add_text(s, img_x, y + half_h - Emu(220000), img_w, Emu(200000),
+                              label, 9, GRAY, align=PP_ALIGN.CENTER, italic=True)
+            else:
+                print(f"  warn: bundle screenshot missing ({path}) — spotlight slide text-only")
+        return s
+
+    def build_closing(self):
+        """Final slide — signals the status update is complete (issue #210)."""
+        s = self.new_slide()
+        self.add_rect(s, 0, 0, self.SW, self.SH, DARKBG)
+        self.add_rect(s, 0, 0, self.SW, Emu(90000), self.C["blue"])
+        self.add_rect(s, 0, self.SH - Emu(90000), self.SW, Emu(90000), self.C["yellow"])
+        cy = self.SH // 2
+        nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
+        if os.path.exists(nce_logo):
+            self.add_picture_contain(s, nce_logo, (self.SW - Emu(1500000)) // 2,
+                                     cy - Emu(1600000), Emu(1500000), Emu(650000))
+        self.add_text(s, 0, cy - Emu(760000), self.SW, Emu(600000),
+                      "Status Update Complete", 40, WHITE, bold=True,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_text(s, 0, cy - Emu(120000), self.SW, Emu(320000),
+                      f"NCE Safe Simulator  ·  {_long_date(self.review_date)}", 16,
+                      self.C["blue"], bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        self.add_text(s, 0, cy + Emu(260000), self.SW, Emu(320000),
+                      "Thank you — questions & discussion", 13, RGBColor(0xC8, 0xCC, 0xD0),
+                      italic=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        return s
+
     def build_wrapup(self):
         m = self.metrics
         wrap = self.new_slide()
@@ -1398,6 +1635,7 @@ class DeckBuilder:
 
         self.build_cover()
         self.build_agenda()
+        self.build_latest_work()
         self.build_chrome_slides()
         self.build_tech_stack()
         self._section_divider("By the Numbers", "Project Metrics")
@@ -1409,18 +1647,28 @@ class DeckBuilder:
         self.build_wrapup()
         self.build_live_cta_slide()
         self.build_appendix()
+        self.build_closing()
         return self.prs
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--template-s3-path", default=os.environ.get("DECK_TEMPLATE_S3", DEFAULT_TEMPLATE_S3))
+    ap.add_argument("--template", default=DEFAULT_TEMPLATE,
+                    help="local template of record (default: committed deck/assets/template.pptx)")
+    ap.add_argument("--template-s3-path", default=os.environ.get("DECK_TEMPLATE_S3"),
+                    help="optional: fetch the template from S3 instead of the committed local one "
+                         "(used only to re-bootstrap deck/assets/template.pptx)")
     ap.add_argument("--template-cache-dir", default=os.path.join(HERE, ".template-cache"))
     ap.add_argument("--screenshots-dir", default=os.path.join(HERE, "screenshots"))
     ap.add_argument("--metrics", default=os.path.join(HERE, "metrics.json"))
     ap.add_argument("--capabilities", default=os.path.join(HERE, "capabilities.yaml"))
     ap.add_argument("--shots", default=os.path.join(HERE, "shots.yaml"))
-    ap.add_argument("--out", default=os.path.join(HERE, "dist", "NCE-Safe-Simulator-Sprint-Review.pptx"))
+    ap.add_argument("--out", default=os.path.join(HERE, "dist", "NCE-Safe-Simulator-Status.pptx"))
+    ap.add_argument("--since", metavar="YYYY-MM-DD",
+                    help="Latest Work window start (default = Monday of the current Pacific work week)")
+    ap.add_argument("--review-date", metavar="YYYY-MM-DD",
+                    help="Review date shown on the cover / closing and used for the filename "
+                         "postfix (default = today, Pacific)")
     args = ap.parse_args()
 
     if not os.path.exists(args.metrics):
@@ -1428,7 +1676,16 @@ def main():
     if not os.path.isdir(args.screenshots_dir):
         raise SystemExit(f"{args.screenshots_dir} not found — run `python3 deck/capture_screenshots.py` first")
 
-    template_path = ensure_template(args.template_s3_path, args.template_cache_dir)
+    # Default: the committed local template of record — no network. An explicit
+    # --template-s3-path (or DECK_TEMPLATE_S3) re-fetches from S3 to re-bootstrap it.
+    if args.template_s3_path:
+        template_path = ensure_template(args.template_s3_path, args.template_cache_dir)
+    else:
+        template_path = args.template
+        if not os.path.exists(template_path):
+            raise SystemExit(
+                f"{template_path} not found — the committed template of record is missing. "
+                f"Regenerate it with deck/make_template.py, or pass --template-s3-path to fetch one.")
 
     with open(args.metrics) as f:
         metrics = json.load(f)
@@ -1437,12 +1694,22 @@ def main():
     with open(args.shots) as f:
         shots = yaml.safe_load(f)
 
-    builder = DeckBuilder(template_path, args.screenshots_dir, metrics, capabilities, shots)
+    review_date = (datetime.strptime(args.review_date, "%Y-%m-%d")
+                   if args.review_date else _now_pacific())
+    since_dt = (datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                if args.since else _week_start_pacific())
+
+    builder = DeckBuilder(template_path, args.screenshots_dir, metrics, capabilities, shots,
+                          review_date=review_date, since_dt=since_dt)
     prs = builder.build()
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    prs.save(args.out)
-    print(f"Saved {args.out} ({len(prs.slides)} slides)")
+    # The output filename always ends with a -YYYYMMDD date postfix (issue #210).
+    base, ext = os.path.splitext(args.out)
+    stamp = review_date.strftime("%Y%m%d")
+    out_path = args.out if base.endswith("-" + stamp) else f"{base}-{stamp}{ext}"
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    prs.save(out_path)
+    print(f"Saved {out_path} ({len(prs.slides)} slides)")
 
 
 if __name__ == "__main__":

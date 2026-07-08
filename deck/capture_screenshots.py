@@ -1,6 +1,6 @@
 """
 Capture screenshots of the NCE Safe Simulator web UI and Quarto reports for the
-sprint-review deck (deck/build_deck.py). Read-only navigation only: dialogs are opened
+status deck (deck/build_deck.py). Read-only navigation only: dialogs are opened
 to photograph the form, never submitted (Launch/Save/Confirm are never clicked), with
 one deliberate exception documented below.
 
