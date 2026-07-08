@@ -185,3 +185,20 @@ class TestUnassignedBucket:
         assert "| **Unassigned / Portfolio** |" not in _run(h)
         assert not [r for r in h._data_pi_predictability()["rows"]
                     if r.get("unassigned")]
+
+
+def test_iter_vs_groups_degrades_when_root_absent():
+    """A snapshot with epics.json but no groups.json leaves _rd_root None;
+    _iter_vs_groups must yield nothing rather than crash on _rd_root['id']
+    (#188), so ART reports render empty on a partial snapshot. The test
+    harness overrides _iter_vs_groups, so exercise the real method directly."""
+    import types
+    from mixins.reports import ReportsMixin
+    stub = types.SimpleNamespace(_rd_root=None, _rd_groups_by_parent={})
+    assert list(ReportsMixin._iter_vs_groups(stub)) == []
+    # And with a root present it still yields that root's child groups.
+    stub = types.SimpleNamespace(
+        _rd_root={"id": 1},
+        _rd_groups_by_parent={1: [{"id": 20, "name": "VS 01"}]},
+    )
+    assert [g["id"] for g in ReportsMixin._iter_vs_groups(stub)] == [20]
