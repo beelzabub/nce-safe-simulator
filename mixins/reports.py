@@ -1741,7 +1741,13 @@ class ReportsMixin:
     # ------------------------------------------------------------------
 
     def _iter_vs_groups(self, _root=None):
-        """Yield vs_group dict for every Value Stream under root."""
+        """Yield vs_group dict for every Value Stream under root.
+
+        Degrades to no Value Streams when the snapshot carries no groups
+        (``groups.json`` absent → ``_rd_root`` is None), so ART-based reports
+        render empty on a partial snapshot instead of crashing (#188)."""
+        if not self._rd_root:
+            return
         for g in self._rd_groups_by_parent.get(self._rd_root["id"], []):
             yield g
 
@@ -2126,6 +2132,7 @@ class ReportsMixin:
             for e in self._rd_metrics.get(t, [])
         ]
         art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
+        unassigned_pi_data: defaultdict = defaultdict(list)   # PIID-committed, under no ART (#188)
         for epic in commitment_epics:
             gid  = epic.get("group_id")
             piid = epic.get("piid")
@@ -2135,9 +2142,12 @@ class ReportsMixin:
                 if gid in gids:
                     art_pi_data[art_id][piid].append(epic)
                     break
+            else:
+                unassigned_pi_data[piid].append(epic)
 
         all_pis = sorted(
-            {piid for pi_map in art_pi_data.values() for piid in pi_map},
+            {piid for pi_map in art_pi_data.values() for piid in pi_map}
+            | set(unassigned_pi_data),
             key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
         )
 
@@ -2180,7 +2190,9 @@ class ReportsMixin:
         md.append("")
         md.append(
             "Percentage of committed Features and Capabilities that were delivered in each PI.  "
-            "Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a systemic problem."
+            "Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a systemic problem.  "
+            "Items committed to a PI but not under any ART are collected in the **Unassigned / Portfolio** "
+            "row, so the Portfolio Total reflects every committed Feature/Capability."
         )
         md.append("")
 
@@ -2206,6 +2218,19 @@ class ReportsMixin:
                 portfolio_by_pi[piid].extend(epics)
                 cells.append(_cell(closed, total, pct, piid))
             md.append("| **" + art_link + "** |" + "|".join(cells) + "|")
+
+        # PIID-committed Features/Capabilities under no ART (#188): shown as
+        # their own row and counted in the Portfolio Total so it agrees with
+        # Flow Metrics, instead of being silently dropped.
+        if unassigned_pi_data:
+            any_rows = True
+            cells = []
+            for piid in all_pis:
+                epics = unassigned_pi_data.get(piid, [])
+                closed, total, pct = _pred(epics)
+                portfolio_by_pi[piid].extend(epics)
+                cells.append(_cell(closed, total, pct, piid))
+            md.append("| **Unassigned / Portfolio** |" + "|".join(cells) + "|")
 
         if not any_rows:
             md.append("_No ART-level commitment data found._")
@@ -4347,6 +4372,7 @@ class ReportsMixin:
             for e in self._rd_metrics.get(t, [])
         ]
         art_pi_data: defaultdict = defaultdict(lambda: defaultdict(list))
+        unassigned_pi_data: defaultdict = defaultdict(list)   # PIID-committed, under no ART (#188)
         for epic in commitment_epics:
             gid  = epic.get("group_id")
             piid = epic.get("piid")
@@ -4356,9 +4382,12 @@ class ReportsMixin:
                 if gid in gids:
                     art_pi_data[art_id][piid].append(epic)
                     break
+            else:
+                unassigned_pi_data[piid].append(epic)
 
         all_pis = sorted(
-            {piid for pi_map in art_pi_data.values() for piid in pi_map},
+            {piid for pi_map in art_pi_data.values() for piid in pi_map}
+            | set(unassigned_pi_data),
             key=lambda p: self._pi_dates_from_label(p)[0] or date.min,
         )
 
@@ -4398,6 +4427,24 @@ class ReportsMixin:
                 "art_url":  art_group.get("web_url", ""),
                 "vs_name":  vs_group["name"],
                 "cells":    cells,
+            })
+
+        # Features/Capabilities committed to a PI but owned by a group that is
+        # not under any ART (held at VS/portfolio level, or outside the ART
+        # tree). Folded into the portfolio total so it matches flow-metrics
+        # (#188), and surfaced as its own row rather than silently dropped.
+        if unassigned_pi_data:
+            cells = []
+            for piid in all_pis:
+                epics = unassigned_pi_data.get(piid, [])
+                portfolio_by_pi[piid].extend(epics)
+                cells.append({"piid": piid, **_cell(epics, piid)})
+            rows.append({
+                "art_name":   "Unassigned / Portfolio",
+                "art_url":    "",
+                "vs_name":    "",
+                "unassigned": True,
+                "cells":      cells,
             })
 
         portfolio_row = [
