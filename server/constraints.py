@@ -58,14 +58,14 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "create-lorem-data",
     ],
     "import-export": [
+        "export-bundle",
+        "import-bundle",
         "export-epics",
-        "export-issues",
         "import-epics",
+        "export-issues",
         "import-issues",
         "export-links",
         "import-links",
-        "export-bundle",
-        "import-bundle",
     ],
 }
 
