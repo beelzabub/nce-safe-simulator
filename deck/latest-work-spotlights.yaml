@@ -1,0 +1,70 @@
+# Latest-Work spotlight slides for the status deck (build_deck.py --spotlights).
+#
+# One entry = one spotlight detail slide in the "Latest Work" section. Related
+# issues that merged this week are grouped onto a single slide here (list them
+# in `issues`); this grouping is authored, not derived — the weekly build's
+# authoring step rewrites this file from the `slides`-labeled issues closed in
+# the current work week. See deck/README.md and issue #213.
+#
+# Fields: title, subtitle, bullets[], images[] (screenshot filenames, 0/1/2),
+#         image_labels[] (captions for the 2-image layout), caption (1-image),
+#         issues[] (source issue numbers — documentation only).
+
+spotlights:
+  - title: "New Capability — Bundle Export / Import  (#206)"
+    subtitle: "One-file transfer of an entire portfolio slice, end to end"
+    issues: [206]
+    images: ["05a-import-export-export-bundle_light.png", "05b-import-export-import-bundle_light.png"]
+    image_labels: ["Export Bundle dialog", "Import Bundle dialog"]
+    bullets:
+      - "One .zip carries the whole slice — group/project containers, epics, issues, blocking links, and container display names — instead of juggling separate epic / issue / link exports."
+      - "Import runs three phases in a single pass: rebuild the container tree, create the epics and issues, then re-link blocking relationships — no manual ordering."
+      - "Cross-instance safe: create_missing rebuilds subgroup / project chains from the bundle's trusted source root; on_missing_bv_field can create the Business Value field on the target when it's absent (#204)."
+      - "Idempotent recovery: on_existing = skip makes a re-run a no-op, so a partially failed import just gets run again (#207)."
+      - "Ships as two UI tools under Import / Export — Export Bundle and Import Bundle — plus the equivalent export-bundle / import-bundle CLI commands."
+
+  - title: "Import / Export — Full-Fidelity Hardening"
+    subtitle: "The transfer arc behind the bundle — nothing dropped, safe to re-run"
+    issues: [193, 195, 196, 198, 200, 201, 202, 211]
+    images: ["05-import-export-import-epics_light.png"]
+    caption: "Import Epics — one of the hardened import dialogs"
+    bullets:
+      - "Full fidelity: issues now land in create_missing_projects and their blocking links export/import with them (#198); epic business_value is carried across a transfer instead of being dropped (#196)."
+      - "Container rebuild: create_missing_groups recreates missing subgroup chains from trusted source roots (#195), and a group-names sidecar carries each container's display name so recreated groups/projects read like the source (#200)."
+      - "Resilient re-runs: visible 429 backoff, batched existence checks, and container-qualified skip messages (#201); a field-level round-trip verification of issues + blocking links (TestDashboard → JamieGroup) proves nothing is lost (#202)."
+      - "Clearer dialogs: destination-fallback / source-root / create-missing params relabeled with precedence help (#193), and the Tools Import/Export list reordered (#211)."
+
+  - title: "Portfolio Explorer — Now a Published Report  (#182)"
+    subtitle: "The in-app analysis view, rendered to the report surfaces"
+    issues: [182]
+    images: ["17-analysis-portfolio-explorer_light.png"]
+    caption: "Portfolio Explorer — the in-app view, now mirrored to Wiki + Quarto"
+    bullets:
+      - "The Portfolio Explorer (three-tier BV / weight-at-risk, untyped-epic warnings) is no longer app-only — it now publishes to a Tier-1 Wiki page and a Quarto Executive page."
+      - "The published numbers are pinned to the app's own analysis engine, so the report surfaces and the live UI can't drift apart."
+      - "Brings the newest portfolio-level analysis into the same Wiki + Quarto surfaces as the rest of the report suite."
+
+  - title: "Selective Data Fetch  (#183)"
+    subtitle: "Fetch only what the selected reports actually need"
+    issues: [183]
+    bullets:
+      - "A report run now derives the minimal set of snapshot phases required by the specific reports selected, instead of always fetching the full portfolio snapshot."
+      - "Fewer GitLab API calls and faster runs when only a subset of reports is requested — the fetch scales with what you asked for."
+      - "Groundwork that also makes targeted, on-demand report refreshes cheaper."
+
+  - title: "UI Enhancements & Cleanup  (#187)"
+    subtitle: "Polish surfaced while building the status deck"
+    issues: [187]
+    images: ["15-login-front-door.png"]
+    caption: "Login front door — now with slideshow nav chevrons"
+    bullets:
+      - "The CLI-command strip (CliCommandStrip / CommandBar) now shows a single truncated line by default, with an expand control — long commands no longer distort the layout (and read cleanly on a slide)."
+      - "The login slideshow gained subtle left/right chevrons to step through the background imagery."
+
+  - title: "Status Deck Tooling  (#144, #210)"
+    subtitle: "The deck you're reading — built from live project data"
+    issues: [144, 210]
+    bullets:
+      - "The status deck is generated from the SAIC-derived template, live GitLab issue/MR data, real SLOC and velocity metrics, and Playwright screenshots of the running app (#144)."
+      - "This iteration added a dated title slide, this 'Latest Work' section, per-capability full-issue footers, a closing slide, and a '-YYYYMMDD' filename (#210)."
+      - "The template is now committed in-repo, so a build needs no external fetch — see the automation that produced this deck (#213)."
