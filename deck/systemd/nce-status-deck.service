@@ -1,0 +1,14 @@
+[Unit]
+Description=Build the weekly NCE Safe Simulator status deck and email a download link
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+Environment=HOME=/root
+Environment=AWS_DEFAULT_REGION=us-east-1
+WorkingDirectory=/root/.venv/nce-safe-simulator-2
+ExecStart=/root/.venv/nce-safe-simulator-2/deck/weekly-status-deck.sh
+# redeploy + screenshots + build can run ~25 min; give plenty of headroom.
+TimeoutStartSec=3600
