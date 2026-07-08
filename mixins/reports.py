@@ -6347,9 +6347,9 @@ class ReportsMixin:
     _PFX_DEFINITIONS_MD = [
         "| Metric | Counts | Reads as |",
         "|--------|--------|----------|",
-        "| **Direct** | BV / weight on the blocked items themselves | \"the work items that can't move\" |",
-        "| **Downstream** | blocked items **plus their open descendants** | \"value that can't be delivered until this clears\" — closed value is already delivered, so it never counts as at risk |",
-        "| **Subtree** | blocked items plus **all** descendants, closed included | \"how big the threatened branch is\" — sizing and exposure, not risk |",
+        "| **Direct** | the blocked items themselves — BV on those items; weight is each blocked branch's **effective weight** (its own set weight, else the sum of its children's, down to the issue roll-up) | \"the work items that can't move\" |",
+        "| **Downstream** | blocked items **plus their open descendants** | \"value that can't be delivered until this clears\" — closed value is already delivered, so it never counts as at risk (open work behind a closed item still does) |",
+        "| **Subtree** | blocked items plus **all** descendants, closed included — for weight this equals Direct, since a branch's effective weight already covers its subtree | \"how big the threatened branch is\" — sizing and exposure, not risk |",
     ]
 
     def _pfx_chain_node_md(self, node):

@@ -146,10 +146,12 @@ class TestDataBuilderPinsToAnalysis:
         assert totals["blocked_business_value"] == 5
         assert totals["blocked_business_value_downstream"] == 5
         assert totals["blocked_business_value_subtree"] == 6
-        # weight: F3 planned 13 + F4 actual-fallback 8 = 21; subtree + F8 (2)
+        # weight: F3 planned 13 + F4 actual-fallback 8 = 21. F3's set
+        # weight is authoritative for its subtree (#179), so closed child
+        # F8 is already covered — subtree is 21, not 23.
         assert totals["blocked_weight"] == 21
         assert totals["blocked_weight_downstream"] == 21
-        assert totals["blocked_weight_subtree"] == 23
+        assert totals["blocked_weight_subtree"] == 21
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,7 @@ class TestWikiPage:
     def test_totals_tier_table_bolds_downstream(self):
         md = _run_md(_harness(*_fixture()))
         assert "| ★ Business Value | 5 | **5** | 6 |" in md
-        assert "| ⚓ Weight | 21 | **21** | 23 |" in md
+        assert "| ⚓ Weight | 21 | **21** | 21 |" in md
 
     def test_metric_definitions_table_present(self):
         md = _run_md(_harness(*_fixture()))
