@@ -37,7 +37,9 @@ HTML(f"""
 </p>
 <p>Percentage of committed Features and Capabilities delivered in each PI.
 Target ≥ 80%. Consistently at 100% may indicate sandbagging; below 60% signals a
-systemic problem.</p>""")
+systemic problem. Work committed to a PI but not owned by any ART appears in an
+<em>Unassigned / Portfolio</em> row, so the Portfolio Total counts every
+committed item.</p>""")
 ```
 
 ## 🗺️ Predictability Heatmap
