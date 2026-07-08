@@ -2,9 +2,9 @@ You are authoring the "Latest Work" spotlight slides for this week's NCE Safe Si
 
 STEP 1 — get this week's candidate issues. Run exactly:
 
-  python3 -c 'import sys;sys.path.insert(0,"deck");import build_deck as b,json;print(json.dumps(b.fetch_slides_issues(b._week_start_pacific())))'
+  python3 -c 'import sys;sys.path.insert(0,"deck");import build_deck as b,json;print(json.dumps(b.fetch_slides_issues(b._window_start_pacific())))'
 
-That prints a JSON list of the issues labeled `slides` that closed in the current work week: each has iid, title, and description.
+That prints a JSON list of the issues labeled `slides` that closed since the previous weekly run (the trailing ~7 days incl. the weekend): each has iid, title, and description.
 
 STEP 2 — see which screenshots exist (for optional images). Run:
 

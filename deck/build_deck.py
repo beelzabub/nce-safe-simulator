@@ -11,9 +11,10 @@ Usage:
 Requires deck/metrics.json (run fetch_metrics.py first) and deck/screenshots/ (run
 capture_screenshots.py first, or point --screenshots-dir at an existing set).
 
---since sets the Latest Work window start (default: Monday of the current Pacific work
-week); --review-date sets the cover/closing date (default: today, Pacific). The saved
-filename always ends with a -YYYYMMDD (review-date) postfix.
+--since sets the Latest Work window start (default: the previous Friday 14:00 Pacific — the
+prior weekly run — so a Friday build covers the trailing 7 days incl. the weekend);
+--review-date sets the cover/closing date (default: today, Pacific). The saved filename
+always ends with a -YYYYMMDD (review-date) postfix.
 """
 import argparse
 import glob
@@ -134,12 +135,19 @@ def _now_pacific():
     return now.astimezone(_PACIFIC) if _PACIFIC else now
 
 
-def _week_start_pacific():
-    """Monday 00:00 of the current work week, in Pacific — the default 'since'
-    boundary for the Latest Work section."""
+def _window_start_pacific():
+    """Start of the 'Latest Work' window: the previous Friday 14:00 Pacific — the
+    time of the prior weekly run. A Friday-14:00 build therefore covers the
+    trailing ~7 days *including the weekend just past*, so Saturday/Sunday work
+    lands in the following Friday's deck instead of falling into a gap between a
+    Monday-anchored week and the Friday run. (--since overrides for an off-cadence
+    build.)"""
     d = _now_pacific()
-    monday = d - timedelta(days=d.weekday())
-    return monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    days = (d.weekday() - 4) % 7   # days since the most recent Friday (Fri = 4)
+    if days == 0:                  # today is Friday → anchor to the *previous* Friday
+        days = 7
+    prev_friday = d - timedelta(days=days)
+    return prev_friday.replace(hour=14, minute=0, second=0, microsecond=0)
 
 
 def _long_date(d):
@@ -180,7 +188,7 @@ def fetch_completed_since(since_dt):
 
 
 def fetch_slides_issues(since_dt):
-    """Issues labeled `slides` that closed within the current work week — the
+    """Issues labeled `slides` that closed since the previous weekly run — the
     candidates for a dedicated spotlight slide. How related issues are grouped
     onto a single slide is a judgement call made when authoring the spotlights
     file; this just reports the candidates (used for the deterministic fallback
@@ -232,7 +240,7 @@ class DeckBuilder:
         # Both stated in Pacific (see _now_pacific): the review date stamped on
         # the cover, and the Latest-Work window start.
         self.review_date = review_date or _now_pacific()
-        self.since_dt = since_dt or _week_start_pacific()
+        self.since_dt = since_dt or _window_start_pacific()
         self.C = _load_theme_colors(self.prs)
         self.SW = self.prs.slide_width
         self.SH = self.prs.slide_height
@@ -1471,7 +1479,7 @@ class DeckBuilder:
 
     def build_latest_work(self):
         """New 'Latest Work' section (issue #210): everything merged into develop
-        since the start of the work week, grouped by type of work, plus a spotlight
+        since the previous weekly run, grouped by type of work, plus a spotlight
         on the new bundle export/import capability (#206) with screenshots."""
         since_str = _long_date(self.since_dt)
         self._section_divider("Latest Work", f"New work completed since {since_str}")
@@ -1733,7 +1741,7 @@ def main():
     ap.add_argument("--shots", default=os.path.join(HERE, "shots.yaml"))
     ap.add_argument("--out", default=os.path.join(HERE, "dist", "NCE-Safe-Simulator-Status.pptx"))
     ap.add_argument("--since", metavar="YYYY-MM-DD",
-                    help="Latest Work window start (default = Monday of the current Pacific work week)")
+                    help="Latest Work window start (default = previous Friday (the prior weekly run))")
     ap.add_argument("--review-date", metavar="YYYY-MM-DD",
                     help="Review date shown on the cover / closing and used for the filename "
                          "postfix (default = today, Pacific)")
@@ -1768,7 +1776,7 @@ def main():
     review_date = (datetime.strptime(args.review_date, "%Y-%m-%d")
                    if args.review_date else _now_pacific())
     since_dt = (datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                if args.since else _week_start_pacific())
+                if args.since else _window_start_pacific())
 
     spotlights = None
     if args.spotlights and os.path.exists(args.spotlights):

@@ -120,13 +120,13 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 
 Beyond the standing sections (overview, architecture, tech stack, metrics, full issues
 table, capability areas, appendix), the deck opens with a **Latest Work** section — the
-issues merged into `develop` since the start of the current work week, grouped by type
+issues merged into `develop` since the previous weekly run, grouped by type
 (features / enhancements / bugs / infrastructure), followed by **spotlight detail slides**
 for the standout items. It closes with a **"Status Update Complete"** slide. The cover and
 closing slides are stamped with the status date.
 
 Which issues get a spotlight is driven by a GitLab **`slides` label**: any issue tagged
-`slides` and closed in the current work week is a spotlight candidate. Spotlight *content*
+`slides` and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
 is authored (not derived verbatim) into `deck/latest-work-spotlights.yaml` — a list of
 `{title, subtitle, bullets[], images[], caption}` entries, one per slide, with related
 issues grouped onto a single slide (e.g. the import/export hardening arc). `build_deck.py`
@@ -137,8 +137,10 @@ week.
 Dates are all stated in **Pacific** (the machine runs UTC). Two `build_deck.py` flags tune
 them; both have sensible defaults so a plain `make deck` needs neither:
 
-- `--since YYYY-MM-DD` — the Latest Work window start. Default: **Monday of the current
-  Pacific work week**. The completed-work set is derived from merge-commit branch names
+- `--since YYYY-MM-DD` — the Latest Work window start. Default: **the previous Friday 14:00
+  Pacific** (the prior weekly run), so a Friday build covers the trailing 7 days *including
+  the weekend just past* — Saturday/Sunday work is picked up in the following Friday's deck
+  rather than skipped. The completed-work set is derived from merge-commit branch names
   (`<type>/<iid>-slug` merged into `develop`), so it needs no extra bookkeeping.
 - `--review-date YYYY-MM-DD` — the date on the cover / closing slides. Default: **today
   (Pacific)**.
