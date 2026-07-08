@@ -72,26 +72,6 @@ TOOLS = [
         ],
     },
     {
-        "key":         "export-epics",
-        "description": "Export all epics from the group hierarchy to CSV or JSON",
-        "method":      "export_epics",
-        "params": [
-            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
-            {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
-            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
-        ],
-    },
-    {
-        "key":         "export-issues",
-        "description": "Export all issues from the group hierarchy to CSV or JSON",
-        "method":      "export_issues",
-        "params": [
-            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
-            {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
-            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
-        ],
-    },
-    {
         "key":         "generate-epic-blocks",
         "description": "Randomly create or remove blocking relationships between epics (negative count = remove)",
         "method":      "_tool_generate_epic_blocks",
@@ -145,6 +125,42 @@ TOOLS = [
         ],
     },
     {
+        "key":         "export-bundle",
+        "description": "Export epics, issues, blocking links, and container names as one transfer bundle (zip)",
+        "method":      "export_bundle",
+        "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "import-bundle",
+        "description": "Import a transfer bundle (zip) in one run: group/project containers, epics, issues, and blocking links",
+        "method":      "import_bundle",
+        "confirm":     True,
+        "params": [
+            {"name": "input_path",     "prompt": "Bundle file path (.zip from export-bundle)", "type": str, "widget": "file", "accept": ".zip", "optional": False},
+            {"name": "group",          "prompt": "Target group (import into)", "type": str, "widget": "group", "optional": True},
+            {"name": "create_missing", "prompt": "Create the target root group if it doesn't exist", "type": bool, "default": True,
+             "help": "The bundle is a full-mirror transfer, so this defaults ON (unlike the standalone importers). Subgroups and projects along each row's reconciled path are always created — that's the point of the bundle — gated on the bundle's trusted source_root stamp."},
+            {"name": "on_existing",    "prompt": "If an epic/issue with the same title exists (create / skip / update)", "type": str, "widget": "select", "options": ["create", "skip", "update"], "default": "skip",
+             "help": "skip (default) makes re-running the same bundle a safe no-op — which is also the recovery story for a partially-failed import: just run it again; everything already created is skipped."},
+            {"name": "on_missing_bv_field", "prompt": "If the Business Value field is missing on the target (create / ignore / fail)", "type": str, "widget": "select", "options": ["create", "ignore", "fail"], "default": "create",
+             "help": "A cross-instance target may lack the Business Value custom field the bundle's epics carry:\n• create (default): create it at the target root's top-level group from the configured definition. Needs GitLab Ultimate and Owner there — when creation fails, the import continues and the values are dropped (counted in the epics summary).\n• ignore: import everything, drop the values (counted in the summary).\n• fail: abort before anything is imported.\nAn existing field is never modified. Note: a bundle re-run skips existing epics without touching BV — backfill after creating the field late by re-running with on_existing=update."},
+            {"name": "dry_run",        "prompt": "Preview (dry run) — validate and preview all three phases, nothing is created", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "export-epics",
+        "description": "Export all epics from the group hierarchy to CSV or JSON",
+        "method":      "export_epics",
+        "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
+            {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
+        ],
+    },
+    {
         "key":         "import-epics",
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",
@@ -168,6 +184,16 @@ TOOLS = [
             {"name": "on_missing_bv_field", "prompt": "If the Business Value field is missing on the target (create / ignore / fail)", "type": str, "widget": "select", "options": ["create", "ignore", "fail"], "default": "create",
              "help": "Rows can carry a business_value, but the target instance may lack the custom field (cross-instance transfer):\n• create (default): create it at the target root's top-level group from the configured definition. Needs GitLab Ultimate and Owner there — when creation fails, the import continues and the values are dropped (counted in the summary).\n• ignore: import everything, drop the values (counted in the summary).\n• fail: abort before anything is imported.\nAn existing field is never modified — values outside its option set are reported per row. Backfill after creating the field late: re-import with on_existing=update."},
             {"name": "dry_run",            "prompt": "Preview (dry run) — validate and preview only, nothing is created",       "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "export-issues",
+        "description": "Export all issues from the group hierarchy to CSV or JSON",
+        "method":      "export_issues",
+        "params": [
+            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
+            {"name": "fmt",         "prompt": "Export format", "type": str, "widget": "select", "options": ["csv", "json"], "default": "csv"},
+            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
         ],
     },
     {
@@ -216,32 +242,6 @@ TOOLS = [
              "help": "Resolves epic endpoints to the epics created by a preceding import-epics run (which writes the map to public/exports and prints its path). Without it, epic endpoints resolve by exact title. Issue endpoints always resolve by reconciled project path + exact title. Raw source ids are never used to address target objects — unresolvable endpoints warn and the link is dropped; existing links are skipped."},
             {"name": "source_root", "prompt": "Source root to strip for container reconciliation (blank = use export stamp)", "type": str, "optional": True},
             {"name": "dry_run",     "prompt": "Preview (dry run) — resolve and preview only, nothing is linked", "type": bool, "default": False, "cli_only": True},
-        ],
-    },
-    {
-        "key":         "export-bundle",
-        "description": "Export epics, issues, blocking links, and container names as one transfer bundle (zip)",
-        "method":      "export_bundle",
-        "params": [
-            {"name": "group",       "prompt": "Source group (export from)", "type": str, "widget": "group", "optional": True},
-            {"name": "output_path", "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
-        ],
-    },
-    {
-        "key":         "import-bundle",
-        "description": "Import a transfer bundle (zip) in one run: group/project containers, epics, issues, and blocking links",
-        "method":      "import_bundle",
-        "confirm":     True,
-        "params": [
-            {"name": "input_path",     "prompt": "Bundle file path (.zip from export-bundle)", "type": str, "widget": "file", "accept": ".zip", "optional": False},
-            {"name": "group",          "prompt": "Target group (import into)", "type": str, "widget": "group", "optional": True},
-            {"name": "create_missing", "prompt": "Create the target root group if it doesn't exist", "type": bool, "default": True,
-             "help": "The bundle is a full-mirror transfer, so this defaults ON (unlike the standalone importers). Subgroups and projects along each row's reconciled path are always created — that's the point of the bundle — gated on the bundle's trusted source_root stamp."},
-            {"name": "on_existing",    "prompt": "If an epic/issue with the same title exists (create / skip / update)", "type": str, "widget": "select", "options": ["create", "skip", "update"], "default": "skip",
-             "help": "skip (default) makes re-running the same bundle a safe no-op — which is also the recovery story for a partially-failed import: just run it again; everything already created is skipped."},
-            {"name": "on_missing_bv_field", "prompt": "If the Business Value field is missing on the target (create / ignore / fail)", "type": str, "widget": "select", "options": ["create", "ignore", "fail"], "default": "create",
-             "help": "A cross-instance target may lack the Business Value custom field the bundle's epics carry:\n• create (default): create it at the target root's top-level group from the configured definition. Needs GitLab Ultimate and Owner there — when creation fails, the import continues and the values are dropped (counted in the epics summary).\n• ignore: import everything, drop the values (counted in the summary).\n• fail: abort before anything is imported.\nAn existing field is never modified. Note: a bundle re-run skips existing epics without touching BV — backfill after creating the field late by re-running with on_existing=update."},
-            {"name": "dry_run",        "prompt": "Preview (dry run) — validate and preview all three phases, nothing is created", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -592,7 +592,8 @@ TOOL_CATEGORIES = [
         "name":        "Import / Export",
         "description": "Move epics and issues in and out of GitLab",
         "tools": ["export-bundle", "import-bundle",
-                  "export-epics", "export-issues", "import-epics", "import-issues",
+                  "export-epics", "import-epics",
+                  "export-issues", "import-issues",
                   "export-links", "import-links"],
     },
 ]

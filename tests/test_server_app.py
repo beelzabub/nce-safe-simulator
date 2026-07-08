@@ -40,6 +40,22 @@ def test_tools_keys_match_registry(client):
     assert returned_keys == expected_keys
 
 
+def test_import_export_run_menu_order(client):
+    """The Tools run menu groups by parallelism_group and preserves the
+    /api/tools order within a group, so the import-export tools must appear
+    in the sequence #211 specifies: each export paired with its import,
+    bundle first, then epics, issues, links."""
+    resp = client.get("/api/tools")
+    order = [t["key"] for t in resp.json()
+             if _TOOL_GROUP.get(t["key"]) == "import-export"]
+    assert order == [
+        "export-bundle", "import-bundle",
+        "export-epics", "import-epics",
+        "export-issues", "import-issues",
+        "export-links", "import-links",
+    ]
+
+
 def test_tools_readonly_field(client):
     resp = client.get("/api/tools")
     for tool in resp.json():
