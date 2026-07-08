@@ -1496,6 +1496,61 @@ class DeckBuilder:
             cur_y = render_group(cur_x, cur_y, heading, color, bucket)
 
         self._build_bundle_slide()
+        self._build_enhancement_spotlights()
+
+    def _build_enhancement_spotlights(self):
+        """Standout enhancements from this week's work each get their own detail
+        slide (issue #210 follow-up): the import/export full-fidelity hardening arc,
+        the Portfolio Explorer report, and selective data fetch."""
+        # -- Import/Export full-fidelity hardening (the arc behind the bundle) --
+        imp = self._resolve_asset("05-import-export-import-epics_light.png")
+        self.capability_slide(
+            "Import / Export — Full-Fidelity Hardening",
+            "The transfer arc behind the bundle — nothing dropped, safe to re-run",
+            [
+                "Full fidelity: issues now land in create_missing_projects and their blocking "
+                "links export/import with them (#198); epic business_value is carried across a "
+                "transfer instead of being dropped (#196).",
+                "Container rebuild: create_missing_groups recreates missing subgroup chains from "
+                "trusted source roots (#195), and a group-names sidecar carries each container's "
+                "display name so recreated groups/projects read like the source (#200).",
+                "Resilient re-runs: visible 429 backoff, batched existence checks, and container-"
+                "qualified skip messages (#201); a field-level round-trip verification of issues + "
+                "blocking links (TestDashboard → JamieGroup) proves nothing is lost (#202).",
+                "Clearer dialogs: destination-fallback / source-root / create-missing params "
+                "relabeled with precedence help (#193), and the Tools Import/Export list "
+                "reordered (#211).",
+            ],
+            image_path=imp, caption="Import Epics — one of the hardened import dialogs",
+        )
+        # -- Portfolio Explorer, now a published report (#182) --
+        pex = self._resolve_asset("17-analysis-portfolio-explorer_light.png")
+        self.capability_slide(
+            "Portfolio Explorer — Now a Published Report  (#182)",
+            "The in-app analysis view, rendered to the report surfaces",
+            [
+                "The Portfolio Explorer (three-tier BV / weight-at-risk, untyped-epic warnings) "
+                "is no longer app-only — it now publishes to a Tier-1 Wiki page and a Quarto "
+                "Executive page.",
+                "The published numbers are pinned to the app's own analysis engine, so the report "
+                "surfaces and the live UI can't drift apart.",
+                "Brings the newest portfolio-level analysis into the same Wiki + Quarto surfaces "
+                "as the rest of the report suite.",
+            ],
+            image_path=pex, caption="Portfolio Explorer — the in-app view, now mirrored to Wiki + Quarto",
+        )
+        # -- Selective data fetch (#183) --
+        self.capability_slide(
+            "Selective Data Fetch  (#183)",
+            "Fetch only what the selected reports actually need",
+            [
+                "A report run now derives the minimal set of snapshot phases required by the "
+                "specific reports selected, instead of always fetching the full portfolio snapshot.",
+                "Fewer GitLab API calls and faster runs when only a subset of reports is requested "
+                "— the fetch scales with what you asked for.",
+                "Groundwork that also makes targeted, on-demand report refreshes cheaper.",
+            ],
+        )
 
     def _build_bundle_slide(self):
         """Spotlight on the flagship new capability (#206): how the bundle
