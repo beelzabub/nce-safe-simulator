@@ -11,9 +11,10 @@ Usage:
 Requires deck/metrics.json (run fetch_metrics.py first) and deck/screenshots/ (run
 capture_screenshots.py first, or point --screenshots-dir at an existing set).
 
---since sets the Latest Work window start (default: Monday of the current Pacific work
-week); --review-date sets the cover/closing date (default: today, Pacific). The saved
-filename always ends with a -YYYYMMDD (review-date) postfix.
+--since sets the Latest Work window start (default: the previous Friday 14:00 Pacific — the
+prior weekly run — so a Friday build covers the trailing 7 days incl. the weekend);
+--review-date sets the cover/closing date (default: today, Pacific). The saved filename
+always ends with a -YYYYMMDD (review-date) postfix.
 """
 import argparse
 import glob
@@ -134,12 +135,19 @@ def _now_pacific():
     return now.astimezone(_PACIFIC) if _PACIFIC else now
 
 
-def _week_start_pacific():
-    """Monday 00:00 of the current work week, in Pacific — the default 'since'
-    boundary for the Latest Work section."""
+def _window_start_pacific():
+    """Start of the 'Latest Work' window: the previous Friday 14:00 Pacific — the
+    time of the prior weekly run. A Friday-14:00 build therefore covers the
+    trailing ~7 days *including the weekend just past*, so Saturday/Sunday work
+    lands in the following Friday's deck instead of falling into a gap between a
+    Monday-anchored week and the Friday run. (--since overrides for an off-cadence
+    build.)"""
     d = _now_pacific()
-    monday = d - timedelta(days=d.weekday())
-    return monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    days = (d.weekday() - 4) % 7   # days since the most recent Friday (Fri = 4)
+    if days == 0:                  # today is Friday → anchor to the *previous* Friday
+        days = 7
+    prev_friday = d - timedelta(days=days)
+    return prev_friday.replace(hour=14, minute=0, second=0, microsecond=0)
 
 
 def _long_date(d):
@@ -179,6 +187,36 @@ def fetch_completed_since(since_dt):
     return ids
 
 
+def fetch_slides_issues(since_dt):
+    """Issues labeled `slides` that closed since the previous weekly run — the
+    candidates for a dedicated spotlight slide. How related issues are grouped
+    onto a single slide is a judgement call made when authoring the spotlights
+    file; this just reports the candidates (used for the deterministic fallback
+    and to tell the weekly authoring step what to write up)."""
+    if since_dt.tzinfo is None:
+        since_dt = since_dt.replace(tzinfo=timezone.utc)
+    out = subprocess.run(
+        ["glab", "api", "projects/:id/issues?labels=slides&state=closed&per_page=100",
+         "--paginate"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout
+    rows = []
+    for x in _decode_concatenated_json_arrays(out):
+        ca = x.get("closed_at")
+        if not ca:
+            continue
+        ca = ca[:-1] + "+00:00" if ca.endswith("Z") else ca
+        try:
+            cdt = datetime.fromisoformat(ca)
+        except ValueError:
+            continue
+        if cdt < since_dt:
+            continue
+        rows.append({"iid": x["iid"], "title": x["title"],
+                     "description": x.get("description") or ""})
+    rows.sort(key=lambda r: r["iid"])
+    return rows
+
+
 def ensure_template(s3_path, cache_dir):
     os.makedirs(cache_dir, exist_ok=True)
     local_path = os.path.join(cache_dir, "template.pptx")
@@ -190,16 +228,19 @@ def ensure_template(s3_path, cache_dir):
 
 class DeckBuilder:
     def __init__(self, template_path, screenshots_dir, metrics, capabilities, shots,
-                 review_date=None, since_dt=None):
+                 review_date=None, since_dt=None, spotlights=None):
         self.prs = Presentation(template_path)
         self.screenshots_dir = screenshots_dir
         self.metrics = metrics
         self.capabilities = capabilities
         self.shots = shots
+        # Authored Latest-Work spotlights (list of dicts) or None → auto-derive
+        # from `slides`-labeled issues at build time.
+        self.spotlights = spotlights
         # Both stated in Pacific (see _now_pacific): the review date stamped on
         # the cover, and the Latest-Work window start.
         self.review_date = review_date or _now_pacific()
-        self.since_dt = since_dt or _week_start_pacific()
+        self.since_dt = since_dt or _window_start_pacific()
         self.C = _load_theme_colors(self.prs)
         self.SW = self.prs.slide_width
         self.SH = self.prs.slide_height
@@ -1438,7 +1479,7 @@ class DeckBuilder:
 
     def build_latest_work(self):
         """New 'Latest Work' section (issue #210): everything merged into develop
-        since the start of the work week, grouped by type of work, plus a spotlight
+        since the previous weekly run, grouped by type of work, plus a spotlight
         on the new bundle export/import capability (#206) with screenshots."""
         since_str = _long_date(self.since_dt)
         self._section_divider("Latest Work", f"New work completed since {since_str}")
@@ -1495,99 +1536,79 @@ class DeckBuilder:
                 cur_x, cur_y = col2_x, top   # spill into the second column
             cur_y = render_group(cur_x, cur_y, heading, color, bucket)
 
-        self._build_bundle_slide()
-        self._build_enhancement_spotlights()
+        self._build_spotlights()
 
-    def _build_enhancement_spotlights(self):
-        """Standout enhancements from this week's work each get their own detail
-        slide (issue #210 follow-up): the import/export full-fidelity hardening arc,
-        the Portfolio Explorer report, and selective data fetch."""
-        # -- Import/Export full-fidelity hardening (the arc behind the bundle) --
-        imp = self._resolve_asset("05-import-export-import-epics_light.png")
-        self.capability_slide(
-            "Import / Export — Full-Fidelity Hardening",
-            "The transfer arc behind the bundle — nothing dropped, safe to re-run",
-            [
-                "Full fidelity: issues now land in create_missing_projects and their blocking "
-                "links export/import with them (#198); epic business_value is carried across a "
-                "transfer instead of being dropped (#196).",
-                "Container rebuild: create_missing_groups recreates missing subgroup chains from "
-                "trusted source roots (#195), and a group-names sidecar carries each container's "
-                "display name so recreated groups/projects read like the source (#200).",
-                "Resilient re-runs: visible 429 backoff, batched existence checks, and container-"
-                "qualified skip messages (#201); a field-level round-trip verification of issues + "
-                "blocking links (TestDashboard → JamieGroup) proves nothing is lost (#202).",
-                "Clearer dialogs: destination-fallback / source-root / create-missing params "
-                "relabeled with precedence help (#193), and the Tools Import/Export list "
-                "reordered (#211).",
-            ],
-            image_path=imp, caption="Import Epics — one of the hardened import dialogs",
-        )
-        # -- Portfolio Explorer, now a published report (#182) --
-        pex = self._resolve_asset("17-analysis-portfolio-explorer_light.png")
-        self.capability_slide(
-            "Portfolio Explorer — Now a Published Report  (#182)",
-            "The in-app analysis view, rendered to the report surfaces",
-            [
-                "The Portfolio Explorer (three-tier BV / weight-at-risk, untyped-epic warnings) "
-                "is no longer app-only — it now publishes to a Tier-1 Wiki page and a Quarto "
-                "Executive page.",
-                "The published numbers are pinned to the app's own analysis engine, so the report "
-                "surfaces and the live UI can't drift apart.",
-                "Brings the newest portfolio-level analysis into the same Wiki + Quarto surfaces "
-                "as the rest of the report suite.",
-            ],
-            image_path=pex, caption="Portfolio Explorer — the in-app view, now mirrored to Wiki + Quarto",
-        )
-        # -- Selective data fetch (#183) --
-        self.capability_slide(
-            "Selective Data Fetch  (#183)",
-            "Fetch only what the selected reports actually need",
-            [
-                "A report run now derives the minimal set of snapshot phases required by the "
-                "specific reports selected, instead of always fetching the full portfolio snapshot.",
-                "Fewer GitLab API calls and faster runs when only a subset of reports is requested "
-                "— the fetch scales with what you asked for.",
-                "Groundwork that also makes targeted, on-demand report refreshes cheaper.",
-            ],
-        )
+    def _build_spotlights(self):
+        """Per-issue spotlight detail slides for the standout work of the week.
+        Content is authored ahead of the build into the spotlights file
+        (self.spotlights, loaded from --spotlights); related issues are grouped
+        onto one slide there. With no spotlights file, fall back to one
+        auto-derived slide per `slides`-labeled issue closed this week."""
+        spots = self.spotlights
+        if spots is None:
+            spots = [
+                {"title": f"#{i['iid']} — {i['title']}", "subtitle": "",
+                 "bullets": self._desc_to_bullets(i["description"]), "images": []}
+                for i in fetch_slides_issues(self.since_dt)
+            ]
+        for spot in spots:
+            self._render_spotlight(spot)
 
-    def _build_bundle_slide(self):
-        """Spotlight on the flagship new capability (#206): how the bundle
-        export/import works, with the two new UI dialogs shown."""
-        exp = self._resolve_asset("05a-import-export-export-bundle_light.png")
-        imp = self._resolve_asset("05b-import-export-import-bundle_light.png")
+    @staticmethod
+    def _desc_to_bullets(desc, limit=5):
+        """Pull the markdown bullet lines out of an issue description to use as
+        slide bullets; if there are none, fall back to the first few non-empty
+        lines. Only used for the deterministic (no-authored-file) fallback."""
+        bullets, plain = [], []
+        for raw in (desc or "").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r"[-*+]\s+(.*)", line)
+            if m:
+                bullets.append(m.group(1).strip())
+            elif len(line) > 3:
+                plain.append(line)
+        out = (bullets or plain)[:limit]
+        return out or ["(see the issue for details)"]
+
+    def _render_spotlight(self, spot):
+        """Render one spotlight slide from an authored dict:
+        {title, subtitle, bullets:[...], images:[<screenshot filename>...],
+        image_labels:[...], caption}. 0 or 1 image → bullets (+ image on the
+        right); 2 images → the stacked two-image layout."""
+        title = spot.get("title", "")
+        subtitle = spot.get("subtitle", "")
+        bullets = spot.get("bullets", [])
+        imgs = [self._resolve_asset(im) for im in (spot.get("images") or [])]
+        imgs = [p for p in imgs if os.path.exists(p)]
+        if len(imgs) >= 2:
+            self._spotlight_two_images(title, subtitle, bullets, imgs[:2],
+                                       spot.get("image_labels") or [])
+        else:
+            self.capability_slide(title, subtitle, bullets,
+                                  image_path=(imgs[0] if imgs else None),
+                                  caption=spot.get("caption"))
+
+    def _spotlight_two_images(self, title, subtitle, bullets, imgs, labels):
+        """Bullets on the left, two screenshots stacked on the right (e.g. the
+        Export + Import bundle dialogs)."""
         s = self.new_slide()
-        self.header_band(s, "New Capability — Bundle Export / Import  (#206)",
-                         "One-file transfer of an entire portfolio slice, end to end")
+        self.header_band(s, title, subtitle)
         body_y = Emu(830000)
         body_h = self.SH - body_y - Emu(160000)
-        self.add_bullets(s, Emu(180000), body_y, Emu(4550000), body_h, [
-            "One .zip carries the whole slice — group/project containers, epics, issues, "
-            "blocking links, and container display names — instead of juggling separate "
-            "epic / issue / link exports.",
-            "Import runs three phases in a single pass: rebuild the container tree, create "
-            "the epics and issues, then re-link blocking relationships — no manual ordering.",
-            "Cross-instance safe: create_missing rebuilds subgroup / project chains from the "
-            "bundle's trusted source root; on_missing_bv_field can create the Business Value "
-            "field on the target when it's absent (#204).",
-            "Idempotent recovery: on_existing = skip makes a re-run a no-op, so a partially "
-            "failed import just gets run again (#207).",
-            "Ships as two UI tools under Import / Export — Export Bundle and Import Bundle — "
-            "plus the equivalent export-bundle / import-bundle CLI commands.",
-        ], 12, RGBColor(0x2A, 0x2E, 0x32), space_after=10)
-
+        self.add_bullets(s, Emu(180000), body_y, Emu(4550000), body_h, bullets, 12,
+                         RGBColor(0x2A, 0x2E, 0x32), space_after=10)
         img_x = Emu(4850000)
         img_w = self.SW - img_x - Emu(180000)
         half_h = (body_h - Emu(120000)) // 2
-        for path, label, y in ((exp, "Export Bundle dialog", body_y),
-                               (imp, "Import Bundle dialog", body_y + half_h + Emu(120000))):
-            if path and os.path.exists(path):
-                self.add_picture_contain(s, path, img_x, y, img_w, half_h - Emu(230000))
+        for idx, path in enumerate(imgs):
+            y = body_y if idx == 0 else body_y + half_h + Emu(120000)
+            self.add_picture_contain(s, path, img_x, y, img_w, half_h - Emu(230000))
+            label = labels[idx] if idx < len(labels) else ""
+            if label:
                 self.add_text(s, img_x, y + half_h - Emu(220000), img_w, Emu(200000),
                               label, 9, GRAY, align=PP_ALIGN.CENTER, italic=True)
-            else:
-                print(f"  warn: bundle screenshot missing ({path}) — spotlight slide text-only")
         return s
 
     def build_closing(self):
@@ -1720,10 +1741,13 @@ def main():
     ap.add_argument("--shots", default=os.path.join(HERE, "shots.yaml"))
     ap.add_argument("--out", default=os.path.join(HERE, "dist", "NCE-Safe-Simulator-Status.pptx"))
     ap.add_argument("--since", metavar="YYYY-MM-DD",
-                    help="Latest Work window start (default = Monday of the current Pacific work week)")
+                    help="Latest Work window start (default = previous Friday (the prior weekly run))")
     ap.add_argument("--review-date", metavar="YYYY-MM-DD",
                     help="Review date shown on the cover / closing and used for the filename "
                          "postfix (default = today, Pacific)")
+    ap.add_argument("--spotlights", default=os.path.join(HERE, "latest-work-spotlights.yaml"),
+                    help="authored Latest-Work spotlight slides (YAML). If absent, spotlights "
+                         "are auto-derived from `slides`-labeled issues closed this week.")
     args = ap.parse_args()
 
     if not os.path.exists(args.metrics):
@@ -1752,10 +1776,16 @@ def main():
     review_date = (datetime.strptime(args.review_date, "%Y-%m-%d")
                    if args.review_date else _now_pacific())
     since_dt = (datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                if args.since else _week_start_pacific())
+                if args.since else _window_start_pacific())
+
+    spotlights = None
+    if args.spotlights and os.path.exists(args.spotlights):
+        with open(args.spotlights) as f:
+            spotlights = (yaml.safe_load(f) or {}).get("spotlights")
+        print(f"  spotlights: {len(spotlights or [])} authored slides from {args.spotlights}")
 
     builder = DeckBuilder(template_path, args.screenshots_dir, metrics, capabilities, shots,
-                          review_date=review_date, since_dt=since_dt)
+                          review_date=review_date, since_dt=since_dt, spotlights=spotlights)
     prs = builder.build()
 
     # The output filename always ends with a -YYYYMMDD date postfix (issue #210).

@@ -120,17 +120,27 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 
 Beyond the standing sections (overview, architecture, tech stack, metrics, full issues
 table, capability areas, appendix), the deck opens with a **Latest Work** section — the
-issues merged into `develop` since the start of the current work week, grouped by type
-(features / enhancements / bugs / infrastructure), followed by spotlight detail slides for
-the standout items — the flagship new capability plus the significant enhancement arcs
-(`_build_bundle_slide` / `_build_enhancement_spotlights`). It closes with a **"Status Update
-Complete"** slide. The cover and closing slides are stamped with the status date.
+issues merged into `develop` since the previous weekly run, grouped by type
+(features / enhancements / bugs / infrastructure), followed by **spotlight detail slides**
+for the standout items. It closes with a **"Status Update Complete"** slide. The cover and
+closing slides are stamped with the status date.
+
+Which issues get a spotlight is driven by a GitLab **`slides` label**: any issue tagged
+`slides` and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
+is authored (not derived verbatim) into `deck/latest-work-spotlights.yaml` — a list of
+`{title, subtitle, bullets[], images[], caption}` entries, one per slide, with related
+issues grouped onto a single slide (e.g. the import/export hardening arc). `build_deck.py`
+renders that file (`--spotlights`); with no file present it falls back to one auto-derived
+slide per labeled issue. See **Weekly automation** below for how the file is produced each
+week.
 
 Dates are all stated in **Pacific** (the machine runs UTC). Two `build_deck.py` flags tune
 them; both have sensible defaults so a plain `make deck` needs neither:
 
-- `--since YYYY-MM-DD` — the Latest Work window start. Default: **Monday of the current
-  Pacific work week**. The completed-work set is derived from merge-commit branch names
+- `--since YYYY-MM-DD` — the Latest Work window start. Default: **the previous Friday 14:00
+  Pacific** (the prior weekly run), so a Friday build covers the trailing 7 days *including
+  the weekend just past* — Saturday/Sunday work is picked up in the following Friday's deck
+  rather than skipped. The completed-work set is derived from merge-commit branch names
   (`<type>/<iid>-slug` merged into `develop`), so it needs no extra bookkeeping.
 - `--review-date YYYY-MM-DD` — the date on the cover / closing slides. Default: **today
   (Pacific)**.
@@ -138,6 +148,33 @@ them; both have sensible defaults so a plain `make deck` needs neither:
 The output filename **always ends with a `-YYYYMMDD` postfix** (the review date), e.g.
 `NCE-Safe-Simulator-Status-20260708.pptx`, so successive builds don't overwrite
 each other. `deck/dist/` is gitignored.
+
+## Weekly automation (issue #213)
+
+On the single-box host, a **systemd timer** builds and emails the deck every **Friday
+14:00 America/Los_Angeles** (DST-safe; the box is up 08:00–01:00 PT). Units live in
+`deck/systemd/`; install with `sudo deck/systemd/install.sh`, then
+`systemctl enable --now nce-status-deck.timer`.
+
+The service runs `deck/weekly-status-deck.sh`, which:
+
+1. checks out + pulls the build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides
+   for a pre-merge validation run),
+2. `make redeploy` — rebuilds the image and hot-swaps the app container so screenshots are
+   current — then health-checks the app,
+3. captures screenshots and fetches metrics,
+4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
+   `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
+   and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build
+   falls back to auto-derived spotlights rather than aborting,
+5. builds the deck, uploads the dated `.pptx` to
+   `s3://…/nce-safe-simulator/status/`,
+6. **emails** via the SNS topic `nce-status-deck` (us-east-1) — a summary plus a 7-day
+   presigned download link; any failure emails a failure notice instead.
+
+Logs land in `deck/dist/weekly-logs/` and the systemd journal
+(`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the
+`claude` CLI, Docker, network to the live app, and `sns:Publish` on the instance role.
 
 ## Template
 
