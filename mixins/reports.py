@@ -1781,7 +1781,9 @@ class ReportsMixin:
         }
 
         # Build relative path from root for each epic's owning group
-        root_id = self._rd_root["id"]
+        # Partial snapshot (groups.json absent) → no root; _group_path then
+        # finds no groups to walk and falls back to the group name (#212).
+        root_id = self._rd_root["id"] if self._rd_root else None
 
         def _group_path(gid):
             parts = []
@@ -3744,7 +3746,9 @@ class ReportsMixin:
             "roam::mitigated": "🛡️",
             "roam::resolved":  "✅",
         }
-        root_id = self._rd_root["id"]
+        # Partial snapshot (groups.json absent) → no root; _group_path then
+        # finds no groups to walk and falls back to the group name (#212).
+        root_id = self._rd_root["id"] if self._rd_root else None
 
         def _group_path(gid):
             parts = []
