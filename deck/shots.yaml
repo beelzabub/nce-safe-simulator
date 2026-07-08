@@ -45,6 +45,14 @@ ui_shots:
     title: "Import/Export — Import Epics"
     expand: ["IMPORT / EXPORT"]
     select: "Import Epics"
+  - out: 05a-import-export-export-bundle
+    title: "Import/Export — Export Bundle"
+    expand: ["IMPORT / EXPORT"]
+    select: "Export Bundle"
+  - out: 05b-import-export-import-bundle
+    title: "Import/Export — Import Bundle"
+    expand: ["IMPORT / EXPORT"]
+    select: "Import Bundle"
   - out: 06-state-progress-simulate-pi
     title: "State & Progress — Simulate PI Progress"
     expand: ["STATE & PROGRESS"]
