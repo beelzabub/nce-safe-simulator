@@ -53,12 +53,12 @@
         </div>
         <table class="metrics-table">
           <tbody>
-          <tr><th>Direct</th><td>on the blocked items themselves — "the work items that can't move"</td></tr>
-          <tr><th>Downstream</th><td>blocked items <em>plus their open descendants</em> — "value that can't be delivered until this clears." Closed/done items are excluded: their value is already delivered, so a block can't hold it hostage</td></tr>
-          <tr><th>Subtree</th><td>blocked items plus <em>all</em> descendants, closed included — sizing/exposure of the threatened branch, not risk</td></tr>
+          <tr><th>Direct</th><td>the blocked items themselves — "the work that can't move." BV counts those items; weight is each blocked branch's effective weight</td></tr>
+          <tr><th>Downstream</th><td>blocked items <em>plus their open descendants</em> — "value that can't be delivered until this clears." Closed/done items are excluded: their value is already delivered, so a block can't hold it hostage (open work behind a closed item still counts)</td></tr>
+          <tr><th>Subtree</th><td>blocked items plus <em>all</em> descendants, closed included — sizing/exposure of the threatened branch, not risk. For weight this equals Direct: a branch's effective weight already covers its subtree</td></tr>
           </tbody>
         </table>
-        <p class="metrics-note">Weight prefers planned and falls back to actual; BV is the GitLab Business Value field (epics only). Overlapping blocked subtrees are never double-counted. A <em>closed</em> item still carrying blocking links stays in the tree (flagged "blocked · closed") as a data-cleanup signal but contributes 0 downstream.</p>
+        <p class="metrics-note">Weight is the <em>recursive effective weight</em>: an epic's own set weight — zero means unset — else the sum of its children's, down to the issue-weight roll-up at the leaves. A set weight speaks for its whole subtree, so overlapping blocked subtrees are never double-counted. BV is the GitLab Business Value field (epics only). A <em>closed</em> item still carrying blocking links stays in the tree (flagged "blocked · closed") as a data-cleanup signal but contributes 0 downstream.</p>
       </div>
 
       <div v-if="totals.untyped_in_chains" class="dq-hint">
@@ -145,7 +145,7 @@
                   :title="node.state === 'closed' ? 'Closed but still carries blocking links — consider clearing them (data cleanup)' : undefined"
                 >{{ node.state === 'closed' ? 'blocked · closed' : 'blocked' }}</span>
                 <span class="node-nums">
-                  w {{ node.planned_weight ?? node.actual_weight ?? '—' }} · bv {{ node.business_value ?? '—' }}
+                  w {{ node.planned_weight || node.actual_weight || '—' }} · bv {{ node.business_value ?? '—' }}
                 </span>
               </div>
               <div v-if="chain.blockers.length" class="blockers" :style="{ paddingLeft: (0.75 + chain.nodes.length * 1.1) + 'rem' }">

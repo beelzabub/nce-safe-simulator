@@ -270,9 +270,10 @@ def test_fully_typed_snapshot_reports_zero_untyped(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _tier_fixture():
-    """Portfolio Epic -> blocked Capability with open + closed children."""
+    """Portfolio Epic -> blocked Capability (weight unset) with open +
+    closed children — the weight tiers decompose into the children."""
     pe   = _epic(1, "Epic", planned=200, bv=21, pct_complete=10)
-    cap  = _epic(2, "Capability", parent_id=1, planned=30, bv=8)   # blocked
+    cap  = _epic(2, "Capability", parent_id=1, planned=None, bv=8)  # blocked
     f_o  = _epic(3, "Feature", parent_id=2, planned=13, bv=5)              # open
     f_c  = _epic(4, "Feature", parent_id=2, planned=8, bv=3, state="Closed")  # done
     blk  = _epic(9, "Feature", title="Blocker")
@@ -295,12 +296,14 @@ def test_downstream_excludes_closed_subtree_includes(tmp_path, monkeypatch):
     assert r["blocked_business_value"] == 8              # cap itself
     assert r["blocked_business_value_downstream"] == 13  # cap 8 + open f 5
     assert r["blocked_business_value_subtree"] == 16     # + closed f 3
-    assert r["blocked_weight"] == 30
-    assert r["blocked_weight_downstream"] == 43          # 30 + 13
-    assert r["blocked_weight_subtree"] == 51             # + 8
+    # Weight (#179): cap unset -> decomposes into children. Downstream
+    # drops the closed feature; direct/subtree size the whole branch.
+    assert r["blocked_weight"] == 21                     # 13 + 8
+    assert r["blocked_weight_downstream"] == 13          # open f only
+    assert r["blocked_weight_subtree"] == 21
     # Totals mirror (single blocked item portfolio-wide).
     assert body["totals"]["blocked_business_value_downstream"] == 13
-    assert body["totals"]["blocked_weight_subtree"] == 51
+    assert body["totals"]["blocked_weight_subtree"] == 21
 
 
 def test_overlapping_blocked_subtrees_do_not_double_count():
@@ -320,7 +323,9 @@ def test_overlapping_blocked_subtrees_do_not_double_count():
     # Direct counts both blocked items; downstream is the UNION (8+5), not 8+5+5.
     assert entry["rollup"]["blocked_business_value"] == 13
     assert entry["rollup"]["blocked_business_value_downstream"] == 13
-    assert entry["rollup"]["blocked_weight_downstream"] == 43
+    # Weight (#179): the cap's set weight (30) is authoritative for its
+    # subtree — the nested blocked feature is already covered, not added.
+    assert entry["rollup"]["blocked_weight_downstream"] == 30
 
 
 def test_closed_blocked_item_visible_but_zero_downstream():
@@ -380,11 +385,119 @@ def test_capitalized_snapshot_states_are_normalized():
 
 
 # ---------------------------------------------------------------------------
-# Computation edge cases (pure function)
+# Recursive effective weight (#179): zero planned == unset (real snapshots
+# never emit null); a set weight is authoritative for its WHOLE subtree;
+# unset decomposes into children, bottoming out at actual_weight (the
+# issue-weight roll-up) on leaves.
 # ---------------------------------------------------------------------------
 
 def _by_id(epics):
     return {e["id"]: e for e in epics}
+
+
+def test_zero_planned_weight_on_leaf_falls_back_to_actual():
+    # The #179 bug: snapshots default unset weights to 0, so the `is None`
+    # fallback never fired and every tier read 0.
+    pe = _epic(1, "Epic")
+    f  = _epic(2, "Feature", parent_id=1, planned=0, actual=21)
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(f), "blocked_by": [],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, f]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_weight"] == 21
+    assert r["blocked_weight_downstream"] == 21
+    assert r["blocked_weight_subtree"] == 21
+
+
+def test_unset_branch_reports_children_without_double_count():
+    # The #179 probe: blocked capability with planned 0 and actual 21
+    # (rolled up from its features' 13 + 8). Must read 21 — not 0 (dead
+    # fallback) and not 42 (roll-up counted on top of the children).
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=0, actual=21)
+    f1  = _epic(3, "Feature", parent_id=2, planned=13)
+    f2  = _epic(4, "Feature", parent_id=2, planned=8)
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, f1, f2]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_weight"] == 21
+    assert r["blocked_weight_downstream"] == 21
+    assert r["blocked_weight_subtree"] == 21
+
+
+def test_set_weight_overrides_descendants():
+    # A set weight speaks for the whole subtree: capability 5 with
+    # features 13 + 8 reports 5, not 26 and not 21.
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=5)
+    f1  = _epic(3, "Feature", parent_id=2, planned=13)
+    f2  = _epic(4, "Feature", parent_id=2, planned=8)
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, f1, f2]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_weight"] == 5
+    assert r["blocked_weight_downstream"] == 5
+    assert r["blocked_weight_subtree"] == 5
+
+
+def test_open_work_behind_closed_intermediate_counts_downstream():
+    # Open blocked capability -> CLOSED feature -> OPEN sub-feature: the
+    # closed intermediate's own weight is delivered (contributes 0), but
+    # the open work behind it is still at risk — downstream must agree
+    # with its own id set (the open grandchild is in it) instead of going
+    # blind at the closed node.
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=0)
+    f_c = _epic(3, "Feature", parent_id=2, planned=13, state="Closed")
+    f_o = _epic(4, "Feature", parent_id=3, planned=5, bv=7)
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, f_c, f_o]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_weight_downstream"] == 5          # open grandchild only
+    assert r["blocked_business_value_downstream"] == 7  # same id set, agrees
+    assert r["blocked_weight"] == 13                    # cap sized via f_c
+    assert r["blocked_weight_subtree"] == 13
+
+
+def test_unset_branch_with_zero_children_falls_back_to_actual():
+    # Weight sits on issues attached above the leaves: the children sum to
+    # 0, so direct/subtree fall back to the branch's actual roll-up.
+    # Downstream deliberately does NOT — a non-leaf roll-up can't exclude
+    # already-delivered descendants, and delivered value must never read
+    # as at-risk (accepting an undercount in this data shape instead).
+    pe  = _epic(1, "Epic")
+    cap = _epic(2, "Capability", parent_id=1, planned=0, actual=21)
+    f1  = _epic(3, "Feature", parent_id=2, planned=0, actual=0)
+    blocking = {"relationships": [{
+        "blocked_epic": _ref(cap), "blocked_by": [],
+        "at_risk_portfolio_epics": [_ref(pe)],
+    }]}
+    body = build_portfolio_view(_by_id([pe, cap, f1]), blocking)
+    (entry,) = [e for e in body["portfolio_epics"] if e["epic"]["id"] == 1]
+    r = entry["rollup"]
+    assert r["blocked_weight"] == 21
+    assert r["blocked_weight_subtree"] == 21
+    assert r["blocked_weight_downstream"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Computation edge cases (pure function)
+# ---------------------------------------------------------------------------
 
 
 def test_blocked_item_threatening_two_portfolio_epics_dedupes_totals():
