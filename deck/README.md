@@ -121,9 +121,10 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
 Beyond the standing sections (overview, architecture, tech stack, metrics, full issues
 table, capability areas, appendix), the deck opens with a **Latest Work** section — the
 issues merged into `develop` since the start of the current work week, grouped by type
-(features / enhancements / bugs / infrastructure), plus a spotlight slide for any flagship
-new capability. It closes with a **"Status Update Complete"** slide. The cover and closing
-slides are stamped with the status date.
+(features / enhancements / bugs / infrastructure), followed by spotlight detail slides for
+the standout items — the flagship new capability plus the significant enhancement arcs
+(`_build_bundle_slide` / `_build_enhancement_spotlights`). It closes with a **"Status Update
+Complete"** slide. The cover and closing slides are stamped with the status date.
 
 Dates are all stated in **Pacific** (the machine runs UTC). Two `build_deck.py` flags tune
 them; both have sensible defaults so a plain `make deck` needs neither:
