@@ -22,9 +22,14 @@ Rollup semantics (mirrors how the WSJF board treats at-risk value):
   descendants only; delivered value can't be held hostage), and **subtree**
   (``*_subtree`` — plus all descendants, closed included; sizing, not risk).
   Overlapping blocked subtrees sum over the union of nodes.
-- ``blocked_weight*`` prefers ``planned_weight`` and falls back to
-  ``actual_weight``; missing values contribute 0. ``business_value`` of
-  ``null`` likewise contributes 0.
+- ``blocked_weight*`` uses the recursive effective weight (#179): an
+  epic's own ``planned_weight`` when set — zero counts as unset, since
+  real snapshots never emit null — else the sum of its children's
+  effective weights, bottoming out at ``actual_weight`` (the issue-weight
+  roll-up) on leaves. A set weight is authoritative for its whole
+  subtree, and each tier sums at the top-most blocked nodes, so a branch
+  can never double-count. ``business_value`` of ``null`` contributes 0
+  (BV stays a flat per-node sum).
 """
 
 import json
@@ -53,12 +58,63 @@ def _is_open(epic):
     return (epic.get("state") or "").lower() == "opened"
 
 
-def _blocked_value(epic):
-    """Weight a blocked item contributes: planned, else actual, else 0."""
-    w = epic.get("planned_weight")
-    if w is None:
-        w = epic.get("actual_weight")
-    return w or 0
+def _effective_weight(eid, lookup, children_by_parent, memo, open_only=False):
+    """Recursive weight of an epic (#179).
+
+    An epic's weight is its own ``planned_weight`` when set — zero means
+    unset (real snapshots default unset weights to 0, never null) — and a
+    set weight is authoritative for the ENTIRE subtree: descendants are
+    not consulted, so no branch can ever be counted twice. An unset weight
+    decomposes into the sum of the child epics' effective weights,
+    bottoming out at ``actual_weight`` (the issue-weight roll-up) on
+    leaves — and on branches whose children all report 0, where the
+    roll-up is the only signal left (issue weights attached above the
+    leaves).
+
+    ``open_only`` (the downstream tier): a closed epic's OWN weight
+    contributes 0 but its children are still consulted — open work behind
+    a closed intermediate stays at risk, matching the downstream id set.
+    A non-leaf never falls back to ``actual_weight`` here — that roll-up
+    cannot exclude already-delivered descendants, and delivered value
+    must not read as at-risk.
+    """
+    if eid in memo:
+        return memo[eid]
+    memo[eid] = 0                     # cycle guard: revisits contribute 0
+    epic = lookup[eid]
+    if open_only and not _is_open(epic):
+        w = sum(_effective_weight(c, lookup, children_by_parent, memo,
+                                  open_only)
+                for c in children_by_parent.get(eid, []) if c in lookup)
+        memo[eid] = w
+        return w
+    w = epic.get("planned_weight") or 0
+    if w <= 0:
+        kids = [c for c in children_by_parent.get(eid, []) if c in lookup]
+        w = sum(_effective_weight(c, lookup, children_by_parent, memo,
+                                  open_only) for c in kids)
+        if w <= 0 and (not kids or not open_only):
+            w = epic.get("actual_weight") or 0
+    memo[eid] = w
+    return w
+
+
+def _top_most(ids, lookup):
+    """Members of ids with no proper ancestor also in ids (cycle-guarded).
+
+    Effective weights are summed at these roots only, so each threatened
+    branch counts exactly once, at its highest blocked point (#179).
+    """
+    out = []
+    for eid in ids:
+        seen = {eid}
+        cur = lookup[eid].get("parent_id")
+        while cur is not None and cur not in seen and cur not in ids:
+            seen.add(cur)
+            cur = lookup.get(cur, {}).get("parent_id")
+        if cur is None or cur in seen:
+            out.append(eid)
+    return out
 
 
 def load_snapshot(data_dir: Path):
@@ -119,7 +175,7 @@ def _descendants(lookup, children_by_parent, root_id):
     return out
 
 
-def _tier_sums(lookup, children_by_parent, node_ids):
+def _tier_sums(lookup, children_by_parent, node_ids, eff_memo, open_memo):
     """Three-tier BV/weight sums over a set of blocked items (#178).
 
     - direct:     the blocked items themselves
@@ -128,8 +184,12 @@ def _tier_sums(lookup, children_by_parent, node_ids):
     - subtree:    blocked items plus descendants regardless of state —
                   sizing/exposure, not risk
 
-    Overlapping subtrees (a blocked item under another blocked item) are
-    handled by summing over the UNION of nodes, never double-counting.
+    BV sums stay flat per node (BV does not roll up). Weight uses the
+    recursive effective weight (#179), summed at the TOP-MOST blocked
+    nodes of each tier's id set — a set weight speaks for its whole
+    subtree, so the direct and subtree weight tiers coincide by
+    construction, and overlapping blocked subtrees (a blocked item under
+    another blocked item) can never double-count.
     """
     down_ids, sub_ids = set(), set()
     for nid in node_ids:
@@ -142,16 +202,19 @@ def _tier_sums(lookup, children_by_parent, node_ids):
     def _bv(ids):
         return sum(lookup[i].get("business_value") or 0 for i in ids)
 
-    def _w(ids):
-        return sum(_blocked_value(lookup[i]) for i in ids)
+    def _w(ids, memo, open_only=False):
+        return sum(
+            _effective_weight(t, lookup, children_by_parent, memo, open_only)
+            for t in _top_most(ids, lookup))
 
     return {
         "blocked_business_value":            _bv(node_ids),
         "blocked_business_value_downstream": _bv(down_ids),
         "blocked_business_value_subtree":    _bv(sub_ids),
-        "blocked_weight":                    _w(node_ids),
-        "blocked_weight_downstream":         _w(down_ids),
-        "blocked_weight_subtree":            _w(sub_ids),
+        "blocked_weight":                    _w(node_ids, eff_memo),
+        "blocked_weight_downstream":         _w(down_ids, open_memo,
+                                                open_only=True),
+        "blocked_weight_subtree":            _w(sub_ids, eff_memo),
     }
 
 
@@ -228,6 +291,9 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
             children_by_parent.setdefault(pid, []).append(e["id"])
     blocked_by_pid, all_blocked_ids = _blocked_by_portfolio(
         chain_lookup, blocking)
+    # Effective-weight memos (#179) — global per snapshot, shared across
+    # every portfolio epic's rollup and the grand totals.
+    eff_memo, open_memo = {}, {}
 
     portfolio_epics = []
     for epic in epics_by_id.values():
@@ -241,7 +307,8 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
             "behind_schedule": _behind_schedule(epic),
         }
         rollup = {"blocked_count": len(blocked_ids)}
-        rollup.update(_tier_sums(chain_lookup, children_by_parent, blocked_ids))
+        rollup.update(_tier_sums(chain_lookup, children_by_parent, blocked_ids,
+                                 eff_memo, open_memo))
         portfolio_epics.append({
             "epic": _slim(epic),
             "flags": flags,
@@ -277,7 +344,8 @@ def build_portfolio_view(epics_by_id, blocking, raw_by_id=None):
         "blocked_items": len(all_blocked_ids),
         "untyped_in_chains": untyped_in_chains,
     }
-    totals.update(_tier_sums(chain_lookup, children_by_parent, all_blocked_ids))
+    totals.update(_tier_sums(chain_lookup, children_by_parent, all_blocked_ids,
+                             eff_memo, open_memo))
 
     return {
         "totals": totals,
