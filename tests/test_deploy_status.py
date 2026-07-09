@@ -95,8 +95,32 @@ def test_status_shape_all_targets(client, monkeypatch):
         assert "state" in target and "url" in target
 
 
-def test_s3_is_stubbed_not_deployed(client, monkeypatch):
+def test_s3_status_from_deploy_module(client, monkeypatch):
+    # #216 replaced the S3 stub with real status: the endpoint surfaces whatever
+    # server.deploy_s3.s3_deploy_status reports (bucket/distribution presence).
+    import server.deploy_s3 as deploy_s3
     _install_cf(monkeypatch, {})
+    monkeypatch.setattr(
+        deploy_s3, "s3_deploy_status",
+        lambda *a, **k: {"state": "deployed", "url": "https://cdn.example.com",
+                         "object_count": 42, "last_sync": "2026-07-09T00:00:00Z"},
+    )
+    body = client.get("/api/deploy/status").json()
+    assert body["s3"]["state"] == "deployed"
+    assert body["s3"]["url"] == "https://cdn.example.com"
+    assert body["s3"]["object_count"] == 42
+
+
+def test_s3_status_resilient_when_module_raises(client, monkeypatch):
+    # Any failure (no config/credentials, boto3 absent) must read as not_deployed
+    # so the Deploy Options section still renders.
+    import server.deploy_s3 as deploy_s3
+    _install_cf(monkeypatch, {})
+
+    def _boom(*a, **k):
+        raise RuntimeError("no credentials")
+
+    monkeypatch.setattr(deploy_s3, "s3_deploy_status", _boom)
     body = client.get("/api/deploy/status").json()
     assert body["s3"] == {"state": "not_deployed", "url": None}
 
@@ -207,3 +231,29 @@ def test_launch_unknown_target_404(deploy_client):
 def test_launch_unknown_action_400(deploy_client):
     client, _ = deploy_client
     assert client.post("/api/deploy/ecs/frobnicate").status_code == 400
+
+
+def test_launch_s3_delegates_to_real_cli(monkeypatch):
+    # S3 execution is real (#216): the generic deploy route must delegate to the
+    # whitelisted --deploy-s3 CLI, mapping the UI's "deploy" action to "publish"
+    # (and "destroy" straight through). Capture the argv instead of spawning.
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        captured.update(kw)
+        return {"id": "s3", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/s3/deploy")
+    assert r.status_code == 201
+    assert captured["kind"] == "deploy:s3"
+    assert captured["argv"][-2:] == ["--deploy-s3", "publish"]
+    assert captured["params"] == {"target": "s3", "action": "deploy"}
+
+    r = client.post("/api/deploy/s3/destroy")
+    assert r.status_code == 201
+    assert captured["argv"][-2:] == ["--deploy-s3", "destroy"]
