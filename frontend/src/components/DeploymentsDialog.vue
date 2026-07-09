@@ -35,9 +35,6 @@
                   class="dep-url"
                   :title="statusFor(t.key).url"
                 >{{ shortUrl(statusFor(t.key).url) }} ↗</a>
-                <span v-if="inFlight(t.key) && lastLogLine(t.key)" class="dep-logline">
-                  {{ lastLogLine(t.key) }}
-                </span>
               </div>
             </div>
 
@@ -82,7 +79,8 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useDeployStatus } from '../composables/useDeployStatus.js'
-import { useDurableJobs } from '../composables/useDurableJobs.js'
+import { useJobs } from '../composables/useJobs.js'
+import { useMainView } from '../composables/useMainView.js'
 import DeployPreflightDialog from './DeployPreflightDialog.vue'
 
 const emit = defineEmits(['close'])
@@ -93,12 +91,15 @@ const DEPLOY_TARGETS = [
   { key: 'eks', label: 'EKS', desc: 'Kubernetes cluster' },
 ]
 
-// Live status polls only while this dialog is mounted; deploy/destroy runs use
-// the durable job engine so they survive a refresh and reattach on reload.
+// Live status polls only while this dialog is mounted. Deploy/destroy runs go
+// through the shared job runner (useJobs), so launching one drops the user onto
+// the streaming job card — the same UX as a report run — and it survives a
+// refresh (HomeView reattaches running jobs on load).
 const _active = ref(true)
 const { status: deployStatus, loading: deployLoading, refresh: refreshDeploy } =
   useDeployStatus(_active)
-const { runningJobs, launchDeployJob, reattach: reattachJobs, linesFor } = useDurableJobs()
+const { launchDeploy, runningDeployJob } = useJobs()
+const { showMain } = useMainView()
 
 function statusFor(target) {
   return deployStatus.value?.[target] || { state: 'unknown', url: null }
@@ -134,9 +135,9 @@ function statusClass(target) {
   return 'dep-status--off'
 }
 
-// A deploy/destroy job for this target that hasn't finished yet.
+// A running deploy/destroy job for this target, if any (from the shared runner).
 function deployJobFor(target) {
-  return runningJobs.value.find(j => j.kind === 'deploy' && j.params?.target === target)
+  return runningDeployJob(target)
 }
 function inFlight(target) {
   const s = statusFor(target).state
@@ -146,12 +147,6 @@ function inFlightLabel(target) {
   const job = deployJobFor(target)
   if (job) return job.params?.action === 'destroy' ? 'Destroying…' : 'Deploying…'
   return statusFor(target).state === 'destroying' ? 'Destroying…' : 'Deploying…'
-}
-function lastLogLine(target) {
-  const job = deployJobFor(target)
-  if (!job) return ''
-  const lines = linesFor(job.id).filter(l => l.trim())
-  return lines.length ? lines[lines.length - 1] : ''
 }
 
 function shortUrl(url) {
@@ -164,16 +159,15 @@ const preflight = ref(null)   // { target, action } | null
 function requestDeploy(target, action) {
   preflight.value = { target, action }
 }
-async function confirmDeploy() {
+function confirmDeploy() {
   const { target, action } = preflight.value
-  try {
-    await launchDeployJob(target, action)
-  } catch (e) {
-    // The job list surfaces launch failures; nothing intrusive here.
-    console.error(`deploy ${action} ${target} failed to launch:`, e)
-  }
+  // Launch through the shared runner so a live streaming job card appears, then
+  // drop the user onto the jobs view to watch it (success or failure).
+  launchDeploy(target, action)
   refreshDeploy()
   preflight.value = null
+  showMain('jobs')
+  emit('close')
 }
 function cancelDeploy() {
   preflight.value = null
@@ -187,8 +181,6 @@ function onKeydown(e) {
 }
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
-  // Re-adopt any deploy/destroy job already running before the dialog opened.
-  reattachJobs()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
@@ -291,15 +283,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .dep-url:hover { text-decoration: underline; }
-.dep-logline {
-  font-size: 0.72rem;
-  color: var(--text-3);
-  font-family: monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .dep-action { flex-shrink: 0; }
 .dep-btn {
   padding: 5px 14px;
