@@ -134,17 +134,26 @@ class JobManager:
     # -- launch -------------------------------------------------------------
 
     def launch(self, argv, *, kind: str, label: str = None,
-               params: dict = None, cwd=None, env=None) -> dict:
+               params: dict = None, cwd=None, env=None, log_header=None) -> dict:
         """Start *argv* as a durable job and return its manifest.
 
         The process runs in its own session (``start_new_session=True``) so the
         whole tree can be signalled as a group on cancel. stdout and stderr are
         merged into ``logs/jobs/<id>.log``. A daemon reaper thread waits on the
         process and records the terminal state.
+
+        *log_header* is an optional list of lines written to the log before the
+        subprocess starts — used by the report/tool runner to echo the
+        equivalent CLI command as the first output lines (issue #140), so the
+        run record carries the exact command that reproduces it.
         """
         job_id = self._new_id()
         argv = [str(a) for a in argv]
         log_fh = self._log_path(job_id).open("w", encoding="utf-8", buffering=1)
+        if log_header:
+            for line in log_header:
+                log_fh.write(f"{line}\n")
+            log_fh.flush()
 
         manifest = {
             "id": job_id,

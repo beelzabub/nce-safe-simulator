@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import re
@@ -7,13 +6,13 @@ import shutil
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import markdown as _md
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,7 +31,6 @@ from server.auth_gate import (
     create_session,
     destroy_session,
     gate_check,
-    request_authenticated,
     session_valid,
     verify_credentials,
 )
@@ -41,7 +39,6 @@ from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
 from server.jobs import manager as job_manager
 from server.version import app_version
 from server.retention import prune_temp_files
-from server.runner import cancel_thread, install_writer, run_job
 
 app = FastAPI(title="NCE Safe Simulator")
 
@@ -56,7 +53,8 @@ app.add_middleware(
 # Authentication gate (epic #135, issue #157). No-op while auth.method is
 # "none"; with "basic" every HTTP request outside the login page's own
 # surface must carry the session cookie or an Authorization: Basic header.
-# The jobs WebSocket enforces the same check before accepting.
+# Report/tool runs are durable jobs over plain HTTP (#219), so this one gate
+# covers launching, tailing, and cancelling them.
 @app.middleware("http")
 async def auth_gate_middleware(request: Request, call_next):
     gl = getattr(request.app.state, "gl", None)
@@ -94,12 +92,6 @@ _report_data_lock = threading.Lock()
 # server path. File extensions are restricted to the formats the importer reads.
 _UPLOADS_DIR = Path("uploads")
 _ALLOWED_UPLOAD_EXT = {".csv", ".json", ".zip"}
-
-# Set of currently-running job keys (used for conflict checking).
-_running_jobs: set = set()
-# Separate timestamps dict for the /api/running status endpoint.
-_running_started: dict = {}
-_running_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -789,12 +781,28 @@ def clear_runs():
 
 @app.get("/api/running")
 def list_running():
-    now = time.time()
-    with _running_lock:
-        return [
-            {"key": k, "elapsed_seconds": round(now - _running_started.get(k, now), 1)}
-            for k in _running_jobs
-        ]
+    """Currently-running work, derived from the durable job engine (#219).
+
+    Report/tool runs are subprocess jobs whose live state lives on disk, so the
+    Server-status tab reads the running manifests directly instead of an
+    in-memory set that a disconnect could desync. ``key`` is the job label (the
+    tool/report key); elapsed is measured from the manifest's start time.
+    """
+    now = datetime.now(timezone.utc)
+    running = []
+    for m in job_manager.list_jobs():
+        if m.get("state") != "running":
+            continue
+        started = m.get("started")
+        elapsed = 0.0
+        if started:
+            try:
+                elapsed = (now - datetime.fromisoformat(started)).total_seconds()
+            except ValueError:
+                elapsed = 0.0
+        running.append({"key": m.get("label") or m.get("kind"),
+                        "elapsed_seconds": round(max(0.0, elapsed), 1)})
+    return running
 
 
 # ---------------------------------------------------------------------------
@@ -809,10 +817,16 @@ def list_running():
 
 @app.post("/api/jobs", status_code=201)
 async def launch_durable_job(request: Request):
-    """Launch a durable background job. Body is the same shape the /ws/run
-    endpoint accepts ({"tool": key, "params": {...}} or {"report": key,
-    "formats": [...], "reuse_data": "last"}); the server maps it to a
-    whitelisted argv. Returns the job manifest (with its id)."""
+    """Launch a durable background job. Body is the report/tool run shape
+    ({"tool": key, "params": {...}}, {"report": key, ...}, or {"reports":
+    [...], ...}); the server maps it to a whitelisted argv. Returns the job
+    manifest (with its id).
+
+    A write-tool request that conflicts with an already-running job is rejected
+    with 409 and the blocking job list (the same guard the retired /ws/run path
+    enforced) — reports are read-only and never conflict. The equivalent CLI
+    command is echoed as the first log line(s) so the run record reproduces
+    itself (issue #140)."""
     gl = getattr(request.app.state, "gl", None)
     if gl is None:
         raise HTTPException(status_code=503, detail="GitLab client not initialised")
@@ -828,8 +842,18 @@ async def launch_durable_job(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Parallelism guard: a running write tool that shares a group with this one
+    # blocks the launch. Running keys are the labels of live durable jobs.
+    running_keys = [m.get("label") for m in job_manager.list_jobs()
+                    if m.get("state") == "running"]
+    blocking = check_conflict(running_keys, label)
+    if blocking:
+        raise HTTPException(status_code=409, detail={"blocking": blocking})
+
+    header = [f"$ {line}" for line in build_cli_command(data).splitlines()]
     return job_manager.launch(
-        argv, kind=kind, label=label, params=data.get("params") or {}
+        argv, kind=kind, label=label, params=data.get("params") or {},
+        log_header=header or None,
     )
 
 
@@ -1070,156 +1094,14 @@ def fetch_report_data(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# WebSocket job runner
+# Report/tool run helpers
 # ---------------------------------------------------------------------------
-
-@app.websocket("/ws/run")
-async def ws_run(websocket: WebSocket):
-    """Stream a tool or report job over WebSocket.
-
-    Client sends:  {"tool": "<key>"}  or  {"report": "<key>"}
-                   optional: {"params": {...}}  for tools
-                   optional: {"formats": ["markdown"]}  for reports
-
-    Server sends:
-      {"type": "log",      "text": "..."}   — captured stdout line
-      {"type": "done"}                       — job completed normally
-      {"type": "error",    "message": "..."}  — job failed or invalid request
-      {"type": "conflict", "blocking": [...]} — job conflicts with a running job
-    """
-    # Auth gate (issue #157): same check as the HTTP middleware, before accept.
-    gl_state = getattr(websocket.app.state, "gl", None)
-    if auth_method(gl_state) != "none" and not request_authenticated(
-        websocket.cookies, websocket.headers
-    ):
-        await websocket.close(code=1008)  # policy violation
-        return
-
-    await websocket.accept()
-
-    try:
-        data = await websocket.receive_json()
-    except Exception:
-        await websocket.close(1003)
-        return
-
-    job_key: Optional[str] = (
-        data.get("tool") or data.get("report")
-        or ("reports" if data.get("reports") else None)
-    )
-    if not job_key:
-        await websocket.send_json({"type": "error", "message": "Message must include 'tool', 'report', or 'reports'"})
-        await websocket.close()
-        return
-
-    gl = getattr(websocket.app.state, "gl", None)
-    if gl is None:
-        await websocket.send_json({"type": "error", "message": "GitLab client not initialised"})
-        await websocket.close()
-        return
-
-    # Conflict check and registration are atomic — happens before building the
-    # callable so a conflict response is sent even if the method lookup would fail.
-    with _running_lock:
-        blocking = check_conflict(list(_running_jobs), job_key)
-        if blocking:
-            await websocket.send_json({"type": "conflict", "blocking": blocking})
-            await websocket.close()
-            return
-        _running_jobs.add(job_key)
-        _running_started[job_key] = time.time()
-
-    gl.reload_config()
-
-    try:
-        fn = _build_job_fn(gl, data)
-    except ValueError as exc:
-        with _running_lock:
-            _running_jobs.discard(job_key)
-            _running_started.pop(job_key, None)
-        await websocket.send_json({"type": "error", "message": str(exc)})
-        await websocket.close()
-        return
-
-    log_fh = None
-    if "tool" in data:
-        now = datetime.now()
-        log_dir = Path("logs") / now.strftime("%Y%m%d")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"{now.strftime('%H%M%S')}_{job_key}.log"
-        log_fh = log_path.open("w", encoding="utf-8")
-        await websocket.send_json({"type": "log_path", "path": str(log_path)})
-
-    # Echo the equivalent CLI command as the first output line(s), so the run
-    # record — recallable from the session/status window — carries the exact
-    # command that reproduces it (issue #140).
-    cli_cmd = build_cli_command(data)
-    if cli_cmd:
-        for line in cli_cmd.splitlines():
-            prefixed = f"$ {line}"
-            await websocket.send_json({"type": "log", "text": prefixed})
-            if log_fh is not None:
-                log_fh.write(prefixed + "\n")
-        if log_fh is not None:
-            log_fh.flush()
-
-    loop = asyncio.get_running_loop()
-    q: asyncio.Queue = asyncio.Queue()
-
-    def on_output(text: str) -> None:
-        # Detect the log-path announcement printed by _tee_to_log / _run_reports.
-        if text.startswith("  log → "):
-            lp = text[len("  log → "):].strip()
-            loop.call_soon_threadsafe(q.put_nowait, ("log_path", lp))
-        loop.call_soon_threadsafe(q.put_nowait, ("log", text))
-        if log_fh is not None:
-            log_fh.write(text + "\n")
-            log_fh.flush()
-
-    def on_done() -> None:
-        loop.call_soon_threadsafe(q.put_nowait, ("done", None))
-
-    def on_error(exc: Exception) -> None:
-        loop.call_soon_threadsafe(q.put_nowait, ("error", str(exc)))
-
-    install_writer()
-    thread = run_job(fn, on_output, on_done=on_done, on_error=on_error)
-
-    async def _watch_disconnect():
-        try:
-            await websocket.receive()
-        except Exception:
-            pass
-        q.put_nowait(("cancel", None))
-
-    disconnect_task = asyncio.create_task(_watch_disconnect())
-    try:
-        while True:
-            kind, payload = await q.get()
-            if kind == "log":
-                await websocket.send_json({"type": "log", "text": payload})
-            elif kind == "log_path":
-                await websocket.send_json({"type": "log_path", "path": payload})
-            elif kind == "done":
-                await websocket.send_json({"type": "done"})
-                break
-            elif kind == "error":
-                await websocket.send_json({"type": "error", "message": payload})
-                break
-            elif kind == "cancel":
-                break
-    finally:
-        disconnect_task.cancel()
-        cancel_thread(thread)
-        if log_fh is not None:
-            try:
-                log_fh.close()
-            except Exception:
-                pass
-        with _running_lock:
-            _running_jobs.discard(job_key)
-            _running_started.pop(job_key, None)
-        await websocket.close()
+# Report and tool runs launched from the UI are durable jobs (issue #219): they
+# go through POST /api/jobs, run as subprocess.Popen children owned by the
+# server, and are tailed/reattached/cancelled over the /api/jobs endpoints. The
+# old /ws/run WebSocket — in-process threads whose output streamed over a socket
+# and which were cancelled when that socket closed — has been retired, along
+# with its disconnect-kills-job path.
 
 
 def _resolve_reuse_data(value) -> "Path | None":
@@ -1325,10 +1207,10 @@ def _job_argv(data: dict) -> tuple:
     """Map a durable-job request to ``(kind, label, argv)``.
 
     Only whitelisted kinds are accepted — the request never supplies a raw
-    command line, so this endpoint can't be used to run arbitrary programs. For
-    #214 the kinds are single tool and single report runs, invoking the same
-    ``NceGitLab.py`` entrypoint the CLI uses; deploy kinds are added by the
-    ECS/EKS/S3 children of #134.
+    command line, so this endpoint can't be used to run arbitrary programs. The
+    kinds are single tool, single report, and multi-report runs, all invoking
+    the same ``NceGitLab.py`` entrypoint the CLI uses (issue #219); deploy kinds
+    are added by the ECS/EKS/S3 children of #134.
     """
     entry = [sys.executable, "NceGitLab.py"]
 
@@ -1340,24 +1222,38 @@ def _job_argv(data: dict) -> tuple:
         argv = entry + ["-ut", key] + _tool_argv_tokens(tool, data.get("params") or {})
         return "tool", key, argv
 
+    # Single report and multi-report selections both map to the CLI's `-r`
+    # report path — the multi case as a comma-separated key list run in one pass
+    # (mixins/reports.run_reports_menu splits it), so the whole selection is one
+    # refresh-survivable subprocess sharing a single data snapshot.
+    keys = None
+    label = None
     if "report" in data:
-        key = data["report"]
-        report = next((r for r in REPORTS if r["key"] == key), None)
-        if report is None:
-            raise ValueError(f"Unknown report: {key!r}")
-        argv = entry + ["-r", key]
+        keys = [data["report"]]
+        label = data["report"]
+    elif "reports" in data:
+        keys = list(data["reports"] or [])
+        label = keys[0] if len(keys) == 1 else f"reports ({len(keys)})"
+
+    if keys is not None:
+        if not keys:
+            raise ValueError("No reports selected")
+        unknown = [k for k in keys if not any(r["key"] == k for r in REPORTS)]
+        if unknown:
+            raise ValueError(f"Unknown report: {unknown[0]!r}")
+        argv = entry + ["-r", ",".join(keys)]
         formats = data.get("formats")
         if formats:
             argv += ["--formats", *[str(f) for f in formats]]
         if data.get("reuse_data") == "last":
             argv.append("--last")
-        return "report", key, argv
+        return "report", label, argv
 
-    raise ValueError("Message must include 'tool' or 'report'")
+    raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
 
 def build_cli_command(data: dict) -> str:
-    """The equivalent `NceGitLab.py` command line for a WebSocket job request.
+    """The equivalent `NceGitLab.py` command line for a report/tool job request.
 
     This is the authoritative, server-side rendering of the command the UI is
     about to run — echoed into the run's output so every job (tools, reports,
@@ -1383,39 +1279,6 @@ def build_cli_command(data: dict) -> str:
         tail.append("--last")
     suffix = (" " + " ".join(tail)) if tail else ""
     return "\n".join(f"{CLI_ENTRY} -r {_quote(k)}{suffix}" for k in keys)
-
-
-def _build_job_fn(gl: object, data: dict):
-    """Return a zero-argument callable for the tool or report described by *data*."""
-    if "tool" in data:
-        key  = data["tool"]
-        tool = next((t for t in TOOLS if t["key"] == key), None)
-        if tool is None:
-            raise ValueError(f"Unknown tool: {key!r}")
-        method = getattr(gl, tool["method"])
-        params = data.get("params") or {}
-        return lambda: method(**params)
-
-    if "report" in data:
-        key    = data["report"]
-        report = next((r for r in REPORTS if r["key"] == key), None)
-        if report is None:
-            raise ValueError(f"Unknown report: {key!r}")
-        formats    = set(data.get("formats") or ["markdown"])
-        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
-        return lambda: gl._run_reports([report], formats=formats, reuse_data=reuse_data)
-
-    if "reports" in data:
-        keys    = data["reports"]
-        reports = [next((r for r in REPORTS if r["key"] == k), None) for k in keys]
-        missing = [k for k, r in zip(keys, reports) if r is None]
-        if missing:
-            raise ValueError(f"Unknown report key(s): {missing}")
-        formats    = set(data.get("formats") or ["markdown"])
-        reuse_data = _resolve_reuse_data(data.get("reuse_data"))
-        return lambda: gl._run_reports([r for r in reports if r], formats=formats, reuse_data=reuse_data)
-
-    raise ValueError("Message must include 'tool', 'report', or 'reports'")
 
 
 # ---------------------------------------------------------------------------

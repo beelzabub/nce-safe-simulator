@@ -1,321 +1,253 @@
 """
-WebSocket integration tests for the /ws/run endpoint.
+Integration tests for report/tool runs on the durable job engine (issue #219).
 
-REST endpoint smoke tests live in test_server_app.py (issue B).
+Report and tool runs launched from the UI are durable subprocess jobs:
+``POST /api/jobs`` starts them, ``GET /api/jobs/{id}?offset=N`` tails/reattaches
+the log, and ``POST /api/jobs/{id}/cancel`` is the only cancel path — a
+disconnect never cancels anything. The retired ``/ws/run`` WebSocket and its
+disconnect-kills-job behavior are gone; these tests exercise the surface that
+replaced it.
+
+To keep the suite hermetic, ``_job_argv`` is redirected to a harmless inline
+Python command while still running through the *real* resolver first, so the
+whitelist (unknown tool/report → 400) and the job label (which drives the
+parallelism guard) are the production ones — only the process that finally runs
+is a stand-in that never touches GitLab.
 """
-import threading
+import sys
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import app, _running_jobs
-from server.runner import install_writer
-
-
-# ---------------------------------------------------------------------------
-# Mock GitLab client
-# ---------------------------------------------------------------------------
-
-class MockGl:
-    parent_group = "test-group"
-    EPIC_TYPE_LABELS        = ["Epic", "Capability", "Feature"]
-    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
-
-    def _tool_audit_hierarchy(self):
-        print("audit line 1")
-        print("audit line 2")
-
-    def _tool_audit_labels(self):
-        print("labels ok")
-
-    def _tool_set_lifecycle_labels(
-        self, percent=20.0, reassign=False, open_only=False, dry_run=False
-    ):
-        self._lifecycle_started.set()
-        self._lifecycle_gate.wait(timeout=10)
-        print("lifecycle labels set")
-
-    def _run_reports(self, reports, reuse_data=None, formats=None):
-        for r in reports:
-            print(f"report:{r['key']}")
-
-    def reload_config(self):
-        pass
-
-    # Per-instance events wired in fixture
-    _lifecycle_started: threading.Event
-    _lifecycle_gate: threading.Event
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def reset_state():
-    """Clear running jobs and reinstall the thread-local writer before each test."""
-    _running_jobs.clear()
-    install_writer()
-    yield
-    _running_jobs.clear()
-
-
-@pytest.fixture()
-def gl():
-    mock = MockGl()
-    mock._lifecycle_started = threading.Event()
-    mock._lifecycle_gate    = threading.Event()
-    return mock
-
-
-@pytest.fixture()
-def client(gl):
-    app.state.gl = gl
-    return TestClient(app)
-
-
-@pytest.fixture()
-def client_no_gl():
-    app.state.gl = None
-    return TestClient(app)
+from server.jobs import JobManager, TERMINAL_STATES
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def collect(ws) -> list:
-    """Collect WebSocket messages until a terminal one (done/error/conflict)."""
-    msgs = []
-    while True:
-        msg = ws.receive_json()
-        msgs.append(msg)
-        if msg["type"] in ("done", "error", "conflict"):
-            break
-    return msgs
+def _py(*code_lines) -> list:
+    return [sys.executable, "-u", "-c", "\n".join(code_lines)]
 
 
-def log_text(msgs: list) -> str:
-    return "".join(m["text"] for m in msgs if m["type"] == "log")
+def _wait_for(predicate, timeout=10.0, interval=0.05):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
 
 
-# ---------------------------------------------------------------------------
-# Successful tool run
-# ---------------------------------------------------------------------------
-
-def test_tool_run_streams_log_lines(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "audit-hierarchy"})
-        msgs = collect(ws)
-
-    assert any(m["type"] == "done" for m in msgs)
-    text = log_text(msgs)
-    assert "audit line 1" in text
-    assert "audit line 2" in text
-
-
-def test_tool_run_final_message_is_done(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "audit-hierarchy"})
-        msgs = collect(ws)
-
-    assert msgs[-1]["type"] == "done"
+def _seed_running(mgr, label):
+    """Write a manifest a job manager will treat as a live job of *label*, so
+    the conflict guard sees it as running without spawning a real process."""
+    mgr._write_manifest({
+        "id": f"seed-{label}", "kind": "tool", "label": label, "params": {},
+        "argv": [], "pid": 999999, "pgid": 999999, "state": "running",
+        "started": "2000-01-01T00:00:00+00:00", "finished": None, "exit_code": None,
+    })
 
 
 # ---------------------------------------------------------------------------
-# Successful report run
+# Fixtures
 # ---------------------------------------------------------------------------
 
-def test_report_run_streams_log_lines(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"report": "portfolio"})
-        msgs = collect(ws)
+@pytest.fixture()
+def app_client(monkeypatch, tmp_path):
+    """TestClient with the module job manager pointed at a tmp dir and the argv
+    resolver redirected to a harmless command that prints and briefly lingers."""
+    import server.app as appmod
 
-    assert any(m["type"] == "done" for m in msgs)
-    assert "portfolio" in log_text(msgs)
+    test_mgr = JobManager(jobs_dir=tmp_path / "jobs")
+    monkeypatch.setattr(appmod, "job_manager", test_mgr)
 
+    real_job_argv = appmod._job_argv
 
-def test_report_run_final_message_is_done(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"report": "wsjf"})
-        msgs = collect(ws)
+    def harmless_argv(data):
+        # Real resolution: keeps production whitelisting + label, so unknown
+        # keys still 400 and the conflict guard uses the true job key.
+        kind, label, _argv = real_job_argv(data)
+        return kind, label, _py(
+            "import time",
+            "print('ran the job', flush=True)",
+            "time.sleep(0.3)",
+        )
 
-    assert msgs[-1]["type"] == "done"
+    monkeypatch.setattr(appmod, "_job_argv", harmless_argv)
 
-
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
-
-def test_unknown_tool_returns_error(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "does-not-exist"})
-        msgs = collect(ws)
-
-    assert any(m["type"] == "error" for m in msgs)
-
-
-def test_unknown_report_returns_error(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"report": "does-not-exist"})
-        msgs = collect(ws)
-
-    assert any(m["type"] == "error" for m in msgs)
+    class _Gl:
+        pass
+    appmod.app.state.gl = _Gl()
+    return TestClient(appmod.app), test_mgr
 
 
-def test_empty_message_returns_error(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({})
-        msgs = collect(ws)
-
-    assert any(m["type"] == "error" for m in msgs)
-
-
-def test_no_gl_returns_error(client_no_gl):
-    with client_no_gl.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "audit-hierarchy"})
-        msgs = collect(ws)
-
-    assert any(m["type"] == "error" for m in msgs)
+@pytest.fixture()
+def app_client_no_gl(monkeypatch, tmp_path):
+    import server.app as appmod
+    monkeypatch.setattr(appmod, "job_manager", JobManager(jobs_dir=tmp_path / "jobs"))
+    appmod.app.state.gl = None
+    return TestClient(appmod.app)
 
 
 # ---------------------------------------------------------------------------
-# Conflict detection
+# Launch + reattach (the core migration)
 # ---------------------------------------------------------------------------
 
-def test_conflicting_job_returns_conflict_response(client):
-    _running_jobs.add("set-lifecycle-labels")
+def test_tool_run_launches_and_tails(app_client):
+    client, _ = app_client
+    r = client.post("/api/jobs", json={"tool": "audit-hierarchy"})
+    assert r.status_code == 201
+    job = r.json()
+    assert job["state"] == "running"
+    assert job["kind"] == "tool" and job["label"] == "audit-hierarchy"
 
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "strip-lifecycle-labels"})
-        msgs = collect(ws)
-
-    conflict = next((m for m in msgs if m["type"] == "conflict"), None)
-    assert conflict is not None
-    assert "set-lifecycle-labels" in conflict["blocking"]
-
-
-def test_conflict_names_all_blocking_jobs(client):
-    _running_jobs.add("set-lifecycle-labels")
-    _running_jobs.add("set-piid-labels")
-
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "strip-labels"})
-        msgs = collect(ws)
-
-    conflict = next(m for m in msgs if m["type"] == "conflict")
-    assert "set-lifecycle-labels" in conflict["blocking"]
-    assert "set-piid-labels" in conflict["blocking"]
+    assert _wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] == "done")
+    tail = client.get(f"/api/jobs/{job['id']}", params={"offset": 0}).json()
+    assert "ran the job" in tail["log"]
 
 
-def test_readonly_tool_runs_alongside_writer(client):
-    _running_jobs.add("set-lifecycle-labels")
-
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "audit-hierarchy"})
-        msgs = collect(ws)
-
-    assert not any(m["type"] == "conflict" for m in msgs)
-    assert any(m["type"] == "done" for m in msgs)
+def test_report_run_launches_and_tails(app_client):
+    client, _ = app_client
+    job = client.post("/api/jobs", json={"report": "portfolio"}).json()
+    assert job["kind"] == "report" and job["label"] == "portfolio"
+    assert _wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] == "done")
+    assert "ran the job" in client.get(f"/api/jobs/{job['id']}").json()["log"]
 
 
-def test_report_runs_alongside_writer(client):
-    _running_jobs.add("set-lifecycle-labels")
-
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"report": "portfolio"})
-        msgs = collect(ws)
-
-    assert not any(m["type"] == "conflict" for m in msgs)
-    assert any(m["type"] == "done" for m in msgs)
+def test_multi_report_run_labels_by_count(app_client):
+    client, _ = app_client
+    job = client.post("/api/jobs", json={"reports": ["portfolio", "wsjf"]}).json()
+    assert job["kind"] == "report"
+    assert job["label"] == "reports (2)"
 
 
-def test_two_reports_no_conflict(client):
-    _running_jobs.add("portfolio")   # simulate another report running
+def test_launch_echoes_cli_command_as_first_log_lines(app_client):
+    """The run record carries the exact reproducing command (issue #140),
+    written to the log before the process starts."""
+    client, _ = app_client
+    job = client.post("/api/jobs", json={"report": "wsjf", "formats": ["markdown"]}).json()
+    assert _wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] in TERMINAL_STATES)
+    log = client.get(f"/api/jobs/{job['id']}").json()["log"]
+    assert "$ python3 NceGitLab.py -r wsjf --formats markdown" in log
 
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"report": "wsjf"})
-        msgs = collect(ws)
 
-    assert not any(m["type"] == "conflict" for m in msgs)
-    assert any(m["type"] == "done" for m in msgs)
+def test_reattach_from_a_fresh_client(app_client):
+    """A completely fresh reader (as after a refresh or re-login) finds a live
+    job in the list and tails its output — no socket, nothing lost."""
+    client, _ = app_client
+    job = client.post("/api/jobs", json={"tool": "audit-hierarchy"}).json()
+
+    fresh = TestClient(client.app)
+    ids = [j["id"] for j in fresh.get("/api/jobs").json()]
+    assert job["id"] in ids
+    assert _wait_for(lambda: "ran the job" in fresh.get(f"/api/jobs/{job['id']}").json()["log"])
 
 
 # ---------------------------------------------------------------------------
-# Running-jobs registry lifecycle
+# Error / validation
 # ---------------------------------------------------------------------------
 
-def test_job_key_added_while_running_and_removed_on_done(client, gl):
-    """Job key is in _running_jobs during execution and removed afterward."""
-    observed_during: list = []
-    original_fn = gl._tool_audit_hierarchy
-
-    def _spy():
-        observed_during.append("audit-hierarchy" in _running_jobs)
-        original_fn()
-
-    gl._tool_audit_hierarchy = _spy
-
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "audit-hierarchy"})
-        collect(ws)
-
-    assert any(observed_during), "job key was never in _running_jobs during execution"
-    assert "audit-hierarchy" not in _running_jobs
+def test_unknown_tool_is_400(app_client):
+    client, _ = app_client
+    assert client.post("/api/jobs", json={"tool": "does-not-exist"}).status_code == 400
 
 
-def test_job_key_removed_after_error(client):
-    with client.websocket_connect("/ws/run") as ws:
-        ws.send_json({"tool": "does-not-exist"})
-        collect(ws)
+def test_unknown_report_is_400(app_client):
+    client, _ = app_client
+    assert client.post("/api/jobs", json={"report": "does-not-exist"}).status_code == 400
 
-    assert "does-not-exist" not in _running_jobs
+
+def test_empty_request_is_400(app_client):
+    client, _ = app_client
+    assert client.post("/api/jobs", json={}).status_code == 400
+
+
+def test_no_gl_is_503(app_client_no_gl):
+    assert app_client_no_gl.post("/api/jobs", json={"tool": "audit-hierarchy"}).status_code == 503
 
 
 # ---------------------------------------------------------------------------
-# Concurrent isolation — two jobs do not interleave output
+# Parallelism guard (the /ws/run conflict check, moved onto POST /api/jobs)
 # ---------------------------------------------------------------------------
 
-def test_concurrent_readonly_jobs_do_not_interleave(client, gl):
-    """Two read-only tools run simultaneously; each WebSocket gets only its own output."""
-    results: dict = {"a": [], "b": []}
-    barrier = threading.Barrier(2)
+def test_conflicting_write_tool_is_409(app_client):
+    client, mgr = app_client
+    _seed_running(mgr, "set-lifecycle-labels")
+    r = client.post("/api/jobs", json={"tool": "strip-lifecycle-labels"})
+    assert r.status_code == 409
+    assert "set-lifecycle-labels" in r.json()["detail"]["blocking"]
 
-    original_audit = gl._tool_audit_hierarchy
-    original_labels = gl._tool_audit_labels
 
-    def _slow_audit():
-        barrier.wait()
-        print("output-from-audit-hierarchy")
+def test_conflict_names_all_blocking_jobs(app_client):
+    client, mgr = app_client
+    _seed_running(mgr, "set-lifecycle-labels")
+    _seed_running(mgr, "set-piid-labels")
+    r = client.post("/api/jobs", json={"tool": "strip-labels"})
+    assert r.status_code == 409
+    blocking = r.json()["detail"]["blocking"]
+    assert "set-lifecycle-labels" in blocking
+    assert "set-piid-labels" in blocking
 
-    def _slow_labels():
-        barrier.wait()
-        print("output-from-audit-labels")
 
-    gl._tool_audit_hierarchy = _slow_audit
-    gl._tool_audit_labels    = _slow_labels
+def test_readonly_tool_not_blocked_by_writer(app_client):
+    client, mgr = app_client
+    _seed_running(mgr, "set-lifecycle-labels")
+    assert client.post("/api/jobs", json={"tool": "audit-hierarchy"}).status_code == 201
 
-    def _run_a():
-        with client.websocket_connect("/ws/run") as ws:
-            ws.send_json({"tool": "audit-hierarchy"})
-            results["a"] = collect(ws)
 
-    def _run_b():
-        with client.websocket_connect("/ws/run") as ws:
-            ws.send_json({"tool": "audit-labels"})
-            results["b"] = collect(ws)
+def test_report_not_blocked_by_writer(app_client):
+    client, mgr = app_client
+    _seed_running(mgr, "set-lifecycle-labels")
+    assert client.post("/api/jobs", json={"report": "portfolio"}).status_code == 201
 
-    ta = threading.Thread(target=_run_a)
-    tb = threading.Thread(target=_run_b)
-    ta.start()
-    tb.start()
-    ta.join(timeout=10)
-    tb.join(timeout=10)
 
-    text_a = log_text(results["a"])
-    text_b = log_text(results["b"])
+# ---------------------------------------------------------------------------
+# /api/running now reflects the durable engine
+# ---------------------------------------------------------------------------
 
-    assert "output-from-audit-hierarchy" in text_a
-    assert "output-from-audit-labels"    in text_b
-    assert "output-from-audit-labels"    not in text_a
-    assert "output-from-audit-hierarchy" not in text_b
+def test_running_endpoint_reflects_durable_jobs(app_client):
+    client, mgr = app_client
+    _seed_running(mgr, "set-lifecycle-labels")
+    running = client.get("/api/running").json()
+    keys = [r["key"] for r in running]
+    assert "set-lifecycle-labels" in keys
+    for r in running:
+        assert "elapsed_seconds" in r
+
+
+def test_running_endpoint_excludes_finished(app_client):
+    client, _ = app_client
+    job = client.post("/api/jobs", json={"tool": "audit-hierarchy"}).json()
+    assert _wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] == "done")
+    keys = [r["key"] for r in client.get("/api/running").json()]
+    assert "audit-hierarchy" not in keys
+
+
+# ---------------------------------------------------------------------------
+# Explicit cancel is the only cancel path
+# ---------------------------------------------------------------------------
+
+def test_cancel_running_job(app_client, monkeypatch):
+    client, _ = app_client
+    import server.app as appmod
+    real = appmod._job_argv   # the fixture's harmless resolver
+
+    def slow(data):
+        kind, label, _argv = real(data)
+        return kind, label, _py("import time", "time.sleep(30)")   # something to cancel
+
+    monkeypatch.setattr(appmod, "_job_argv", slow)
+    job = client.post("/api/jobs", json={"tool": "audit-hierarchy"}).json()
+
+    assert client.post(f"/api/jobs/{job['id']}/cancel").status_code == 200
+    assert _wait_for(
+        lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] == "cancelled",
+        timeout=15,
+    )
+
+
+def test_cancel_unknown_job_is_404(app_client):
+    client, _ = app_client
+    assert client.post("/api/jobs/nope/cancel").status_code == 404
