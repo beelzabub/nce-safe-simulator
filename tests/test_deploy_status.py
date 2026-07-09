@@ -206,12 +206,14 @@ def deploy_client(monkeypatch, tmp_path):
 
 
 def test_launch_deploy_returns_durable_job(deploy_client):
+    # EKS is still the placeholder target (#218); posting it spawns a harmless
+    # inline subprocess rather than a real cloud deploy.
     client, mgr = deploy_client
-    r = client.post("/api/deploy/ecs/deploy")
+    r = client.post("/api/deploy/eks/deploy")
     assert r.status_code == 201
     manifest = r.json()
     assert manifest["kind"] == "deploy"
-    assert manifest["params"] == {"target": "ecs", "action": "deploy"}
+    assert manifest["params"] == {"target": "eks", "action": "deploy"}
     # It's a real durable job: listed and tailable.
     assert any(j["id"] == manifest["id"] for j in client.get("/api/jobs").json())
 
@@ -257,3 +259,29 @@ def test_launch_s3_delegates_to_real_cli(monkeypatch):
     r = client.post("/api/deploy/s3/destroy")
     assert r.status_code == 201
     assert captured["argv"][-2:] == ["--deploy-s3", "destroy"]
+
+
+def test_launch_ecs_delegates_to_real_cli(monkeypatch):
+    # ECS execution is real (#217): the generic deploy route delegates to the
+    # whitelisted --deploy-ecs CLI, mapping "deploy" -> "publish" and passing
+    # "destroy" straight through. Capture the argv instead of spawning.
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        captured.update(kw)
+        return {"id": "ecs", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/ecs/deploy")
+    assert r.status_code == 201
+    assert captured["kind"] == "deploy:ecs"
+    assert captured["argv"][-2:] == ["--deploy-ecs", "publish"]
+    assert captured["params"] == {"target": "ecs", "action": "deploy"}
+
+    r = client.post("/api/deploy/ecs/destroy")
+    assert r.status_code == 201
+    assert captured["argv"][-2:] == ["--deploy-ecs", "destroy"]
