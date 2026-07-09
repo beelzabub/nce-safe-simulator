@@ -467,6 +467,19 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 | Main pane | Owned by the active side-panel tab: **Tools** shows the job runner (one card per launched job with streaming log output, plus the docked CLI command bar — a single truncated line by default, with a toggle to expand long commands so they never distort the layout), **Reports** the markdown viewer, **Analysis** the Portfolio Explorer. Launching a job pulls the runner forward from any tab |
 | Right panel | Status sidebar — server polling and session history (toggle via nav bar) |
 
+#### Durable background jobs
+
+Long-running work can run as a **durable job** that outlives the browser connection. Unlike the `/ws/run` path — in-process threads whose output streams over a WebSocket and which are cancelled when that socket closes — a durable job is a `subprocess.Popen` child **owned by the server**, in its own session/process group, with its stdout+stderr tee'd to `logs/jobs/<id>.log` and a JSON manifest (`logs/jobs/<id>.json`) recording its lifecycle (`id`, `kind`, `params`, `argv`, `pid`, `state`, `started`, `finished`, `exit_code`). Because the process and its state live outside the request, a job survives page refreshes, re-logins, extra tabs, and even a server restart (the OS process keeps running; the manifest is reconciled on startup). This is the foundation for the Deploy Options epic (#134) — deploy/destroy jobs mutate real cloud resources and must never be killed by a stray refresh.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/jobs` | Launch a job. Body matches the `/ws/run` shape (`{"tool": key, "params": {…}}` or `{"report": key, "formats": […], "reuse_data": "last"}`); the server maps it to a whitelisted command line (no arbitrary commands accepted). Returns the manifest. |
+| `GET /api/jobs` | All jobs (live + recent), newest first. |
+| `GET /api/jobs/{id}?offset=N` | Manifest plus the log tail from byte `N`; the returned `offset` is where to resume on the next poll — this is how a fresh page load reattaches to a running job's live output. |
+| `POST /api/jobs/{id}/cancel` | Explicitly cancel a running job (SIGTERM → the process group, escalating to SIGKILL). Cancellation is only ever this call — never a side effect of a disconnect. |
+
+On startup the server reconciles any manifest left `running` by a previous process: a job whose pid is dead becomes `unknown` (its outcome was never recorded), while one still alive is re-adopted so its terminal state is captured when it exits. The client-side reattach machinery lives in `frontend/src/composables/useDurableJobs.js`. Report runs migrate onto this engine under #219; today they still use `/ws/run`.
+
 #### Version badge
 
 The bottom-right corner shows the running build's version (hidden at phone widths; it shifts left of the AWS button on ECS/EKS). Resolution order, computed once per server process and served via `GET /api/config`:

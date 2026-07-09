@@ -121,6 +121,49 @@ export async function saveConfig(data) {
   return r.json()
 }
 
+// ── Durable background jobs (issue #214) ────────────────────────────────────
+// These jobs run as server-owned subprocesses whose state lives on disk, so
+// they survive refreshes, re-logins, extra tabs, and server restarts. The
+// useDurableJobs composable drives these; deploy/report UIs (#215/#219) consume
+// that composable rather than calling these directly.
+
+// Launch a durable job. `payload` matches the /ws/run shape:
+// { tool, params } or { report, formats, reuse_data }. Returns the manifest.
+export async function launchJob(payload) {
+  const r = await fetch('/api/jobs', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload),
+  })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.detail || `POST /api/jobs: ${r.status}`)
+  }
+  return r.json()
+}
+
+// All durable jobs (live + recent), newest first.
+export async function listJobs() {
+  const r = await fetch('/api/jobs')
+  if (!r.ok) throw new Error(`GET /api/jobs: ${r.status}`)
+  return r.json()
+}
+
+// One job's manifest plus the log tail from `offset` bytes. The returned
+// `offset` is the position to pass on the next poll to resume streaming.
+export async function getJob(id, offset = 0) {
+  const r = await fetch(`/api/jobs/${encodeURIComponent(id)}?offset=${offset}`)
+  if (!r.ok) throw new Error(`GET /api/jobs/${id}: ${r.status}`)
+  return r.json()
+}
+
+// Explicitly cancel a running job. No-op server-side on an already-finished job.
+export async function cancelJob(id) {
+  const r = await fetch(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
+  if (!r.ok) throw new Error(`POST /api/jobs/${id}/cancel: ${r.status}`)
+  return r.json()
+}
+
 // Upload a file the browser user picked (e.g. an import CSV/JSON). The server
 // stores it and returns { path, filename, size }; the returned server path is
 // then passed to a tool's file param (input_path) for the actual run.
