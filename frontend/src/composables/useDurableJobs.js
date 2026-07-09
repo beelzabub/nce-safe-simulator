@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { launchJob, listJobs, getJob, cancelJob } from '../api.js'
+import { launchJob, listJobs, getJob, cancelJob, launchDeploy as apiLaunchDeploy } from '../api.js'
 
 // Durable background jobs (issue #214).
 //
@@ -89,6 +89,16 @@ export function useDurableJobs() {
     return entry
   }
 
+  // Launch a durable deploy/destroy job for a target (issue #215). Goes through
+  // the dedicated /api/deploy endpoint rather than /api/jobs, but is otherwise an
+  // ordinary durable job: it tails live and is re-adopted by reattach() on load.
+  async function launchDeployJob(target, action = 'deploy') {
+    const manifest = await apiLaunchDeploy(target, action)
+    const entry = _upsert(manifest)
+    _tail(entry.id)
+    return entry
+  }
+
   // Re-adopt jobs from the server on page load: populate the list and resume
   // tailing anything still running. Safe to call repeatedly (runs once).
   async function reattach() {
@@ -125,6 +135,7 @@ export function useDurableJobs() {
     jobs,
     runningJobs,
     launch,
+    launchDeployJob,
     reattach,
     cancel,
     linesFor,

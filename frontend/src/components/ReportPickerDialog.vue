@@ -16,6 +16,55 @@
         <span class="data-source-hint">Skip API fetch — re-render from the most recent data/ directory</span>
       </div>
 
+      <!-- Deploy Options (epic #134, issue #215) — live per-target status, with
+           an explicit pre-flight before any ECS/EKS launch. -->
+      <div class="section-label">
+        Deploy Options
+        <span v-if="deployLoading" class="deploy-loading">checking…</span>
+      </div>
+      <div class="deploy-list">
+        <div v-for="t in DEPLOY_TARGETS" :key="t.key" class="deploy-row">
+
+          <!-- Already deployed → show URL + Destroy instead of a checkbox -->
+          <template v-if="statusFor(t.key).state === 'deployed'">
+            <span class="deploy-name">{{ t.label }}</span>
+            <span class="deploy-badge deploy-badge--ok">deployed</span>
+            <a
+              v-if="statusFor(t.key).url"
+              :href="statusFor(t.key).url"
+              target="_blank"
+              rel="noopener"
+              class="deploy-url"
+              :title="statusFor(t.key).url"
+            >{{ shortUrl(statusFor(t.key).url) }}</a>
+            <button class="deploy-destroy" @click="requestDeploy(t.key, 'destroy')">Destroy</button>
+          </template>
+
+          <!-- Deploy/destroy in flight (running job or CloudFormation busy) -->
+          <template v-else-if="inFlight(t.key)">
+            <span class="deploy-name">{{ t.label }}</span>
+            <span class="deploy-badge deploy-badge--busy">● {{ inFlightLabel(t.key) }}</span>
+            <span class="deploy-logline">{{ lastLogLine(t.key) }}</span>
+          </template>
+
+          <!-- Selectable → checkbox + current status -->
+          <template v-else>
+            <label class="check-label deploy-check">
+              <input type="checkbox" :value="t.key" v-model="deployTargets" />
+              {{ t.label }}
+            </label>
+            <span class="deploy-badge" :class="badgeClass(t.key)">{{ stateLabel(t.key) }}</span>
+          </template>
+
+        </div>
+
+        <div v-if="selectableChecked.length" class="deploy-actions">
+          <button class="btn-deploy" @click="startDeploy">
+            Deploy {{ selectableChecked.length }} target{{ selectableChecked.length !== 1 ? 's' : '' }}…
+          </button>
+        </div>
+      </div>
+
       <!-- Format selection -->
       <div class="section-label">Output formats</div>
       <div class="format-row">
@@ -74,6 +123,15 @@
 
     </div>
   </div>
+
+  <!-- Pre-flight confirmation for a deploy/destroy (issue #215). -->
+  <DeployPreflightDialog
+    v-if="preflight"
+    :target="preflight.target"
+    :action="preflight.action"
+    @confirm="confirmDeploy"
+    @cancel="cancelDeploy"
+  />
 </template>
 
 <script setup>
@@ -81,7 +139,10 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 import { buildReportCommand } from '../composables/useCliCommand.js'
 import { useCommandPreview } from '../composables/useCommandPreview.js'
+import { useDeployStatus } from '../composables/useDeployStatus.js'
+import { useDurableJobs } from '../composables/useDurableJobs.js'
 import CliCommandStrip from './CliCommandStrip.vue'
+import DeployPreflightDialog from './DeployPreflightDialog.vue'
 
 const props = defineProps({
   reports: { type: Array, required: true },
@@ -89,6 +150,12 @@ const props = defineProps({
 const emit = defineEmits(['launch', 'close'])
 
 const ALL_FORMATS = ['markdown', 'plotly', 'interactive']
+const DEPLOY_TARGETS = [
+  { key: 's3',  label: 'S3' },
+  { key: 'ecs', label: 'ECS' },
+  { key: 'eks', label: 'EKS' },
+]
+const DEPLOY_KEYS = new Set(DEPLOY_TARGETS.map(t => t.key))
 const STORAGE_KEY = 'nce-report-picker'
 
 function _loadState() {
@@ -102,6 +169,9 @@ function _loadState() {
       ? saved.keys.filter(k => validKeys.has(k))
       : props.reports.map(r => r.key),
     useLast: saved.useLast ?? false,
+    deployTargets: Array.isArray(saved.deployTargets)
+      ? saved.deployTargets.filter(k => DEPLOY_KEYS.has(k))
+      : [],
   }
 }
 
@@ -109,14 +179,114 @@ const _init          = _loadState()
 const selectedFormats = ref(_init.formats)
 const selectedKeys    = ref(_init.keys)
 const useLast         = ref(_init.useLast)
+const deployTargets   = ref(_init.deployTargets)   // checked targets, persisted
 
-watch([selectedFormats, selectedKeys, useLast], () => {
+watch([selectedFormats, selectedKeys, useLast, deployTargets], () => {
   saveStored(STORAGE_KEY, {
     formats: selectedFormats.value,
     keys:    selectedKeys.value,
     useLast: useLast.value,
+    deployTargets: deployTargets.value,
   })
 }, { deep: true })
+
+// ── Deploy Options (issue #215) ──────────────────────────────────────────────
+// Live status polls only while this dialog is mounted; deploy/destroy runs use
+// the durable job engine so they survive a refresh and reattach on reload.
+const _active = ref(true)
+const { status: deployStatus, loading: deployLoading, refresh: refreshDeploy } =
+  useDeployStatus(_active)
+const { runningJobs, launchDeployJob, reattach: reattachJobs, linesFor } = useDurableJobs()
+
+function statusFor(target) {
+  return deployStatus.value?.[target] || { state: 'unknown', url: null }
+}
+
+const STATE_LABELS = {
+  not_deployed: 'not deployed',
+  deploying:    'deploying…',
+  destroying:   'destroying…',
+  deployed:     'deployed',
+  error:        'error',
+  unknown:      'checking…',
+}
+function stateLabel(target) {
+  return STATE_LABELS[statusFor(target).state] || statusFor(target).state
+}
+function badgeClass(target) {
+  const s = statusFor(target).state
+  if (s === 'error')  return 'deploy-badge--err'
+  if (s === 'deploying' || s === 'destroying') return 'deploy-badge--busy'
+  return 'deploy-badge--idle'
+}
+
+// A deploy/destroy job for this target that hasn't finished yet.
+function deployJobFor(target) {
+  return runningJobs.value.find(j => j.kind === 'deploy' && j.params?.target === target)
+}
+function inFlight(target) {
+  const s = statusFor(target).state
+  return !!deployJobFor(target) || s === 'deploying' || s === 'destroying'
+}
+function inFlightLabel(target) {
+  const job = deployJobFor(target)
+  if (job) return job.params?.action === 'destroy' ? 'destroying…' : 'deploying…'
+  return statusFor(target).state === 'destroying' ? 'destroying…' : 'deploying…'
+}
+function lastLogLine(target) {
+  const job = deployJobFor(target)
+  if (!job) return ''
+  const lines = linesFor(job.id).filter(l => l.trim())
+  return lines.length ? lines[lines.length - 1] : ''
+}
+
+function shortUrl(url) {
+  try { return new URL(url).host } catch { return url }
+}
+
+// Only targets shown as a checkbox (not deployed, not in flight) count as
+// selectable for the Deploy button.
+const selectableChecked = computed(() =>
+  deployTargets.value.filter(t =>
+    statusFor(t).state !== 'deployed' && !inFlight(t)))
+
+// Pre-flight queue: confirm each checked target one at a time.
+const preflight   = ref(null)   // { target, action } | null
+const _queue      = ref([])
+
+function startDeploy() {
+  _queue.value = [...selectableChecked.value]
+  _advanceQueue('deploy')
+}
+function requestDeploy(target, action) {
+  _queue.value = []
+  preflight.value = { target, action }
+}
+function _advanceQueue(action) {
+  const next = _queue.value.shift()
+  preflight.value = next ? { target: next, action } : null
+}
+
+async function confirmDeploy() {
+  const { target, action } = preflight.value
+  try {
+    await launchDeployJob(target, action)
+  } catch (e) {
+    // Surface nothing intrusive here — the job list shows failures; just log.
+    console.error(`deploy ${action} ${target} failed to launch:`, e)
+  }
+  // Uncheck a target we've just launched a deploy for.
+  if (action === 'deploy') {
+    deployTargets.value = deployTargets.value.filter(t => t !== target)
+  }
+  refreshDeploy()
+  if (_queue.value.length) _advanceQueue(action)
+  else preflight.value = null
+}
+function cancelDeploy() {
+  _queue.value = []
+  preflight.value = null
+}
 
 const allSelected = computed(() => selectedKeys.value.length === props.reports.length)
 const canLaunch   = computed(() => selectedKeys.value.length > 0 && selectedFormats.value.length > 0)
@@ -143,9 +313,17 @@ function toggleAll() {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Escape') emit('close')
+  if (e.key === 'Escape') {
+    if (preflight.value) cancelDeploy()   // Esc backs out of pre-flight first
+    else emit('close')
+  }
 }
-onMounted(() => document.addEventListener('keydown', onKeydown))
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  // Re-adopt any deploy/destroy job that was already running before the dialog
+  // (or the whole page) was (re)opened, so its progress shows here immediately.
+  reattachJobs()
+})
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
 })
@@ -238,6 +416,92 @@ function launch() {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+
+/* ── Deploy Options (issue #215) ── */
+.deploy-loading {
+  font-size: 0.7rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+.deploy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.15rem 1rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.deploy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 1.6rem;
+}
+.deploy-check { flex-shrink: 0; }
+.deploy-name {
+  font-size: 0.85rem;
+  color: var(--text-1);
+  min-width: 3rem;
+}
+.deploy-badge {
+  font-size: 0.7rem;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.deploy-badge--idle { color: var(--text-3); }
+.deploy-badge--ok   { background: var(--badge-run-bg, rgba(40,160,90,0.15)); color: #3fa66a; }
+.deploy-badge--busy { background: var(--badge-run-bg); color: var(--badge-run-text); }
+.deploy-badge--err  { color: #f87171; }
+.deploy-url {
+  font-size: 0.76rem;
+  color: var(--action);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deploy-url:hover { text-decoration: underline; }
+.deploy-logline {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.deploy-destroy {
+  margin-left: auto;
+  padding: 2px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: #d16b57;
+  cursor: pointer;
+  font-size: 0.76rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+.deploy-destroy:hover { border-color: #d16b57; color: #b1442f; }
+.deploy-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.15rem;
+}
+.btn-deploy {
+  padding: 4px 12px;
+  background: var(--action);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+.btn-deploy:hover { background: var(--action-hover); }
 
 /* ── Report list ── */
 .report-list {
