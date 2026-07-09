@@ -127,8 +127,11 @@ export async function saveConfig(data) {
 // useDurableJobs composable drives these; deploy/report UIs (#215/#219) consume
 // that composable rather than calling these directly.
 
-// Launch a durable job. `payload` matches the /ws/run shape:
-// { tool, params } or { report, formats, reuse_data }. Returns the manifest.
+// Launch a durable job. `payload` is the report/tool run shape:
+// { tool, params }, { report, formats, reuse_data }, or { reports, ... }.
+// Returns the manifest. A 409 (a conflicting write tool is already running)
+// throws an Error carrying `.conflict` and the `.blocking` job list so callers
+// can render the parallelism guard instead of a generic failure.
 export async function launchJob(payload) {
   const r = await fetch('/api/jobs', {
     method:  'POST',
@@ -137,7 +140,14 @@ export async function launchJob(payload) {
   })
   if (!r.ok) {
     const body = await r.json().catch(() => ({}))
-    throw new Error(body.detail || `POST /api/jobs: ${r.status}`)
+    const detail = body.detail
+    if (r.status === 409) {
+      const err = new Error('conflict')
+      err.conflict = true
+      err.blocking = (detail && detail.blocking) || []
+      throw err
+    }
+    throw new Error(typeof detail === 'string' ? detail : `POST /api/jobs: ${r.status}`)
   }
   return r.json()
 }
