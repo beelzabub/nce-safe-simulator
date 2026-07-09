@@ -6986,6 +6986,20 @@ class ReportsMixin:
             if report_key == "all":
                 self._run_reports(REPORTS, reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
                 return
+            # A comma-separated list runs exactly those reports in one pass. The
+            # durable job engine uses this form when the web UI launches a
+            # multi-report selection (issue #219), so the whole selection is a
+            # single refresh-survivable subprocess sharing one data snapshot.
+            if "," in report_key:
+                keys = [k.strip() for k in report_key.split(",") if k.strip()]
+                selected = [next((r for r in REPORTS if r["key"] == k), None) for k in keys]
+                missing = [k for k, r in zip(keys, selected) if r is None]
+                if missing:
+                    print(f"Unknown report(s): {', '.join(missing)}. Available: all, "
+                          + ", ".join(r['key'] for r in REPORTS))
+                    sys.exit(1)
+                self._run_reports(selected, reuse_data=reuse_data, formats=formats, full_fetch=full_fetch)
+                return
             report = next((r for r in REPORTS if r["key"] == report_key), None)
             if report is None:
                 print(f"Unknown report '{report_key}'. Available: all, " + ", ".join(r['key'] for r in REPORTS))
