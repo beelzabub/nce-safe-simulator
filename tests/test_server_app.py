@@ -1,11 +1,10 @@
 """
 REST API smoke tests for server/app.py.
 
-Full WebSocket and job-streaming tests live in test_server_api.py (issue C).
-These tests cover the three REST endpoints and the runner scaffolding.
+Durable report/tool run integration tests live in test_server_api.py; the
+durable job engine itself is covered in test_jobs.py. These tests cover the
+REST endpoints and the request→argv resolution helpers.
 """
-import threading
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,7 +12,6 @@ from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.app import app
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP
-from server.runner import ThreadLocalWriter, install_writer, run_job
 
 
 @pytest.fixture()
@@ -155,82 +153,6 @@ def test_reports_all_readonly(client):
 def test_fetch_data_503_when_no_gl(client):
     resp = client.post("/api/reports/fetch-data")
     assert resp.status_code == 503
-
-
-# ---------------------------------------------------------------------------
-# ThreadLocalWriter
-# ---------------------------------------------------------------------------
-
-def test_thread_local_writer_routes_to_callback():
-    captured = []
-    writer = ThreadLocalWriter()
-
-    def _run():
-        import threading as _t
-        _t.local  # access just to confirm threading available
-        # Simulate what run_job does
-        from server import runner as r
-        r._thread_local.write_callback = captured.append
-        writer.write("hello\n")
-        r._thread_local.write_callback = None
-
-    t = threading.Thread(target=_run)
-    t.start()
-    t.join()
-    assert captured == ["hello"]
-
-
-def test_thread_local_writer_main_thread_falls_back(capsys):
-    import sys
-    writer = ThreadLocalWriter(sys.__stdout__)
-    # In the main thread there is no callback — should not raise
-    writer.write("fallback")
-    # No assertion on capsys here since __stdout__ bypasses capture;
-    # the important thing is no exception is raised.
-
-
-# ---------------------------------------------------------------------------
-# run_job
-# ---------------------------------------------------------------------------
-
-def test_run_job_captures_output():
-    captured = []
-
-    def _job():
-        print("line one")
-        print("line two")
-
-    install_writer()
-    t = run_job(_job, captured.append)
-    t.join(timeout=5)
-    assert not t.is_alive()
-    combined = "".join(captured)
-    assert "line one" in combined
-    assert "line two" in combined
-
-
-def test_run_job_isolates_threads():
-    results: dict[str, list] = {"a": [], "b": []}
-    barrier = threading.Barrier(2)
-
-    def _job_a():
-        barrier.wait()
-        print("from-a")
-
-    def _job_b():
-        barrier.wait()
-        print("from-b")
-
-    install_writer()
-    ta = run_job(_job_a, results["a"].append)
-    tb = run_job(_job_b, results["b"].append)
-    ta.join(timeout=5)
-    tb.join(timeout=5)
-
-    assert any("from-a" in s for s in results["a"])
-    assert any("from-b" in s for s in results["b"])
-    assert not any("from-b" in s for s in results["a"])
-    assert not any("from-a" in s for s in results["b"])
 
 
 # ---------------------------------------------------------------------------

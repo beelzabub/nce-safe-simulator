@@ -260,7 +260,7 @@ The images themselves are committed to the repo under `media/login-backgrounds/`
 - `GET /api/auth/backgrounds` — server-shuffled list: `images[0]` is the random initial background, the rest are the client's lazy-loaded rotation pool. Degrades to `{"fallback": true, "images": []}` (HTTP 200) when no images are available, so the login page always renders.
 - `GET /api/auth/backgrounds/{name}` — serves a single committed image with long-lived cache headers.
 
-With `method: "basic"` the server enforces authentication on **everything** — all other `/api/*` endpoints, `/reports`, `/logs`, `/quarto`, `/data`, and the jobs WebSocket return 401 (`WWW-Authenticate: Basic`) unless the request carries the session cookie from `POST /api/auth/login` or an `Authorization: Basic` header (`curl -u asdf:asdf ...`). The login surface itself (SPA shell and assets, login/session/logout endpoints, background imagery, curated `GET /api/config`) stays open so the front door can render. The dev credential is hardcoded and dev-only; it never appears in config.
+With `method: "basic"` the server enforces authentication on **everything** — all other `/api/*` endpoints (including the durable job surface report/tool runs use), `/reports`, `/logs`, `/quarto`, and `/data` return 401 (`WWW-Authenticate: Basic`) unless the request carries the session cookie from `POST /api/auth/login` or an `Authorization: Basic` header (`curl -u asdf:asdf ...`). The login surface itself (SPA shell and assets, login/session/logout endpoints, background imagery, curated `GET /api/config`) stays open so the front door can render. The dev credential is hardcoded and dev-only; it never appears in config.
 
 ### Label Conventions
 
@@ -428,7 +428,7 @@ Images are curated public-domain U.S. Government works (DVIDS / navy.mil / Wikim
 
 ### Web UI
 
-A Vue 3 browser interface provides an alternative to the CLI for running utility tools and viewing reports. The backend is a FastAPI server that exposes the same tools over HTTP/WebSocket.
+A Vue 3 browser interface provides an alternative to the CLI for running utility tools and viewing reports. The backend is a FastAPI server that exposes the same tools over HTTP.
 
 #### Starting the web UI
 
@@ -456,7 +456,7 @@ Navigate to `http://localhost:5173/app/`. The dev server proxies `/api` and all 
 
 Before the sign-in card becomes interactive, the standard DoD Notice and Consent banner (DTM 08-060) fronts the page and requires explicit acknowledgment **per logon attempt**: it reappears after an explicit sign-out and after any other end of access — the 12-hour session TTL lapsing or a server restart wiping the session store (#163) — while a mid-form reload before ever signing in does not re-nag. Toggle it with `auth.dod_banner_enabled` in `config.json`.
 
-Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior depends on `auth.method`: with `none` the gate is cosmetic (any non-empty credentials accepted, client-side session flag, no security); with `basic` the sign-in card round-trips to `POST /api/auth/login`, wrong credentials are rejected inline, and the server enforces authentication on every endpoint and the jobs WebSocket (see the Authentication section above). The NavBar's **Sign out** control ends the session and returns to `/login` without closing the browser; sign-out (like any end of access) clears the DoD banner acknowledgment so the next logon attempt re-presents consent. Gate logic lives in `frontend/src/composables/useAuthGate.js`, where the AAA methods will plug in. Login-page settings, including the auth method, are editable in the Config dialog's **Auth** tab.
+Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior depends on `auth.method`: with `none` the gate is cosmetic (any non-empty credentials accepted, client-side session flag, no security); with `basic` the sign-in card round-trips to `POST /api/auth/login`, wrong credentials are rejected inline, and the server enforces authentication on every endpoint (see the Authentication section above). The NavBar's **Sign out** control ends the session and returns to `/login` without closing the browser; sign-out (like any end of access) clears the DoD banner acknowledgment so the next logon attempt re-presents consent. Gate logic lives in `frontend/src/composables/useAuthGate.js`, where the AAA methods will plug in. Login-page settings, including the auth method, are editable in the Config dialog's **Auth** tab.
 
 #### Layout
 
@@ -469,16 +469,19 @@ Unauthenticated navigation anywhere in the app redirects to `/login`. Behavior d
 
 #### Durable background jobs
 
-Long-running work can run as a **durable job** that outlives the browser connection. Unlike the `/ws/run` path — in-process threads whose output streams over a WebSocket and which are cancelled when that socket closes — a durable job is a `subprocess.Popen` child **owned by the server**, in its own session/process group, with its stdout+stderr tee'd to `logs/jobs/<id>.log` and a JSON manifest (`logs/jobs/<id>.json`) recording its lifecycle (`id`, `kind`, `params`, `argv`, `pid`, `state`, `started`, `finished`, `exit_code`). Because the process and its state live outside the request, a job survives page refreshes, re-logins, extra tabs, and even a server restart (the OS process keeps running; the manifest is reconciled on startup). This is the foundation for the Deploy Options epic (#134) — deploy/destroy jobs mutate real cloud resources and must never be killed by a stray refresh.
+Long-running work runs as a **durable job** that outlives the browser connection. A durable job is a `subprocess.Popen` child **owned by the server**, in its own session/process group, with its stdout+stderr tee'd to `logs/jobs/<id>.log` and a JSON manifest (`logs/jobs/<id>.json`) recording its lifecycle (`id`, `kind`, `params`, `argv`, `pid`, `state`, `started`, `finished`, `exit_code`). Because the process and its state live outside the request, a job survives page refreshes, re-logins, extra tabs, and even a server restart (the OS process keeps running; the manifest is reconciled on startup). This is the foundation for the Deploy Options epic (#134) — deploy/destroy jobs mutate real cloud resources and must never be killed by a stray refresh.
+
+**Report and tool runs are durable jobs (#219).** Launching a report or utility tool from the UI is a `POST /api/jobs` — the run becomes a subprocess with an id, manifest, and log file, exactly like a deploy job. The old `/ws/run` WebSocket, whose in-process thread streamed over a socket and was **cancelled when that socket closed**, has been retired along with its disconnect-kills-job behavior. So you can start a report, close the laptop or refresh the page, and the run keeps going; when you come back the UI reattaches to its live log. A multi-report selection runs as one subprocess (`-r key1,key2`) sharing a single data snapshot. Cancelling is now only the explicit **Stop** button (`POST /api/jobs/{id}/cancel`) — never a side effect of a disconnect.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/jobs` | Launch a job. Body matches the `/ws/run` shape (`{"tool": key, "params": {…}}` or `{"report": key, "formats": […], "reuse_data": "last"}`); the server maps it to a whitelisted command line (no arbitrary commands accepted). Returns the manifest. |
+| `POST /api/jobs` | Launch a job. Body is the report/tool run shape (`{"tool": key, "params": {…}}`, `{"report": key, "formats": […], "reuse_data": "last"}`, or `{"reports": [key, …], …}`); the server maps it to a whitelisted command line (no arbitrary commands accepted) and echoes that command as the first log line. A write tool that conflicts with a running job is rejected with `409` and the blocking job list; reports are read-only and never conflict. Returns the manifest. |
 | `GET /api/jobs` | All jobs (live + recent), newest first. |
 | `GET /api/jobs/{id}?offset=N` | Manifest plus the log tail from byte `N`; the returned `offset` is where to resume on the next poll — this is how a fresh page load reattaches to a running job's live output. |
 | `POST /api/jobs/{id}/cancel` | Explicitly cancel a running job (SIGTERM → the process group, escalating to SIGKILL). Cancellation is only ever this call — never a side effect of a disconnect. |
+| `GET /api/running` | Currently-running jobs (key + elapsed), derived from the live manifests — feeds the Server-status tab. |
 
-On startup the server reconciles any manifest left `running` by a previous process: a job whose pid is dead becomes `unknown` (its outcome was never recorded), while one still alive is re-adopted so its terminal state is captured when it exits. The client-side reattach machinery lives in `frontend/src/composables/useDurableJobs.js`. Report runs migrate onto this engine under #219; today they still use `/ws/run`.
+On startup the server reconciles any manifest left `running` by a previous process: a job whose pid is dead becomes `unknown` (its outcome was never recorded), while one still alive is re-adopted so its terminal state is captured when it exits. On page load the UI reattaches by reconciling `GET /api/jobs` (live + recent runs, resuming the live tail of anything still running) alongside the on-disk history reconstruction from `GET /api/history` (`useJobs.loadDiskHistory`), so both in-flight and finished runs repopulate. The client-side engine primitives live in `frontend/src/composables/useDurableJobs.js`; the report/tool run UI (launch, tail, reattach, cancel, session history) lives in `frontend/src/composables/useJobs.js`.
 
 #### Version badge
 
@@ -498,7 +501,7 @@ The UI is responsive and touch-ready — usable on iPhones, iPads, and Android p
 - The docked CLI command bar is hidden — it is a hover affordance, and the server still echoes the exact command into every run's output.
 - Touch details: tap targets meet a 40–44 px floor, text fields render at ≥ 16 px so iOS Safari doesn't zoom on focus, log panes and status sections resize via touch drag (pointer events), and the viewport uses dynamic-height units so mobile URL bars don't clip the layout.
 
-**Mobile test suite** — Playwright drives the real UI on emulated device profiles (iPhone SE, iPhone 14 portrait + landscape, iPad, Pixel 7, Galaxy S9+) and asserts the flows above work by touch: no horizontal overflow, DoD banner + login usable, drawer/overlay behavior, dialog fit, tap-target sizes. All `/api` and WebSocket traffic is mocked, so no Python backend or GitLab is needed:
+**Mobile test suite** — Playwright drives the real UI on emulated device profiles (iPhone SE, iPhone 14 portrait + landscape, iPad, Pixel 7, Galaxy S9+) and asserts the flows above work by touch: no horizontal overflow, DoD banner + login usable, drawer/overlay behavior, dialog fit, tap-target sizes. All `/api` traffic is mocked, so no Python backend or GitLab is needed:
 
 ```bash
 cd frontend

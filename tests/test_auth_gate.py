@@ -1,7 +1,8 @@
 """Tests for the server-side auth gate (epic #135, issue #157).
 
 auth.method "none" must preserve pre-gate behavior; "basic" must gate every
-endpoint and the jobs WebSocket except the login page's own surface.
+endpoint — including the durable job surface that report/tool runs use (#219) —
+except the login page's own surface.
 """
 import base64
 import time
@@ -9,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 from server import auth_gate
 from server.app import app
@@ -163,25 +163,20 @@ def test_expired_session_rejected(client_basic):
 
 
 # ---------------------------------------------------------------------------
-# WebSocket gate
+# Durable job surface gate (report/tool runs, #219)
 # ---------------------------------------------------------------------------
+# An empty body 400s at request validation, so these assert only that the gate
+# lets the request reach the handler (or blocks it), never launching anything.
 
-def test_websocket_rejected_without_auth(client_basic):
-    with pytest.raises(WebSocketDisconnect):
-        with client_basic.websocket_connect("/ws/run"):
-            pass
-
-
-def test_websocket_accepts_basic_header(client_basic):
-    with client_basic.websocket_connect("/ws/run", headers=_basic()) as ws:
-        ws.send_json({})
-        # Accepted and processing: replies to the invalid payload instead of
-        # closing at the gate.
-        msg = ws.receive_json()
-        assert msg["type"] == "error"
+def test_jobs_launch_rejected_without_auth(client_basic):
+    assert client_basic.post("/api/jobs", json={}).status_code == 401
 
 
-def test_websocket_open_in_none_mode(client_none):
-    with client_none.websocket_connect("/ws/run") as ws:
-        ws.send_json({})
-        assert ws.receive_json()["type"] == "error"
+def test_jobs_launch_accepts_basic_header(client_basic):
+    # Past the gate: the handler rejects the empty body (400), not the gate (401).
+    resp = client_basic.post("/api/jobs", json={}, headers=_basic())
+    assert resp.status_code != 401
+
+
+def test_jobs_launch_open_in_none_mode(client_none):
+    assert client_none.post("/api/jobs", json={}).status_code != 401

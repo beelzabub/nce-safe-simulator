@@ -56,7 +56,7 @@ import ArchitectureDialog  from '../components/ArchitectureDialog.vue'
 import { useJobs }         from '../composables/useJobs.js'
 import { useMainView }     from '../composables/useMainView.js'
 
-const { runningJobKeys, launch, launchReports, loadDiskHistory } = useJobs()
+const { runningJobKeys, launch, launchReports, loadDiskHistory, reattach } = useJobs()
 const { mainView, contentEpoch, showMain } = useMainView()
 
 // Opening a report page or an analysis reveals the main pane on phones,
@@ -82,6 +82,10 @@ const deploymentType = ref('')
 const appVersion     = ref('')
 
 onMounted(async () => {
+  // Re-adopt any durable run still going (or recently finished) on the server,
+  // then reconstruct older finished runs from disk. Reattach first so its start
+  // times are known before disk history dedupes against them.
+  await reattach()
   loadDiskHistory()
   try {
     const r = await fetch('/api/config')

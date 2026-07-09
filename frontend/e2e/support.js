@@ -165,17 +165,31 @@ export async function mockApi(page) {
       return json({ slug: 'portfolio-health', title: 'Portfolio Health Dashboard',
                     html: '<h1>Portfolio Health Dashboard</h1><table><tr><th>VS</th><th>Status</th></tr><tr><td>VS 01</td><td>Green</td></tr></table>' })
     if (path === '/api/analysis/portfolio') return json(PORTFOLIO)
-    return json({})
-  })
 
-  // A launched job streams two log lines and finishes — enough to drive the
-  // runner tab through running → done.
-  await page.routeWebSocket('**/ws/run', (ws) => {
-    ws.onMessage(() => {
-      ws.send(JSON.stringify({ type: 'log', text: 'starting…' }))
-      ws.send(JSON.stringify({ type: 'log', text: 'all checks passed' }))
-      ws.send(JSON.stringify({ type: 'done' }))
+    // Durable job engine (#219): a launch returns a running manifest; the first
+    // log-tail poll streams two lines, the next reports it done — enough to
+    // drive the runner tab through running → done.
+    const method = route.request().method()
+    const JOB_LOG = 'starting…\nall checks passed\n'
+    const manifest = (state, extra = {}) => ({
+      id: 'job-1', label: 'audit-hierarchy', kind: 'tool', params: {},
+      state, started: '2026-07-09T00:00:00+00:00',
+      finished: state === 'running' ? null : '2026-07-09T00:00:01+00:00',
+      exit_code: state === 'done' ? 0 : null, ...extra,
     })
+    if (path === '/api/jobs' && method === 'POST') return json(manifest('running'))
+    if (path === '/api/jobs' && method === 'GET')  return json([])
+    const jobMatch = path.match(/^\/api\/jobs\/([^/]+)$/)
+    if (jobMatch && method === 'GET') {
+      const offset = Number(new URL(route.request().url()).searchParams.get('offset') || 0)
+      return offset === 0
+        ? json(manifest('running', { log: JOB_LOG, offset: JOB_LOG.length, running: true }))
+        : json(manifest('done',    { log: '', offset, running: false }))
+    }
+    if (path.match(/^\/api\/jobs\/[^/]+\/cancel$/) && method === 'POST')
+      return json(manifest('cancelled', { log: '', offset: 0 }))
+
+    return json({})
   })
 }
 
