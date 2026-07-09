@@ -344,6 +344,17 @@ def test_publish_requires_bucket():
         deploy_s3.publish({"deploy": {"s3": {}}}, log=lambda *a: None)
 
 
+def test_run_cli_publish_missing_bucket_is_clean_exit():
+    # A missing bucket is operator error, not a bug: run_cli converts the
+    # RuntimeError into a SystemExit with an actionable config hint (no traceback)
+    # so the message reads cleanly in the deploy job's log window.
+    with pytest.raises(SystemExit) as exc:
+        deploy_s3.run_cli("publish", config={"deploy": {"s3": {}}})
+    msg = str(exc.value)
+    assert "bucket is not set" in msg
+    assert "config.json" in msg and "seed-config" in msg
+
+
 # ---------------------------------------------------------------------------
 # destroy
 # ---------------------------------------------------------------------------

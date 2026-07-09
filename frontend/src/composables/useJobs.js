@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { launchJob, listJobs, getJob, cancelJob as apiCancelJob } from '../api.js'
+import { launchJob, listJobs, getJob, cancelJob as apiCancelJob, launchDeploy as apiLaunchDeploy } from '../api.js'
 import { triggerDownload } from '../download.js'
 
 // Report/tool runs on the durable job engine (issue #219).
@@ -233,6 +233,8 @@ function _adopt(manifest, { openPane = false } = {}) {
     logPath: `logs/jobs/${id}.log`,
     _raw: '',
     _durable: true,
+    kind: manifest.kind,
+    params: manifest.params || {},
   }
   _sessionHistory.value.push(hist)
 
@@ -241,6 +243,8 @@ function _adopt(manifest, { openPane = false } = {}) {
     pane.status = status
     pane.lines = hist.lines       // shared reference — one update drives both
     pane.logPath = hist.logPath
+    pane.kind = manifest.kind
+    pane.params = manifest.params || {}
     jobs.value.push(pane)
   }
   if (running) {
@@ -326,6 +330,20 @@ async function _launchDurable(payload, key) {
   _adopt(manifest, { openPane: manifest.state !== 'running' })
 }
 
+// Launch a durable deploy/destroy job through POST /api/deploy (issue #217).
+// Same UX as a report/tool run: it lands in the JobRunner as a live streaming
+// card, so the deploy log (success or failure) is visible in a job window.
+async function _launchDeploy(target, action, key) {
+  let manifest
+  try {
+    manifest = await apiLaunchDeploy(target, action)
+  } catch (err) {
+    _pushSyntheticError(key, `Error: ${err?.message || 'deploy launch failed'}`)
+    return
+  }
+  _adopt(manifest, { openPane: manifest.state !== 'running' })
+}
+
 export function useJobs() {
   const runningJobKeys = computed(() =>
     jobs.value.filter(j => j.status === 'running').map(j => j.key)
@@ -342,6 +360,21 @@ export function useJobs() {
       : { reports: reports.map(r => r.key), formats }
     if (useLast) payload.reuse_data = 'last'
     _launchDurable(payload, label)
+  }
+
+  // Launch an app-driven deploy/destroy (S3/ECS/EKS) as a live JobRunner card.
+  function launchDeploy(target, action = 'deploy') {
+    _launchDeploy(target, action, `${target}-${action}`)
+  }
+
+  // Running deploy/destroy job for a target, if any — lets the Deployments
+  // dialog reflect an in-flight job (kinds are `deploy`, `deploy:s3`, …).
+  function runningDeployJob(target) {
+    return jobs.value.find(j =>
+      j.status === 'running' &&
+      typeof j.kind === 'string' && j.kind.startsWith('deploy') &&
+      j.params?.target === target
+    )
   }
 
   function cancelJob(id) {
@@ -415,6 +448,8 @@ export function useJobs() {
     scrollToJobId: _scrollToId,
     launch,
     launchReports,
+    launchDeploy,
+    runningDeployJob,
     cancelJob,
     closeJob,
     toggleCollapse,
