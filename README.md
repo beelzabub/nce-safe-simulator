@@ -531,7 +531,7 @@ A dedicated **Deployments** dialog — opened from the **Deployments…** button
 - **Clicking Deploy or Destroy** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm (bucket, region, exposure note).
 - **Deploy and destroy run as [durable jobs](#durable-background-jobs)**, so an in-flight operation survives a page refresh: reopening the dialog re-adopts the running job and shows its progress and latest log line, and the job is never killed by a stray disconnect.
 
-Cloud execution is real for **S3** (#216) and **ECS** (#217): both delegate to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs`) that runs the real publish/destroy path as a durable subprocess. **EKS** execution lands with #218; until then its deploy/destroy is a clearly-marked placeholder job that still exercises the full pre-flight → launch → live-log → reattach flow. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through.
+Cloud execution is real for all three targets — **S3** (#216), **ECS** (#217), and **EKS** (#218): each delegates to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs` / `--deploy-eks`) that runs the real publish/destroy path as a durable subprocess. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through.
 
 The ECS deploy (#217) runs the same CDK path an operator drives by hand — `make -C cdk ecs-deploy` / `ecs-destroy` → `cdk deploy/destroy NceStack` — as a refresh-survivable job, streaming CDK output to the job log. Per **decision A3** it **reuses the existing ECR image tag** (the deploy only builds+pushes a new image when the repository is empty and a Docker daemon is present; there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`) and fails fast with a clear message when a first image is needed but Docker is unavailable — so the job log explains the failure instead of dying deep inside make/cdk. Because it drives the local CDK toolchain, the ECS deploy is launched from the **operator's** server (the box running `--serve`), not from inside the deployed container.
 
@@ -1183,6 +1183,25 @@ After `eks-full-deploy` finishes, navigate to the CloudFront URL (printed in CDK
 | `make eks-grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
 | `make grafana-setup` | Rotate the Grafana Admin API key in SSM (valid 30 days) |
 | `make eks-destroy` | Tear down all EKS resources |
+
+#### From the web UI / app (issue #218)
+
+Deploy and destroy EKS from the browser's **[Deployments](#deployments)** dialog — both run as [durable background jobs](#durable-background-jobs), so a refresh can never kill a cloud mutation.
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/deploy/eks` | Deploy (or update) the EKS stack `NceEksStack` + Helm release. Returns a job manifest. |
+| `POST /api/deploy/eks/destroy` | Tear down `NceEksStack` (the Helm release is uninstalled first). Returns a job manifest. |
+
+These delegate to the whitelisted CLI below (this is also the exact argv the durable job runs):
+
+```bash
+python NceGitLab.py --deploy-eks publish    # make eks-full-deploy (CDK + Helm, reuses the existing ECR image tag)
+python NceGitLab.py --deploy-eks status     # prints status JSON (state, url, stack_status)
+python NceGitLab.py --deploy-eks destroy    # make eks-destroy
+```
+
+`publish`/`destroy` shell to the same path as `make -C cdk eks-full-deploy` / `eks-destroy`. Per **decision A3** the deploy **reuses the existing ECR image tag** — unlike ECS, `eks-full-deploy` never builds an image (the Helm chart pulls the current tag), so publish fails fast in preflight if the repository is empty; push an image first with `make -C cdk ecr-push` (there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`, `kubectl`, `helm`). Because it drives the local CDK/Helm toolchain, launch these from the **operator's** server (the box running `--serve`), not from inside the deployed container. `status` reports `not_deployed`, `deploying`, `deployed` (with the public URL, falling back to the `eks_cf_url` in `cdk-eks.json`), `destroying`, or `error`, read from the `NceEksStack` CloudFormation stack.
 
 ---
 
