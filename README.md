@@ -1213,6 +1213,54 @@ make seed-config        # store config.json in SSM
 
 ---
 
+### Option 3 — S3 static site (CloudFront + OAC)
+
+Publish the **rendered static site** (Quarto pages + Marimo WASM notebooks + the JSON data layer) to a **private S3 bucket fronted by CloudFront** — no running container. The bucket blocks all public access; CloudFront reads it through an **Origin Access Control (OAC)**, with the bucket policy scoped to the distribution ARN (`aws:SourceArn`). The site is served over HTTPS, never from the raw S3 website endpoint.
+
+Configure the target in `config.json` under a `deploy.s3` section:
+
+```json
+"deploy": {
+  "s3": {
+    "bucket": "nce-safe-sim-site",
+    "region": "us-east-1",
+    "prefix": "",
+    "distribution_comment": "NCE SAFe Simulator static site"
+  }
+}
+```
+
+Build the site first (`python NceGitLab.py --serve` → **Site** → *build all*, which produces `quarto-site/`, `public/interactive/`, and `public/data/`), then publish.
+
+**From the web UI / API** — publish and destroy run as [durable background jobs](#durable-background-jobs) (a browser refresh can never kill a cloud mutation):
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/deploy/s3` | Ensure the bucket, sync the built site (correct content-types + stale-object deletion), put it behind CloudFront/OAC, and report the HTTPS URL. Returns a job manifest. |
+| `POST /api/deploy/s3/destroy` | Disable + delete the distribution, empty the bucket, and delete it. Returns a job manifest. |
+
+Publish is idempotent — the bucket, OAC, and distribution are reused on re-runs; each sync uploads changed files and deletes any object no longer part of the built site.
+
+**From the CLI** (this is also the exact argv the durable job runs):
+
+```bash
+python NceGitLab.py --deploy-s3 publish    # build → private bucket behind CloudFront, prints HTTPS URL
+python NceGitLab.py --deploy-s3 status     # prints status JSON (state, url, object_count, last_sync)
+python NceGitLab.py --deploy-s3 destroy    # empty bucket + delete distribution
+```
+
+Status reports one of `not_deployed` (bucket absent), `deploying` (bucket present, distribution not yet created), `deployed` (bucket + distribution live, with the HTTPS URL), or `error`.
+
+**Infrastructure-as-code alternative** — the identical private-bucket + CloudFront/OAC topology is also available as a CDK stack for operators who prefer declarative IaC (object sync still happens via the publish job):
+
+```bash
+cd cdk
+make s3-deploy     # deploy private bucket + CloudFront/OAC distribution
+make s3-destroy    # tear it down (empties the bucket, deletes the distribution)
+```
+
+---
+
 ### Shared operations
 
 | Command | Description |
