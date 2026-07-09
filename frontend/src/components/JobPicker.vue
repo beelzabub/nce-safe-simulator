@@ -68,10 +68,13 @@
       </div>
     </div>
 
-    <!-- Reports button — pinned to bottom -->
+    <!-- Reports + Deployments buttons — pinned to bottom -->
     <div class="reports-area">
       <button class="reports-btn" @click="showReportDialog = true">
         Run Reports…
+      </button>
+      <button class="reports-btn" @click="showDeployDialog = true">
+        Deployments…
       </button>
     </div>
 
@@ -93,6 +96,12 @@
     @launch="onReportLaunch"
     @close="showReportDialog = false"
   />
+
+  <!-- Deployments dialog -->
+  <DeploymentsDialog
+    v-if="showDeployDialog"
+    @close="showDeployDialog = false"
+  />
 </template>
 
 <script setup>
@@ -100,6 +109,7 @@ import { ref, computed, onMounted } from 'vue'
 import { getTools, getReports } from '../api.js'
 import ToolParamDialog from './ToolParamDialog.vue'
 import ReportPickerDialog from './ReportPickerDialog.vue'
+import DeploymentsDialog from './DeploymentsDialog.vue'
 import { buildToolCommand } from '../composables/useCliCommand.js'
 import { useCommandPreview } from '../composables/useCommandPreview.js'
 
@@ -118,6 +128,7 @@ const error          = ref(null)
 const filter         = ref('')
 const expanded       = ref([])
 const showReportDialog = ref(false)
+const showDeployDialog = ref(false)
 
 onMounted(async () => {
   try {
@@ -398,12 +409,14 @@ function onReportLaunch(selectedReports, formats, useLast) {
 /* ── Reports area ── */
 .reports-area {
   flex-shrink: 0;
+  display: flex;
+  gap: 0.5rem;
   border-top: 1px solid var(--border);
   padding: 0.65rem 1rem;
   background: var(--surface);
 }
 .reports-btn {
-  width: 100%;
+  flex: 1 1 0;
   padding: 7px 0;
   background: transparent;
   border: 1px solid var(--border);
