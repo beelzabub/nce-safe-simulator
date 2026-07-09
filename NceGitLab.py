@@ -573,6 +573,12 @@ def main():
                         help="S3 static-site hosting behind CloudFront/OAC (issue #216): "
                              "publish the built site to a private bucket, destroy the "
                              "deployment, or print status JSON. Runs as a durable job.")
+    parser.add_argument("--deploy-ecs",              metavar="ACTION",
+                        choices=["publish", "destroy", "status"],
+                        help="ECS/Fargate deploy via CDK stack NceStack (issue #217): "
+                             "publish (deploy/update) the stack, destroy it, or print "
+                             "status JSON. Reuses the existing ECR image tag. Runs as a "
+                             "durable job.")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -588,6 +594,16 @@ def main():
         from server.deploy_s3 import run_cli as _deploy_s3_cli
 
         _deploy_s3_cli(args.deploy_s3)
+        return
+
+    # ECS/Fargate deploy (issue #217). Same rationale as --deploy-s3: provisions
+    # cloud resources only (no GitLab connection), so it runs before the
+    # NceGitLab() client is built. Launched as a durable subprocess job.
+    if args.deploy_ecs:
+        _phase[0] = f"deploy-ecs {args.deploy_ecs}"
+        from server.deploy_ecs import run_cli as _deploy_ecs_cli
+
+        _deploy_ecs_cli(args.deploy_ecs)
         return
 
     formats   = _parse_formats(args.formats)

@@ -525,13 +525,15 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 #### Deploy Options
 
-The Run Reports dialog also carries a **Deploy Options** section (directly above the output-format picker) for standing the app itself up on AWS from the browser. It offers three targets — **S3**, **ECS**, and **EKS** — each showing its **live deployment status** inline: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS; the S3/CloudFront reader arrives with the S3 publish path). The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
+The Run Reports dialog also carries a **Deploy Options** section (directly above the output-format picker) for standing the app itself up on AWS from the browser. It offers three targets — **S3**, **ECS**, and **EKS** — each showing its **live deployment status** inline: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS) and, for S3, the bucket/CloudFront state from the deploy module. The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
 
 - **Selecting a target and confirming** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm (bucket, region, exposure note).
 - **A target that's already deployed** renders as *deployed* with its URL and a **Destroy** affordance in place of a checkbox; destroy has its own irreversible-action confirm.
 - **Deploy and destroy run as [durable jobs](#durable-background-jobs)**, so an in-flight operation survives a page refresh: reopening the dialog re-adopts the running job and shows its progress and latest log line, and the job is never killed by a stray disconnect. Checkbox selections persist to `localStorage` alongside the report/format choices.
 
-The actual cloud execution for each target lands with the deploy-execution issues; the section above delivers the UI, live status, pre-flight gating, and durable-job reattach.
+Cloud execution is real for **S3** (#216) and **ECS** (#217): both delegate to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs`) that runs the real publish/destroy path as a durable subprocess. **EKS** execution lands with #218; until then its deploy/destroy is a clearly-marked placeholder job that still exercises the full pre-flight → launch → live-log → reattach flow. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through.
+
+The ECS deploy (#217) runs the same CDK path an operator drives by hand — `make -C cdk ecs-deploy` / `ecs-destroy` → `cdk deploy/destroy NceStack` — as a refresh-survivable job, streaming CDK output to the job log. Per **decision A3** it **reuses the existing ECR image tag** (the deploy only builds+pushes a new image when the repository is empty and a Docker daemon is present; there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`) and fails fast with a clear message when a first image is needed but Docker is unavailable — so the job log explains the failure instead of dying deep inside make/cdk. Because it drives the local CDK toolchain, the ECS deploy is launched from the **operator's** server (the box running `--serve`), not from inside the deployed container.
 
 #### Equivalent CLI command
 
@@ -1210,6 +1212,25 @@ make seed-config        # store config.json in SSM
 | `make ecs-grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
 | `make grafana-setup` | Rotate the Grafana Admin API key in SSM (valid 30 days) |
 | `make ecs-destroy` | Tear down ECS resources (EFS and CloudWatch logs are retained) |
+
+#### From the web UI / app (issue #217)
+
+Deploy and destroy ECS from the browser's **[Deploy Options](#deploy-options)** section — both run as [durable background jobs](#durable-background-jobs), so a refresh can never kill a cloud mutation.
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/deploy/ecs` | Deploy (or update) the ECS/Fargate stack `NceStack`. Returns a job manifest. |
+| `POST /api/deploy/ecs/destroy` | Tear down `NceStack` (EFS and CloudWatch logs are retained). Returns a job manifest. |
+
+These delegate to the whitelisted CLI below (this is also the exact argv the durable job runs):
+
+```bash
+python NceGitLab.py --deploy-ecs publish    # cdk deploy NceStack (reuses the existing ECR image tag)
+python NceGitLab.py --deploy-ecs status     # prints status JSON (state, url, stack_status)
+python NceGitLab.py --deploy-ecs destroy    # cdk destroy NceStack
+```
+
+`publish`/`destroy` shell to the same CDK path as `make -C cdk ecs-deploy` / `ecs-destroy`. Per **decision A3** the deploy **reuses the existing ECR image tag** — it only builds+pushes a new image when the repository is empty *and* a Docker daemon is present (there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`) and, when a first image is needed but Docker is absent, fails fast with a clear message. Because it drives the local CDK toolchain, launch these from the **operator's** server (the box running `--serve`), not from inside the deployed container. `status` reports `not_deployed`, `deploying`, `deployed` (with the public URL), `destroying`, or `error`, read from the `NceStack` CloudFormation stack.
 
 ---
 

@@ -1037,8 +1037,10 @@ def launch_deploy_job(target: str, action: str):
     """Launch a durable deploy/destroy job for a target (issue #215).
 
     The actual cloud execution (S3 publish, ECS/EKS apply/destroy) lands in the
-    sibling issues #216/#217/#218. Until then this launches a clearly-marked
-    placeholder durable job through the same engine, so the UI's
+    sibling issues #216/#217/#218. S3 (#216) and ECS (#217) are real: they
+    delegate to the whitelisted ``--deploy-s3`` / ``--deploy-ecs`` CLI, which runs
+    the real deploy path as a durable subprocess. EKS (#218) is still a
+    clearly-marked placeholder job through the same engine, so the UI's
     pre-flight → launch → live-log → reattach flow is real end to end: the job
     shows up in ``GET /api/jobs`` and is re-adopted by ``useDurableJobs`` after a
     refresh exactly like a real deploy will be."""
@@ -1047,24 +1049,24 @@ def launch_deploy_job(target: str, action: str):
     if action not in _DEPLOY_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown deploy action: {action}")
 
-    # S3 execution is real (issue #216): publish/destroy the CloudFront+OAC site
-    # via the whitelisted --deploy-s3 CLI. The UI's "deploy" action maps to the
-    # module's "publish". ECS/EKS remain placeholders until #217/#218.
-    if target == "s3":
-        s3_action = "publish" if action == "deploy" else "destroy"
-        kind, label, argv = _job_argv({"deploy": "s3", "action": s3_action})
+    # S3 (#216) and ECS (#217) execution is real: delegate to the whitelisted
+    # deploy CLI. The UI's "deploy" action maps to the module's "publish";
+    # "destroy" passes straight through. EKS remains a placeholder until #218.
+    if target in ("s3", "ecs"):
+        cli_action = "publish" if action == "deploy" else "destroy"
+        kind, label, argv = _job_argv({"deploy": target, "action": cli_action})
         return job_manager.launch(
             argv, kind=kind, label=label,
-            params={"target": "s3", "action": action},
+            params={"target": target, "action": action},
         )
 
     label = f"{action} {target.upper()}"
-    # TODO(#217/#218): replace this placeholder argv with the real deploy /
-    # destroy command for the target.
+    # TODO(#218): replace this placeholder argv with the real deploy / destroy
+    # command for EKS.
     script = (
         "import sys, time\n"
         f"print('[placeholder] {action} {target} — cloud execution arrives in "
-        "#216/#217/#218'); sys.stdout.flush()\n"
+        "#218'); sys.stdout.flush()\n"
         "for i in range(3):\n"
         f"    print('  {action} {target}: step %d/3' % (i + 1)); sys.stdout.flush(); time.sleep(1)\n"
         f"print('[placeholder] {action} {target} complete')\n"
@@ -1239,6 +1241,15 @@ def _job_argv(data: dict) -> tuple:
         if action not in ("publish", "destroy"):
             raise ValueError(f"Unknown S3 deploy action: {action!r}")
         return "deploy:s3", f"s3-{action}", entry + ["--deploy-s3", action]
+
+    # --- Deploy: ECS/Fargate via CDK stack NceStack (issue #217) ------------
+    # Same whitelist shape as S3; delegates to the --deploy-ecs CLI which shells
+    # to the real `make -C cdk ecs-deploy/ecs-destroy` CDK path.
+    if data.get("deploy") == "ecs":
+        action = data.get("action", "publish")
+        if action not in ("publish", "destroy"):
+            raise ValueError(f"Unknown ECS deploy action: {action!r}")
+        return "deploy:ecs", f"ecs-{action}", entry + ["--deploy-ecs", action]
 
     if "tool" in data:
         key = data["tool"]
