@@ -1,4 +1,4 @@
-.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram dod-diagrams audit help
+.PHONY: install bootstrap set-vpc set-efs ecs-diff ecs-deploy ecs-destroy seed-config ecr-push ecs-redeploy ecs-logs ecs-exec grafana-setup ecs-grafana-deploy grafana-add-user ecs-full-deploy ecs-full-redeploy eks-install eks-deploy eks-kubeconfig eks-lb-controller eks-helm-install eks-helm-upgrade eks-set-alb eks-cloudfront-deploy eks-grafana-deploy eks-redeploy eks-logs eks-exec eks-full-deploy eks-full-redeploy eks-destroy eks-diagram ecs-diagram s3-diff s3-deploy s3-destroy dod-diagrams audit help
 .DEFAULT_GOAL := help
 
 # Separate CDK config files for ECS and EKS stacks.
@@ -80,6 +80,16 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 
 ecs-destroy: ## Tear down ECS stack (EFS and CloudWatch logs are retained)
 	cdk destroy NceStack --app "python ecs_app.py" --output cdk-ecs.out --force
+
+##@ S3 static site (CloudFront + OAC, issue #216)
+s3-diff: ## Show what the S3 static-site stack will change without deploying
+	cdk diff NceS3SiteStack --app "python s3_app.py" --output cdk-s3.out
+
+s3-deploy: ## Deploy (or update) the private S3 bucket + CloudFront/OAC distribution
+	cdk deploy NceS3SiteStack --app "python s3_app.py" --output cdk-s3.out --require-approval never
+
+s3-destroy: ## Tear down the S3 static-site stack (empties the bucket, deletes the distribution)
+	cdk destroy NceS3SiteStack --app "python s3_app.py" --output cdk-s3.out --force
 
 ##@ Shared
 eks-diagram: ## Regenerate EKS architecture PNG (queries live CloudFormation stack for labels)

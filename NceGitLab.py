@@ -568,11 +568,26 @@ def main():
                         help="Create SAFe group/project structure only (omit GROUP to be prompted)")
     parser.add_argument("-w", "--serve",             action="store_true",
                         help="Start the uvicorn server and open the browser")
+    parser.add_argument("--deploy-s3",               metavar="ACTION",
+                        choices=["publish", "destroy", "status"],
+                        help="S3 static-site hosting behind CloudFront/OAC (issue #216): "
+                             "publish the built site to a private bucket, destroy the "
+                             "deployment, or print status JSON. Runs as a durable job.")
     args, extra = parser.parse_known_args()
 
     if args.usage:
         parser.print_help()
         print()
+        return
+
+    # S3 static-site hosting (issue #216). Provisions cloud resources only — no
+    # GitLab connection needed — so it runs before the NceGitLab() client is
+    # built. Launched as a durable subprocess job by the server.
+    if args.deploy_s3:
+        _phase[0] = f"deploy-s3 {args.deploy_s3}"
+        from server.deploy_s3 import run_cli as _deploy_s3_cli
+
+        _deploy_s3_cli(args.deploy_s3)
         return
 
     formats   = _parse_formats(args.formats)
