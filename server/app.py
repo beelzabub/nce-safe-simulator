@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import shutil
+import sys
 import threading
 import time
 from datetime import datetime
@@ -37,6 +38,7 @@ from server.auth_gate import (
 )
 from server.analysis import portfolio_payload
 from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.jobs import manager as job_manager
 from server.version import app_version
 from server.retention import prune_temp_files
 from server.runner import cancel_thread, install_writer, run_job
@@ -73,6 +75,16 @@ def _prune_temp_files_on_startup():
     removed = prune_temp_files()
     if removed:
         print(f"[retention] pruned {len(removed)} stale import/export temp file(s)")
+
+
+@app.on_event("startup")
+def _reconcile_jobs_on_startup():
+    """Reconcile durable jobs left mid-flight by a previous server process
+    (issue #214). Dead-pid jobs become 'unknown'; still-running jobs are
+    re-adopted so their terminal state is recorded when they exit."""
+    changed = job_manager.reconcile()
+    if changed:
+        print(f"[jobs] reconciled {len(changed)} orphaned job(s) after restart")
 
 
 # Exclusive lock for the fetch-data phase — only one data snapshot at a time.
@@ -785,6 +797,68 @@ def list_running():
         ]
 
 
+# ---------------------------------------------------------------------------
+# Durable background jobs (issue #214)
+# ---------------------------------------------------------------------------
+# Unlike the /ws/run path (in-process threads that die when the socket closes),
+# these jobs run as subprocess.Popen children owned by the server. Their state
+# and logs live on disk, so a job survives refreshes, re-logins, extra tabs,
+# and server restarts. Cancellation is an explicit call here — never a side
+# effect of a disconnect. This is the foundation for the Deploy Options epic;
+# report runs migrate onto it under #219.
+
+@app.post("/api/jobs", status_code=201)
+async def launch_durable_job(request: Request):
+    """Launch a durable background job. Body is the same shape the /ws/run
+    endpoint accepts ({"tool": key, "params": {...}} or {"report": key,
+    "formats": [...], "reuse_data": "last"}); the server maps it to a
+    whitelisted argv. Returns the job manifest (with its id)."""
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        raise HTTPException(status_code=503, detail="GitLab client not initialised")
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Expected JSON body")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    try:
+        kind, label, argv = _job_argv(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return job_manager.launch(
+        argv, kind=kind, label=label, params=data.get("params") or {}
+    )
+
+
+@app.get("/api/jobs")
+def list_durable_jobs():
+    """All durable jobs (live + recent), newest first."""
+    return job_manager.list_jobs()
+
+
+@app.get("/api/jobs/{job_id}")
+def get_durable_job(job_id: str, offset: int = 0):
+    """Job manifest plus the log tail from *offset* bytes. Pass the returned
+    ``offset`` on the next poll to resume streaming where you left off."""
+    job = job_manager.get_job(job_id, offset=offset)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_durable_job(job_id: str):
+    """Explicitly cancel a running job (SIGTERM to its process group, escalating
+    to SIGKILL). No-op on an already-finished job."""
+    job = job_manager.cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
 @app.post("/api/reports/fetch-data", status_code=200)
 def fetch_report_data(request: Request):
     """Fetch live data from GitLab and load it into memory.
@@ -1036,6 +1110,73 @@ def _tool_arg_tokens(tool: dict, params: dict) -> list:
         else:
             tokens.extend([f"--{name}", q])
     return tokens
+
+
+def _tool_argv_tokens(tool: dict, params: dict) -> list:
+    """Like ``_tool_arg_tokens`` but produces raw argv elements (no shell
+    quoting): each element is passed literally to ``subprocess.Popen``. Dash-
+    leading values use the attached --name=value form so argparse can't mistake
+    them for a flag."""
+    tokens: list = []
+    for p in tool["params"]:
+        if p.get("cli_only"):
+            continue
+        name = p["name"]
+        if name not in params:
+            continue
+        v = params[name]
+        if p["type"] is bool:
+            if v is None:
+                continue
+            on = v is True
+            if p.get("default") is True:
+                tokens.append(f"--{name}" if on else f"--{name}=false")
+            elif on:
+                tokens.append(f"--{name}")
+            continue
+        if v is None or v == "":
+            continue
+        s = str(v)
+        if s.startswith("-"):
+            tokens.append(f"--{name}={s}")
+        else:
+            tokens.extend([f"--{name}", s])
+    return tokens
+
+
+def _job_argv(data: dict) -> tuple:
+    """Map a durable-job request to ``(kind, label, argv)``.
+
+    Only whitelisted kinds are accepted — the request never supplies a raw
+    command line, so this endpoint can't be used to run arbitrary programs. For
+    #214 the kinds are single tool and single report runs, invoking the same
+    ``NceGitLab.py`` entrypoint the CLI uses; deploy kinds are added by the
+    ECS/EKS/S3 children of #134.
+    """
+    entry = [sys.executable, "NceGitLab.py"]
+
+    if "tool" in data:
+        key = data["tool"]
+        tool = next((t for t in TOOLS if t["key"] == key), None)
+        if tool is None:
+            raise ValueError(f"Unknown tool: {key!r}")
+        argv = entry + ["-ut", key] + _tool_argv_tokens(tool, data.get("params") or {})
+        return "tool", key, argv
+
+    if "report" in data:
+        key = data["report"]
+        report = next((r for r in REPORTS if r["key"] == key), None)
+        if report is None:
+            raise ValueError(f"Unknown report: {key!r}")
+        argv = entry + ["-r", key]
+        formats = data.get("formats")
+        if formats:
+            argv += ["--formats", *[str(f) for f in formats]]
+        if data.get("reuse_data") == "last":
+            argv.append("--last")
+        return "report", key, argv
+
+    raise ValueError("Message must include 'tool' or 'report'")
 
 
 def build_cli_command(data: dict) -> str:
