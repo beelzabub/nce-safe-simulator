@@ -1,0 +1,350 @@
+<template>
+  <div class="overlay" @click.self="$emit('close')">
+    <div class="dialog">
+
+      <div class="dialog-header">
+        <span class="dialog-title">
+          Deployments
+          <span v-if="deployLoading" class="dep-loading">checking…</span>
+        </span>
+        <button class="dialog-close" @click="$emit('close')" aria-label="Close">×</button>
+      </div>
+
+      <div class="dialog-body">
+        <p class="dep-lede">
+          Stand the app up on AWS, or tear it down. Each target shows its live status; deploy and
+          destroy run as durable jobs that survive a page refresh.
+        </p>
+
+        <div class="dep-list">
+          <div v-for="t in DEPLOY_TARGETS" :key="t.key" class="dep-row">
+            <span class="dep-dot" :class="dotClass(t.key)" :title="stateLabel(t.key)"></span>
+
+            <div class="dep-main">
+              <div class="dep-title">
+                <span class="dep-name">{{ t.label }}</span>
+                <span class="dep-desc">{{ t.desc }}</span>
+              </div>
+              <div class="dep-meta">
+                <span class="dep-status" :class="statusClass(t.key)">{{ stateLabel(t.key) }}</span>
+                <a
+                  v-if="statusFor(t.key).state === 'deployed' && statusFor(t.key).url"
+                  :href="statusFor(t.key).url"
+                  target="_blank"
+                  rel="noopener"
+                  class="dep-url"
+                  :title="statusFor(t.key).url"
+                >{{ shortUrl(statusFor(t.key).url) }} ↗</a>
+                <span v-if="inFlight(t.key) && lastLogLine(t.key)" class="dep-logline">
+                  {{ lastLogLine(t.key) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="dep-action">
+              <button
+                v-if="statusFor(t.key).state === 'deployed'"
+                class="dep-btn dep-btn--destroy"
+                @click="requestDeploy(t.key, 'destroy')"
+              >Destroy</button>
+              <button
+                v-else-if="inFlight(t.key)"
+                class="dep-btn dep-btn--busy"
+                disabled
+              >{{ inFlightLabel(t.key) }}</button>
+              <button
+                v-else
+                class="dep-btn dep-btn--deploy"
+                @click="requestDeploy(t.key, 'deploy')"
+              >Deploy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-footer">
+        <button class="btn-cancel" @click="$emit('close')">Close</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Pre-flight confirmation for a deploy/destroy (issue #215), reused as-is. -->
+  <DeployPreflightDialog
+    v-if="preflight"
+    :target="preflight.target"
+    :action="preflight.action"
+    @confirm="confirmDeploy"
+    @cancel="cancelDeploy"
+  />
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useDeployStatus } from '../composables/useDeployStatus.js'
+import { useDurableJobs } from '../composables/useDurableJobs.js'
+import DeployPreflightDialog from './DeployPreflightDialog.vue'
+
+const emit = defineEmits(['close'])
+
+const DEPLOY_TARGETS = [
+  { key: 's3',  label: 'S3',  desc: 'Static site (CloudFront + OAC)' },
+  { key: 'ecs', label: 'ECS', desc: 'Fargate service' },
+  { key: 'eks', label: 'EKS', desc: 'Kubernetes cluster' },
+]
+
+// Live status polls only while this dialog is mounted; deploy/destroy runs use
+// the durable job engine so they survive a refresh and reattach on reload.
+const _active = ref(true)
+const { status: deployStatus, loading: deployLoading, refresh: refreshDeploy } =
+  useDeployStatus(_active)
+const { runningJobs, launchDeployJob, reattach: reattachJobs, linesFor } = useDurableJobs()
+
+function statusFor(target) {
+  return deployStatus.value?.[target] || { state: 'unknown', url: null }
+}
+
+const STATE_LABELS = {
+  not_deployed: 'not deployed',
+  deploying:    'deploying…',
+  destroying:   'destroying…',
+  deployed:     'deployed',
+  error:        'error',
+  unknown:      'checking…',
+}
+function stateLabel(target) {
+  return STATE_LABELS[statusFor(target).state] || statusFor(target).state
+}
+
+// Red/green status indicator: green when deployed, amber while a deploy/destroy
+// is in flight, red for not-deployed/error. The visible status text carries the
+// same meaning, so the dot is decorative (no hover-only affordance).
+function dotClass(target) {
+  const s = statusFor(target).state
+  if (s === 'deployed') return 'dep-dot--ok'
+  if (s === 'deploying' || s === 'destroying') return 'dep-dot--busy'
+  if (s === 'unknown')  return 'dep-dot--unknown'
+  return 'dep-dot--off'
+}
+function statusClass(target) {
+  const s = statusFor(target).state
+  if (s === 'deployed') return 'dep-status--ok'
+  if (s === 'deploying' || s === 'destroying') return 'dep-status--busy'
+  if (s === 'error')    return 'dep-status--err'
+  return 'dep-status--off'
+}
+
+// A deploy/destroy job for this target that hasn't finished yet.
+function deployJobFor(target) {
+  return runningJobs.value.find(j => j.kind === 'deploy' && j.params?.target === target)
+}
+function inFlight(target) {
+  const s = statusFor(target).state
+  return !!deployJobFor(target) || s === 'deploying' || s === 'destroying'
+}
+function inFlightLabel(target) {
+  const job = deployJobFor(target)
+  if (job) return job.params?.action === 'destroy' ? 'Destroying…' : 'Deploying…'
+  return statusFor(target).state === 'destroying' ? 'Destroying…' : 'Deploying…'
+}
+function lastLogLine(target) {
+  const job = deployJobFor(target)
+  if (!job) return ''
+  const lines = linesFor(job.id).filter(l => l.trim())
+  return lines.length ? lines[lines.length - 1] : ''
+}
+
+function shortUrl(url) {
+  try { return new URL(url).host } catch { return url }
+}
+
+// Pre-flight: each target's Deploy/Destroy button opens the confirm directly.
+const preflight = ref(null)   // { target, action } | null
+
+function requestDeploy(target, action) {
+  preflight.value = { target, action }
+}
+async function confirmDeploy() {
+  const { target, action } = preflight.value
+  try {
+    await launchDeployJob(target, action)
+  } catch (e) {
+    // The job list surfaces launch failures; nothing intrusive here.
+    console.error(`deploy ${action} ${target} failed to launch:`, e)
+  }
+  refreshDeploy()
+  preflight.value = null
+}
+function cancelDeploy() {
+  preflight.value = null
+}
+
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    if (preflight.value) cancelDeploy()   // Esc backs out of pre-flight first
+    else emit('close')
+  }
+}
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  // Re-adopt any deploy/destroy job already running before the dialog opened.
+  reattachJobs()
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+})
+</script>
+
+<style scoped>
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Header ── */
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dialog-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); display: flex; align-items: baseline; gap: 0.5rem; }
+.dep-loading { font-size: 0.7rem; font-weight: 400; color: var(--text-3); }
+.dialog-close {
+  background: none; border: none;
+  color: var(--text-3); cursor: pointer; font-size: 1.4rem; line-height: 1;
+}
+.dialog-close:hover { color: var(--text-1); }
+
+/* ── Body ── */
+.dialog-body { padding: 0.85rem 1rem; overflow-y: auto; }
+.dep-lede { margin: 0 0 0.85rem; color: var(--text-2); font-size: 0.83rem; line-height: 1.45; }
+
+.dep-list { display: flex; flex-direction: column; gap: 0.55rem; }
+.dep-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Red/green status indicator — decorative; the status text carries the meaning. */
+.dep-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.dep-dot--ok      { background: #3fa66a; box-shadow: 0 0 0 2px rgba(63,166,106,0.18); }
+.dep-dot--off     { background: #e05656; box-shadow: 0 0 0 2px rgba(224,86,86,0.18); }
+.dep-dot--unknown { background: var(--text-3); }
+.dep-dot--busy {
+  background: #e0a13f;
+  box-shadow: 0 0 0 2px rgba(224,161,63,0.18);
+  animation: dep-pulse 1.1s ease-in-out infinite;
+}
+@keyframes dep-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.dep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.dep-title { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.dep-name { font-size: 0.9rem; font-weight: 600; color: var(--text-1); }
+.dep-desc {
+  font-size: 0.78rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dep-meta { display: flex; align-items: baseline; gap: 0.55rem; min-width: 0; }
+.dep-status { font-size: 0.76rem; font-weight: 600; }
+.dep-status--ok  { color: #3fa66a; }
+.dep-status--off { color: #e05656; }
+.dep-status--busy { color: var(--badge-run-text, #e0a13f); }
+.dep-status--err { color: #e05656; }
+.dep-url {
+  font-size: 0.76rem;
+  color: var(--action);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dep-url:hover { text-decoration: underline; }
+.dep-logline {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dep-action { flex-shrink: 0; }
+.dep-btn {
+  padding: 5px 14px;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.dep-btn--deploy { color: #fff; background: var(--action); border-color: var(--action); }
+.dep-btn--deploy:hover { background: var(--action-hover); border-color: var(--action-hover); }
+.dep-btn--destroy { color: #d16b57; }
+.dep-btn--destroy:hover { border-color: #d16b57; color: #b1442f; }
+.dep-btn--busy { color: var(--text-3); cursor: not-allowed; }
+
+/* ── Footer ── */
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.btn-cancel {
+  padding: 6px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-cancel:hover { border-color: var(--text-2); color: var(--text-1); }
+
+@media (max-width: 768px) {
+  .overlay { padding: 0; }
+  .dialog {
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+  }
+}
+</style>

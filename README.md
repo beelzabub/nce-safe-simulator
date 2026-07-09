@@ -523,13 +523,13 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 **Run Reports…** — a button pinned at the bottom of the sidebar opens the report picker dialog: choose individual reports or toggle All, select output formats (markdown / plotly / interactive; plotly and interactive require all reports to be selected since site builds are project-wide), and optionally check **Use last available data snapshot** to skip the GitLab API fetch and re-render from the most recent `data/` directory.
 
-#### Deploy Options
+#### Deployments
 
-The Run Reports dialog also carries a **Deploy Options** section (directly above the output-format picker) for standing the app itself up on AWS from the browser. It offers three targets — **S3**, **ECS**, and **EKS** — each showing its **live deployment status** inline: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS) and, for S3, the bucket/CloudFront state from the deploy module. The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
+A dedicated **Deployments** dialog — opened from the **Deployments…** button beside **Run Reports…** in the sidebar footer — stands the app itself up on AWS from the browser. It lists three targets — **S3**, **ECS**, and **EKS** — one per row, each showing its **live deployment status** as a **red/green/amber indicator dot with the state spelled out in text**: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS) and, for S3, the bucket/CloudFront state from the deploy module. The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
 
-- **Selecting a target and confirming** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm (bucket, region, exposure note).
-- **A target that's already deployed** renders as *deployed* with its URL and a **Destroy** affordance in place of a checkbox; destroy has its own irreversible-action confirm.
-- **Deploy and destroy run as [durable jobs](#durable-background-jobs)**, so an in-flight operation survives a page refresh: reopening the dialog re-adopts the running job and shows its progress and latest log line, and the job is never killed by a stray disconnect. Checkbox selections persist to `localStorage` alongside the report/format choices.
+- Each row carries **one state-driven action button**: **Deploy** when not deployed, a disabled **Deploying…/Destroying…** while a job is in flight (with its latest log line shown inline), and **Destroy** once deployed (alongside the public URL). There are no checkboxes or batch actions — deploy and destroy are per-target.
+- **Clicking Deploy or Destroy** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm (bucket, region, exposure note).
+- **Deploy and destroy run as [durable jobs](#durable-background-jobs)**, so an in-flight operation survives a page refresh: reopening the dialog re-adopts the running job and shows its progress and latest log line, and the job is never killed by a stray disconnect.
 
 Cloud execution is real for **S3** (#216) and **ECS** (#217): both delegate to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs`) that runs the real publish/destroy path as a durable subprocess. **EKS** execution lands with #218; until then its deploy/destroy is a clearly-marked placeholder job that still exercises the full pre-flight → launch → live-log → reattach flow. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through.
 
@@ -1215,7 +1215,7 @@ make seed-config        # store config.json in SSM
 
 #### From the web UI / app (issue #217)
 
-Deploy and destroy ECS from the browser's **[Deploy Options](#deploy-options)** section — both run as [durable background jobs](#durable-background-jobs), so a refresh can never kill a cloud mutation.
+Deploy and destroy ECS from the browser's **[Deployments](#deployments)** dialog — both run as [durable background jobs](#durable-background-jobs), so a refresh can never kill a cloud mutation.
 
 | Endpoint | Description |
 |---|---|
