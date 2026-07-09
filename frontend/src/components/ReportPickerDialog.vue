@@ -23,39 +23,48 @@
         <span v-if="deployLoading" class="deploy-loading">checking…</span>
       </div>
       <div class="deploy-list">
-        <div v-for="t in DEPLOY_TARGETS" :key="t.key" class="deploy-row">
+        <div class="deploy-row">
+          <div v-for="t in DEPLOY_TARGETS" :key="t.key" class="deploy-cell">
 
-          <!-- Already deployed → show URL + Destroy instead of a checkbox -->
-          <template v-if="statusFor(t.key).state === 'deployed'">
-            <span class="deploy-name">{{ t.label }}</span>
-            <span class="deploy-badge deploy-badge--ok">deployed</span>
-            <a
-              v-if="statusFor(t.key).url"
-              :href="statusFor(t.key).url"
-              target="_blank"
-              rel="noopener"
-              class="deploy-url"
-              :title="statusFor(t.key).url"
-            >{{ shortUrl(statusFor(t.key).url) }}</a>
-            <button class="deploy-destroy" @click="requestDeploy(t.key, 'destroy')">Destroy</button>
-          </template>
+            <!-- Already deployed → green dot + URL + Destroy -->
+            <template v-if="statusFor(t.key).state === 'deployed'">
+              <div class="deploy-cell-head">
+                <span class="deploy-dot deploy-dot--ok" title="deployed"></span>
+                <span class="deploy-name">{{ t.label }}</span>
+              </div>
+              <a
+                v-if="statusFor(t.key).url"
+                :href="statusFor(t.key).url"
+                target="_blank"
+                rel="noopener"
+                class="deploy-url"
+                :title="statusFor(t.key).url"
+              >{{ shortUrl(statusFor(t.key).url) }}</a>
+              <button class="deploy-destroy" @click="requestDeploy(t.key, 'destroy')">Destroy</button>
+            </template>
 
-          <!-- Deploy/destroy in flight (running job or CloudFormation busy) -->
-          <template v-else-if="inFlight(t.key)">
-            <span class="deploy-name">{{ t.label }}</span>
-            <span class="deploy-badge deploy-badge--busy">● {{ inFlightLabel(t.key) }}</span>
-            <span class="deploy-logline">{{ lastLogLine(t.key) }}</span>
-          </template>
+            <!-- Deploy/destroy in flight (running job or CloudFormation busy) -->
+            <template v-else-if="inFlight(t.key)">
+              <div class="deploy-cell-head">
+                <span class="deploy-dot deploy-dot--busy" :title="inFlightLabel(t.key)"></span>
+                <span class="deploy-name">{{ t.label }}</span>
+              </div>
+              <span class="deploy-inflight">{{ inFlightLabel(t.key) }}</span>
+              <span class="deploy-logline">{{ lastLogLine(t.key) }}</span>
+            </template>
 
-          <!-- Selectable → checkbox + current status -->
-          <template v-else>
-            <label class="check-label deploy-check">
-              <input type="checkbox" :value="t.key" v-model="deployTargets" />
-              {{ t.label }}
-            </label>
-            <span class="deploy-badge" :class="badgeClass(t.key)">{{ stateLabel(t.key) }}</span>
-          </template>
+            <!-- Selectable → checkbox + red/green status dot -->
+            <template v-else>
+              <div class="deploy-cell-head">
+                <span class="deploy-dot" :class="dotClass(t.key)" :title="stateLabel(t.key)"></span>
+                <label class="check-label deploy-check">
+                  <input type="checkbox" :value="t.key" v-model="deployTargets" />
+                  {{ t.label }}
+                </label>
+              </div>
+            </template>
 
+          </div>
         </div>
 
         <div v-if="selectableChecked.length" class="deploy-actions">
@@ -218,6 +227,15 @@ function badgeClass(target) {
   if (s === 'error')  return 'deploy-badge--err'
   if (s === 'deploying' || s === 'destroying') return 'deploy-badge--busy'
   return 'deploy-badge--idle'
+}
+// Red/green status dot for the selectable (idle) state: green when deployed,
+// red for not-deployed/error, amber while a deploy/destroy is in flight. The
+// title attribute surfaces the state text ("deployed" / "not deployed") on hover.
+function dotClass(target) {
+  const s = statusFor(target).state
+  if (s === 'deployed') return 'deploy-dot--ok'
+  if (s === 'deploying' || s === 'destroying') return 'deploy-dot--busy'
+  return 'deploy-dot--off'
 }
 
 // A deploy/destroy job for this target that hasn't finished yet.
@@ -433,17 +451,53 @@ function launch() {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* Three targets laid out side by side. */
 .deploy-row {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.deploy-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   min-height: 1.6rem;
 }
-.deploy-check { flex-shrink: 0; }
+.deploy-cell-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+/* Red/green status indicator; hover shows the state text via title=. */
+.deploy-dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  cursor: help;
+  background: var(--text-3);
+}
+.deploy-dot--ok  { background: #3fa66a; box-shadow: 0 0 0 2px rgba(63,166,106,0.18); }
+.deploy-dot--off { background: #e05656; box-shadow: 0 0 0 2px rgba(224,86,86,0.18); }
+.deploy-dot--busy {
+  background: #e0a13f;
+  box-shadow: 0 0 0 2px rgba(224,161,63,0.18);
+  animation: deploy-pulse 1.1s ease-in-out infinite;
+}
+@keyframes deploy-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.deploy-check { flex-shrink: 0; min-width: 0; }
 .deploy-name {
   font-size: 0.85rem;
   color: var(--text-1);
-  min-width: 3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .deploy-badge {
   font-size: 0.7rem;
@@ -456,6 +510,11 @@ function launch() {
 .deploy-badge--ok   { background: var(--badge-run-bg, rgba(40,160,90,0.15)); color: #3fa66a; }
 .deploy-badge--busy { background: var(--badge-run-bg); color: var(--badge-run-text); }
 .deploy-badge--err  { color: #f87171; }
+.deploy-inflight {
+  font-size: 0.72rem;
+  color: var(--badge-run-text, #e0a13f);
+  font-weight: 600;
+}
 .deploy-url {
   font-size: 0.76rem;
   color: var(--action);
@@ -472,10 +531,10 @@ function launch() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
 }
 .deploy-destroy {
-  margin-left: auto;
+  align-self: flex-start;
+  margin-top: auto;
   padding: 2px 10px;
   background: transparent;
   border: 1px solid var(--border);
