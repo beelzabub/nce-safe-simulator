@@ -536,16 +536,33 @@ def _status_error(exc):
 # CLI entry point for the durable-job subcommand
 # ---------------------------------------------------------------------------
 
+_S3_CONFIG_HINT = (
+    'Add a "deploy": {"s3": {"bucket": "your-bucket"}} section to config.json '
+    "(see config.example.json), then re-seed the deployed config with "
+    "`make -C cdk seed-config`."
+)
+
+
 def run_cli(action, config=None):
     """Entry point for ``NceGitLab.py --deploy-s3 ACTION``.
 
     ``publish`` and ``destroy`` run as durable subprocess jobs; ``status``
     prints the status JSON (handy for operators / smoke tests).
+
+    A missing/invalid ``deploy.s3`` config is an operator error, not a bug, so it
+    exits with a clean, actionable message (``SystemExit``) instead of a raw
+    traceback — that message is what shows in the deploy job's log window.
     """
     if action == "publish":
-        publish(config)
+        try:
+            publish(config)
+        except RuntimeError as exc:
+            raise SystemExit(f"S3 deploy: {exc}\n{_S3_CONFIG_HINT}")
     elif action == "destroy":
-        destroy(config)
+        try:
+            destroy(config)
+        except RuntimeError as exc:
+            raise SystemExit(f"S3 destroy: {exc}\n{_S3_CONFIG_HINT}")
     elif action == "status":
         print(json.dumps(s3_deploy_status(config), indent=2))
     else:
