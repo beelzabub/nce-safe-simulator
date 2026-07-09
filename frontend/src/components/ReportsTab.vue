@@ -68,10 +68,13 @@
       </div>
     </template>
 
-    <!-- Run Reports — pinned to bottom, same affordance as the Tools tab -->
+    <!-- Run Reports + Deployments — pinned to bottom, same affordance as Tools -->
     <div class="reports-area">
       <button class="reports-btn" @click="showReportDialog = true">
         Run Reports…
+      </button>
+      <button class="reports-btn" @click="showDeployDialog = true">
+        Deployments…
       </button>
     </div>
 
@@ -83,12 +86,18 @@
     @launch="onReportLaunch"
     @close="showReportDialog = false"
   />
+
+  <DeploymentsDialog
+    v-if="showDeployDialog"
+    @close="showDeployDialog = false"
+  />
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { getReports } from '../api.js'
 import ReportPickerDialog from './ReportPickerDialog.vue'
+import DeploymentsDialog from './DeploymentsDialog.vue'
 import { useMainView } from '../composables/useMainView.js'
 
 const emit = defineEmits(['launch-reports'])
@@ -96,6 +105,7 @@ const emit = defineEmits(['launch-reports'])
 const { reportPage, openReport } = useMainView()
 
 const showReportDialog = ref(false)
+const showDeployDialog = ref(false)
 const reportDefs       = ref([])
 
 function onReportLaunch(selectedReports, formats, useLast) {
@@ -326,12 +336,14 @@ onMounted(async () => {
 /* ── Run Reports (matches the Tools tab's) ── */
 .reports-area {
   flex-shrink: 0;
+  display: flex;
+  gap: 0.5rem;
   border-top: 1px solid var(--border);
   padding: 0.65rem 1rem;
   background: var(--surface);
 }
 .reports-btn {
-  width: 100%;
+  flex: 1 1 0;
   padding: 7px 0;
   background: transparent;
   border: 1px solid var(--border);
