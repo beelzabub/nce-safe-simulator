@@ -164,6 +164,39 @@ export async function cancelJob(id) {
   return r.json()
 }
 
+// ── Deploy Options (epic #134, issue #215) ──────────────────────────────────
+// Live per-target deploy status for the Run Reports Deploy Options section. The
+// dialog polls this on the shared 3s cadence while it's visible. Degrades to a
+// safe all-"unknown" shape on failure so the section still renders.
+export async function getDeployStatus() {
+  const fallback = {
+    s3:  { state: 'unknown', url: null },
+    ecs: { state: 'unknown', url: null },
+    eks: { state: 'unknown', url: null },
+  }
+  try {
+    const r = await fetch('/api/deploy/status')
+    if (!r.ok) return fallback
+    return r.json()
+  } catch {
+    return fallback
+  }
+}
+
+// Launch a durable deploy/destroy job for a target. Returns the job manifest;
+// the caller feeds it to useDurableJobs for live-log + reattach. The real cloud
+// execution lands in #216/#217/#218 — today the server runs a marked placeholder.
+export async function launchDeploy(target, action = 'deploy') {
+  const r = await fetch(`/api/deploy/${encodeURIComponent(target)}/${encodeURIComponent(action)}`, {
+    method: 'POST',
+  })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.detail || `POST /api/deploy/${target}/${action}: ${r.status}`)
+  }
+  return r.json()
+}
+
 // Upload a file the browser user picked (e.g. an import CSV/JSON). The server
 // stores it and returns { path, filename, size }; the returned server path is
 // then passed to a tool's file param (input_path) for the actual run.

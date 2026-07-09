@@ -859,6 +859,183 @@ def cancel_durable_job(job_id: str):
     return job
 
 
+# ---------------------------------------------------------------------------
+# Deploy Options status (epic #134, issue #215)
+# ---------------------------------------------------------------------------
+# The Run Reports dialog's Deploy Options section surfaces the live state of each
+# target (S3 / ECS / EKS) so an operator can see what's already running and
+# launch / destroy from the same place. Status is aggregated from small
+# per-target helpers so the sibling deploy-execution issues can slot their real
+# logic in without colliding here: #216 fills in the S3/CloudFront status (stub
+# for now), #217/#218 supply the actual ECS/EKS deploy execution. ECS/EKS status
+# is real today, read from CloudFormation.
+
+_ECS_STACK = "NceStack"       # cdk/ecs_app.py — NceEcsStack(app, "NceStack")
+_EKS_STACK = "NceEksStack"    # cdk/eks_app.py — NceEksStack(app, "NceEksStack")
+
+_CDK_DIR = Path(__file__).resolve().parent.parent / "cdk"
+
+# CloudFormation stack statuses that mean "stack is up and usable".
+_CFN_HEALTHY = {
+    "CREATE_COMPLETE", "UPDATE_COMPLETE",
+    "UPDATE_ROLLBACK_COMPLETE", "IMPORT_COMPLETE",
+}
+
+# Cache the (potentially slow) AWS round-trips briefly so the dialog's 3s poll
+# doesn't hammer CloudFormation while it's open.
+_DEPLOY_STATUS_TTL = 10.0
+_deploy_status_lock = threading.Lock()
+_deploy_status_cache = {"at": 0.0, "value": None}
+
+
+def _cfn_state(status: "str | None") -> str:
+    """Map a raw CloudFormation stack status to the coarse state the Deploy
+    Options UI renders."""
+    if status is None:
+        return "not_deployed"
+    if status.endswith("_IN_PROGRESS"):
+        return "destroying" if status.startswith("DELETE") else "deploying"
+    if status in _CFN_HEALTHY:
+        return "deployed"
+    return "error"
+
+
+def _cdk_context(filename: str) -> dict:
+    """Return the ``context`` dict from a cdk JSON file, or {} if unreadable."""
+    try:
+        return json.loads((_CDK_DIR / filename).read_text()).get("context", {})
+    except Exception:
+        return {}
+
+
+def _describe_stack(stack_name: str) -> "tuple[str | None, dict]":
+    """Return ``(stack_status, outputs)`` for a CloudFormation stack, or
+    ``(None, {})`` when the stack is absent, boto3 is unavailable, or no AWS
+    credentials are configured. Never raises."""
+    try:
+        import boto3
+        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
+    except Exception:
+        return None, {}
+    try:
+        cf = boto3.client("cloudformation")
+        stacks = cf.describe_stacks(StackName=stack_name).get("Stacks", [])
+    except (ClientError, BotoCoreError, NoCredentialsError):
+        return None, {}
+    except Exception:
+        return None, {}
+    if not stacks:
+        return None, {}
+    stack = stacks[0]
+    outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs", [])}
+    return stack.get("StackStatus"), outputs
+
+
+def _stack_deploy_status(stack_name: str, url_output_keys, url_fallback=None) -> dict:
+    """Shared CloudFormation-backed status for a stack-based target (ECS/EKS).
+    Resolves the public URL from the first matching stack output, falling back to
+    ``url_fallback`` (e.g. a value the deploy wrote to cdk JSON) when present."""
+    status, outputs = _describe_stack(stack_name)
+    url = None
+    for key in url_output_keys:
+        if outputs.get(key):
+            url = outputs[key]
+            break
+    if url is None and url_fallback:
+        url = url_fallback
+    result = {"state": _cfn_state(status), "url": url}
+    if status:
+        result["stack_status"] = status
+    return result
+
+
+def _s3_deploy_status() -> dict:
+    # TODO(#216): real S3/CloudFront status (bucket existence + website/CDN URL).
+    # Wired in by the orchestrator after #216 merges; stubbed here so the Deploy
+    # Options section renders the S3 row today without a hard dependency on #216.
+    return {"state": "not_deployed", "url": None}
+
+
+def _ecs_deploy_status() -> dict:
+    return _stack_deploy_status(
+        _ECS_STACK,
+        ("CloudFrontUrl", "AppUrl", "AlbUrl", "AlbDns"),
+    )
+
+
+def _eks_deploy_status() -> dict:
+    return _stack_deploy_status(
+        _EKS_STACK,
+        ("CloudFrontUrl", "AppUrl"),
+        url_fallback=_cdk_context("cdk-eks.json").get("eks_cf_url") or None,
+    )
+
+
+def _compute_deploy_status() -> dict:
+    return {
+        "s3":  _s3_deploy_status(),
+        "ecs": _ecs_deploy_status(),
+        "eks": _eks_deploy_status(),
+    }
+
+
+@app.get("/api/deploy/status")
+def deploy_status(refresh: bool = False):
+    """Live deploy status per target for the Run Reports Deploy Options section
+    (issue #215). Each target reports a coarse ``state`` (``not_deployed`` /
+    ``deploying`` / ``deployed`` / ``destroying`` / ``error``), a public ``url``
+    when known, and — for ECS/EKS — the raw ``stack_status``. Results are cached
+    for a few seconds so the dialog's 3s poll doesn't hammer AWS; pass
+    ``?refresh=1`` to force a fresh read."""
+    now = time.time()
+    with _deploy_status_lock:
+        cached = _deploy_status_cache["value"]
+        if not refresh and cached is not None and now - _deploy_status_cache["at"] < _DEPLOY_STATUS_TTL:
+            return cached
+    value = _compute_deploy_status()
+    with _deploy_status_lock:
+        _deploy_status_cache["at"] = time.time()
+        _deploy_status_cache["value"] = value
+    return value
+
+
+_DEPLOY_TARGETS = {"s3", "ecs", "eks"}
+_DEPLOY_ACTIONS = {"deploy", "destroy"}
+
+
+@app.post("/api/deploy/{target}/{action}", status_code=201)
+def launch_deploy_job(target: str, action: str):
+    """Launch a durable deploy/destroy job for a target (issue #215).
+
+    The actual cloud execution (S3 publish, ECS/EKS apply/destroy) lands in the
+    sibling issues #216/#217/#218. Until then this launches a clearly-marked
+    placeholder durable job through the same engine, so the UI's
+    pre-flight → launch → live-log → reattach flow is real end to end: the job
+    shows up in ``GET /api/jobs`` and is re-adopted by ``useDurableJobs`` after a
+    refresh exactly like a real deploy will be."""
+    if target not in _DEPLOY_TARGETS:
+        raise HTTPException(status_code=404, detail=f"Unknown deploy target: {target}")
+    if action not in _DEPLOY_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown deploy action: {action}")
+
+    label = f"{action} {target.upper()}"
+    # TODO(#216/#217/#218): replace this placeholder argv with the real deploy /
+    # destroy command for the target.
+    script = (
+        "import sys, time\n"
+        f"print('[placeholder] {action} {target} — cloud execution arrives in "
+        "#216/#217/#218'); sys.stdout.flush()\n"
+        "for i in range(3):\n"
+        f"    print('  {action} {target}: step %d/3' % (i + 1)); sys.stdout.flush(); time.sleep(1)\n"
+        f"print('[placeholder] {action} {target} complete')\n"
+    )
+    argv = [sys.executable, "-c", script]
+    return job_manager.launch(
+        argv, kind="deploy", label=label,
+        params={"target": target, "action": action},
+    )
+
+
 @app.post("/api/reports/fetch-data", status_code=200)
 def fetch_report_data(request: Request):
     """Fetch live data from GitLab and load it into memory.
