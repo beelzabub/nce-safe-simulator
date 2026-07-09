@@ -974,10 +974,15 @@ def _stack_deploy_status(stack_name: str, url_output_keys, url_fallback=None) ->
 
 
 def _s3_deploy_status() -> dict:
-    # TODO(#216): real S3/CloudFront status (bucket existence + website/CDN URL).
-    # Wired in by the orchestrator after #216 merges; stubbed here so the Deploy
-    # Options section renders the S3 row today without a hard dependency on #216.
-    return {"state": "not_deployed", "url": None}
+    """Live S3/CloudFront status from the deploy module (issue #216): bucket
+    presence, distribution URL, object count and last-sync time. Resilient —
+    any failure (no config, no credentials, boto3 absent) reads as
+    ``not_deployed`` so the Deploy Options section still renders."""
+    try:
+        from server.deploy_s3 import s3_deploy_status
+        return s3_deploy_status()
+    except Exception:
+        return {"state": "not_deployed", "url": None}
 
 
 def _ecs_deploy_status() -> dict:
@@ -1042,8 +1047,19 @@ def launch_deploy_job(target: str, action: str):
     if action not in _DEPLOY_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown deploy action: {action}")
 
+    # S3 execution is real (issue #216): publish/destroy the CloudFront+OAC site
+    # via the whitelisted --deploy-s3 CLI. The UI's "deploy" action maps to the
+    # module's "publish". ECS/EKS remain placeholders until #217/#218.
+    if target == "s3":
+        s3_action = "publish" if action == "deploy" else "destroy"
+        kind, label, argv = _job_argv({"deploy": "s3", "action": s3_action})
+        return job_manager.launch(
+            argv, kind=kind, label=label,
+            params={"target": "s3", "action": action},
+        )
+
     label = f"{action} {target.upper()}"
-    # TODO(#216/#217/#218): replace this placeholder argv with the real deploy /
+    # TODO(#217/#218): replace this placeholder argv with the real deploy /
     # destroy command for the target.
     script = (
         "import sys, time\n"
@@ -1213,6 +1229,16 @@ def _job_argv(data: dict) -> tuple:
     are added by the ECS/EKS/S3 children of #134.
     """
     entry = [sys.executable, "NceGitLab.py"]
+
+    # --- Deploy: S3 static site behind CloudFront/OAC (issue #216) ----------
+    # Self-contained whitelist branch. Sibling deploy children (#215 ECS/EKS,
+    # #219 reports) append their own branches here; kept isolated for a clean
+    # rebase. The request never supplies a raw command line.
+    if data.get("deploy") == "s3":
+        action = data.get("action", "publish")
+        if action not in ("publish", "destroy"):
+            raise ValueError(f"Unknown S3 deploy action: {action!r}")
+        return "deploy:s3", f"s3-{action}", entry + ["--deploy-s3", action]
 
     if "tool" in data:
         key = data["tool"]

@@ -1,0 +1,6 @@
+{
+  "context": {
+    "site_bucket": "nce-safe-sim-site",
+    "distribution_comment": "NCE SAFe Simulator static site"
+  }
+}

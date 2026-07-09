@@ -41,6 +41,14 @@
       }
     }
   },
+  "deploy": {
+    "s3": {
+      "bucket": "nce-safe-sim-site",
+      "region": "us-east-1",
+      "prefix": "",
+      "distribution_comment": "NCE SAFe Simulator static site"
+    }
+  },
   "project_labels": [
     "project::DO",
     "project::RTSO",
