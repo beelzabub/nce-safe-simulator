@@ -579,6 +579,12 @@ def main():
                              "publish (deploy/update) the stack, destroy it, or print "
                              "status JSON. Reuses the existing ECR image tag. Runs as a "
                              "durable job.")
+    parser.add_argument("--deploy-eks",              metavar="ACTION",
+                        choices=["publish", "destroy", "status"],
+                        help="EKS/Kubernetes deploy via CDK stack NceEksStack + Helm "
+                             "(issue #218): publish (deploy/update), destroy it, or print "
+                             "status JSON. Reuses the existing ECR image tag (push one "
+                             "first with `make -C cdk ecr-push`). Runs as a durable job.")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -604,6 +610,16 @@ def main():
         from server.deploy_ecs import run_cli as _deploy_ecs_cli
 
         _deploy_ecs_cli(args.deploy_ecs)
+        return
+
+    # EKS/Kubernetes deploy (issue #218). Same rationale as --deploy-ecs:
+    # provisions cloud resources only (no GitLab connection), so it runs before
+    # the NceGitLab() client is built. Launched as a durable subprocess job.
+    if args.deploy_eks:
+        _phase[0] = f"deploy-eks {args.deploy_eks}"
+        from server.deploy_eks import run_cli as _deploy_eks_cli
+
+        _deploy_eks_cli(args.deploy_eks)
         return
 
     formats   = _parse_formats(args.formats)

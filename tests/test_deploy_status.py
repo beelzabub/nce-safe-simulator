@@ -3,6 +3,8 @@
 The status endpoint aggregates per-target state; S3 is a stub (owned by #216),
 ECS/EKS read CloudFormation. These tests mock boto3 so they never touch AWS.
 """
+import sys
+
 import boto3
 import pytest
 from fastapi.testclient import TestClient
@@ -197,8 +199,17 @@ def test_status_survives_boto_error(client, monkeypatch):
 
 @pytest.fixture()
 def deploy_client(monkeypatch, tmp_path):
-    """TestClient whose job_manager writes to a temp dir, so deploy launches
-    spawn a harmless placeholder subprocess instead of touching AWS."""
+    """TestClient whose job_manager writes to a temp dir, and whose _job_argv is
+    swapped for a harmless echo (preserving the real kind/label) — so a deploy
+    launch exercises the durable-job plumbing without shelling to a real
+    ``--deploy-*`` CLI (which would run make/cdk against AWS)."""
+    real_job_argv = appmod._job_argv
+
+    def harmless_argv(data):
+        kind, label, _argv = real_job_argv(data)
+        return kind, label, [sys.executable, "-c", "print('ok')"]
+
+    monkeypatch.setattr(appmod, "_job_argv", harmless_argv)
     test_mgr = JobManager(jobs_dir=tmp_path / "jobs")
     monkeypatch.setattr(appmod, "job_manager", test_mgr)
     appmod.app.state.gl = None
@@ -206,13 +217,13 @@ def deploy_client(monkeypatch, tmp_path):
 
 
 def test_launch_deploy_returns_durable_job(deploy_client):
-    # EKS is still the placeholder target (#218); posting it spawns a harmless
-    # inline subprocess rather than a real cloud deploy.
+    # Every target now delegates to a real CLI; the fixture's harmless _job_argv
+    # keeps the real kind/label but runs a no-op subprocess.
     client, mgr = deploy_client
     r = client.post("/api/deploy/eks/deploy")
     assert r.status_code == 201
     manifest = r.json()
-    assert manifest["kind"] == "deploy"
+    assert manifest["kind"] == "deploy:eks"
     assert manifest["params"] == {"target": "eks", "action": "deploy"}
     # It's a real durable job: listed and tailable.
     assert any(j["id"] == manifest["id"] for j in client.get("/api/jobs").json())
@@ -285,3 +296,29 @@ def test_launch_ecs_delegates_to_real_cli(monkeypatch):
     r = client.post("/api/deploy/ecs/destroy")
     assert r.status_code == 201
     assert captured["argv"][-2:] == ["--deploy-ecs", "destroy"]
+
+
+def test_launch_eks_delegates_to_real_cli(monkeypatch):
+    # EKS execution is real (#218): the generic deploy route delegates to the
+    # whitelisted --deploy-eks CLI, mapping "deploy" -> "publish" and passing
+    # "destroy" straight through. Capture the argv instead of spawning.
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        captured.update(kw)
+        return {"id": "eks", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/eks/deploy")
+    assert r.status_code == 201
+    assert captured["kind"] == "deploy:eks"
+    assert captured["argv"][-2:] == ["--deploy-eks", "publish"]
+    assert captured["params"] == {"target": "eks", "action": "deploy"}
+
+    r = client.post("/api/deploy/eks/destroy")
+    assert r.status_code == 201
+    assert captured["argv"][-2:] == ["--deploy-eks", "destroy"]
