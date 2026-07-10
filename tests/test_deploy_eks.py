@@ -28,7 +28,7 @@ def test_app_name_falls_back_when_unreadable(monkeypatch, tmp_path):
 
 
 def test_missing_tools_reports_absent(monkeypatch):
-    present = {"make", "cdk", "node", "aws", "kubectl"}  # helm "missing"
+    present = {"make", "jq", "cdk", "node", "aws", "kubectl"}  # helm "missing"
     monkeypatch.setattr(de.shutil, "which", lambda t: t if t in present else None)
     assert de._missing_tools() == ["helm"]
 
@@ -41,6 +41,8 @@ def test_missing_tools_empty_when_all_present(monkeypatch):
 def test_required_tools_include_kubectl_and_helm():
     assert "kubectl" in de._REQUIRED_TOOLS
     assert "helm" in de._REQUIRED_TOOLS
+    # The make targets parse cdk context JSON with jq (#231).
+    assert "jq" in de._REQUIRED_TOOLS
     # EKS never builds an image, so docker is not required.
     assert "docker" not in de._REQUIRED_TOOLS
 

@@ -45,9 +45,10 @@ _CFN_HEALTHY = {
     "UPDATE_ROLLBACK_COMPLETE", "IMPORT_COMPLETE",
 }
 
-# Tools the CDK deploy path needs on PATH. ``docker`` is intentionally excluded —
-# it is only required for the initial image build (see _needs_image_build).
-_REQUIRED_TOOLS = ("make", "cdk", "node", "aws")
+# Tools the CDK deploy path needs on PATH. The make targets parse cdk context
+# JSON with ``jq``. ``docker`` is intentionally excluded — it is only required
+# for the initial image build (see _needs_image_build).
+_REQUIRED_TOOLS = ("make", "jq", "cdk", "node", "aws")
 
 
 # ---------------------------------------------------------------------------
