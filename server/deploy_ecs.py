@@ -26,6 +26,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from server.deploy_proc import run_streaming
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CDK_DIR = _REPO_ROOT / "cdk"
 _ECS_CTX = _CDK_DIR / "cdk-ecs.json"
@@ -119,12 +121,10 @@ def _needs_image_build(app_name, *, log=print) -> bool:
 def _run_make(target, *, log=print) -> int:
     """Run ``make -C cdk <target>`` and return its exit code.
 
-    Output is inherited by the parent process so it streams straight into the
-    durable job log; ``log`` frames the run with start/finish markers.
+    Runs under a pseudo-tty (issue #225) so cdk/node stream line-by-line into
+    the durable job log instead of block-buffering to a burst at the end.
     """
-    argv = ["make", "-C", str(_CDK_DIR), target]
-    log(f"$ {' '.join(argv)}")
-    return subprocess.run(argv).returncode
+    return run_streaming(["make", "-C", str(_CDK_DIR), target], log=log)
 
 
 def _preflight(*, require_image_build_check, log=print) -> None:

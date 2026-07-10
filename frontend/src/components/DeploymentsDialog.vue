@@ -36,6 +36,25 @@
                   :title="statusFor(t.key).url"
                 >{{ shortUrl(statusFor(t.key).url) }} ↗</a>
               </div>
+
+              <!-- S3 publish target: pick an existing bucket or create a new,
+                   globally-unique one (issue #225). -->
+              <div v-if="showBucketPicker(t.key)" class="dep-bucket">
+                <label class="dep-bucket-label">Bucket</label>
+                <select v-model="selectedBucket" class="dep-bucket-select">
+                  <option v-for="name in bucketOptions" :key="name" :value="name">{{ name }}</option>
+                  <option :value="NEW">＋ Create new…</option>
+                </select>
+                <template v-if="selectedBucket === NEW">
+                  <input
+                    v-model="newBase"
+                    class="dep-bucket-input"
+                    spellcheck="false"
+                    placeholder="base name"
+                  />
+                  <span class="dep-bucket-preview" :title="resolvedNewBucket">→ {{ resolvedNewBucket }}</span>
+                </template>
+              </div>
             </div>
 
             <div class="dep-action">
@@ -77,7 +96,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { getS3Buckets } from '../api.js'
 import { useDeployStatus } from '../composables/useDeployStatus.js'
 import { useJobs } from '../composables/useJobs.js'
 import { useMainView } from '../composables/useMainView.js'
@@ -153,6 +173,45 @@ function shortUrl(url) {
   try { return new URL(url).host } catch { return url }
 }
 
+// ── S3 bucket selector (issue #225) ─────────────────────────────────────────
+// S3 bucket names are globally unique, so an S3 publish targets either an
+// existing bucket (dropdown) or a new one whose name is the deterministic
+// `${base}-${accountId}`. Choices are fetched once when the dialog opens.
+const NEW = '__new__'
+const bucketData = ref({ buckets: [], default: null, account_id: null, suggested_base: 'nce-safe-sim-site' })
+const selectedBucket = ref(NEW)
+const newBase = ref('nce-safe-sim-site')
+
+const bucketOptions = computed(() => {
+  const names = bucketData.value.buckets.map(b => b.name)
+  const d = bucketData.value.default
+  if (d && !names.includes(d)) names.unshift(d)
+  return names
+})
+const resolvedNewBucket = computed(() => {
+  const base = (newBase.value || '').trim()
+  const acct = bucketData.value.account_id
+  return base && acct ? `${base}-${acct}` : base
+})
+const chosenS3Bucket = computed(() =>
+  selectedBucket.value === NEW ? resolvedNewBucket.value : selectedBucket.value)
+
+async function loadBuckets() {
+  const data = await getS3Buckets()
+  bucketData.value = data
+  newBase.value = data.suggested_base || 'nce-safe-sim-site'
+  // Default to the live/configured bucket when it's a real existing choice,
+  // otherwise fall to the "Create new" path.
+  selectedBucket.value =
+    data.default && bucketOptions.value.includes(data.default) ? data.default : NEW
+}
+
+function showBucketPicker(target) {
+  return target === 's3'
+    && statusFor('s3').state !== 'deployed'
+    && !inFlight('s3')
+}
+
 // Pre-flight: each target's Deploy/Destroy button opens the confirm directly.
 const preflight = ref(null)   // { target, action } | null
 
@@ -161,9 +220,10 @@ function requestDeploy(target, action) {
 }
 function confirmDeploy() {
   const { target, action } = preflight.value
+  const bucket = (target === 's3' && action === 'deploy') ? (chosenS3Bucket.value || null) : null
   // Launch through the shared runner so a live streaming job card appears, then
   // drop the user onto the jobs view to watch it (success or failure).
-  launchDeploy(target, action)
+  launchDeploy(target, action, bucket)
   refreshDeploy()
   preflight.value = null
   showMain('jobs')
@@ -181,6 +241,7 @@ function onKeydown(e) {
 }
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
+  loadBuckets()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
@@ -283,6 +344,42 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .dep-url:hover { text-decoration: underline; }
+
+/* S3 bucket picker (issue #225) */
+.dep-bucket {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+.dep-bucket-label {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dep-bucket-select,
+.dep-bucket-input {
+  font-size: 0.78rem;
+  padding: 2px 6px;
+  background: var(--surface-alt, var(--surface));
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-width: 100%;
+}
+.dep-bucket-select { max-width: 15rem; }
+.dep-bucket-input { min-width: 8rem; }
+.dep-bucket-preview {
+  font-size: 0.74rem;
+  font-family: monospace;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dep-action { flex-shrink: 0; }
 .dep-btn {
   padding: 5px 14px;

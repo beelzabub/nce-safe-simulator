@@ -573,6 +573,10 @@ def main():
                         help="S3 static-site hosting behind CloudFront/OAC (issue #216): "
                              "publish the built site to a private bucket, destroy the "
                              "deployment, or print status JSON. Runs as a durable job.")
+    parser.add_argument("--deploy-s3-bucket",        metavar="NAME",
+                        help="Publish target bucket for --deploy-s3 publish (issue #225); "
+                             "overrides config.json. Destroy discovers the live bucket from "
+                             "CloudFront and ignores this.")
     parser.add_argument("--deploy-ecs",              metavar="ACTION",
                         choices=["publish", "destroy", "status"],
                         help="ECS/Fargate deploy via CDK stack NceStack (issue #217): "
@@ -599,7 +603,7 @@ def main():
         _phase[0] = f"deploy-s3 {args.deploy_s3}"
         from server.deploy_s3 import run_cli as _deploy_s3_cli
 
-        _deploy_s3_cli(args.deploy_s3)
+        _deploy_s3_cli(args.deploy_s3, bucket=args.deploy_s3_bucket)
         return
 
     # ECS/Fargate deploy (issue #217). Same rationale as --deploy-s3: provisions

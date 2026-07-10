@@ -525,13 +525,16 @@ Tools that share a `parallelism_group` cannot run concurrently; the dialog disab
 
 #### Deployments
 
-A dedicated **Deployments** dialog — opened from the **Deployments…** button beside **Run Reports…** in the sidebar footer — stands the app itself up on AWS from the browser. It lists three targets — **S3**, **ECS**, and **EKS** — one per row, each showing its **live deployment status** as a **red/green/amber indicator dot with the state spelled out in text**: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS) and, for S3, the bucket/CloudFront state from the deploy module. The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
+A dedicated **Deployments** dialog — opened from the **Deployments…** button beside **Run Reports…** in the sidebar footer — stands the app itself up on AWS from the browser. It lists three targets — **S3**, **ECS**, and **EKS** — one per row, each showing its **live deployment status** as a **red/green/amber indicator dot with the state spelled out in text**: `not deployed`, `deploying…`, `deployed` (with a link to the public URL), `destroying…`, or `error`. Status is served by `GET /api/deploy/status`, which reads CloudFormation (`describe_stacks` on `NceStack` for ECS and `NceEksStack` for EKS) and, for S3, discovers the live deployment from **CloudFront** (issue #225 — see below). The result is cached for a few seconds server-side and the dialog polls it on the shared 3s cadence, but only while it's open.
 
-- Each row carries **one state-driven action button**: **Deploy** when not deployed, a disabled **Deploying…/Destroying…** while a job is in flight (with its latest log line shown inline), and **Destroy** once deployed (alongside the public URL). There are no checkboxes or batch actions — deploy and destroy are per-target.
-- **Clicking Deploy or Destroy** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm (bucket, region, exposure note).
-- **Deploy and destroy run as [durable jobs](#durable-background-jobs)**, so an in-flight operation survives a page refresh: reopening the dialog re-adopts the running job and shows its progress and latest log line, and the job is never killed by a stray disconnect.
+- Each row carries **one state-driven action button**: **Deploy** when not deployed, a disabled **Deploying…/Destroying…** while a job is in flight, and **Destroy** once deployed (alongside the public URL). There are no checkboxes or batch actions — deploy and destroy are per-target.
+- **The S3 row includes a bucket selector** (issue #225): a dropdown of the account's existing buckets (from `GET /api/deploy/s3/buckets`) plus a **Create new…** option that previews a globally-unique `${base}-${accountId}` name. S3 bucket names are globally unique across all AWS accounts, so a fixed name is fragile; the account-id suffix guarantees uniqueness and is deterministic (idempotent re-runs).
+- **Clicking Deploy or Destroy** opens a **pre-flight dialog**. For ECS/EKS it embeds the architecture diagram (the same `diagrams/` PNGs and zoom/pan viewer as the AWS Architecture button), itemizes every resource about to be created (VPC, Fargate/EKS cluster, ALB, EFS, CloudFront, ECR, Grafana…), warns that it's a long-running, billable operation, and requires an explicit acknowledgement before launching. S3 gets a lighter confirm.
+- **Deploy and destroy run as [durable jobs](#durable-background-jobs)** through the same runner as report runs: launching one drops you onto the **live streaming job card** in the main pane, and the job survives a page refresh (a running deploy is re-adopted on reload). ECS/EKS deploys run their `make`/`cdk` subprocess under a **pseudo-tty** so cdk/node output streams line-by-line rather than arriving in one burst at the end.
 
-Cloud execution is real for all three targets — **S3** (#216), **ECS** (#217), and **EKS** (#218): each delegates to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs` / `--deploy-eks`) that runs the real publish/destroy path as a durable subprocess. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through.
+Cloud execution is real for all three targets — **S3** (#216), **ECS** (#217), and **EKS** (#218): each delegates to a whitelisted CLI (`--deploy-s3` / `--deploy-ecs` / `--deploy-eks`) that runs the real publish/destroy path as a durable subprocess. The `POST /api/deploy/{target}/{action}` route maps the UI's `deploy` action to the CLI's `publish` and passes `destroy` straight through; for an S3 publish it also accepts an optional `{ "bucket": … }` body naming the target.
+
+**CloudFront is the source of truth for the S3 deployment** (issue #225). Rather than remembering the bucket name in config, S3 **status** and **destroy** find the app's distribution by its fixed origin id and recover the bucket (and region) from the origin domain (`<bucket>.s3.<region>.amazonaws.com`). So a deployed site is always discoverable — even with no `deploy.s3.bucket` in config — and destroy always tears down what's actually live. The bucket picker's dropdown needs `s3:ListAllMyBuckets` on the deploying role; without it (or without credentials) the endpoint degrades gracefully and **Create new** still works.
 
 The ECS deploy (#217) runs the same CDK path an operator drives by hand — `make -C cdk ecs-deploy` / `ecs-destroy` → `cdk deploy/destroy NceStack` — as a refresh-survivable job, streaming CDK output to the job log. Per **decision A3** it **reuses the existing ECR image tag** (the deploy only builds+pushes a new image when the repository is empty and a Docker daemon is present; there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`) and fails fast with a clear message when a first image is needed but Docker is unavailable — so the job log explains the failure instead of dying deep inside make/cdk. Because it drives the local CDK toolchain, the ECS deploy is launched from the **operator's** server (the box running `--serve`), not from inside the deployed container.
 
@@ -1257,7 +1260,7 @@ python NceGitLab.py --deploy-ecs destroy    # cdk destroy NceStack
 
 Publish the **rendered static site** (Quarto pages + Marimo WASM notebooks + the JSON data layer) to a **private S3 bucket fronted by CloudFront** — no running container. The bucket blocks all public access; CloudFront reads it through an **Origin Access Control (OAC)**, with the bucket policy scoped to the distribution ARN (`aws:SourceArn`). The site is served over HTTPS, never from the raw S3 website endpoint.
 
-Configure the target in `config.json` under a `deploy.s3` section:
+**Choosing the bucket** — from the web UI the S3 row offers a **bucket selector** (issue #225): pick one of the account's existing buckets, or **Create new…**, which appends the AWS account id to a base name (`nce-safe-sim-site` → `nce-safe-sim-site-123456789012`) so the name is globally unique (an S3 requirement) and deterministic. Alternatively set a base in `config.json` under `deploy.s3` (used as the "create new" default and the pre-distribution fallback):
 
 ```json
 "deploy": {
@@ -1276,20 +1279,22 @@ Build the site first (`python NceGitLab.py --serve` → **Site** → *build all*
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/deploy/s3` | Ensure the bucket, sync the built site (correct content-types + stale-object deletion), put it behind CloudFront/OAC, and report the HTTPS URL. Returns a job manifest. |
-| `POST /api/deploy/s3/destroy` | Disable + delete the distribution, empty the bucket, and delete it. Returns a job manifest. |
+| `GET /api/deploy/s3/buckets` | List the account's buckets + account id + suggested base name for the selector. Needs `s3:ListAllMyBuckets`; resilient (empty on failure). |
+| `POST /api/deploy/s3` | Ensure the bucket, sync the built site (correct content-types + stale-object deletion), put it behind CloudFront/OAC, and report the HTTPS URL. Optional `{ "bucket": … }` body names the target. Returns a job manifest. |
+| `POST /api/deploy/s3/destroy` | Disable + delete the distribution, empty the bucket (discovered from CloudFront), and delete it. Returns a job manifest. |
 
-Publish is idempotent — the bucket, OAC, and distribution are reused on re-runs; each sync uploads changed files and deletes any object no longer part of the built site.
+Publish is idempotent — the bucket, OAC, and distribution are reused on re-runs; each sync uploads changed files and deletes any object no longer part of the built site. **Status and destroy read the live bucket from CloudFront** (the app's distribution names its own bucket via the origin domain), so they work with no `deploy.s3.bucket` configured and always act on what's actually deployed.
 
 **From the CLI** (this is also the exact argv the durable job runs):
 
 ```bash
-python NceGitLab.py --deploy-s3 publish    # build → private bucket behind CloudFront, prints HTTPS URL
-python NceGitLab.py --deploy-s3 status     # prints status JSON (state, url, object_count, last_sync)
-python NceGitLab.py --deploy-s3 destroy    # empty bucket + delete distribution
+python NceGitLab.py --deploy-s3 publish                       # publish to the configured bucket
+python NceGitLab.py --deploy-s3 publish --deploy-s3-bucket X  # publish to a chosen/created bucket
+python NceGitLab.py --deploy-s3 status                        # status JSON (state, url, object_count, last_sync, bucket)
+python NceGitLab.py --deploy-s3 destroy                       # tear down the live deployment (bucket found via CloudFront)
 ```
 
-Status reports one of `not_deployed` (bucket absent), `deploying` (bucket present, distribution not yet created), `deployed` (bucket + distribution live, with the HTTPS URL), or `error`.
+Status reports one of `not_deployed`, `deploying` (bucket present, distribution not yet created), `deployed` (distribution live, with the HTTPS URL and the resolved bucket), or `error`.
 
 **Infrastructure-as-code alternative** — the identical private-bucket + CloudFront/OAC topology is also available as a CDK stack for operators who prefer declarative IaC (object sync still happens via the publish job):
 
