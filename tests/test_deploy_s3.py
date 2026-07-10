@@ -73,7 +73,8 @@ class FakeS3:
 
 
 class FakeCloudFront:
-    def __init__(self, bucket="b", region="us-east-1", with_dist=False):
+    def __init__(self, bucket="b", region="us-east-1", with_dist=False,
+                 dist_status="Deployed"):
         self.bucket = bucket
         self.region = region
         self.oacs = []
@@ -82,18 +83,20 @@ class FakeCloudFront:
         self.deleted = []
         self.disabled = []
         if with_dist:
-            self._add_dist()
+            self._add_dist(status=dist_status)
 
     def _domain(self):
         return f"{self.bucket}.s3.{self.region}.amazonaws.com"
 
-    def _add_dist(self):
+    def _add_dist(self, status="Deployed"):
         did = f"DIST{self._n}"
         self._n += 1
         self.dists[did] = {
             "Id": did,
             "ARN": f"arn:aws:cloudfront::123456789012:distribution/{did}",
             "DomainName": f"{did.lower()}.cloudfront.net",
+            # CloudFront's propagation state: "Deployed" (live) or "InProgress".
+            "Status": status,
             # The fixed ORIGIN_ID is how find_our_distribution locates us.
             "Origins": {"Items": [{"DomainName": self._domain(), "Id": deploy_s3.ORIGIN_ID}]},
             "_config": {"Enabled": True},
@@ -510,6 +513,23 @@ def test_status_deployed_derived_from_cloudfront_without_config(monkeypatch):
     assert st["state"] == "deployed"
     assert st["bucket"] == "live-bucket"
     assert st["url"].endswith(".cloudfront.net")
+
+
+def test_status_deploying_while_distribution_still_propagating(monkeypatch):
+    # A freshly created distribution is InProgress for ~15 min while CloudFront
+    # propagates to the edge; the URL doesn't serve yet. Status must report
+    # "deploying" with NO live URL — not "deployed" — so the UI doesn't claim the
+    # site is live and ready (issue: distro still deploying).
+    s3 = FakeS3(exists=True)
+    s3.store = {"index.html": {"Body": b"x", "ContentType": "text/html"}}
+    cf = FakeCloudFront(bucket="live-bucket", region="us-east-1",
+                        with_dist=True, dist_status="InProgress")
+    monkeypatch.setattr(deploy_s3, "_s3_client", lambda region: s3)
+    monkeypatch.setattr(deploy_s3, "_cloudfront_client", lambda: cf)
+    st = deploy_s3.s3_deploy_status({})
+    assert st["state"] == "deploying"
+    assert st["url"] is None
+    assert st["bucket"] == "live-bucket"   # bucket still resolved from CloudFront
 
 
 def test_destroy_discovers_bucket_from_cloudfront_ignoring_config(monkeypatch):
