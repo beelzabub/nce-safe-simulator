@@ -35,6 +35,10 @@
                   class="dep-url"
                   :title="statusFor(t.key).url"
                 >{{ shortUrl(statusFor(t.key).url) }} ↗</a>
+                <!-- Server-supplied context: ECR image count / S3 propagation note. -->
+                <span v-if="statusFor(t.key).detail" class="dep-detail" :title="statusFor(t.key).detail">
+                  {{ statusFor(t.key).detail }}
+                </span>
               </div>
 
               <!-- S3 publish target: pick an existing bucket or create a new,
@@ -59,7 +63,7 @@
 
             <div class="dep-action">
               <button
-                v-if="statusFor(t.key).state === 'deployed'"
+                v-if="canDestroy(t.key)"
                 class="dep-btn dep-btn--destroy"
                 @click="requestDeploy(t.key, 'destroy')"
               >Destroy</button>
@@ -107,6 +111,7 @@ const emit = defineEmits(['close'])
 
 const DEPLOY_TARGETS = [
   { key: 's3',  label: 'S3',  desc: 'Static site (CloudFront + OAC)' },
+  { key: 'ecr', label: 'ECR', desc: 'Container image registry — required by ECS/EKS' },
   { key: 'ecs', label: 'ECS', desc: 'Fargate service' },
   { key: 'eks', label: 'EKS', desc: 'Kubernetes cluster' },
 ]
@@ -130,6 +135,7 @@ const STATE_LABELS = {
   deploying:    'deploying…',
   destroying:   'destroying…',
   deployed:     'deployed',
+  no_image:     'repo created — no image',   // ECR only (issue #234)
   error:        'error',
   unknown:      'checking…',
 }
@@ -144,15 +150,23 @@ function dotClass(target) {
   const s = statusFor(target).state
   if (s === 'deployed') return 'dep-dot--ok'
   if (s === 'deploying' || s === 'destroying') return 'dep-dot--busy'
+  if (s === 'no_image') return 'dep-dot--warn'   // half-way there: repo, no image
   if (s === 'unknown')  return 'dep-dot--unknown'
   return 'dep-dot--off'
 }
 function statusClass(target) {
   const s = statusFor(target).state
   if (s === 'deployed') return 'dep-status--ok'
-  if (s === 'deploying' || s === 'destroying') return 'dep-status--busy'
+  if (s === 'deploying' || s === 'destroying' || s === 'no_image') return 'dep-status--busy'
   if (s === 'error')    return 'dep-status--err'
   return 'dep-status--off'
+}
+
+// Destroy applies to anything that exists server-side: a deployed target, or
+// an ECR repo that exists but holds no image yet (issue #234).
+function canDestroy(target) {
+  const s = statusFor(target).state
+  return s === 'deployed' || s === 'no_image'
 }
 
 // A running deploy/destroy job for this target, if any (from the shared runner).
@@ -317,6 +331,11 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px rgba(224,161,63,0.18);
   animation: dep-pulse 1.1s ease-in-out infinite;
 }
+/* Static amber — a partial state (ECR repo without an image), not activity. */
+.dep-dot--warn {
+  background: #e0a13f;
+  box-shadow: 0 0 0 2px rgba(224,161,63,0.18);
+}
 @keyframes dep-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 .dep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
@@ -344,6 +363,13 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .dep-url:hover { text-decoration: underline; }
+.dep-detail {
+  font-size: 0.74rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* S3 bucket picker (issue #225) */
 .dep-bucket {

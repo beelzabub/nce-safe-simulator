@@ -59,16 +59,14 @@ class NceEcsStack(Stack):
         else:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
 
-        # ── ECR repository ────────────────────────────────────────────────────
-        # Image is built and pushed externally via 'make ecr-push'.
-        # ECS always pulls :latest; use 'make ecs-redeploy' to pick up a new image.
-        repo = ecr.Repository(
-            self,
-            "Repo",
-            repository_name=app_name,
-            removal_policy=RemovalPolicy.DESTROY,
-            empty_on_delete=True,
-        )
+        # ── ECR repository (referenced, not owned — issue #234) ──────────────
+        # The repo is shared infrastructure: EKS pulls from it too, so this
+        # stack must not create or delete it (an ECS destroy used to take the
+        # repo and its images down with it, breaking a live EKS deployment).
+        # It is created/pushed by the ECR deploy target ('--deploy-ecr publish'
+        # / 'make ecr-push'); ECS always pulls :latest — 'make ecs-redeploy'
+        # picks up a new image.
+        repo = ecr.Repository.from_repository_name(self, "Repo", app_name)
 
         # ── SSM: config seed permission ───────────────────────────────────────
         # config.json is stored as a SecureString in SSM via 'make seed-config'

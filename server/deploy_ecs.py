@@ -81,31 +81,11 @@ def _docker_available() -> bool:
         return False
 
 
-def _ecr_image_count(app_name) -> "int | None":
-    """Number of images in the app's ECR repository, or ``None`` when it can't be
-    determined (no boto3, no credentials). ``None`` means "don't block" — the
-    make target will surface any real problem. A **missing repository** is a
-    definite answer, not an unknown: the stack creates the repo itself on the
-    first deploy, so absent-repo means zero images and an initial build+push
-    is certainly required."""
-    try:
-        import boto3
-        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
-    except Exception:
-        return None
-    try:
-        ecr = boto3.client("ecr")
-        ids = ecr.list_images(repositoryName=app_name).get("imageIds", [])
-        return len(ids)
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code") if hasattr(e, "response") else None
-        if code == "RepositoryNotFoundException":
-            return 0
-        return None
-    except (BotoCoreError, NoCredentialsError):
-        return None
-    except Exception:
-        return None
+# Shared ECR read helpers live in server.deploy_ecr (issue #234) — the repo is
+# the ECR target's resource now, not this stack's. Bound here so tests (and the
+# preflight below) keep their existing monkeypatch seams.
+from server.deploy_ecr import ecr_image_count as _ecr_image_count          # noqa: E402
+from server.deploy_ecr import ecr_repo_exists as _ecr_repo_exists          # noqa: E402
 
 
 def _needs_image_build(app_name, *, log=print) -> bool:
@@ -152,12 +132,22 @@ def _preflight(*, require_image_build_check, log=print) -> None:
         )
     if require_image_build_check:
         app_name = _app_name()
+        # The stack references the shared ECR repo by name (issue #234) — it no
+        # longer creates it, so an absent repo can't be built into and the ECR
+        # target must be deployed first.
+        if _ecr_repo_exists(app_name) is False:
+            raise SystemExit(
+                f"ECR repository '{app_name}' does not exist. The repository is "
+                "managed by the ECR deploy target now — deploy ECR first "
+                "(Deployments dialog → ECR → Deploy, which creates the repo and "
+                "pushes the image), then retry."
+            )
         if _needs_image_build(app_name, log=log) and not _docker_available():
             raise SystemExit(
                 f"ECR repository '{app_name}' has no image and no Docker daemon "
                 "is available to build the first one (decision A3: build only when "
-                "Docker is present, never CodeBuild). Start Docker, or push an "
-                "initial image with 'make -C cdk ecr-push', then retry."
+                "Docker is present, never CodeBuild). Start Docker, or deploy the "
+                "ECR target (Deployments dialog → ECR → Deploy), then retry."
             )
 
 

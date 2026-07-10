@@ -11,6 +11,7 @@ const POLL_MS = 3000
 
 const EMPTY = {
   s3:  { state: 'unknown', url: null },
+  ecr: { state: 'unknown', url: null },
   ecs: { state: 'unknown', url: null },
   eks: { state: 'unknown', url: null },
 }

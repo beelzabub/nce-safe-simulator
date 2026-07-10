@@ -64,6 +64,9 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
 	IMAGE_COUNT=$$(aws ecr list-images --repository-name $$APP_NAME --region $$REGION --query 'length(imageIds)' --output text 2>/dev/null || echo "0") && \
 	if [ "$$IMAGE_COUNT" = "0" ]; then \
+	  aws ecr describe-repositories --repository-names $$APP_NAME --region $$REGION >/dev/null 2>&1 || \
+	    { echo "==> ECR repository absent — creating it (no longer stack-owned, issue #234)..." && \
+	      aws ecr create-repository --repository-name $$APP_NAME --region $$REGION >/dev/null; } && \
 	  echo "==> No image in ECR — deploying infra with service scaled to 0..." && \
 	  cdk deploy NceStack --app "python ecs_app.py" --output cdk-ecs.out --require-approval never --context desired_count=0 && \
 	  echo "==> Building and pushing initial image..." && \
@@ -125,10 +128,13 @@ seed-config: ## Store config.json in SSM as a SecureString, token injected from 
 	  aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$CONFIG_JSON" >/dev/null
 	@echo "Done. Run 'make ecs-deploy' (or 'make ecs-redeploy') to pick up the new config."
 
-ecr-push: ## Build and push :latest to ECR (follow with ecs-redeploy or eks-redeploy)
+ecr-push: ## Build and push :latest to ECR (creates the repo if absent — issue #234)
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
+	aws ecr describe-repositories --repository-names nce-safe-simulator --region $$REGION >/dev/null 2>&1 || \
+	  { echo "ECR repository absent — creating it (the repo is no longer stack-owned)..." && \
+	    aws ecr create-repository --repository-name nce-safe-simulator --region $$REGION >/dev/null; } && \
 	echo "Fetching CloudFormation outputs for architecture diagrams..." && \
 	EKS_CF=$$(aws cloudformation describe-stacks --stack-name NceEksStack \
 	  --query 'Stacks[0].Outputs' --output json 2>/dev/null || echo '[]') && \

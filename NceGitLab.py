@@ -587,8 +587,15 @@ def main():
                         choices=["publish", "destroy", "status"],
                         help="EKS/Kubernetes deploy via CDK stack NceEksStack + Helm "
                              "(issue #218): publish (deploy/update), destroy it, or print "
-                             "status JSON. Reuses the existing ECR image tag (push one "
-                             "first with `make -C cdk ecr-push`). Runs as a durable job.")
+                             "status JSON. Reuses the existing ECR image tag (publish the "
+                             "ECR target first). Runs as a durable job.")
+    parser.add_argument("--deploy-ecr",              metavar="ACTION",
+                        choices=["publish", "destroy", "status"],
+                        help="Shared ECR image repository (issue #234): publish creates "
+                             "the repo when absent and builds+pushes the app image "
+                             "(requires Docker), destroy deletes the repo and its images "
+                             "(ECS/EKS cannot pull until republished), status prints "
+                             "JSON. Runs as a durable job.")
     args, extra = parser.parse_known_args()
 
     if args.usage:
@@ -624,6 +631,15 @@ def main():
         from server.deploy_eks import run_cli as _deploy_eks_cli
 
         _deploy_eks_cli(args.deploy_eks)
+        return
+
+    # Shared ECR image repository (issue #234). Same rationale: cloud resources
+    # only (no GitLab connection). Launched as a durable subprocess job.
+    if args.deploy_ecr:
+        _phase[0] = f"deploy-ecr {args.deploy_ecr}"
+        from server.deploy_ecr import run_cli as _deploy_ecr_cli
+
+        _deploy_ecr_cli(args.deploy_ecr)
         return
 
     formats   = _parse_formats(args.formats)
