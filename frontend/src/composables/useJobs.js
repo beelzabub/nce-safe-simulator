@@ -34,6 +34,10 @@ const _offsets = new Map()        // id -> next log byte offset
 const _timers = new Map()         // id -> poll timeout handle
 const _userCancelled = new Set()  // ids the user explicitly cancelled
 const _terminalHandled = new Set()// ids whose terminal transition was processed
+// Panes adopted by reattach() rather than launched this session. They were
+// never watched to completion here, so they are exempt from the terminal
+// auto-close — a refreshed session's panes must not silently vanish (#230).
+const _reattachedPanes = new Set()
 
 // Terminal control codes are meaningful in a terminal but visually broken in a
 // <pre> block; strip them and fold bare carriage returns into newlines — the
@@ -171,7 +175,8 @@ function _onTerminal(id, status) {
   const h = _sessionHistory.value.find(e => e.id === id)
   if (h && !h.endedAt) h.endedAt = Date.now()
   const ms = AUTOCLOSE_MS[status]
-  if (ms) _scheduleClose(id, ms)   // errors have no delay — stay open
+  // Errors and reattached panes have no delay — stay open until closed.
+  if (ms && !_reattachedPanes.has(id)) _scheduleClose(id, ms)
 }
 
 // Poll one durable job's log tail from its current offset until it reaches a
@@ -214,8 +219,9 @@ function _tail(id) {
 
 // Adopt a server manifest into the UI: always a history entry; a running job
 // also opens a live pane and starts tailing. `openPane` forces a pane open even
-// for a terminal job (used when a fresh launch failed to start).
-function _adopt(manifest, { openPane = false } = {}) {
+// for a terminal job (used when a fresh launch failed to start). `reattached`
+// marks a pane re-adopted on page load, which exempts it from auto-close.
+function _adopt(manifest, { openPane = false, reattached = false } = {}) {
   const id = manifest.id
   if (_sessionHistory.value.some(e => e.id === id)) return
   const status = _uiStatus(manifest.state)
@@ -246,6 +252,7 @@ function _adopt(manifest, { openPane = false } = {}) {
     pane.kind = manifest.kind
     pane.params = manifest.params || {}
     jobs.value.push(pane)
+    if (reattached) _reattachedPanes.add(id)
   }
   if (running) {
     _offsets.set(id, 0)
@@ -275,22 +282,25 @@ async function _loadDiskHistory() {
 
 // Re-adopt durable jobs from the server on page load: repopulate history and
 // resume tailing anything still running. Safe to call repeatedly (runs once).
+// Returns the number of still-running jobs adopted, so the caller can pull
+// the jobs view forward when there is live output to show (#230).
 async function _reattach() {
-  if (_reattached) return
+  if (_reattached) return 0
   _reattached = true
   let manifests = []
   try {
     manifests = await listJobs()
   } catch {
     _reattached = false   // allow a later retry if the server was briefly down
-    return
+    return 0
   }
   for (const m of manifests) {
     const started = m.started ? Date.parse(m.started) : Date.now()
     if (started < _durableFloor) _durableFloor = started
   }
   // oldest-last insertion keeps newest-first history ordering
-  for (const m of [...manifests].reverse()) _adopt(m)
+  for (const m of [...manifests].reverse()) _adopt(m, { reattached: true })
+  return manifests.filter(m => m.state === 'running').length
 }
 
 function _pushSyntheticError(key, message) {
