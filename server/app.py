@@ -1000,9 +1000,21 @@ def _eks_deploy_status() -> dict:
     )
 
 
+def _ecr_deploy_status() -> dict:
+    """Live status of the shared container-image repository (issue #234):
+    repo presence + image count + last push. Resilient — any failure reads as
+    ``not_deployed`` so the Deployments dialog still renders."""
+    try:
+        from server.deploy_ecr import ecr_deploy_status
+        return ecr_deploy_status()
+    except Exception:
+        return {"state": "not_deployed", "url": None}
+
+
 def _compute_deploy_status() -> dict:
     return {
         "s3":  _s3_deploy_status(),
+        "ecr": _ecr_deploy_status(),
         "ecs": _ecs_deploy_status(),
         "eks": _eks_deploy_status(),
     }
@@ -1028,7 +1040,7 @@ def deploy_status(refresh: bool = False):
     return value
 
 
-_DEPLOY_TARGETS = {"s3", "ecs", "eks"}
+_DEPLOY_TARGETS = {"s3", "ecr", "ecs", "eks"}
 _DEPLOY_ACTIONS = {"deploy", "destroy"}
 
 
@@ -1288,6 +1300,16 @@ def _job_argv(data: dict) -> tuple:
         if action not in ("publish", "destroy"):
             raise ValueError(f"Unknown EKS deploy action: {action!r}")
         return "deploy:eks", f"eks-{action}", entry + ["--deploy-eks", action]
+
+    # --- Deploy: shared ECR image repository (issue #234) --------------------
+    # Delegates to the --deploy-ecr CLI: publish creates the repo when absent
+    # and runs the real `make -C cdk ecr-push` build+push; destroy deletes the
+    # repo and its images.
+    if data.get("deploy") == "ecr":
+        action = data.get("action", "publish")
+        if action not in ("publish", "destroy"):
+            raise ValueError(f"Unknown ECR deploy action: {action!r}")
+        return "deploy:ecr", f"ecr-{action}", entry + ["--deploy-ecr", action]
 
     if "tool" in data:
         key = data["tool"]

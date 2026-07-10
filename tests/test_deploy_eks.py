@@ -58,12 +58,17 @@ def test_preflight_raises_on_missing_tools(monkeypatch):
     assert "helm" in str(exc.value) and "kubectl" in str(exc.value)
 
 
-def test_preflight_blocks_when_repo_empty(monkeypatch):
+def test_preflight_blocks_when_repo_empty_or_absent(monkeypatch):
+    # The shared helper reports an absent repo as a definite 0 (issue #234),
+    # so this one check covers both "repo exists, no image" and "no repo" —
+    # the message points at the ECR deploy target either way.
     monkeypatch.setattr(de, "_missing_tools", lambda: [])
     monkeypatch.setattr(de, "_ecr_image_count", lambda name: 0)
     with pytest.raises(SystemExit) as exc:
         de._preflight(require_image=True, log=lambda *_: None)
-    assert "ecr-push" in str(exc.value).lower()
+    msg = str(exc.value)
+    assert "absent or has no image" in msg
+    assert "ECR" in msg and "Deploy" in msg
 
 
 def test_preflight_passes_when_image_exists(monkeypatch):

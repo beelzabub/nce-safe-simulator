@@ -81,33 +81,9 @@ def test_needs_image_build_false_when_count_unknown(monkeypatch):
     assert de._needs_image_build("app", log=lambda *_: None) is False
 
 
-def test_ecr_image_count_zero_when_repo_absent(monkeypatch):
-    # A missing repository is a definite zero, not an unknown: the stack
-    # creates the repo itself on first deploy, so an initial build+push is
-    # certainly required and preflight must check for Docker (#231 follow-up).
-    boto3 = pytest.importorskip("boto3")
-    from botocore.exceptions import ClientError
-
-    class _Ecr:
-        def list_images(self, repositoryName):
-            raise ClientError(
-                {"Error": {"Code": "RepositoryNotFoundException"}}, "ListImages"
-            )
-
-    monkeypatch.setattr(boto3, "client", lambda service: _Ecr())
-    assert de._ecr_image_count("app") == 0
-
-
-def test_ecr_image_count_none_on_other_client_error(monkeypatch):
-    boto3 = pytest.importorskip("boto3")
-    from botocore.exceptions import ClientError
-
-    class _Ecr:
-        def list_images(self, repositoryName):
-            raise ClientError({"Error": {"Code": "AccessDeniedException"}}, "ListImages")
-
-    monkeypatch.setattr(boto3, "client", lambda service: _Ecr())
-    assert de._ecr_image_count("app") is None
+# The ECR read-helper implementation tests (absent repo → 0, other client
+# errors → None) live in tests/test_deploy_ecr.py — the helpers moved to
+# server/deploy_ecr.py (issue #234) and this module imports them.
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +97,22 @@ def test_preflight_raises_on_missing_tools(monkeypatch):
     assert "cdk" in str(exc.value) and "aws" in str(exc.value)
 
 
+def test_preflight_blocks_when_repo_absent(monkeypatch):
+    # The stack references the shared repo by name (issue #234) — it cannot
+    # create it, so an absent repo must fail fast pointing at the ECR target,
+    # regardless of Docker availability.
+    monkeypatch.setattr(de, "_missing_tools", lambda: [])
+    monkeypatch.setattr(de, "_ecr_repo_exists", lambda name: False)
+    monkeypatch.setattr(de, "_docker_available", lambda: True)
+    with pytest.raises(SystemExit) as exc:
+        de._preflight(require_image_build_check=True, log=lambda *_: None)
+    assert "does not exist" in str(exc.value)
+    assert "ECR" in str(exc.value)
+
+
 def test_preflight_blocks_when_no_image_and_no_docker(monkeypatch):
     monkeypatch.setattr(de, "_missing_tools", lambda: [])
+    monkeypatch.setattr(de, "_ecr_repo_exists", lambda name: True)
     monkeypatch.setattr(de, "_needs_image_build", lambda name, log=print: True)
     monkeypatch.setattr(de, "_docker_available", lambda: False)
     with pytest.raises(SystemExit) as exc:
@@ -132,6 +122,7 @@ def test_preflight_blocks_when_no_image_and_no_docker(monkeypatch):
 
 def test_preflight_passes_when_image_exists(monkeypatch):
     monkeypatch.setattr(de, "_missing_tools", lambda: [])
+    monkeypatch.setattr(de, "_ecr_repo_exists", lambda name: True)
     monkeypatch.setattr(de, "_needs_image_build", lambda name, log=print: False)
     # Docker not consulted when an image already exists.
     monkeypatch.setattr(de, "_docker_available", lambda: pytest.fail("should not check docker"))

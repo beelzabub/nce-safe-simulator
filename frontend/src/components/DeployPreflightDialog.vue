@@ -97,9 +97,9 @@ const PLANS = {
       'Application Load Balancer (public entry point)',
       'EFS file system (config, reports, interactive, Quarto site)',
       'CloudFront distribution (HTTPS front door)',
-      'ECR repository (container image)',
       'CloudWatch log group',
       'Amazon Managed Grafana workspace (when enabled)',
+      'Pulls the app image from the shared ECR repository (deploy ECR first)',
     ],
   },
   eks: {
@@ -110,10 +110,22 @@ const PLANS = {
       'AWS Load Balancer Controller → Application Load Balancer',
       'EFS file system + access points (config, reports, interactive, Quarto)',
       'CloudFront distribution (HTTPS front door)',
-      'ECR repository (container image)',
       'IAM roles for service accounts (IRSA)',
       'Amazon Managed Grafana workspace (when enabled)',
+      'Pulls the app image from the shared ECR repository (deploy ECR first)',
     ],
+  },
+  ecr: {
+    light: true,
+    lede: 'This creates the shared container-image registry and pushes the app image.',
+    resources: [
+      'ECR repository (shared — ECS and EKS pull from it)',
+      'Container image build + push (:latest) — requires Docker on the server',
+    ],
+    warning: 'The image build+push runs on the server\'s Docker daemon and can take several minutes.',
+    ack: 'I understand this creates the ECR repository and pushes an image.',
+    destroyLede: 'This deletes the ECR repository and every image in it.',
+    destroyWarning: 'ECS and EKS pull from this repository: they cannot deploy (and their tasks/pods cannot restart) until ECR is republished. Deleted images cannot be recovered.',
   },
   s3: {
     light: true,
@@ -133,12 +145,14 @@ const plan = computed(() => {
   if (props.action === 'destroy') {
     return {
       ...base,
-      lede: base.light
-        ? 'This removes the published assets from S3.'
-        : `This tears down every resource in ${base.lede.match(/“[^”]+”/)?.[0] || 'the stack'} — data on EFS is deleted.`,
-      warning: base.light
-        ? 'Deleted objects cannot be recovered.'
-        : 'Destroying the stack is irreversible: EFS data (reports, config, interactive site) is deleted and the public URL stops resolving.',
+      lede: base.destroyLede
+        || (base.light
+          ? 'This removes the published assets from S3.'
+          : `This tears down every resource in ${base.lede.match(/“[^”]+”/)?.[0] || 'the stack'} — data on EFS is deleted.`),
+      warning: base.destroyWarning
+        || (base.light
+          ? 'Deleted objects cannot be recovered.'
+          : 'Destroying the stack is irreversible: EFS data (reports, config, interactive site) is deleted and the public URL stops resolving.'),
       ack: 'I understand this permanently destroys the resources above.',
     }
   }

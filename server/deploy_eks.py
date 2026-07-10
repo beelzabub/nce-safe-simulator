@@ -73,23 +73,12 @@ def _missing_tools() -> list:
     return [t for t in _REQUIRED_TOOLS if shutil.which(t) is None]
 
 
-def _ecr_image_count(app_name) -> "int | None":
-    """Number of images in the app's ECR repository, or ``None`` when it can't be
-    determined (no boto3, no credentials, repo absent). ``None`` means "don't
-    block" — the make target will surface any real problem."""
-    try:
-        import boto3
-        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
-    except Exception:
-        return None
-    try:
-        ecr = boto3.client("ecr")
-        ids = ecr.list_images(repositoryName=app_name).get("imageIds", [])
-        return len(ids)
-    except (ClientError, BotoCoreError, NoCredentialsError):
-        return None
-    except Exception:
-        return None
+# Shared ECR read helper (issue #234): one implementation in server.deploy_ecr
+# for both ECS and EKS pre-flights. Crucially it reports a **missing** repo as
+# a definite 0 — the old local copy here mapped RepositoryNotFoundException to
+# "unknown → assume an image exists", which let an EKS deploy sail past a
+# nonexistent repo and end as an opaque ImagePullBackOff 503.
+from server.deploy_ecr import ecr_image_count as _ecr_image_count          # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +113,10 @@ def _preflight(*, require_image, log=print) -> None:
         count = _ecr_image_count(app_name)
         if count == 0:
             raise SystemExit(
-                f"ECR repository '{app_name}' has no image. EKS deploy never builds "
-                "one (the Helm chart pulls the current tag), so push an image first "
-                "with 'make -C cdk ecr-push' (decision A3: reuse the existing tag, "
-                "never CodeBuild), then retry."
+                f"ECR repository '{app_name}' is absent or has no image. EKS deploy "
+                "never builds one (the Helm chart pulls the current tag; decision A3), "
+                "so deploy the ECR target first (Deployments dialog → ECR → Deploy, "
+                "which creates the repo and pushes the image), then retry."
             )
         if count is None:
             log("  (could not read ECR image count — assuming an image exists)")
