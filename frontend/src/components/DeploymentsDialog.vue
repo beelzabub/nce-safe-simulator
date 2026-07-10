@@ -136,6 +136,7 @@ const STATE_LABELS = {
   destroying:   'destroying…',
   deployed:     'deployed',
   no_image:     'repo created — no image',   // ECR only (issue #234)
+  unreadable:   'status unavailable',        // can't read ≠ not deployed (issue #235)
   error:        'error',
   unknown:      'checking…',
 }
@@ -151,7 +152,7 @@ function dotClass(target) {
   if (s === 'deployed') return 'dep-dot--ok'
   if (s === 'deploying' || s === 'destroying') return 'dep-dot--busy'
   if (s === 'no_image') return 'dep-dot--warn'   // half-way there: repo, no image
-  if (s === 'unknown')  return 'dep-dot--unknown'
+  if (s === 'unknown' || s === 'unreadable') return 'dep-dot--unknown'
   return 'dep-dot--off'
 }
 function statusClass(target) {
@@ -159,6 +160,7 @@ function statusClass(target) {
   if (s === 'deployed') return 'dep-status--ok'
   if (s === 'deploying' || s === 'destroying' || s === 'no_image') return 'dep-status--busy'
   if (s === 'error')    return 'dep-status--err'
+  if (s === 'unreadable') return 'dep-status--muted'
   return 'dep-status--off'
 }
 
@@ -352,6 +354,7 @@ onBeforeUnmount(() => {
 .dep-status { font-size: 0.76rem; font-weight: 600; }
 .dep-status--ok  { color: #3fa66a; }
 .dep-status--off { color: #e05656; }
+.dep-status--muted { color: var(--text-3); }
 .dep-status--busy { color: var(--badge-run-text, #e0a13f); }
 .dep-status--err { color: #e05656; }
 .dep-url {

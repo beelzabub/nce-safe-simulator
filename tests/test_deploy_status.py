@@ -113,6 +113,8 @@ def test_ecr_status_from_deploy_module(client, monkeypatch):
 
 
 def test_ecr_status_resilient_when_module_raises(client, monkeypatch):
+    # An unexpected module failure reads as `unreadable` (#235) — the dialog
+    # still renders, and nothing false is claimed about the repo.
     import server.deploy_ecr as deploy_ecr
     _install_cf(monkeypatch, {})
 
@@ -121,7 +123,7 @@ def test_ecr_status_resilient_when_module_raises(client, monkeypatch):
 
     monkeypatch.setattr(deploy_ecr, "ecr_deploy_status", _boom)
     body = client.get("/api/deploy/status").json()
-    assert body["ecr"] == {"state": "not_deployed", "url": None}
+    assert body["ecr"] == {"state": "unreadable", "url": None}
 
 
 def test_s3_status_from_deploy_module(client, monkeypatch):
@@ -212,9 +214,40 @@ def test_status_is_cached(client, monkeypatch):
 
 
 def test_status_survives_boto_error(client, monkeypatch):
+    # A read failure is "unreadable", never a false "not deployed" (#235).
     def _boom(service, *a, **k):
         raise RuntimeError("no credentials")
     monkeypatch.setattr(boto3, "client", _boom)
+    body = client.get("/api/deploy/status").json()
+    assert body["ecs"]["state"] == "unreadable"
+    assert body["eks"]["state"] == "unreadable"
+
+
+def test_status_unreadable_on_access_denied(client, monkeypatch):
+    # The EKS pod's own-cluster case (#235): DescribeStacks AccessDenied must
+    # render as `unreadable` (with an explanatory detail and no URL), not as
+    # the false "not deployed" the pod used to report about itself.
+    from botocore.exceptions import ClientError
+
+    class _Denied:
+        def describe_stacks(self, StackName):
+            raise ClientError(
+                {"Error": {"Code": "AccessDenied", "Message": "not authorized"}},
+                "DescribeStacks",
+            )
+
+    monkeypatch.setattr(boto3, "client", lambda service, *a, **k: _Denied())
+    body = client.get("/api/deploy/status").json()
+    for target in ("ecs", "eks"):
+        assert body[target]["state"] == "unreadable"
+        assert body[target]["url"] is None
+        assert "unreadable" in body[target]["detail"]
+
+
+def test_status_absent_stack_is_still_not_deployed(client, monkeypatch):
+    # The definitive "does not exist" ValidationError keeps mapping to
+    # not_deployed — only *unreadable* states moved (#235).
+    _install_cf(monkeypatch, {})
     body = client.get("/api/deploy/status").json()
     assert body["ecs"]["state"] == "not_deployed"
     assert body["eks"]["state"] == "not_deployed"

@@ -215,17 +215,24 @@ def ecr_deploy_status() -> dict:
     """Point-in-time status of the shared image repository for the Deployments
     dialog's ECR row.
 
-    States: ``not_deployed`` (repo absent, or state unreadable — the safe
-    render for the dialog), ``no_image`` (repo exists but holds nothing —
-    ECS/EKS cannot pull), ``deployed`` (repo exists with images; ``detail``
-    carries count + last push), ``error`` (an AWS failure worth surfacing).
-    ``url`` is always None — a registry has no public front door."""
+    States: ``not_deployed`` (repo definitively absent), ``no_image`` (repo
+    exists but holds nothing — ECS/EKS cannot pull), ``deployed`` (repo exists
+    with images; ``detail`` carries count + last push), ``unreadable`` (state
+    could not be read — no boto3/credentials or AccessDenied; never rendered
+    as a false not-deployed, issue #235), ``error`` (an unexpected AWS
+    failure worth surfacing). ``url`` is always None — a registry has no
+    public front door."""
     app_name = _app_name()
+    _unreadable = {
+        "state": "unreadable", "url": None,
+        "detail": ("status unreadable — the server's AWS identity lacks read "
+                   "permissions (or has no credentials)"),
+    }
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
     except Exception:
-        return {"state": "not_deployed", "url": None}
+        return dict(_unreadable)
     try:
         ecr = boto3.client("ecr")
         try:
@@ -260,11 +267,14 @@ def ecr_deploy_status() -> dict:
             "detail": detail,
         }
     except (BotoCoreError, NoCredentialsError):
-        return {"state": "not_deployed", "url": None}
+        return dict(_unreadable)
     except ClientError as e:
+        code = e.response.get("Error", {}).get("Code") if hasattr(e, "response") else None
+        if code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation"):
+            return dict(_unreadable)
         return {"state": "error", "url": None, "detail": str(e)}
     except Exception:
-        return {"state": "not_deployed", "url": None}
+        return dict(_unreadable)
 
 
 def run_cli(action, *, log=print):

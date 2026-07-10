@@ -912,11 +912,20 @@ _deploy_status_lock = threading.Lock()
 _deploy_status_cache = {"at": 0.0, "value": None}
 
 
+# Sentinel status for "the stack's state could not be read" (no credentials,
+# AccessDenied, boto3 absent) — distinct from "the stack does not exist". A
+# permissions gap must render as `unreadable`, never as a false "not deployed"
+# (issue #235: the EKS pod reported its own cluster as not deployed).
+_CFN_UNREADABLE = "__unreadable__"
+
+
 def _cfn_state(status: "str | None") -> str:
     """Map a raw CloudFormation stack status to the coarse state the Deploy
     Options UI renders."""
     if status is None:
         return "not_deployed"
+    if status == _CFN_UNREADABLE:
+        return "unreadable"
     if status.endswith("_IN_PROGRESS"):
         return "destroying" if status.startswith("DELETE") else "deploying"
     if status in _CFN_HEALTHY:
@@ -933,21 +942,30 @@ def _cdk_context(filename: str) -> dict:
 
 
 def _describe_stack(stack_name: str) -> "tuple[str | None, dict]":
-    """Return ``(stack_status, outputs)`` for a CloudFormation stack, or
-    ``(None, {})`` when the stack is absent, boto3 is unavailable, or no AWS
-    credentials are configured. Never raises."""
+    """Return ``(stack_status, outputs)`` for a CloudFormation stack.
+
+    ``(None, {})`` means the stack definitively **does not exist**
+    (CloudFormation's ValidationError). ``(_CFN_UNREADABLE, {})`` means the
+    state **could not be read** — boto3 absent, no credentials, AccessDenied —
+    which must not masquerade as not-deployed (issue #235). Never raises."""
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
     except Exception:
-        return None, {}
+        return _CFN_UNREADABLE, {}
     try:
         cf = boto3.client("cloudformation")
         stacks = cf.describe_stacks(StackName=stack_name).get("Stacks", [])
-    except (ClientError, BotoCoreError, NoCredentialsError):
-        return None, {}
+    except ClientError as e:
+        err = e.response.get("Error", {}) if hasattr(e, "response") else {}
+        # "Stack with id X does not exist" is the definitive absent signal.
+        if err.get("Code") == "ValidationError" and "does not exist" in err.get("Message", ""):
+            return None, {}
+        return _CFN_UNREADABLE, {}
+    except (BotoCoreError, NoCredentialsError):
+        return _CFN_UNREADABLE, {}
     except Exception:
-        return None, {}
+        return _CFN_UNREADABLE, {}
     if not stacks:
         return None, {}
     stack = stacks[0]
@@ -968,7 +986,11 @@ def _stack_deploy_status(stack_name: str, url_output_keys, url_fallback=None) ->
     if url is None and url_fallback:
         url = url_fallback
     result = {"state": _cfn_state(status), "url": url}
-    if status:
+    if status == _CFN_UNREADABLE:
+        result["url"] = None   # an unverifiable URL must not render as live
+        result["detail"] = ("status unreadable — the server's AWS identity lacks "
+                            "read permissions (or has no credentials)")
+    elif status:
         result["stack_status"] = status
     return result
 
@@ -1002,13 +1024,14 @@ def _eks_deploy_status() -> dict:
 
 def _ecr_deploy_status() -> dict:
     """Live status of the shared container-image repository (issue #234):
-    repo presence + image count + last push. Resilient — any failure reads as
-    ``not_deployed`` so the Deployments dialog still renders."""
+    repo presence + image count + last push. Resilient — an unexpected failure
+    reads as ``unreadable`` (never a false ``not_deployed``, issue #235) so the
+    Deployments dialog still renders."""
     try:
         from server.deploy_ecr import ecr_deploy_status
         return ecr_deploy_status()
     except Exception:
-        return {"state": "not_deployed", "url": None}
+        return {"state": "unreadable", "url": None}
 
 
 def _compute_deploy_status() -> dict:
