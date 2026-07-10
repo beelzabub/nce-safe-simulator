@@ -83,8 +83,11 @@ def _docker_available() -> bool:
 
 def _ecr_image_count(app_name) -> "int | None":
     """Number of images in the app's ECR repository, or ``None`` when it can't be
-    determined (no boto3, no credentials, repo absent). ``None`` means "don't
-    block" — the make target will surface any real problem."""
+    determined (no boto3, no credentials). ``None`` means "don't block" — the
+    make target will surface any real problem. A **missing repository** is a
+    definite answer, not an unknown: the stack creates the repo itself on the
+    first deploy, so absent-repo means zero images and an initial build+push
+    is certainly required."""
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
@@ -94,7 +97,12 @@ def _ecr_image_count(app_name) -> "int | None":
         ecr = boto3.client("ecr")
         ids = ecr.list_images(repositoryName=app_name).get("imageIds", [])
         return len(ids)
-    except (ClientError, BotoCoreError, NoCredentialsError):
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code") if hasattr(e, "response") else None
+        if code == "RepositoryNotFoundException":
+            return 0
+        return None
+    except (BotoCoreError, NoCredentialsError):
         return None
     except Exception:
         return None

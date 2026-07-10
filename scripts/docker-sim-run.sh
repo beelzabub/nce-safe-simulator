@@ -43,12 +43,22 @@ if [ -d "${HOME}/.aws" ]; then
   AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
 fi
 
+# Ops variant only (#231): hand the container the host docker daemon so the
+# first-time ECS deploy can build+push the initial image (empty-repo branch:
+# infra at desired_count=0 → push → scale up). The slim image has no docker
+# CLI, so the socket is deliberately not offered to it.
+DOCKER_MOUNT=()
+if [ -n "$BUILD_TARGET" ] && [ -S /var/run/docker.sock ]; then
+  DOCKER_MOUNT=(-v /var/run/docker.sock:/var/run/docker.sock)
+fi
+
 echo "Starting $IMAGE..."
 docker run -d --rm \
   --name nce \
   -p 80:80 \
   -e GITLAB_TOKEN="$GITLAB_TOKEN" \
   "${AWS_MOUNT[@]}" \
+  "${DOCKER_MOUNT[@]}" \
   -v "$PROJECT_ROOT/config.json:/app/config.json" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   "$IMAGE"

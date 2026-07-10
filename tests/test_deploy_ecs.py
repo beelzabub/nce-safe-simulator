@@ -81,6 +81,35 @@ def test_needs_image_build_false_when_count_unknown(monkeypatch):
     assert de._needs_image_build("app", log=lambda *_: None) is False
 
 
+def test_ecr_image_count_zero_when_repo_absent(monkeypatch):
+    # A missing repository is a definite zero, not an unknown: the stack
+    # creates the repo itself on first deploy, so an initial build+push is
+    # certainly required and preflight must check for Docker (#231 follow-up).
+    boto3 = pytest.importorskip("boto3")
+    from botocore.exceptions import ClientError
+
+    class _Ecr:
+        def list_images(self, repositoryName):
+            raise ClientError(
+                {"Error": {"Code": "RepositoryNotFoundException"}}, "ListImages"
+            )
+
+    monkeypatch.setattr(boto3, "client", lambda service: _Ecr())
+    assert de._ecr_image_count("app") == 0
+
+
+def test_ecr_image_count_none_on_other_client_error(monkeypatch):
+    boto3 = pytest.importorskip("boto3")
+    from botocore.exceptions import ClientError
+
+    class _Ecr:
+        def list_images(self, repositoryName):
+            raise ClientError({"Error": {"Code": "AccessDeniedException"}}, "ListImages")
+
+    monkeypatch.setattr(boto3, "client", lambda service: _Ecr())
+    assert de._ecr_image_count("app") is None
+
+
 # ---------------------------------------------------------------------------
 # preflight
 # ---------------------------------------------------------------------------
