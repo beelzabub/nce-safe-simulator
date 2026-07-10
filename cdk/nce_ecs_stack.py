@@ -145,6 +145,37 @@ class NceEcsStack(Stack):
             )
         )
 
+        # Read-only deploy-status permissions (issue #235): the in-app
+        # Deployments dialog reads CloudFormation, ECR, and CloudFront with the
+        # task's identity. Without these every probe is AccessDenied, which the
+        # status readers used to render as a false "not deployed" — the app
+        # claiming its own stack doesn't exist.
+        task_def.task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["cloudformation:DescribeStacks"],
+                resources=[
+                    f"arn:aws:cloudformation:{self.region}:{self.account}:stack/NceStack/*",
+                    f"arn:aws:cloudformation:{self.region}:{self.account}:stack/NceEksStack/*",
+                ],
+            )
+        )
+        task_def.task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:ListImages"],
+                resources=[
+                    f"arn:aws:ecr:{self.region}:{self.account}:repository/{app_name}"
+                ],
+            )
+        )
+        task_def.task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                # List calls are not resource-scopeable; needed for the S3 row's
+                # CloudFront-based deployment discovery.
+                actions=["cloudfront:ListDistributions"],
+                resources=["*"],
+            )
+        )
+
         def _vol(vol_name, access_point):
             task_def.add_volume(
                 name=vol_name,
