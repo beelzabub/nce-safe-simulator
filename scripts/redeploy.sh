@@ -82,11 +82,22 @@ if [ -d "${HOME}/.aws" ]; then
   echo "    mounting ${HOME}/.aws -> /root/.aws (read-only) for in-app AWS deploys"
 fi
 
+# Ops variant only (#231): hand the container the host docker daemon so the
+# first-time ECS deploy can build+push the initial image (empty-repo branch:
+# infra at desired_count=0 → push → scale up). The slim image has no docker
+# CLI, so the socket is deliberately not offered to it.
+DOCKER_MOUNT=()
+if [ "${#BUILD_TARGET[@]}" -gt 0 ] && [ -S /var/run/docker.sock ]; then
+  DOCKER_MOUNT=(-v /var/run/docker.sock:/var/run/docker.sock)
+  echo "    mounting /var/run/docker.sock for in-app first-time image builds"
+fi
+
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker run -d --name "$APP" --restart unless-stopped \
   --network "$NETWORK" \
   -e GITLAB_TOKEN="${GITLAB_TOKEN:-}" \
   "${AWS_MOUNT[@]}" \
+  "${DOCKER_MOUNT[@]}" \
   -v "$PROJECT_ROOT/config.json:/app/config.json:ro" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   -v "$PROJECT_ROOT/quarto-site:/app/quarto-site" \
