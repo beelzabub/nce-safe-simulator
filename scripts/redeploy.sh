@@ -60,10 +60,23 @@ echo "==> Recreating app container ($APP)..."
 # retention handled in-app); mounting them keeps generated exports from being
 # lost on every redeploy.
 mkdir -p reports logs quarto-site public/interactive public/exports uploads
+
+# AWS credentials for in-app deploys (S3/CloudFront, ECS, EKS — issue #225).
+# The container runs as root, so boto3 reads /root/.aws; mount the host's creds
+# read-only rather than baking them into the image (which would leave IAM keys
+# in image layers, incl. anything pushed to ECR). Skipped when the host has no
+# ~/.aws so the site still comes up for non-deploy use.
+AWS_MOUNT=()
+if [ -d "${HOME}/.aws" ]; then
+  AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
+  echo "    mounting ${HOME}/.aws -> /root/.aws (read-only) for in-app AWS deploys"
+fi
+
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker run -d --name "$APP" --restart unless-stopped \
   --network "$NETWORK" \
   -e GITLAB_TOKEN="${GITLAB_TOKEN:-}" \
+  "${AWS_MOUNT[@]}" \
   -v "$PROJECT_ROOT/config.json:/app/config.json:ro" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   -v "$PROJECT_ROOT/quarto-site:/app/quarto-site" \

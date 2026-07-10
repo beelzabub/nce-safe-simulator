@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, NoCredentialsError
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_FILE = _REPO_ROOT / "config.json"
@@ -698,6 +698,39 @@ _S3_CONFIG_HINT = (
     "`make -C cdk seed-config`."
 )
 
+_S3_CREDS_HINT = (
+    "No AWS credentials were found. When deploying from the app container, mount "
+    "the host's ~/.aws into it read-only (see scripts/redeploy.sh), or launch the "
+    "deploy from a box that has AWS credentials."
+)
+
+
+def _run_deploy_op(label, op):
+    """Run a deploy op, mapping operator/AWS failures to a clean, actionable
+    ``SystemExit`` (issue #226) instead of a raw botocore traceback.
+
+    The deploy runs as a durable subprocess job, so whatever reaches stderr is
+    what an operator sees in the job-log window. A missing config, absent
+    credentials, or a denied permission are all operator/environment errors —
+    surface each as a one-line message with a fix, not a stack dump.
+    """
+    try:
+        op()
+    except RuntimeError as exc:
+        raise SystemExit(f"{label}: {exc}\n{_S3_CONFIG_HINT}")
+    except NoCredentialsError:
+        raise SystemExit(f"{label}: no AWS credentials found.\n{_S3_CREDS_HINT}")
+    except ClientError as exc:
+        err = exc.response.get("Error", {})
+        code = err.get("Code", "")
+        msg = err.get("Message", str(exc))
+        if code in ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation"):
+            raise SystemExit(
+                f"{label}: access denied ({code}) — {msg}\n"
+                "The AWS identity is missing the required S3/CloudFront permissions."
+            )
+        raise SystemExit(f"{label}: AWS error {code}: {msg}")
+
 
 def run_cli(action, config=None, bucket=None):
     """Entry point for ``NceGitLab.py --deploy-s3 ACTION``.
@@ -707,20 +740,15 @@ def run_cli(action, config=None, bucket=None):
     publish target chosen in the UI (issue #225), overriding config; destroy
     ignores it (the live bucket is discovered from CloudFront).
 
-    A missing/invalid ``deploy.s3`` config is an operator error, not a bug, so it
-    exits with a clean, actionable message (``SystemExit``) instead of a raw
-    traceback — that message is what shows in the deploy job's log window.
+    Operator/environment errors — a missing/invalid ``deploy.s3`` config, absent
+    AWS credentials, or a denied permission — exit with a clean, actionable
+    message (``SystemExit``) instead of a raw traceback (issue #226); that
+    message is what shows in the deploy job's log window.
     """
     if action == "publish":
-        try:
-            publish(config, bucket=bucket)
-        except RuntimeError as exc:
-            raise SystemExit(f"S3 deploy: {exc}\n{_S3_CONFIG_HINT}")
+        _run_deploy_op("S3 deploy", lambda: publish(config, bucket=bucket))
     elif action == "destroy":
-        try:
-            destroy(config)
-        except RuntimeError as exc:
-            raise SystemExit(f"S3 destroy: {exc}\n{_S3_CONFIG_HINT}")
+        _run_deploy_op("S3 destroy", lambda: destroy(config))
     elif action == "status":
         print(json.dumps(s3_deploy_status(config), indent=2))
     else:
