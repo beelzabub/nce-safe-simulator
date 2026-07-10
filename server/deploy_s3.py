@@ -417,8 +417,9 @@ def find_our_distribution(cf):
     """Find *this app's* distribution without knowing the bucket, by matching the
     fixed origin id (``ORIGIN_ID``) we stamp on every distribution we create.
 
-    Returns ``{"id","arn","domain","bucket","region"}`` (bucket/region parsed from
-    the origin domain) or ``None``. This makes CloudFront the source of truth for
+    Returns ``{"id","arn","domain","bucket","region","status"}`` (bucket/region
+    parsed from the origin domain; ``status`` is CloudFront's ``"Deployed"`` /
+    ``"InProgress"``) or ``None``. This makes CloudFront the source of truth for
     the live deployment: status and destroy locate the bucket from here rather
     than from config, so a fixed/absent config value can't hide a live site.
     """
@@ -432,6 +433,7 @@ def find_our_distribution(cf):
                     "domain": d["DomainName"],
                     "bucket": bucket,
                     "region": region,
+                    "status": d.get("Status"),
                 }
     return None
 
@@ -617,10 +619,15 @@ def s3_deploy_status(config=None) -> dict:
     configured target to distinguish ``deploying`` (bucket created, distribution
     not yet) from ``not_deployed``.
 
-    States: ``not_deployed``, ``deploying`` (bucket present but no distribution
-    yet), ``deployed`` (distribution live), ``error`` (any AWS failure — a
-    ``detail`` key carries the message). ``bucket`` names the resolved bucket
-    when known.
+    A newly created distribution is ``InProgress`` for ~15 min while CloudFront
+    propagates it to the edge; during that window the URL doesn't serve yet, so it
+    is reported as ``deploying`` (not ``deployed``) — the UI must not present it as
+    live and ready until CloudFront reports ``Deployed``.
+
+    States: ``not_deployed``, ``deploying`` (bucket present but distribution not
+    yet live — either not created, or created and still propagating),
+    ``deployed`` (distribution live), ``error`` (any AWS failure — a ``detail``
+    key carries the message). ``bucket`` names the resolved bucket when known.
     """
     # 1. CloudFront first — the deployed distribution names its own bucket.
     try:
@@ -639,6 +646,22 @@ def s3_deploy_status(config=None) -> dict:
             last_sync = _get_last_sync(s3, bucket)
         except Exception:
             pass
+
+        # The distribution exists but CloudFront may still be propagating it to
+        # the edge (Status="InProgress"); the URL won't resolve/serve yet, so
+        # don't claim "deployed" — report "deploying" with no live URL until
+        # CloudFront reports "Deployed". A missing status (older API/mocks) is
+        # treated as live for backward compatibility.
+        status = dist.get("status")
+        if status and status != "Deployed":
+            return {
+                "state": "deploying",
+                "url": None,
+                "object_count": object_count,
+                "last_sync": last_sync,
+                "bucket": bucket,
+                "detail": "CloudFront distribution is still propagating (can take ~15 min).",
+            }
         return {
             "state": "deployed",
             "url": f"https://{dist['domain']}",
