@@ -85,7 +85,16 @@ onMounted(async () => {
   // Re-adopt any durable run still going (or recently finished) on the server,
   // then reconstruct older finished runs from disk. Reattach first so its start
   // times are known before disk history dedupes against them.
-  await reattach()
+  const runningCount = await reattach()
+  // Live panes came back — bring the runner forward, same as a fresh launch.
+  // SidePanel's restored tab already drove the initial pane during setup, so
+  // without this a persisted Reports/Analysis tab hides the reattached output
+  // behind its viewer (#230). A refresh with nothing running keeps the
+  // restored tab's view.
+  if (runningCount > 0) {
+    showMain('jobs')
+    if (isMobile.matches) sidebarOpen.value = false   // reveal the runner pane
+  }
   loadDiskHistory()
   try {
     const r = await fetch('/api/config')
