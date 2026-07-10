@@ -95,6 +95,17 @@ RUN ARCH=$(dpkg --print-architecture) \
     && chmod +x /usr/local/bin/kubectl \
     && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+# docker CLI (client only, static binary) — the first-time ECS deploy builds
+# and pushes the initial image (the make target's empty-repo branch: deploy
+# scaled to 0, push, scale up). No daemon ships in the image; the run scripts
+# mount the host's /var/run/docker.sock for the --ops variants.
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN ARCH=$(uname -m) \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp docker/docker \
+    && mv /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz
+
 # Python deps for the CDK apps under cdk/ (aws-cdk-lib, constructs, kubectl layer)
 RUN pip install --no-cache-dir -r cdk/requirements.txt
 
