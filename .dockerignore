@@ -1,4 +1,6 @@
 .git
+.venv/
+venv/
 __pycache__
 **/__pycache__
 *.pyc
@@ -11,5 +13,9 @@ reports
 logs
 config.json
 .server.pid
-cdk/
+# cdk/ sources ship in the image (the ops variant runs `make -C cdk ...`,
+# issue #231) — only its build artifacts stay out.
+cdk/node_modules/
+cdk/cdk*.out/
+cdk/.venv/
 cdk.out/

@@ -23,8 +23,8 @@ RUN mkdir -p /diagrams \
     && python3 dataflow_architecture.py /diagrams/dataflow-architecture.png \
     && python3 devsecops_pipeline.py /diagrams/devsecops-architecture.png
 
-# Stage 3 — runtime image
-FROM python:3.11-slim
+# Stage 3 — runtime image (slim; the default build and the image pushed to ECR)
+FROM python:3.11-slim AS runtime
 WORKDIR /app
 
 # Install Quarto (required for plotly/static site build format)
@@ -63,3 +63,42 @@ COPY --from=diagram-builder /diagrams/ ./public/architecture/
 EXPOSE 80
 
 ENTRYPOINT ["python", "NceGitLab.py", "--serve"]
+
+# Stage 4 — ops variant (issue #231): runtime + the CDK deploy toolchain, so a
+# container run on an operator box (host ~/.aws mounted) can drive the in-app
+# ECS/EKS deploys, which shell to `make -C cdk ...`. Built only explicitly:
+#   docker build --target ops -t nce-safe-simulator:ops .
+# Never pushed to ECR — the trailing default stage keeps plain builds slim.
+FROM runtime AS ops
+
+# make + jq (cdk Makefile), Node 22 LTS (nodesource; bookworm's node is too
+# old for the cdk CLI, and Node 20 is EOL — jsii spams a deprecation banner
+# into every deploy log), and the cdk CLI itself.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        make jq curl unzip ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g aws-cdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# AWS CLI v2 (the Makefile shells to `aws`; boto3 alone doesn't cover it)
+RUN ARCH=$(uname -m) \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscliv2.zip \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# kubectl + helm — the EKS path only (LB controller + app chart installs)
+RUN ARCH=$(dpkg --print-architecture) \
+    && KVER=$(curl -fsSL https://dl.k8s.io/release/stable.txt) \
+    && curl -fsSL "https://dl.k8s.io/release/${KVER}/bin/linux/${ARCH}/kubectl" -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl \
+    && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Python deps for the CDK apps under cdk/ (aws-cdk-lib, constructs, kubectl layer)
+RUN pip install --no-cache-dir -r cdk/requirements.txt
+
+# Final stage — re-select the slim runtime so a plain `docker build .` (all
+# existing call sites: cdk/Makefile ecr-push/ecs-deploy, redeploy scripts)
+# still produces the slim image. BuildKit skips the unreferenced ops stage.
+FROM runtime
