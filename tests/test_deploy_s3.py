@@ -356,6 +356,56 @@ def test_run_cli_publish_missing_bucket_is_clean_exit():
     assert "config.json" in msg and "seed-config" in msg
 
 
+def test_run_cli_no_credentials_is_clean_exit(monkeypatch):
+    # No AWS credentials in the container (issue #226) is an environment error,
+    # not a bug: run_cli must turn the botocore NoCredentialsError into a clean
+    # SystemExit pointing at the ~/.aws mount, not dump a stack trace to the job log.
+    from botocore.exceptions import NoCredentialsError
+
+    def _boom(*a, **k):
+        raise NoCredentialsError()
+
+    monkeypatch.setattr(deploy_s3, "publish", _boom)
+    with pytest.raises(SystemExit) as exc:
+        deploy_s3.run_cli("publish", config={"deploy": {"s3": {"bucket": "b"}}})
+    msg = str(exc.value)
+    assert "no aws credentials" in msg.lower()
+    assert "~/.aws" in msg
+
+
+def test_run_cli_access_denied_is_clean_exit(monkeypatch):
+    # An under-privileged identity (AccessDenied) surfaces as a clean permission
+    # message, not a traceback — covers the keys-present-but-insufficient case.
+    err = {"Error": {"Code": "AccessDenied", "Message": "not authorized to PutObject"}}
+
+    def _boom(*a, **k):
+        raise ClientError(err, "PutObject")
+
+    monkeypatch.setattr(deploy_s3, "destroy", _boom)
+    with pytest.raises(SystemExit) as exc:
+        deploy_s3.run_cli("destroy", config={"deploy": {"s3": {"bucket": "b"}}})
+    msg = str(exc.value)
+    assert "access denied" in msg.lower()
+    assert "permission" in msg.lower()
+    assert "not authorized to PutObject" in msg
+
+
+def test_run_cli_generic_client_error_is_clean_exit(monkeypatch):
+    # Any other AWS error is reported as a one-line "AWS error <code>: <msg>"
+    # rather than escaping as a raw botocore traceback.
+    err = {"Error": {"Code": "BucketAlreadyExists", "Message": "bucket taken"}}
+
+    def _boom(*a, **k):
+        raise ClientError(err, "CreateBucket")
+
+    monkeypatch.setattr(deploy_s3, "publish", _boom)
+    with pytest.raises(SystemExit) as exc:
+        deploy_s3.run_cli("publish", config={"deploy": {"s3": {"bucket": "b"}}})
+    msg = str(exc.value)
+    assert "BucketAlreadyExists" in msg
+    assert "bucket taken" in msg
+
+
 # ---------------------------------------------------------------------------
 # destroy
 # ---------------------------------------------------------------------------

@@ -1106,6 +1106,18 @@ opportunistically on each upload/download, deleting files older than
 UI temp dirs are touched — explicit CLI export/import paths live elsewhere and
 are never affected.
 
+**AWS credentials (in-app deploys).** The app-driven deploys (S3/CloudFront #216,
+ECS #217, EKS #218) call AWS from inside the app container, so it needs
+credentials. `redeploy.sh`/`docker-sim-run.sh` **bind-mount the host's `~/.aws`
+read-only** into the container (`-v "$HOME/.aws:/root/.aws:ro"` — the container
+runs as root, so boto3 reads `/root/.aws`). Credentials are deliberately **not
+baked into the image**: that would leave IAM keys in image layers (including
+anything pushed to ECR) and force a rebuild on rotation. The mount is skipped
+when the host has no `~/.aws`, so the site still comes up for non-deploy use —
+only the in-app deploy buttons need it. The mounted identity must carry the
+deploy permissions (`s3:ListAllMyBuckets` + the S3/CloudFront/OAC actions for the
+S3 path; CDK/CloudFormation for ECS/EKS).
+
 ### Prerequisites
 
 - DNS: Route 53 A records for `nce-safe-sim.com` and `www` pointing at the instance's Elastic IP.
