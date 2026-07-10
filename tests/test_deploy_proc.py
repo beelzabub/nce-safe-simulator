@@ -15,6 +15,20 @@ def test_run_streaming_returns_child_exit_code():
     assert rc == 3
 
 
+def test_run_streaming_child_env_is_noninteractive_on_a_tty(capsys):
+    # The pty keeps line-oriented tools flushing per line, but cdk must not
+    # render its interactive progress bar into the job log (#233): the child
+    # env carries CI=true (cdk --ci defaults from it → line-by-line events)
+    # and NO_COLOR=1, while stdout remains a tty for the flushing behavior.
+    rc = run_streaming(
+        [sys.executable, "-c",
+         "import os, sys; print(os.environ.get('CI'), os.environ.get('NO_COLOR'), sys.stdout.isatty())"],
+        log=lambda *_: None,
+    )
+    assert rc == 0
+    assert "true 1 True" in capsys.readouterr().out
+
+
 def test_run_streaming_falls_back_without_pty(monkeypatch, capsys):
     # Simulate a platform with no pty module: run_streaming must still run the
     # command and return its exit code via the subprocess fallback.
