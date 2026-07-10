@@ -94,7 +94,8 @@ class FakeCloudFront:
             "Id": did,
             "ARN": f"arn:aws:cloudfront::123456789012:distribution/{did}",
             "DomainName": f"{did.lower()}.cloudfront.net",
-            "Origins": {"Items": [{"DomainName": self._domain()}]},
+            # The fixed ORIGIN_ID is how find_our_distribution locates us.
+            "Origins": {"Items": [{"DomainName": self._domain(), "Id": deploy_s3.ORIGIN_ID}]},
             "_config": {"Enabled": True},
         }
         return did
@@ -121,7 +122,7 @@ class FakeCloudFront:
             "Id": did,
             "ARN": f"arn:aws:cloudfront::123456789012:distribution/{did}",
             "DomainName": f"{did.lower()}.cloudfront.net",
-            "Origins": {"Items": [{"DomainName": origin["DomainName"]}]},
+            "Origins": {"Items": [{"DomainName": origin["DomainName"], "Id": origin.get("Id")}]},
             "_config": DistributionConfig,
         }
         self.dists[did] = d
@@ -392,9 +393,11 @@ def test_destroy_without_distribution(monkeypatch):
 # status
 # ---------------------------------------------------------------------------
 
-def test_status_not_deployed_when_no_bucket_configured():
+def test_status_not_deployed_when_no_bucket_configured(monkeypatch):
+    monkeypatch.setattr(deploy_s3, "_cloudfront_client", lambda: FakeCloudFront(with_dist=False))
     st = deploy_s3.s3_deploy_status({})
-    assert st == {"state": "not_deployed", "url": None, "object_count": 0, "last_sync": None}
+    assert st["state"] == "not_deployed"
+    assert st["url"] is None and st["bucket"] is None
 
 
 def test_status_not_deployed_when_bucket_missing(monkeypatch):
@@ -436,7 +439,103 @@ def test_status_error_is_captured(monkeypatch):
     def _boom(region):
         raise RuntimeError("aws exploded")
 
+    monkeypatch.setattr(deploy_s3, "_cloudfront_client", lambda: FakeCloudFront(with_dist=False))
     monkeypatch.setattr(deploy_s3, "_s3_client", _boom)
     st = deploy_s3.s3_deploy_status({"deploy": {"s3": {"bucket": "b"}}})
     assert st["state"] == "error"
     assert "aws exploded" in st["detail"]
+
+
+# --- CloudFront is the source of truth (issue #225) ------------------------
+
+def test_status_deployed_derived_from_cloudfront_without_config(monkeypatch):
+    # No bucket in config at all — status must still report deployed and name the
+    # live bucket, derived from the CloudFront distribution's origin.
+    s3 = FakeS3(exists=True)
+    s3.store = {"index.html": {"Body": b"x", "ContentType": "text/html"}}
+    cf = FakeCloudFront(bucket="live-bucket", region="us-west-2", with_dist=True)
+    monkeypatch.setattr(deploy_s3, "_s3_client", lambda region: s3)
+    monkeypatch.setattr(deploy_s3, "_cloudfront_client", lambda: cf)
+    st = deploy_s3.s3_deploy_status({})   # empty config
+    assert st["state"] == "deployed"
+    assert st["bucket"] == "live-bucket"
+    assert st["url"].endswith(".cloudfront.net")
+
+
+def test_destroy_discovers_bucket_from_cloudfront_ignoring_config(monkeypatch):
+    s3 = FakeS3(exists=True)
+    s3.store = {"index.html": {"Body": b"x", "ContentType": "text/html"}}
+    cf = FakeCloudFront(bucket="live-bucket", region="us-east-1", with_dist=True)
+    monkeypatch.setattr(deploy_s3, "_s3_client", lambda region: s3)
+    monkeypatch.setattr(deploy_s3, "_cloudfront_client", lambda: cf)
+    # config names a *different* bucket — destroy must use the CloudFront one.
+    result = deploy_s3.destroy({"deploy": {"s3": {"bucket": "stale-config-bucket"}}}, log=lambda *a: None)
+    assert result["bucket"] == "live-bucket"
+    assert s3.deleted_bucket is True
+    assert cf.deleted == ["DIST1"]
+
+
+def test_parse_origin_domain_roundtrip():
+    assert deploy_s3._parse_origin_domain("my-bucket.s3.us-east-1.amazonaws.com") == ("my-bucket", "us-east-1")
+    assert deploy_s3._parse_origin_domain("not-an-origin.example.com") == (None, None)
+
+
+# --- bucket naming / listing (issue #225) ----------------------------------
+
+@pytest.mark.parametrize("name", ["abc", "nce-safe-sim-site", "my.bucket-1", "a1b"])
+def test_validate_bucket_name_accepts_legal(name):
+    assert deploy_s3.validate_bucket_name(name) is None
+
+
+@pytest.mark.parametrize("name", [
+    "ab",                       # too short
+    "a" * 64,                   # too long
+    "MyBucket",                 # uppercase
+    "under_score",              # underscore
+    "-leading",                 # starts with hyphen
+    "trailing-",                # ends with hyphen
+    "double..dot",              # consecutive dots
+    "192.168.0.1",              # IP-formatted
+    "xn--punycode",             # reserved prefix
+])
+def test_validate_bucket_name_rejects_illegal(name):
+    assert deploy_s3.validate_bucket_name(name) is not None
+
+
+def test_resolve_bucket_name_appends_account(monkeypatch):
+    monkeypatch.setattr(deploy_s3, "account_id", lambda: "123456789012")
+    assert deploy_s3.resolve_bucket_name("nce-safe-sim-site") == "nce-safe-sim-site-123456789012"
+
+
+def test_resolve_bucket_name_uses_explicit_account():
+    assert deploy_s3.resolve_bucket_name("base", account="999") == "base-999"
+
+
+def test_resolve_bucket_name_falls_back_without_account(monkeypatch):
+    monkeypatch.setattr(deploy_s3, "account_id", lambda: None)
+    assert deploy_s3.resolve_bucket_name("base") == "base"
+
+
+def test_list_buckets_empty_on_failure(monkeypatch):
+    import boto3
+    def _boom(*a, **k):
+        raise RuntimeError("no creds")
+    monkeypatch.setattr(boto3, "client", _boom)
+    assert deploy_s3.list_buckets() == []
+
+
+def test_list_buckets_maps_names_and_regions(monkeypatch):
+    import boto3
+
+    class _FakeS3:
+        def list_buckets(self):
+            return {"Buckets": [{"Name": "one"}, {"Name": "two"}]}
+        def get_bucket_location(self, Bucket):
+            return {"LocationConstraint": None if Bucket == "one" else "us-west-2"}
+
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _FakeS3())
+    buckets = deploy_s3.list_buckets()
+    assert buckets == [
+        {"name": "one", "region": "us-east-1"},
+        {"name": "two", "region": "us-west-2"},
+    ]

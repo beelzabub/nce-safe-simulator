@@ -194,17 +194,34 @@ export async function getDeployStatus() {
 }
 
 // Launch a durable deploy/destroy job for a target. Returns the job manifest;
-// the caller feeds it to useDurableJobs for live-log + reattach. The real cloud
-// execution lands in #216/#217/#218 — today the server runs a marked placeholder.
-export async function launchDeploy(target, action = 'deploy') {
-  const r = await fetch(`/api/deploy/${encodeURIComponent(target)}/${encodeURIComponent(action)}`, {
-    method: 'POST',
-  })
+// the caller adopts it into the job runner for live-log + reattach. `body` may
+// carry a `{ bucket }` for an S3 publish (issue #225).
+export async function launchDeploy(target, action = 'deploy', body = null) {
+  const init = { method: 'POST' }
+  if (body) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify(body)
+  }
+  const r = await fetch(`/api/deploy/${encodeURIComponent(target)}/${encodeURIComponent(action)}`, init)
   if (!r.ok) {
-    const body = await r.json().catch(() => ({}))
-    throw new Error(body.detail || `POST /api/deploy/${target}/${action}: ${r.status}`)
+    const b = await r.json().catch(() => ({}))
+    throw new Error(b.detail || `POST /api/deploy/${target}/${action}: ${r.status}`)
   }
   return r.json()
+}
+
+// Bucket choices for the S3 deploy selector (issue #225): existing buckets, the
+// current default, the account id, and a suggested base name. Resilient — the
+// server returns empty/None on any failure so the dialog still works.
+export async function getS3Buckets() {
+  const fallback = { buckets: [], default: null, account_id: null, suggested_base: 'nce-safe-sim-site' }
+  try {
+    const r = await fetch('/api/deploy/s3/buckets')
+    if (!r.ok) return fallback
+    return r.json()
+  } catch {
+    return fallback
+  }
 }
 
 // Upload a file the browser user picked (e.g. an import CSV/JSON). The server

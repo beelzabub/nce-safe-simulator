@@ -28,6 +28,7 @@ Config lives in a new ``deploy.s3`` section of ``config.json``::
 """
 import json
 import mimetypes
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,6 +133,86 @@ def _cloudfront_client():
 
     # CloudFront is a global service; its control-plane API lives in us-east-1.
     return boto3.client("cloudfront", region_name="us-east-1")
+
+
+# ---------------------------------------------------------------------------
+# bucket discovery / naming (issue #225)
+# ---------------------------------------------------------------------------
+
+def account_id():
+    """The current AWS account id via STS, or ``None`` when it can't be read
+    (no boto3, no credentials). Never raises."""
+    try:
+        import boto3
+        return boto3.client("sts").get_caller_identity().get("Account")
+    except Exception:
+        return None
+
+
+def _bucket_region(s3, name):
+    """The region a bucket lives in (``LocationConstraint`` normalised), or None."""
+    try:
+        loc = s3.get_bucket_location(Bucket=name).get("LocationConstraint")
+    except Exception:
+        return None
+    if not loc:
+        return "us-east-1"          # the API returns null/"" for us-east-1
+    if loc == "EU":
+        return "eu-west-1"          # legacy alias
+    return loc
+
+
+def list_buckets():
+    """Every bucket in the account as ``[{"name", "region"}]``.
+
+    Resilient by design (for the Deploy Options dropdown): returns ``[]`` on any
+    failure — no boto3, no credentials, or a role without ``s3:ListAllMyBuckets``
+    — so the dialog still renders and "Create new" still works.
+    """
+    try:
+        import boto3
+        s3 = boto3.client("s3")
+        resp = s3.list_buckets()
+    except Exception:
+        return []
+    out = []
+    for b in resp.get("Buckets", []):
+        name = b.get("Name")
+        if name:
+            out.append({"name": name, "region": _bucket_region(s3, name)})
+    return out
+
+
+# S3 bucket naming rules (the subset that matters here): 3–63 chars, lowercase
+# letters/digits/hyphens/dots, start and end alphanumeric.
+_BUCKET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+
+
+def validate_bucket_name(name):
+    """Return ``None`` if *name* is a legal S3 bucket name, else an error string."""
+    if not name or not (3 <= len(name) <= 63):
+        return "bucket name must be 3–63 characters"
+    if not _BUCKET_NAME_RE.match(name):
+        return ("bucket name must be lowercase letters, numbers, hyphens or dots, "
+                "starting and ending with a letter or number")
+    if ".." in name or ".-" in name or "-." in name:
+        return "bucket name cannot contain '..', '.-' or '-.'"
+    if re.match(r"^\d+\.\d+\.\d+\.\d+$", name):
+        return "bucket name cannot be formatted as an IP address"
+    if name.startswith("xn--") or name.endswith("-s3alias") or name.endswith("--ol-s3"):
+        return "bucket name uses a reserved prefix/suffix"
+    return None
+
+
+def resolve_bucket_name(base, account=None):
+    """Append the account id to *base* for global uniqueness: ``${base}-${account}``.
+
+    Deterministic — the same base always yields the same name, so a re-run of
+    "create new" is idempotent and status/destroy (which read the live bucket
+    from CloudFront) never need it persisted. Falls back to *base* unchanged when
+    the account id can't be determined."""
+    acct = account or account_id()
+    return f"{base}-{acct}" if acct else base
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +401,41 @@ def find_distribution(cf, bucket, region):
     return None
 
 
+# Origin domain shape we always emit: ``<bucket>.s3.<region>.amazonaws.com``.
+_ORIGIN_DOMAIN_RE = re.compile(r"^(?P<bucket>.+)\.s3\.(?P<region>[a-z0-9-]+)\.amazonaws\.com$")
+
+
+def _parse_origin_domain(domain):
+    """Recover ``(bucket, region)`` from an S3 origin domain, or ``(None, None)``."""
+    m = _ORIGIN_DOMAIN_RE.match(domain or "")
+    if m:
+        return m.group("bucket"), m.group("region")
+    return None, None
+
+
+def find_our_distribution(cf):
+    """Find *this app's* distribution without knowing the bucket, by matching the
+    fixed origin id (``ORIGIN_ID``) we stamp on every distribution we create.
+
+    Returns ``{"id","arn","domain","bucket","region"}`` (bucket/region parsed from
+    the origin domain) or ``None``. This makes CloudFront the source of truth for
+    the live deployment: status and destroy locate the bucket from here rather
+    than from config, so a fixed/absent config value can't hide a live site.
+    """
+    for d in cf.list_distributions().get("DistributionList", {}).get("Items", []):
+        for o in d.get("Origins", {}).get("Items", []):
+            if o.get("Id") == ORIGIN_ID:
+                bucket, region = _parse_origin_domain(o.get("DomainName"))
+                return {
+                    "id": d["Id"],
+                    "arn": d["ARN"],
+                    "domain": d["DomainName"],
+                    "bucket": bucket,
+                    "region": region,
+                }
+    return None
+
+
 def _distribution_config(bucket, region, oac_id, comment):
     return {
         "CallerReference": f"nce-safe-sim-{bucket}-{int(time.time())}",
@@ -392,28 +508,31 @@ def _disable_and_delete_distribution(cf, dist_id, *, log=print):
 # orchestration
 # ---------------------------------------------------------------------------
 
-def publish(config=None, *, root=None, log=print) -> dict:
+def publish(config=None, *, root=None, log=print, bucket=None) -> dict:
     """Ensure the bucket, sync the built site, and put it behind CloudFront/OAC.
 
-    Reports the HTTPS site URL. Safe to re-run: the bucket, OAC, and
-    distribution are reused if they already exist.
+    *bucket* (issue #225) is the publish target chosen in the UI — an existing
+    bucket or a freshly-named ``${base}-${account}``; it overrides the
+    ``deploy.s3.bucket`` config value. Reports the HTTPS site URL. Safe to re-run:
+    the bucket, OAC, and distribution are reused if they already exist.
     """
     st = s3_settings(config)
-    if not st.bucket:
+    target = bucket or st.bucket
+    if not target:
         raise RuntimeError("config.json deploy.s3.bucket is not set")
 
     s3 = _s3_client(st.region)
-    log(f"S3 publish -> s3://{st.bucket}/{st.prefix} ({st.region})")
-    ensure_bucket(s3, st.bucket, st.region, log=log)
-    uploaded, deleted = sync_site(s3, st.bucket, st.prefix, root=root, log=log)
+    log(f"S3 publish -> s3://{target}/{st.prefix} ({st.region})")
+    ensure_bucket(s3, target, st.region, log=log)
+    uploaded, deleted = sync_site(s3, target, st.prefix, root=root, log=log)
 
     cf = _cloudfront_client()
     oac_id = ensure_oac(cf, log=log)
-    dist = ensure_distribution(cf, st.bucket, st.region, oac_id, st.comment, log=log)
-    put_bucket_policy_for_oac(s3, st.bucket, dist["arn"], log=log)
+    dist = ensure_distribution(cf, target, st.region, oac_id, st.comment, log=log)
+    put_bucket_policy_for_oac(s3, target, dist["arn"], log=log)
 
     ts = datetime.now(timezone.utc).isoformat()
-    _set_last_sync(s3, st.bucket, ts)
+    _set_last_sync(s3, target, ts)
 
     url = f"https://{dist['domain']}"
     log(f"\nPublished {uploaded} object(s), removed {deleted} stale.")
@@ -424,42 +543,56 @@ def publish(config=None, *, root=None, log=print) -> dict:
         "deleted": deleted,
         "distribution_id": dist["id"],
         "last_sync": ts,
+        "bucket": target,
     }
 
 
 def destroy(config=None, *, log=print) -> dict:
     """Tear the deployment down: disable+delete the distribution, empty the
-    bucket, then delete the bucket."""
-    st = s3_settings(config)
-    if not st.bucket:
-        raise RuntimeError("config.json deploy.s3.bucket is not set")
+    bucket, then delete the bucket.
 
-    s3 = _s3_client(st.region)
+    The bucket is discovered from the live CloudFront distribution (the source of
+    truth), so teardown always hits what's actually deployed. Only when there is
+    no distribution — a bucket created before its distribution — does this fall
+    back to the configured target.
+    """
     cf = _cloudfront_client()
+    dist = find_our_distribution(cf)
 
-    dist = find_distribution(cf, st.bucket, st.region)
-    if dist:
+    if dist and dist.get("bucket"):
+        bucket = dist["bucket"]
+        region = dist["region"] or DEFAULT_REGION
+        log(f"  discovered live bucket s3://{bucket} from CloudFront")
         _disable_and_delete_distribution(cf, dist["id"], log=log)
     else:
-        log("  no CloudFront distribution found")
+        st = s3_settings(config)
+        if not st.bucket:
+            raise RuntimeError(
+                "no deployed CloudFront distribution found and "
+                "config.json deploy.s3.bucket is not set"
+            )
+        bucket, region = st.bucket, st.region
+        log("  no CloudFront distribution found; using the configured bucket")
 
-    keys = _list_keys(s3, st.bucket, "")
+    s3 = _s3_client(region)
+    keys = _list_keys(s3, bucket, "")
     for start in range(0, len(keys), 1000):
         batch = keys[start:start + 1000]
         s3.delete_objects(
-            Bucket=st.bucket, Delete={"Objects": [{"Key": k} for k in batch]}
+            Bucket=bucket, Delete={"Objects": [{"Key": k} for k in batch]}
         )
-    log(f"  emptied {len(keys)} object(s) from s3://{st.bucket}")
+    log(f"  emptied {len(keys)} object(s) from s3://{bucket}")
 
     try:
-        s3.delete_bucket(Bucket=st.bucket)
-        log(f"  deleted bucket s3://{st.bucket}")
+        s3.delete_bucket(Bucket=bucket)
+        log(f"  deleted bucket s3://{bucket}")
     except ClientError as exc:
         log(f"  bucket not deleted: {exc}")
 
     return {
         "deleted_objects": len(keys),
         "distribution_id": dist["id"] if dist else None,
+        "bucket": bucket,
     }
 
 
@@ -478,17 +611,51 @@ def s3_deploy_status(config=None) -> dict:
           "last_sync": <iso str|None>,
         }
 
-    States: ``not_deployed`` (bucket absent), ``deploying`` (bucket present but
-    no distribution yet), ``deployed`` (bucket + distribution live), ``error``
-    (any AWS/config failure — a ``detail`` key carries the message).
+    CloudFront is the source of truth: if our distribution exists, the live
+    ``bucket`` is derived from its origin and reported as ``deployed`` — no config
+    value required. Only when there is no distribution does this fall back to the
+    configured target to distinguish ``deploying`` (bucket created, distribution
+    not yet) from ``not_deployed``.
+
+    States: ``not_deployed``, ``deploying`` (bucket present but no distribution
+    yet), ``deployed`` (distribution live), ``error`` (any AWS failure — a
+    ``detail`` key carries the message). ``bucket`` names the resolved bucket
+    when known.
     """
+    # 1. CloudFront first — the deployed distribution names its own bucket.
+    try:
+        cf = _cloudfront_client()
+        dist = find_our_distribution(cf)
+    except Exception:
+        dist = None
+
+    if dist and dist.get("bucket"):
+        bucket = dist["bucket"]
+        region = dist["region"] or DEFAULT_REGION
+        object_count, last_sync = 0, None
+        try:
+            s3 = _s3_client(region)
+            object_count = len(_list_keys(s3, bucket, ""))
+            last_sync = _get_last_sync(s3, bucket)
+        except Exception:
+            pass
+        return {
+            "state": "deployed",
+            "url": f"https://{dist['domain']}",
+            "object_count": object_count,
+            "last_sync": last_sync,
+            "bucket": bucket,
+        }
+
+    # 2. No distribution — fall back to the configured target to tell
+    #    "deploying" (bucket exists) from "not_deployed".
     try:
         st = s3_settings(config)
     except Exception as exc:
         return _status_error(exc)
 
     if not st.bucket:
-        return {"state": "not_deployed", "url": None, "object_count": 0, "last_sync": None}
+        return {"state": "not_deployed", "url": None, "object_count": 0, "last_sync": None, "bucket": None}
 
     try:
         s3 = _s3_client(st.region)
@@ -497,26 +664,15 @@ def s3_deploy_status(config=None) -> dict:
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code")
             if code in ("404", "NoSuchBucket", "NotFound"):
-                return {"state": "not_deployed", "url": None, "object_count": 0, "last_sync": None}
+                return {"state": "not_deployed", "url": None, "object_count": 0, "last_sync": None, "bucket": None}
             raise
 
-        object_count = len(_list_keys(s3, st.bucket, st.prefix))
-        last_sync = _get_last_sync(s3, st.bucket)
-
-        cf = _cloudfront_client()
-        dist = find_distribution(cf, st.bucket, st.region)
-        if dist:
-            return {
-                "state": "deployed",
-                "url": f"https://{dist['domain']}",
-                "object_count": object_count,
-                "last_sync": last_sync,
-            }
         return {
             "state": "deploying",
             "url": None,
-            "object_count": object_count,
-            "last_sync": last_sync,
+            "object_count": len(_list_keys(s3, st.bucket, st.prefix)),
+            "last_sync": _get_last_sync(s3, st.bucket),
+            "bucket": st.bucket,
         }
     except Exception as exc:
         return _status_error(exc)
@@ -543,11 +699,13 @@ _S3_CONFIG_HINT = (
 )
 
 
-def run_cli(action, config=None):
+def run_cli(action, config=None, bucket=None):
     """Entry point for ``NceGitLab.py --deploy-s3 ACTION``.
 
     ``publish`` and ``destroy`` run as durable subprocess jobs; ``status``
-    prints the status JSON (handy for operators / smoke tests).
+    prints the status JSON (handy for operators / smoke tests). *bucket* is the
+    publish target chosen in the UI (issue #225), overriding config; destroy
+    ignores it (the live bucket is discovered from CloudFront).
 
     A missing/invalid ``deploy.s3`` config is an operator error, not a bug, so it
     exits with a clean, actionable message (``SystemExit``) instead of a raw
@@ -555,7 +713,7 @@ def run_cli(action, config=None):
     """
     if action == "publish":
         try:
-            publish(config)
+            publish(config, bucket=bucket)
         except RuntimeError as exc:
             raise SystemExit(f"S3 deploy: {exc}\n{_S3_CONFIG_HINT}")
     elif action == "destroy":
