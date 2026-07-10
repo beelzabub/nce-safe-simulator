@@ -34,7 +34,7 @@ def test_app_name_falls_back_when_unreadable(monkeypatch, tmp_path):
 
 
 def test_missing_tools_reports_absent(monkeypatch):
-    present = {"make", "cdk", "node"}  # aws "missing"
+    present = {"make", "jq", "cdk", "node"}  # aws "missing"
     monkeypatch.setattr(de.shutil, "which", lambda t: t if t in present else None)
     assert de._missing_tools() == ["aws"]
 

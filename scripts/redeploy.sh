@@ -16,6 +16,16 @@ IMAGE="nce-safe-simulator:latest"
 NETWORK="nce-net"
 APP="nce-safe-sim"
 
+# --ops (issue #231): build and swap in the ops image variant, which carries
+# the CDK deploy toolchain (make, jq, node/cdk, AWS CLI, kubectl, helm) so the
+# in-app ECS/EKS Deploy/Destroy buttons work from inside the container. The
+# default stays the slim image — the same one that ships to ECR.
+BUILD_TARGET=()
+if [ "${1:-}" = "--ops" ]; then
+  IMAGE="nce-safe-simulator:ops"
+  BUILD_TARGET=(--target ops)
+fi
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$BRANCH" != "develop" ]; then
   echo "==> NOTE: building from '$BRANCH', not develop. The live site will run" >&2
@@ -23,7 +33,7 @@ if [ "$BRANCH" != "develop" ]; then
 fi
 
 echo "==> Building image ($IMAGE)..."
-docker build \
+docker build "${BUILD_TARGET[@]}" \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
   -t "$IMAGE" .

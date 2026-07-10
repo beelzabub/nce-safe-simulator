@@ -1,4 +1,4 @@
-.PHONY: build data interactive static serve deploy-local redeploy deck-screenshots deck
+.PHONY: build data interactive static serve deploy-local redeploy redeploy-ops deck-screenshots deck
 
 ## Run the full pipeline: fetch data, export notebooks, render static site
 build: data interactive static
@@ -27,6 +27,11 @@ deploy-local:
 ## Iterative redeploy: rebuild image and swap the live app container (Caddy untouched)
 redeploy:
 	bash scripts/redeploy.sh
+
+## Same swap, but with the ops image variant (CDK toolchain baked in) so the
+## in-app ECS/EKS Deploy/Destroy buttons work from inside the container (#231)
+redeploy-ops:
+	bash scripts/redeploy.sh --ops
 
 ## Capture sprint-review deck screenshots (Playwright, ~10-15 min). See deck/README.md.
 deck-screenshots:
