@@ -45,9 +45,10 @@ _CFN_HEALTHY = {
 }
 
 # Tools the EKS deploy path needs on PATH. EKS additionally needs kubectl + helm
-# (the LB controller install and the app chart), on top of the CDK toolchain.
-# ``docker`` is intentionally excluded — the EKS path never builds an image.
-_REQUIRED_TOOLS = ("make", "cdk", "node", "aws", "kubectl", "helm")
+# (the LB controller install and the app chart), on top of the CDK toolchain;
+# the make targets parse cdk context JSON with ``jq``. ``docker`` is
+# intentionally excluded — the EKS path never builds an image.
+_REQUIRED_TOOLS = ("make", "jq", "cdk", "node", "aws", "kubectl", "helm")
 
 
 # ---------------------------------------------------------------------------
