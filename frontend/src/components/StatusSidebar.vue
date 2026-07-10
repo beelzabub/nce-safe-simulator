@@ -209,6 +209,7 @@ function startResize(e) {
 }
 import { useServerStatus } from '../composables/useServerStatus.js'
 import { useJobs } from '../composables/useJobs.js'
+import { useMainView } from '../composables/useMainView.js'
 
 const props = defineProps({
   open: { type: Boolean, required: true },
@@ -219,6 +220,7 @@ const activeTab = ref('server')
 
 const { serverJobs, refresh } = useServerStatus(() => props.open)
 const { jobs, sessionHistory, cancelJob: _cancelJob, reopenJob, clearHistory } = useJobs()
+const { showMain } = useMainView()
 
 // ── Report runs ──────────────────────────────────────────────────────────────
 const runs = ref([])
@@ -279,8 +281,16 @@ function stopJob(key) {
   if (j) _cancelJob(j.id)
 }
 
+// Open a job's output pane and actually put it in front of the user (issue
+// #229). reopenJob alone only pushes the pane into the JobRunner list — but the
+// runner is hidden unless mainView is 'jobs', and the status sidebar (a
+// full-screen overlay on mobile) would sit on top of it. So also switch to the
+// jobs view and close the sidebar, so View reliably reveals live *or* finished
+// output — including deploy jobs whose log the reopen lazily fetches.
 function view(id) {
   reopenJob(id)
+  showMain('jobs')
+  emit('close')
 }
 
 // ── Runs section vertical resize ─────────────────────────────────────────────
