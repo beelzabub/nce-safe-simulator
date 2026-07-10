@@ -92,9 +92,36 @@ def test_cfn_state_mapping(status, expected):
 def test_status_shape_all_targets(client, monkeypatch):
     _install_cf(monkeypatch, {})  # nothing deployed
     body = client.get("/api/deploy/status").json()
-    assert set(body) == {"s3", "ecs", "eks"}
+    assert set(body) == {"s3", "ecr", "ecs", "eks"}
     for target in body.values():
         assert "state" in target and "url" in target
+
+
+def test_ecr_status_from_deploy_module(client, monkeypatch):
+    # #234 added the shared image repository as a target: the endpoint surfaces
+    # whatever server.deploy_ecr.ecr_deploy_status reports (repo/image presence).
+    import server.deploy_ecr as deploy_ecr
+    _install_cf(monkeypatch, {})
+    monkeypatch.setattr(
+        deploy_ecr, "ecr_deploy_status",
+        lambda: {"state": "deployed", "url": None, "image_count": 3,
+                 "detail": "3 image(s), last push 2026-07-10 05:30 UTC"},
+    )
+    body = client.get("/api/deploy/status").json()
+    assert body["ecr"]["state"] == "deployed"
+    assert body["ecr"]["image_count"] == 3
+
+
+def test_ecr_status_resilient_when_module_raises(client, monkeypatch):
+    import server.deploy_ecr as deploy_ecr
+    _install_cf(monkeypatch, {})
+
+    def _boom():
+        raise RuntimeError("no credentials")
+
+    monkeypatch.setattr(deploy_ecr, "ecr_deploy_status", _boom)
+    body = client.get("/api/deploy/status").json()
+    assert body["ecr"] == {"state": "not_deployed", "url": None}
 
 
 def test_s3_status_from_deploy_module(client, monkeypatch):
@@ -296,6 +323,32 @@ def test_launch_ecs_delegates_to_real_cli(monkeypatch):
     r = client.post("/api/deploy/ecs/destroy")
     assert r.status_code == 201
     assert captured["argv"][-2:] == ["--deploy-ecs", "destroy"]
+
+
+def test_launch_ecr_delegates_to_real_cli(monkeypatch):
+    # ECR execution is real (#234): the generic deploy route delegates to the
+    # whitelisted --deploy-ecr CLI, mapping "deploy" -> "publish" and passing
+    # "destroy" straight through. Capture the argv instead of spawning.
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        captured.update(kw)
+        return {"id": "ecr", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/ecr/deploy")
+    assert r.status_code == 201
+    assert captured["kind"] == "deploy:ecr"
+    assert captured["argv"][-2:] == ["--deploy-ecr", "publish"]
+    assert captured["params"] == {"target": "ecr", "action": "deploy"}
+
+    r = client.post("/api/deploy/ecr/destroy")
+    assert r.status_code == 201
+    assert captured["argv"][-2:] == ["--deploy-ecr", "destroy"]
 
 
 def test_launch_eks_delegates_to_real_cli(monkeypatch):
