@@ -322,3 +322,67 @@ def test_launch_eks_delegates_to_real_cli(monkeypatch):
     r = client.post("/api/deploy/eks/destroy")
     assert r.status_code == 201
     assert captured["argv"][-2:] == ["--deploy-eks", "destroy"]
+
+
+# ---------------------------------------------------------------------------
+# S3 bucket selector (issue #225)
+# ---------------------------------------------------------------------------
+
+def test_s3_buckets_endpoint(monkeypatch):
+    from types import SimpleNamespace
+    from server import deploy_s3
+
+    monkeypatch.setattr(deploy_s3, "list_buckets", lambda: [{"name": "a", "region": "us-east-1"}])
+    monkeypatch.setattr(deploy_s3, "account_id", lambda: "123456789012")
+    monkeypatch.setattr(appmod, "_s3_deploy_status", lambda: {"state": "deployed", "bucket": "live-bucket"})
+    monkeypatch.setattr(deploy_s3, "s3_settings", lambda *a, **k: SimpleNamespace(bucket="cfgbase"))
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    body = client.get("/api/deploy/s3/buckets").json()
+    assert body["buckets"] == [{"name": "a", "region": "us-east-1"}]
+    assert body["account_id"] == "123456789012"
+    assert body["default"] == "live-bucket"
+    assert body["suggested_base"] == "cfgbase"
+
+
+def test_launch_s3_with_bucket_appends_flag(monkeypatch):
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        captured.update(kw)
+        return {"id": "s3", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/s3/deploy", json={"bucket": "nce-safe-sim-site-123456789012"})
+    assert r.status_code == 201
+    assert captured["argv"][-4:] == [
+        "--deploy-s3", "publish", "--deploy-s3-bucket", "nce-safe-sim-site-123456789012",
+    ]
+
+
+def test_launch_s3_invalid_bucket_is_400(monkeypatch):
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+    r = client.post("/api/deploy/s3/deploy", json={"bucket": "BAD_NAME"})
+    assert r.status_code == 400
+
+
+def test_launch_s3_bucket_ignored_for_destroy(monkeypatch):
+    captured = {}
+
+    def fake_launch(argv, **kw):
+        captured["argv"] = argv
+        return {"id": "s3", "state": "running", **kw}
+
+    monkeypatch.setattr(appmod.job_manager, "launch", fake_launch)
+    appmod.app.state.gl = None
+    client = TestClient(appmod.app)
+
+    r = client.post("/api/deploy/s3/destroy", json={"bucket": "whatever-123"})
+    assert r.status_code == 201
+    assert captured["argv"][-2:] == ["--deploy-s3", "destroy"]   # no bucket flag

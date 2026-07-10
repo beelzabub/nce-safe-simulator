@@ -11,11 +11,6 @@ import pytest
 import server.deploy_eks as de
 
 
-class _Completed:
-    def __init__(self, returncode):
-        self.returncode = returncode
-
-
 # ---------------------------------------------------------------------------
 # config / tool discovery
 # ---------------------------------------------------------------------------
@@ -101,13 +96,13 @@ def _clean_preflight(monkeypatch):
 def _capture_run(captured, returncode=0):
     def _run(argv, *a, **k):
         captured["argv"] = argv
-        return _Completed(returncode)
+        return returncode
     return _run
 
 
 def test_publish_runs_eks_full_deploy_target(monkeypatch, _clean_preflight):
     captured = {}
-    monkeypatch.setattr(de.subprocess, "run", _capture_run(captured))
+    monkeypatch.setattr(de, "run_streaming", _capture_run(captured))
     de.publish(log=lambda *_: None)
     assert captured["argv"][:2] == ["make", "-C"]
     assert captured["argv"][-1] == "eks-full-deploy"
@@ -115,20 +110,20 @@ def test_publish_runs_eks_full_deploy_target(monkeypatch, _clean_preflight):
 
 def test_destroy_runs_eks_destroy_target(monkeypatch, _clean_preflight):
     captured = {}
-    monkeypatch.setattr(de.subprocess, "run", _capture_run(captured))
+    monkeypatch.setattr(de, "run_streaming", _capture_run(captured))
     de.destroy(log=lambda *_: None)
     assert captured["argv"][-1] == "eks-destroy"
 
 
 def test_publish_raises_on_nonzero_exit(monkeypatch, _clean_preflight):
-    monkeypatch.setattr(de.subprocess, "run", lambda *a, **k: _Completed(2))
+    monkeypatch.setattr(de, "run_streaming", lambda *a, **k: 2)
     with pytest.raises(SystemExit) as exc:
         de.publish(log=lambda *_: None)
     assert "exit 2" in str(exc.value)
 
 
 def test_destroy_raises_on_nonzero_exit(monkeypatch, _clean_preflight):
-    monkeypatch.setattr(de.subprocess, "run", lambda *a, **k: _Completed(1))
+    monkeypatch.setattr(de, "run_streaming", lambda *a, **k: 1)
     with pytest.raises(SystemExit):
         de.destroy(log=lambda *_: None)
 

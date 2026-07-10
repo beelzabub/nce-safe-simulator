@@ -12,7 +12,7 @@ from typing import Optional
 
 import markdown as _md
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -1032,24 +1032,69 @@ _DEPLOY_TARGETS = {"s3", "ecs", "eks"}
 _DEPLOY_ACTIONS = {"deploy", "destroy"}
 
 
+@app.get("/api/deploy/s3/buckets")
+def s3_buckets():
+    """Bucket choices for the Deploy Options S3 selector (issue #225).
+
+    Returns the account's buckets, the current default (the live bucket from
+    CloudFront when deployed, else the configured target), the account id, and a
+    suggested base name — so the dialog can offer a dropdown plus a "Create new"
+    option that previews ``${base}-${accountId}``. Fully resilient: any failure
+    (no creds, no ``s3:ListAllMyBuckets``) yields empty/None so the dialog still
+    works."""
+    from server import deploy_s3
+    try:
+        buckets = deploy_s3.list_buckets()
+    except Exception:
+        buckets = []
+    try:
+        acct = deploy_s3.account_id()
+    except Exception:
+        acct = None
+    default = _s3_deploy_status().get("bucket")
+    try:
+        base = deploy_s3.s3_settings().bucket
+    except Exception:
+        base = None
+    return {
+        "buckets": buckets,
+        "default": default,
+        "account_id": acct,
+        "suggested_base": base or "nce-safe-sim-site",
+    }
+
+
 @app.post("/api/deploy/{target}/{action}", status_code=201)
-def launch_deploy_job(target: str, action: str):
+def launch_deploy_job(target: str, action: str, payload: dict = Body(default=None)):
     """Launch a durable deploy/destroy job for a target (issue #215).
 
     All three targets execute for real (S3 #216, ECS #217, EKS #218): each
     delegates to the whitelisted ``--deploy-s3`` / ``--deploy-ecs`` /
     ``--deploy-eks`` CLI, which runs the real deploy path as a durable
     subprocess. The UI's ``deploy`` action maps to the module's ``publish``;
-    ``destroy`` passes straight through. The job shows up in ``GET /api/jobs``
-    and is re-adopted after a refresh, so the pre-flight → launch → live-log →
-    reattach flow is real end to end."""
+    ``destroy`` passes straight through. The optional JSON body may carry a
+    ``bucket`` for an S3 publish (issue #225). The job shows up in
+    ``GET /api/jobs`` and is re-adopted after a refresh, so the pre-flight →
+    launch → live-log → reattach flow is real end to end."""
     if target not in _DEPLOY_TARGETS:
         raise HTTPException(status_code=404, detail=f"Unknown deploy target: {target}")
     if action not in _DEPLOY_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown deploy action: {action}")
 
     cli_action = "publish" if action == "deploy" else "destroy"
-    kind, label, argv = _job_argv({"deploy": target, "action": cli_action})
+    data = {"deploy": target, "action": cli_action}
+
+    # S3 publish may target a chosen/created bucket (issue #225). Validate it
+    # here so a bad name is a clean 400, not a job that fails at runtime.
+    bucket = (payload or {}).get("bucket") if isinstance(payload, dict) else None
+    if target == "s3" and action == "deploy" and bucket:
+        from server import deploy_s3
+        err = deploy_s3.validate_bucket_name(bucket)
+        if err:
+            raise HTTPException(status_code=400, detail=f"Invalid bucket name: {err}")
+        data["bucket"] = bucket
+
+    kind, label, argv = _job_argv(data)
     return job_manager.launch(
         argv, kind=kind, label=label,
         params={"target": target, "action": action},
@@ -1218,7 +1263,13 @@ def _job_argv(data: dict) -> tuple:
         action = data.get("action", "publish")
         if action not in ("publish", "destroy"):
             raise ValueError(f"Unknown S3 deploy action: {action!r}")
-        return "deploy:s3", f"s3-{action}", entry + ["--deploy-s3", action]
+        argv = entry + ["--deploy-s3", action]
+        # Chosen publish target bucket (issue #225); destroy discovers it from
+        # CloudFront so a bucket is only threaded through for publish.
+        bucket = data.get("bucket")
+        if bucket and action == "publish":
+            argv += ["--deploy-s3-bucket", bucket]
+        return "deploy:s3", f"s3-{action}", argv
 
     # --- Deploy: ECS/Fargate via CDK stack NceStack (issue #217) ------------
     # Same whitelist shape as S3; delegates to the --deploy-ecs CLI which shells

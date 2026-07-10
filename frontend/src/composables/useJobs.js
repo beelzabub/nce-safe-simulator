@@ -333,10 +333,10 @@ async function _launchDurable(payload, key) {
 // Launch a durable deploy/destroy job through POST /api/deploy (issue #217).
 // Same UX as a report/tool run: it lands in the JobRunner as a live streaming
 // card, so the deploy log (success or failure) is visible in a job window.
-async function _launchDeploy(target, action, key) {
+async function _launchDeploy(target, action, key, body = null) {
   let manifest
   try {
-    manifest = await apiLaunchDeploy(target, action)
+    manifest = await apiLaunchDeploy(target, action, body)
   } catch (err) {
     _pushSyntheticError(key, `Error: ${err?.message || 'deploy launch failed'}`)
     return
@@ -363,8 +363,10 @@ export function useJobs() {
   }
 
   // Launch an app-driven deploy/destroy (S3/ECS/EKS) as a live JobRunner card.
-  function launchDeploy(target, action = 'deploy') {
-    _launchDeploy(target, action, `${target}-${action}`)
+  // `bucket` (S3 publish only, issue #225) selects the publish target.
+  function launchDeploy(target, action = 'deploy', bucket = null) {
+    const body = bucket ? { bucket } : null
+    _launchDeploy(target, action, `${target}-${action}`, body)
   }
 
   // Running deploy/destroy job for a target, if any — lets the Deployments
