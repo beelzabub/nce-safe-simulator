@@ -126,14 +126,35 @@ def test_status_deployed_with_count_and_last_push(monkeypatch):
     assert "2026-07-10 05:54 UTC" in result["detail"]
 
 
-def test_status_error_on_unexpected_client_error(monkeypatch):
+def test_status_unreadable_on_access_denied(monkeypatch):
+    # Can't-read must never render as a false not-deployed (#235).
     class _Denied:
         def describe_repositories(self, repositoryNames):
             raise _client_error("AccessDeniedException", "DescribeRepositories")
     _use(monkeypatch, _Denied())
     result = de.ecr_deploy_status()
+    assert result["state"] == "unreadable"
+    assert "unreadable" in result["detail"]
+
+
+def test_status_unreadable_on_missing_credentials(monkeypatch):
+    from botocore.exceptions import NoCredentialsError
+
+    class _NoCreds:
+        def describe_repositories(self, repositoryNames):
+            raise NoCredentialsError()
+    _use(monkeypatch, _NoCreds())
+    assert de.ecr_deploy_status()["state"] == "unreadable"
+
+
+def test_status_error_on_unexpected_client_error(monkeypatch):
+    class _Throttled:
+        def describe_repositories(self, repositoryNames):
+            raise _client_error("ThrottlingException", "DescribeRepositories")
+    _use(monkeypatch, _Throttled())
+    result = de.ecr_deploy_status()
     assert result["state"] == "error"
-    assert "AccessDenied" in result["detail"]
+    assert "Throttling" in result["detail"]
 
 
 # ---------------------------------------------------------------------------

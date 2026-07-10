@@ -181,6 +181,36 @@ class NceEksStack(Stack):
                 ],
             )
         )
+        # Read-only deploy-status permissions (issue #235): the in-app
+        # Deployments dialog reads CloudFormation, ECR, and CloudFront with the
+        # pod's IRSA identity. Without these every probe is AccessDenied, which
+        # the status readers used to render as a false "not deployed" — the app
+        # claiming its own cluster doesn't exist.
+        app_sa.role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["cloudformation:DescribeStacks"],
+                resources=[
+                    f"arn:aws:cloudformation:{self.region}:{self.account}:stack/NceStack/*",
+                    f"arn:aws:cloudformation:{self.region}:{self.account}:stack/NceEksStack/*",
+                ],
+            )
+        )
+        app_sa.role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:ListImages"],
+                resources=[
+                    f"arn:aws:ecr:{self.region}:{self.account}:repository/{app_name}"
+                ],
+            )
+        )
+        app_sa.role.add_to_principal_policy(
+            iam.PolicyStatement(
+                # List calls are not resource-scopeable; needed for the S3 row's
+                # CloudFront-based deployment discovery.
+                actions=["cloudfront:ListDistributions"],
+                resources=["*"],
+            )
+        )
         filesystem.grant_read_write(app_sa.role)
         # Node group role performs NFS mounts; it needs ClientMount in addition to
         # the app SA role grant above (which only covers the pod's IRSA identity).
