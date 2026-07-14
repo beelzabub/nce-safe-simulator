@@ -1,0 +1,4 @@
+# Build outputs — regenerate with build_brief.py / render_preview.py
+dist/
+preview/
+__pycache__/

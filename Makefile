@@ -39,11 +39,11 @@ redeploy-ops:
 
 ## Container-based development (issue #244): build the dev/build image and drop
 ## into a shell with the working tree mounted at /app — full toolchain, nothing
-## installed on the host. The app port (4645) is published so `--serve` from
-## inside the container is reachable at http://localhost:4645.
+## installed on the host. Host port 4645 is mapped to the app's container port
+## 80 (`--serve` binds :80), so it is reachable at http://localhost:4645.
 dev-shell:
 	docker build --target dev -t nce-safe-simulator:dev .
-	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:4645 nce-safe-simulator:dev
+	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:80 nce-safe-simulator:dev
 
 ## Build and push the runtime + dev images to the GitLab Container Registry
 ## (issue #244) — the local/manual mirror of the CI `containerize` job, for
