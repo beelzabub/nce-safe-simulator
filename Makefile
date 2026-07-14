@@ -1,4 +1,8 @@
-.PHONY: build data interactive static serve deploy-local redeploy redeploy-ops deck-screenshots deck
+.PHONY: build data interactive static serve deploy-local redeploy redeploy-ops dev-shell registry-push deck-screenshots deck
+
+## GitLab Container Registry path for this project (issue #244). Override to push
+## elsewhere, e.g. `make registry-push REGISTRY=registry.gitlab.com/you/proj`.
+REGISTRY ?= registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator
 
 ## Run the full pipeline: fetch data, export notebooks, render static site
 build: data interactive static
@@ -32,6 +36,30 @@ redeploy:
 ## in-app ECS/EKS Deploy/Destroy buttons work from inside the container (#231)
 redeploy-ops:
 	bash scripts/redeploy.sh --ops
+
+## Container-based development (issue #244): build the dev/build image and drop
+## into a shell with the working tree mounted at /app — full toolchain, nothing
+## installed on the host. The app port (4645) is published so `--serve` from
+## inside the container is reachable at http://localhost:4645.
+dev-shell:
+	docker build --target dev -t nce-safe-simulator:dev .
+	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:4645 nce-safe-simulator:dev
+
+## Build and push the runtime + dev images to the GitLab Container Registry
+## (issue #244) — the local/manual mirror of the CI `containerize` job, for
+## ad-hoc pushes. Log in first: `docker login registry.gitlab.com` (username +
+## a PAT/deploy token with read_registry+write_registry scope).
+registry-push:
+	@REF=$$(git rev-parse --short HEAD); \
+	VER=$$(git describe --tags --exact-match 2>/dev/null || true); \
+	docker build --target runtime \
+	  --build-arg VCS_REF=$$REF --build-arg NCE_VERSION=$$VER \
+	  -t $(REGISTRY):latest -t $(REGISTRY):$$REF . && \
+	docker build --target dev \
+	  -t $(REGISTRY)/dev:latest -t $(REGISTRY)/dev:$$REF . && \
+	docker push $(REGISTRY):latest && docker push $(REGISTRY):$$REF && \
+	docker push $(REGISTRY)/dev:latest && docker push $(REGISTRY)/dev:$$REF && \
+	echo "Pushed runtime ($(REGISTRY):latest,$$REF) + dev ($(REGISTRY)/dev:latest,$$REF)"
 
 ## Capture sprint-review deck screenshots (Playwright, ~10-15 min). See deck/README.md.
 deck-screenshots:

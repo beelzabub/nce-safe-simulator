@@ -3,6 +3,7 @@ image: python:latest
 stages:
   - build
   - pages
+  - containerize
 
 test:
   stage: build
@@ -25,5 +26,40 @@ pages:
     paths:
       - public/
     expire_in: 7 days
+  only:
+    - develop
+
+# Build and push the runtime + dev containers to the project's GitLab Container
+# Registry on every merge to develop (issue #244). Kaniko needs no privileged
+# Docker daemon; it authenticates with the built-in per-job $CI_JOB_TOKEN, so no
+# registry secret has to be configured. Images land at:
+#   $CI_REGISTRY_IMAGE          → runtime (the served app), :latest + :<sha>
+#   $CI_REGISTRY_IMAGE/dev      → dev/build toolchain image, :latest + :<sha>
+# Note: gitlab.com shared runners are amd64, so these images are amd64. The
+# arm64 (Graviton) deploy path is unchanged — it still builds via cdk ecr-push.
+containerize:
+  stage: containerize
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+  script:
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target runtime
+      --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
+      --destination "$CI_REGISTRY_IMAGE:latest"
+      --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target dev
+      --destination "$CI_REGISTRY_IMAGE/dev:latest"
+      --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
   only:
     - develop
