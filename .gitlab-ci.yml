@@ -12,6 +12,11 @@ test:
     # config.json is git-ignored, so a clean CI checkout has none; several test
     # modules read it at import time. Seed it from the tracked template.
     - test -f config.json || cp config.example.json config.json
+    # public/ is a git-ignored build artifact; the server only registers its
+    # static mount when the dir exists (server/app.py). Create it so the
+    # mount-registration test reflects a real deployment (the content probe
+    # skips itself when the dir is empty).
+    - mkdir -p public
     - pip install -r requirements.txt
     - python -m pytest tests/
 
