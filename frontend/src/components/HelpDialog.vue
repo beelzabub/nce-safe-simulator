@@ -83,7 +83,7 @@
               <div class="step-num">1</div>
               <div class="step-body">
                 <div class="step-title">Clone the repository</div>
-                <pre class="code-block">git clone https://gitlab.com/saic-study-group/nce-safe-simulator.git
+                <pre class="code-block">git clone https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator.git
 cd nce-safe-simulator</pre>
               </div>
             </div>

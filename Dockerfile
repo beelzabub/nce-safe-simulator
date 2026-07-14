@@ -109,7 +109,34 @@ RUN ARCH=$(uname -m) \
 # Python deps for the CDK apps under cdk/ (aws-cdk-lib, constructs, kubectl layer)
 RUN pip install --no-cache-dir -r cdk/requirements.txt
 
+# Stage 5 — dev/build container (issue #244): the golden toolchain image a
+# developer pulls, then volume-mounts their working tree into /app to run the
+# whole pipeline (make build, pytest, npm run build, quarto render, diagram
+# gen) with zero local toolchain. Source is NOT baked in — it is mounted at
+# run time (`make dev-shell`, or `docker run -v "$PWD":/app ...`), so the image
+# stays reusable across every checkout. CI pushes it to the GitLab registry as
+# .../nce-safe-simulator/dev on merges to develop. Built explicitly:
+#   docker build --target dev -t nce-safe-simulator:dev .
+FROM runtime AS dev
+
+# The runtime base already carries Python 3.11 + requirements.txt (incl. pytest,
+# diagrams) and the pinned Quarto CLI. The dev image adds the rest of the build
+# toolchain: Node 20 (matches the frontend-builder stage) for `npm ci && npm run
+# build`, graphviz for the `diagrams` library's `dot`, and make/git/jq for the
+# everyday loop.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        make git jq graphviz curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Working tree is bind-mounted here at run time; drop to an interactive shell
+# instead of the runtime's `--serve` entrypoint.
+WORKDIR /app
+ENTRYPOINT []
+CMD ["bash"]
+
 # Final stage — re-select the slim runtime so a plain `docker build .` (all
 # existing call sites: cdk/Makefile ecr-push/ecs-deploy, redeploy scripts)
-# still produces the slim image. BuildKit skips the unreferenced ops stage.
+# still produces the slim image. BuildKit skips the unreferenced ops/dev stages.
 FROM runtime

@@ -70,7 +70,7 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
 ### 1 — Clone
 
 ```bash
-git clone https://gitlab.com/saic-study-group/nce-safe-simulator.git
+git clone https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator.git
 cd nce-safe-simulator
 ```
 
@@ -1071,6 +1071,78 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ---
 
+## Container-Based Development & Registry
+
+The [Installation](#installation) steps above install the toolchain (Python, Node,
+Quarto, Graphviz) directly on your host. As an alternative, the project ships a
+**dev/build container** that already carries the entire toolchain — clone the
+repo, mount it into the container, and develop with nothing installed locally.
+This is the container-based SDLC the project uses to demonstrate moving teams off
+per-developer VMs (issues #243 / #244).
+
+Two images are built from the multi-stage `Dockerfile`:
+
+| Image | Target | Purpose |
+|---|---|---|
+| `…/nce-safe-simulator` | `runtime` | The slim served app (uvicorn/FastAPI). Same image deployed to ECS/EKS. |
+| `…/nce-safe-simulator/dev` | `dev` | Full build toolchain (Python + deps, Node 20, Quarto, Graphviz, make, git). Source is **not** baked in — you mount your working tree. |
+
+### Develop inside the container
+
+```bash
+git clone https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator.git
+cd nce-safe-simulator
+make dev-shell          # builds the dev image, then opens a shell with $PWD mounted at /app
+```
+
+Inside that shell the whole pipeline runs with no host setup:
+
+```bash
+pytest tests/                       # run the test suite
+cd frontend && npm ci && npm run build && cd ..   # build the Vue app
+make build                          # fetch data, export notebooks, render the site
+python3 NceGitLab.py --serve        # http://localhost:4645 (port published by make dev-shell)
+```
+
+Because only the working tree is mounted, edits in your local IDE are visible
+immediately inside the container, and rebuilding the image is only needed when the
+toolchain itself changes (dependency bumps, tool versions). Your IDE stays on the
+host; the container is just the build/run environment.
+
+To pull the published dev image instead of building it locally:
+
+```bash
+docker login registry.gitlab.com
+docker run --rm -it -v "$PWD":/app -w /app -p 4645:4645 \
+  registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest
+```
+
+### Registry & CI
+
+On every merge to `develop`, the `containerize` CI job (`.gitlab-ci.yml`) builds
+both images with [Kaniko](https://github.com/GoogleContainerTools/kaniko) and
+pushes them to this project's GitLab Container Registry, tagged `:latest` and
+`:<short-sha>`:
+
+```
+registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator        # runtime
+registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev    # dev toolchain
+```
+
+To build and push the same images by hand (the local mirror of the CI job):
+
+```bash
+docker login registry.gitlab.com     # username + a PAT/deploy token with write_registry scope
+make registry-push
+```
+
+> **Architecture note.** gitlab.com shared runners are amd64, so the registry
+> images are amd64 — ideal for developer laptops pulling the `dev` image. The
+> arm64 (Graviton) production images used by the AWS deploys are unchanged; they
+> still build via `make -C cdk ecr-push`.
+
+---
+
 ## Single-Box Deployment (nce-safe-sim.com)
 
 The lightest deployment runs the simulator on a single EC2 instance and serves it
@@ -1393,7 +1465,7 @@ Dashboards read JSON data from `<CloudFrontUrl>/data/<report>.json`, served by t
 
 ## Contributing
 
-Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/saic-study-group/nce-safe-simulator/-/issues](https://gitlab.com/saic-study-group/nce-safe-simulator/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
+Bug reports and feature requests are tracked as GitLab issues at [gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/issues](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/issues). Open an issue describing what you found or what you need — include reproduction steps for bugs, and a use-case description for feature requests.
 
 ---
 
