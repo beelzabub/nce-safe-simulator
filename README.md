@@ -800,18 +800,18 @@ Interactive pages share a single `public/interactive/assets/` directory (~34 MB 
 
 Available interactive reports: health-dashboard, pi-predictability, flow-metrics, art-capacity-balance, piid-project, piid-project-detail, workload, art-feature-status, vs-capability-dashboard, team-backlog, portfolio, diagnostics.
 
-#### CI and GitLab Pages
+#### CI and the Container Registry
 
 `.gitlab-ci.yml` has two jobs:
 
 | Job | Stage | Trigger | What it does |
 |---|---|---|---|
 | `test` | build | every push | `pip install -r requirements.txt && pytest tests/` |
-| `pages` | pages | `develop` branch only | Builds the full site → `public/` and publishes to GitLab Pages |
+| `containerize` | containerize | `develop` branch only | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
 
-The `pages` job runs `python3 NceGitLab.py --report all --formats all` (Quarto + Marimo) then publishes the resulting `public/` directory. It uses the `ghcr.io/quarto-dev/quarto:latest` image which includes Python, Quarto, and the Marimo CLI.
+`containerize` gates on `test` (`needs: [test]`), so an image is never published from a failing suite. It uses the built-in `$CI_JOB_TOKEN` to authenticate to the registry — no secret to configure. See [Container-Based Development & Registry](#container-based-development--registry) for how developers consume the published images.
 
-The deployed site is published at the project's GitLab Pages URL and mirrors the wiki structure as navigable HTML with interactive drill-down on supported reports. Each static report page links to its interactive counterpart via a **📄 Static** toggle button, and vice versa.
+> The report site was previously published to GitLab Pages by a `pages` job; that job was retired once the site was no longer consumed. Reports are still generated on demand with `python3 NceGitLab.py --report all` and served by the running app.
 
 ### Report Index
 
@@ -1113,7 +1113,7 @@ To pull the published dev image instead of building it locally:
 
 ```bash
 docker login registry.gitlab.com
-docker run --rm -it -v "$PWD":/app -w /app -p 4645:4645 \
+docker run --rm -it -v "$PWD":/app -w /app -p 4645:80 \
   registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest
 ```
 

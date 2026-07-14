@@ -1,9 +1,9 @@
 """DevSecOps Pipeline View — build, test, publish, and deploy paths.
 
-Shows the automated GitLab CI path (test on every push, Pages publish on
-develop) and the operator-driven deployment path (Docker buildx → ECR →
-CDK/Helm). Rendered at container build time alongside the other architecture
-diagrams.
+Shows the automated GitLab CI path (test on every push, container image publish
+to the GitLab Container Registry on develop) and the operator-driven deployment
+path (Docker buildx → ECR → CDK/Helm). Rendered at container build time
+alongside the other architecture diagrams.
 """
 
 import sys
@@ -46,9 +46,9 @@ def main():
 
         with Cluster("GitLab CI (.gitlab-ci.yml)"):
             test  = GitlabCI("test — every push\npip install + pytest")
-            pages = GitlabCI("pages — develop only\nreports + Quarto + Marimo\n(masked GITLAB_TOKEN)")
+            containerize = GitlabCI("containerize — develop only\nKaniko build + push\n(needs: test)")
 
-        pages_site = Gitlab("GitLab Pages\n(public report site)")
+        registry = Docker("GitLab Container Registry\nruntime + dev images\n(:latest + :<sha>)")
 
         with Cluster("Operator deploy (cdk/Makefile)"):
             build = Docker("docker buildx\nARM64 multi-stage\n(frontend, diagrams, runtime)")
@@ -62,7 +62,8 @@ def main():
 
         dev  >> Edge(label="git push / MR") >> repo
         repo >> test
-        repo >> Edge(label="merge to develop") >> pages >> pages_site
+        repo >> Edge(label="merge to develop") >> containerize >> registry
+        registry >> Edge(style="dashed", label="docker pull\n(dev + build image)") >> dev
 
         dev >> Edge(label="make ecr-push\n(when releasing)") >> build >> ecr
         dev >> Edge(label="make *-full-deploy\n(when standing up)") >> cdk
