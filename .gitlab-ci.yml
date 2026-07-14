@@ -48,6 +48,11 @@ pages:
 # arm64 (Graviton) deploy path is unchanged — it still builds via cdk ecr-push.
 containerize:
   stage: containerize
+  # Decouple from the pages stage: publishing images must not be gated on the
+  # report-rendering job. Wait only for `test` so we never push an image built
+  # from a red suite, but a `pages` failure no longer skips this job (#244).
+  needs:
+    - test
   image:
     name: gcr.io/kaniko-project/executor:debug
     entrypoint: [""]
