@@ -2,7 +2,6 @@ image: python:latest
 
 stages:
   - build
-  - pages
   - containerize
 
 test:
@@ -20,24 +19,6 @@ test:
     - pip install -r requirements.txt
     - python -m pytest tests/
 
-pages:
-  stage: pages
-  image: ghcr.io/quarto-dev/quarto:latest
-  # Requires a GITLAB_TOKEN CI/CD variable (masked + protected) in project settings —
-  # config.json no longer carries the token. NceGitLab.py reads GITLAB_TOKEN from env.
-  before_script:
-    - test -n "$GITLAB_TOKEN" || { echo "GITLAB_TOKEN CI/CD variable is not set"; exit 1; }
-    - apt-get update -qq && apt-get install -y python3-pip -qq
-    - pip3 install -r requirements.txt
-  script:
-    - python3 NceGitLab.py --report all --formats markdown
-  artifacts:
-    paths:
-      - public/
-    expire_in: 7 days
-  only:
-    - develop
-
 # Build and push the runtime + dev containers to the project's GitLab Container
 # Registry on every merge to develop (issue #244). Kaniko needs no privileged
 # Docker daemon; it authenticates with the built-in per-job $CI_JOB_TOKEN, so no
@@ -48,9 +29,7 @@ pages:
 # arm64 (Graviton) deploy path is unchanged — it still builds via cdk ecr-push.
 containerize:
   stage: containerize
-  # Decouple from the pages stage: publishing images must not be gated on the
-  # report-rendering job. Wait only for `test` so we never push an image built
-  # from a red suite, but a `pages` failure no longer skips this job (#244).
+  # Gate on `test` so we never publish an image built from a red suite.
   needs:
     - test
   image:
