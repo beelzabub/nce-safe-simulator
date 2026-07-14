@@ -38,6 +38,7 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -88,9 +89,26 @@ class JobManager:
 
     def _write_manifest(self, manifest: dict) -> None:
         path = self._manifest_path(manifest["id"])
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        os.replace(tmp, path)  # atomic — a concurrent reader never sees a half-write
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.dumps(manifest, indent=2)
+        # Unique temp file per write: concurrent writers of the same manifest
+        # (e.g. the reaper and the cancel-escalation threads firing together)
+        # must not share one fixed ".json.tmp" and race on os.replace — one
+        # would move it out from under the other (FileNotFoundError). mkstemp in
+        # the same directory keeps the replace atomic (same filesystem).
+        fd, tmp = tempfile.mkstemp(
+            dir=str(path.parent), prefix=path.stem + ".", suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(data)
+            os.replace(tmp, path)  # atomic — a concurrent reader never sees a half-write
+        except BaseException:
+            try:
+                os.unlink(tmp)  # don't leak the temp file on a failed write
+            except OSError:
+                pass
+            raise
 
     def _read_manifest(self, job_id: str) -> "dict | None":
         path = self._manifest_path(job_id)
