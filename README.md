@@ -1061,15 +1061,21 @@ The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart
 | Param | Purpose |
 |---|---|
 | `group` | Source group (defaults to the configured root; all subgroups included) |
-| `per_page` | Cards per sheet — `1`, `2` (default), or `4` |
-| `label_filter` | Comma-separated labels; an epic must carry **all** of them to be included |
+| `per_page` | Cards per sheet — `1` (default), `2`, or `4` |
+| `label_filter` | Comma-separated labels; an epic must carry **all** of them. A trailing `*` is a scope wildcard — `mission-thread::*` matches any `mission-thread::…` label |
 | `taxonomy_path` | Path to the #238 label taxonomy JSON (CLI only) — see below |
 
 ```bash
-python3 NceGitLab.py -ut epic-cards --per_page 2 --label_filter "epic::capability"
+# The capability-card set: capabilities that carry any mission thread.
+python3 NceGitLab.py -ut epic-cards --per_page 1 \
+    --label_filter "epic::capability,mission-thread::*" --taxonomy_path taxonomy.json
 ```
 
-Each card shows **title, weight, description, mission thread (+phase), actions, main system / related systems, and due date**. These map from epic fields and labels per the taxonomy locked in #238: scoped labels resolve directly (`mission-thread::` → thread, `project::` → main system), while the unscoped **activity** (actions) and **related-system** labels are classified against the taxonomy file. Until that file exists, pass `taxonomy_path` to populate those fields; without it the scoped fields still render and the unscoped ones are left empty. Program accent colors are placeholders pending Program's palette (#222).
+Each card shows **mission thread and weight (header), title, description, buckets, project / related systems, and due date**. These map from epic fields and labels per the taxonomy locked in #238: scoped labels resolve directly (`mission-thread::` → thread, `project::` → main system), while the unscoped **bucket** and **related-system** labels are classified against the taxonomy file. Until that file exists, pass `taxonomy_path` to populate those fields; without it the scoped fields still render and the unscoped ones are left empty. Program accent colors are placeholders pending Program's palette (#222).
+
+Content that would overflow a card is **truncated in Python (not clipped by CSS)** so the cut is always visible and WeasyPrint never hits its O(n²) overflow-relayout path: the **description** is trimmed to a per-layout character budget and ends in ` …` when cut, and **buckets** past the ~two-line budget collapse into a trailing `…` chip. The special bucket value **`ALL`** (buckets only) means "all buckets" and renders as a single `ALL` chip regardless of any other bucket labels on the epic.
+
+Bucket chips **honor each label's live GitLab color** — the exporter reads the group's label colors and fills each chip with its color, picking a readable ink (dark or white) by the same YIQ rule GitLab uses. Change a label's color in GitLab and the next render reflects it; labels with no color fall back to the default chip styling.
 
 ### Test Data Seeding Pattern
 

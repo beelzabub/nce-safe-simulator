@@ -3,7 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from mixins.epic_cards import build_html, render_cards, _dims
+from mixins.epic_cards import (
+    build_html, render_cards, _dims, _truncate, _bucket_chips, _BUCKET_MAX, _DESC_BUDGET,
+)
 from mixins.importexport import ImportExportMixin
 
 
@@ -12,7 +14,7 @@ from mixins.importexport import ImportExportMixin
 def _sample_card(**over):
     c = {
         "title": "Secure Data Fabric", "weight": 13, "description": "A long-ish description.",
-        "mission_thread": "Thread 3", "phase": "Deliver", "actions": ["Transport", "Tagging"],
+        "mission_thread": "Thread 3", "buckets": ["bucket7", "bucket12"],
         "main_system": "DOO", "related_systems": ["ABC", "DEF"], "due_date": "2026-09-30",
         "color": "#2f6f4f",
     }
@@ -24,7 +26,7 @@ def _sample_card(**over):
 def test_build_html_contains_all_fields():
     html = build_html([_sample_card()], per_page=2)
     for token in ("Secure Data Fabric", "13", "A long-ish description.",
-                  "Thread 3", "Phase: Deliver", "Transport", "Tagging",
+                  "Thread 3", "Buckets", "bucket7", "bucket12",
                   "DOO", "ABC", "DEF", "2026-09-30", "#2f6f4f"):
         assert token in html, f"missing {token!r}"
 
@@ -48,6 +50,54 @@ def test_build_html_paginates(per_page, cards, pages):
 def test_build_html_empty_still_valid():
     html = build_html([], per_page=2)
     assert 'class="sheet"' in html   # one empty sheet, never a crash
+
+
+@pytest.mark.unit
+def test_truncate_marks_only_when_cut():
+    assert _truncate("short and sweet", 100) == "short and sweet"   # untouched
+    long = "word " * 100
+    out = _truncate(long, 40)
+    assert out.endswith(" …") and len(out) <= 44                    # cut + marker
+    assert _truncate("a\n\n  b   c\nd", 100) == "a b c d"           # whitespace collapsed
+
+
+@pytest.mark.unit
+def test_description_truncated_at_budget_with_ellipsis():
+    budget = _DESC_BUDGET[1]
+    card = _sample_card(description="lorem ipsum dolor sit amet " * 400)
+    html = build_html([card], per_page=1)
+    assert " …</div>" in html                                       # visible cut marker
+    # the rendered description never exceeds the budget (+ the ' …' marker)
+    body = html.split('class="desc">', 1)[1].split("</div>", 1)[0]
+    assert len(body) <= budget + 2
+
+
+@pytest.mark.unit
+def test_buckets_cutoff_collapses_to_ellipsis_chip():
+    over = ["bucket%d" % i for i in range(1, _BUCKET_MAX[1] + 6)]   # more than the cap
+    chips = _bucket_chips(over, per_page=1)
+    assert chips.count('class="chip bucket"') == _BUCKET_MAX[1]     # exactly the cap shown
+    assert 'class="chip bucket more">…' in chips                    # trailing '…' chip
+    # under the cap → no ellipsis
+    assert "more" not in _bucket_chips(["bucket1", "bucket2"], per_page=1)
+
+
+@pytest.mark.unit
+def test_all_bucket_shorthand_wins():
+    chips = _bucket_chips(["bucket3", "ALL", "bucket9"], per_page=1)
+    assert chips == '<span class="chip bucket all">ALL</span>'      # ALL subsumes the rest
+    assert _bucket_chips(["all"], per_page=1).endswith('>ALL</span>')  # case-insensitive
+
+
+@pytest.mark.unit
+def test_bucket_chips_honor_live_colors():
+    # light bg → dark ink; dark bg → white ink (YIQ, matching GitLab)
+    chips = _bucket_chips(["bucket3"], per_page=1, colors={"bucket3": "#E6C594"})
+    assert "background:#E6C594;color:#1a1a1a;" in chips
+    allc = _bucket_chips(["ALL"], per_page=1, colors={"ALL": "#2C6D4D"})
+    assert "background:#2C6D4D;color:#ffffff;" in allc
+    # no color for a label → default class styling, no inline style
+    assert "style=" not in _bucket_chips(["bucket3"], per_page=1, colors={})
 
 
 @pytest.mark.unit
@@ -84,6 +134,19 @@ def test_scoped_value():
 
 
 @pytest.mark.unit
+def test_epic_label_match_wildcard():
+    m = ImportExportMixin._epic_label_match
+    caps = ["epic::capability", "mission-thread::Thread3", "bucket7"]
+    # the capability-card definition: epic::capability AND any mission-thread::*
+    assert m(caps, ["epic::capability", "mission-thread::*"])
+    # missing the mission-thread scope → excluded
+    assert not m(["epic::capability", "bucket7"], ["epic::capability", "mission-thread::*"])
+    # exact tokens still require an exact label
+    assert not m(caps, ["epic::feature"])
+    assert m(caps, ["bucket7"])
+
+
+@pytest.mark.unit
 def test_program_color_is_deterministic():
     assert ImportExportMixin._program_color("DOO") == ImportExportMixin._program_color("DOO")
     assert ImportExportMixin._program_color(None) == "#3b6ea5"
@@ -94,18 +157,17 @@ def test_epic_to_card_splits_labels_by_taxonomy():
     epic = SimpleNamespace(
         title="Cap A", web_url="http://x/1", description="desc",
         due_date="2026-09-30", end_date=None,
-        labels=["project::DOO", "mission-thread::T3", "phase::Deliver",
-                "activity1", "activity2", "ABC", "DEF", "bucket7"],
+        labels=["project::DOO", "mission-thread::T3",
+                "bucket7", "bucket12", "ABC", "DEF"],
     )
-    taxonomy = {"activity": {"activity1", "activity2"}, "project": {"DOO", "ABC", "DEF"}}
+    taxonomy = {"bucket": {"bucket7", "bucket12"}, "project": {"DOO", "ABC", "DEF"}}
     card = _mixin()._epic_to_card(epic, {"http://x/1": 13}, taxonomy)
 
     assert card["title"] == "Cap A"
     assert card["weight"] == 13
     assert card["mission_thread"] == "T3"
-    assert card["phase"] == "Deliver"
     assert card["main_system"] == "DOO"
-    assert sorted(card["actions"]) == ["activity1", "activity2"]
+    assert sorted(card["buckets"]) == ["bucket12", "bucket7"]
     # related = project-vocab unscoped labels EXCLUDING the primary DOO
     assert sorted(card["related_systems"]) == ["ABC", "DEF"]
     assert "bucket7" not in card["related_systems"]   # not in project vocab
@@ -116,12 +178,12 @@ def test_epic_to_card_without_taxonomy_leaves_unscoped_empty():
     epic = SimpleNamespace(
         title="Cap B", web_url="http://x/2", description="d",
         due_date=None, end_date="2026-01-01",
-        labels=["project::AIS", "mission-thread::T1", "activity9", "COP"],
+        labels=["project::AIS", "mission-thread::T1", "bucket9", "COP"],
     )
     card = _mixin()._epic_to_card(epic, {}, {})
     assert card["main_system"] == "AIS"          # scoped still resolves
     assert card["mission_thread"] == "T1"
-    assert card["actions"] == []                  # can't classify without taxonomy
+    assert card["buckets"] == []                  # can't classify without taxonomy
     assert card["related_systems"] == []
     assert card["due_date"] == "2026-01-01"       # falls back to end_date
     assert card["weight"] is None
