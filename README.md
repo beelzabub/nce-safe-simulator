@@ -1054,6 +1054,23 @@ Existence checks are **batched per container** (#201): each target group/project
 
 The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
 
+### Printable Epic Cards (PDF)
+
+The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart cards** for hard-copy PI planning (#249). Output is Letter-size with dashed cut borders, **1, 2, or 4 landscape cards per page**, written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
+
+| Param | Purpose |
+|---|---|
+| `group` | Source group (defaults to the configured root; all subgroups included) |
+| `per_page` | Cards per sheet — `1`, `2` (default), or `4` |
+| `label_filter` | Comma-separated labels; an epic must carry **all** of them to be included |
+| `taxonomy_path` | Path to the #238 label taxonomy JSON (CLI only) — see below |
+
+```bash
+python3 NceGitLab.py -ut epic-cards --per_page 2 --label_filter "epic::capability"
+```
+
+Each card shows **title, weight, description, mission thread (+phase), actions, main system / related systems, and due date**. These map from epic fields and labels per the taxonomy locked in #238: scoped labels resolve directly (`mission-thread::` → thread, `project::` → main system), while the unscoped **activity** (actions) and **related-system** labels are classified against the taxonomy file. Until that file exists, pass `taxonomy_path` to populate those fields; without it the scoped fields still render and the unscoped ones are left empty. Program accent colors are placeholders pending Program's palette (#222).
+
 ### Test Data Seeding Pattern
 
 The `set-*` and `strip-*` pairs are designed for rapid test-data cycling:

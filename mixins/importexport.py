@@ -673,6 +673,117 @@ class ImportExportMixin:
             print(f"  Download: {url}")
         self._write_group_names_sidecar(group, path)
 
+    # ── Epic cards (printable PDF, #249) ──────────────────────────────────────
+
+    def export_epic_cards(self, output_path=None, group=None, per_page="2",
+                          label_filter=None, taxonomy_path=None):
+        with self._group_override(group):
+            return self._export_epic_cards(output_path, per_page, label_filter, taxonomy_path)
+
+    def _export_epic_cards(self, output_path=None, per_page="2",
+                           label_filter=None, taxonomy_path=None):
+        from .epic_cards import render_cards   # lazy — WeasyPrint only needed for this tool
+
+        group = self.get_group_by_name(self.parent_group)
+        if not group:
+            print(f"ERROR: group '{self.parent_group}' not found.")
+            return
+
+        try:
+            per = int(per_page)
+        except (TypeError, ValueError):
+            per = 2
+        if per not in (1, 2, 3, 4):
+            per = 2
+
+        if output_path:
+            path = self._resolve_path(output_path)
+            if path.suffix.lower() != ".pdf":
+                path = path.with_suffix(".pdf")
+        else:
+            path = self._default_export_name("epic-cards", "pdf")
+
+        taxonomy = self._load_card_taxonomy(taxonomy_path)
+
+        print(f"\nBuilding epic cards from '{group.full_path}' (all subgroups included)...")
+        all_epics = group.epics.list(all=True)
+
+        # Optional filter: comma-separated labels; an epic must carry ALL of them.
+        wanted = [l.strip() for l in (label_filter or "").split(",") if l.strip()]
+        if wanted:
+            all_epics = [e for e in all_epics if set(wanted).issubset(set(e.labels or []))]
+        print(f"  {len(all_epics)} epic(s) after filter")
+        if not all_epics:
+            print("  Nothing to render — no epics matched the filter.")
+            return
+
+        weights = self._fetch_epic_weights(all_epics)
+        cards   = [self._epic_to_card(e, weights, taxonomy) for e in all_epics]
+        render_cards(cards, path, per_page=per)
+        print(f"  Rendered {len(cards)} card(s), {per}-up → {path}")
+        url = self._export_url(path)
+        if url:
+            print(f"  Download: {url}")
+
+    def _load_card_taxonomy(self, taxonomy_path):
+        """Load the #238 label taxonomy (family -> {scoped, names}) so unscoped
+        labels can be split into activities vs project/system codes. Returns {}
+        when no file is given/found — scoped fields still resolve; unscoped ones
+        are left empty until the taxonomy file exists."""
+        if not taxonomy_path:
+            return {}
+        try:
+            raw = json.loads(Path(taxonomy_path).expanduser().read_text())
+        except (OSError, ValueError) as e:
+            print(f"  WARN: could not read taxonomy {taxonomy_path}: {e}")
+            return {}
+        fams = {}
+        for fam, spec in (raw or {}).items():
+            names = spec.get("names", spec) if isinstance(spec, dict) else spec
+            fams[fam] = set(names or [])
+        return fams
+
+    @staticmethod
+    def _scoped_value(labels, prefix):
+        """Value of a scoped label ``prefix::X`` -> 'X' (first match), else None."""
+        for l in labels:
+            if l.startswith(prefix + "::"):
+                return l.split("::", 1)[1]
+        return None
+
+    @staticmethod
+    def _program_color(system):
+        """Deterministic placeholder color per program until Program's palette
+        (issue #222) lands — stable so a program is always the same hue."""
+        if not system:
+            return "#3b6ea5"
+        palette = ["#2f6f4f", "#8a3b3b", "#2f5c8a", "#6b4e8a", "#8a6a2f",
+                   "#3b7d7d", "#7d3b6b", "#556b2f"]
+        return palette[sum(ord(c) for c in system) % len(palette)]
+
+    def _epic_to_card(self, epic, weights, taxonomy):
+        """Map a live epic + the #238 taxonomy to a card dict (see epic_cards.py)."""
+        labels   = list(epic.labels or [])
+        unscoped = [l for l in labels if "::" not in l]
+        main_system    = self._scoped_value(labels, "project")
+        activity_vocab = taxonomy.get("activity", set())
+        project_vocab  = taxonomy.get("project", set())
+        actions = [l for l in unscoped if l in activity_vocab] if activity_vocab else []
+        related = [l for l in unscoped
+                   if l in project_vocab and l != main_system] if project_vocab else []
+        return {
+            "title":           epic.title or "",
+            "weight":          weights.get(epic.web_url) if weights else None,
+            "description":     getattr(epic, "description", "") or "",
+            "mission_thread":  self._scoped_value(labels, "mission-thread"),
+            "phase":           self._scoped_value(labels, "phase"),
+            "actions":         actions,
+            "main_system":     main_system,
+            "related_systems": related,
+            "due_date":        getattr(epic, "due_date", None) or getattr(epic, "end_date", None),
+            "color":           self._program_color(main_system),
+        }
+
     # ── Epic import ───────────────────────────────────────────────────────────
 
     def _warn_type_unconfirmed(self, kind, other_kind, other_tool, example_cols):
