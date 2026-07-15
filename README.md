@@ -542,7 +542,7 @@ The ECS deploy (#217) runs the same CDK path an operator drives by hand — `mak
 
 **Image variants (issue #231).** The `Dockerfile` produces two images from the same build:
 
-- **Slim (default)** — what every existing call site builds (`docker build .`, `make -C cdk ecr-push`, the redeploy scripts) and the only image pushed to ECR. Serves the app, runs reports, performs S3 deploys (pure boto3), and shows live status for all three targets; ECS/EKS deploy attempts fail fast at preflight.
+- **Slim (default)** — what every existing call site builds (`docker build .`, `make -C cdk ecr-push`, the redeploy script) and the only image pushed to ECR. Serves the app, runs reports, performs S3 deploys (pure boto3), and shows live status for all three targets; ECS/EKS deploy attempts fail fast at preflight.
 - **Ops** (`docker build --target ops -t nce-safe-simulator:ops .`) — the slim runtime plus the CDK deploy toolchain (`make`, `jq`, Node 22 + `aws-cdk`, AWS CLI v2, `kubectl`, `helm`, a client-only `docker` CLI, and `cdk/requirements.txt`). Run this variant on an operator box (with host AWS credentials mounted, see **AWS credentials** below) when the in-app **ECS/EKS Deploy/Destroy buttons** should work from inside a container. It is intentionally never pushed to ECR — a trailing default stage in the `Dockerfile` keeps plain builds slim. **`make redeploy-ops`** runs the usual rebuild-and-swap (`scripts/redeploy.sh --ops`) with the ops image — same version guard, mounts, and container name, Caddy untouched — while plain `make redeploy` keeps deploying slim. `scripts/docker-sim-run.sh --ops` does the same for the lightweight local runner (plain runs keep the slim image; add `--build` to rebuild it first).
 
   **First-time ECS deploy (empty/absent ECR repo)** works fully in-app from the ops container: the stack creates the ECR repository itself, the make target deploys the infra with the service scaled to 0, builds and pushes the initial image, then scales up. The image build runs against the **host's Docker daemon** — both `--ops` run scripts mount `/var/run/docker.sock` into the container when present (the slim image never gets the socket; it has no docker CLI). Note the ECS stack builds for `linux/arm64`: on an amd64 operator box the host daemon needs multi-arch emulation (Docker Desktop ships it; on bare dockerd run `docker run --privileged --rm tonistiigi/binfmt --install arm64` once).
@@ -1278,6 +1278,7 @@ After `eks-full-deploy` finishes, navigate to the CloudFront URL (printed in CDK
 | `make eks-deploy` | Apply CDK stack changes |
 | `make eks-grafana-deploy` | Re-push dashboard changes to the Grafana workspace |
 | `make grafana-setup` | Rotate the Grafana Admin API key in SSM (valid 30 days) |
+| `make eks-full-redeploy` | Full teardown + rebuild from scratch — runs `eks-destroy` then `eks-full-deploy`; reuses the current ECR tag, so run `ecr-push` first for fresh code. Safe to run unattended: `nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &` |
 | `make eks-destroy` | Tear down all EKS resources |
 
 #### From the web UI / app (issue #218)
