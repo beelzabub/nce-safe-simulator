@@ -486,8 +486,9 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	  $(MAKE) --no-print-directory eks-grafana-deploy; \
 	fi
 
-eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
-	bash scripts/redeploy-eks.sh
+eks-full-redeploy: ## Full EKS teardown + redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
+	@$(MAKE) --no-print-directory eks-destroy       # tear down the existing stack (helm release first)
+	@$(MAKE) --no-print-directory eks-full-deploy   # rebuild from scratch (reuses the current ECR tag; run ecr-push first for fresh code)
 
 eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
