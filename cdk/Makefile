@@ -283,8 +283,15 @@ eks-install: ## Download and create LB Controller IAM policy (once per AWS accou
 eks-deploy: ## Deploy EKS CDK stack (cluster, node group, LB controller, EFS CSI driver)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
+	ALB_DNS=$$(kubectl get ingress -n $$NAMESPACE $$APP_NAME \
+	  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true) && \
+	[ -n "$$ALB_DNS" ] && echo "==> Pointing CloudFront origin at live ALB $$ALB_DNS" \
+	  || echo "==> No ALB yet — CloudFront uses placeholder origin (repoint on the second pass)" && \
 	CDK_DEFAULT_ACCOUNT=$$ACCOUNT CDK_DEFAULT_REGION=$$REGION \
-	cdk deploy NceEksStack --app "python eks_app.py" --output cdk-eks.out --require-approval never
+	cdk deploy NceEksStack --app "python eks_app.py" --output cdk-eks.out --require-approval never \
+	  --context eks_alb_dns="$$ALB_DNS"
 
 eks-tag-subnets: ## Tag VPC public subnets so the LB controller can provision internet-facing ALBs
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
@@ -350,7 +357,7 @@ eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for 
 	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE
 
-eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk-eks.json (polls up to 15 min)
+eks-set-alb: ## Wait until the LB Controller has provisioned the ALB (polls up to 15 min)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
 	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
 	echo "==> Waiting for ALB to be provisioned (up to 15 min)..." && \
@@ -363,12 +370,14 @@ eks-set-alb: ## Read EKS ALB DNS from ingress and write to cdk-eks.json (polls u
 	  sleep 10; \
 	done && \
 	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB DNS still not available after 15 min"; exit 1; } && \
-	jq --arg v "$$ALB_DNS" '.context.eks_alb_dns = $$v' $(EKS_CTX) > cdk-eks.json.tmp && mv cdk-eks.json.tmp $(EKS_CTX) && \
-	echo "==> eks_alb_dns set to $$ALB_DNS in $(EKS_CTX)"
+	echo "==> ALB ready: $$ALB_DNS — the next 'eks-deploy' resolves it live and repoints CloudFront (issue #236)"
 
 eks-cloudfront-deploy: ## Create or update CloudFront distribution in front of EKS ALB
-	@ALB_DNS=$$(jq -r '.context.eks_alb_dns // empty' $(EKS_CTX)) && \
-	[ -n "$$ALB_DNS" ] || { echo "ERROR: eks_alb_dns not set — run make eks-set-alb first"; exit 1; } && \
+	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
+	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
+	ALB_DNS=$$(kubectl get ingress -n $$NAMESPACE $$APP_NAME \
+	  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true) && \
+	[ -n "$$ALB_DNS" ] || { echo "ERROR: ALB not provisioned yet — run make eks-set-alb to wait for it"; exit 1; } && \
 	EXISTING_ID=$$(jq -r '.context.eks_cf_distribution_id // empty' $(EKS_CTX)) && \
 	DIST_CONFIG=$$(jq -nc --arg alb "$$ALB_DNS" \
 	  '{"CallerReference":"nce-eks-alb","Comment":"NCE Safe Simulator EKS","DefaultCacheBehavior":{"TargetOriginId":"nce-eks-alb","ViewerProtocolPolicy":"https-only","CachePolicyId":"4135ea2d-6df8-44a3-9df3-4b5a84be39ad","OriginRequestPolicyId":"b689b0a8-53d0-40ab-baf2-68738e2966ac","AllowedMethods":{"Quantity":7,"Items":["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"],"CachedMethods":{"Quantity":2,"Items":["GET","HEAD"]}},"Compress":true},"Origins":{"Quantity":1,"Items":[{"Id":"nce-eks-alb","DomainName":$alb,"CustomOriginConfig":{"HTTPPort":80,"HTTPSPort":443,"OriginProtocolPolicy":"http-only"}}]},"Enabled":true,"HttpVersion":"http2"}') && \
@@ -468,8 +477,8 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	@echo "==> Waiting for LB Controller webhook to be ready..."
 	@kubectl -n kube-system wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller --timeout=120s
 	@$(MAKE) --no-print-directory eks-helm-install  # deploy app + Ingress (LBC provisions ALB)
-	@$(MAKE) --no-print-directory eks-set-alb       # write ALB DNS to cdk-eks.json
-	@$(MAKE) --no-print-directory eks-deploy        # CDK again: update CloudFront origin to real ALB DNS
+	@$(MAKE) --no-print-directory eks-set-alb       # wait until the LB Controller has provisioned the ALB
+	@$(MAKE) --no-print-directory eks-deploy        # CDK again: resolve ALB DNS live and repoint CloudFront origin
 	@ENABLE_GRAFANA=$$(jq -r '.context.enable_grafana // false' $(EKS_CTX)) && \
 	if [ "$$ENABLE_GRAFANA" = "true" ]; then \
 	  $(MAKE) --no-print-directory grafana-setup && \
@@ -477,8 +486,9 @@ eks-full-deploy: ## End-to-end EKS deploy from scratch — idempotent, safe to r
 	  $(MAKE) --no-print-directory eks-grafana-deploy; \
 	fi
 
-eks-full-redeploy: ## Full EKS teardown and redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
-	bash scripts/redeploy-eks.sh
+eks-full-redeploy: ## Full EKS teardown + redeploy — safe to run unattended (nohup make eks-full-redeploy > redeploy-eks.log 2>&1 &)
+	@$(MAKE) --no-print-directory eks-destroy       # tear down the existing stack (helm release first)
+	@$(MAKE) --no-print-directory eks-full-deploy   # rebuild from scratch (reuses the current ECR tag; run ecr-push first for fresh code)
 
 eks-destroy: ## Tear down EKS CDK stack (helm release uninstalled first)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \

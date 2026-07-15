@@ -52,6 +52,21 @@ def _kubectl(*args, check=True):
     return result.stdout.strip()
 
 
+def _alb_dns(ctx):
+    """Resolve the ALB DNS name live from the Ingress — the single source of
+    truth (issue #236). We no longer read it from cdk-eks.json: that file is a
+    cache at most and is stale on any box that didn't run the deploy. Returns
+    "" when the LB Controller hasn't provisioned the ALB yet."""
+    ns = ctx["eks_namespace"]
+    app = ctx["app_name"]
+    raw = _kubectl(
+        "get", "ingress", app, "-n", ns,
+        "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}",
+        check=False,
+    )
+    return raw.strip()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -86,7 +101,7 @@ def eks_kubeconfig(ctx):
 # Layer 1 — CloudFormation
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_cfn_stack_healthy(ctx):
     """NceEksStack must be in a terminal healthy state."""
     cf = boto3.client("cloudformation", region_name=_region())
@@ -99,7 +114,7 @@ def test_cfn_stack_healthy(ctx):
     )
 
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_cfn_stack_outputs_present(ctx):
     """NceEksStack must export the keys that downstream steps depend on."""
     cf = boto3.client("cloudformation", region_name=_region())
@@ -115,7 +130,7 @@ def test_cfn_stack_outputs_present(ctx):
 # Layer 2 — EKS cluster
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_eks_cluster_active(ctx):
     """EKS cluster must be ACTIVE."""
     eks = boto3.client("eks", region_name=_region())
@@ -125,7 +140,7 @@ def test_eks_cluster_active(ctx):
     )
 
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_eks_nodes_ready(ctx):
     """At least one node must be in Ready condition."""
     raw = _kubectl("get", "nodes", "-o", "json")
@@ -146,7 +161,7 @@ def test_eks_nodes_ready(ctx):
 # Layer 3 — Kubernetes workload
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_app_pods_running(ctx):
     """All pods in the nce namespace must be Running."""
     ns = ctx["eks_namespace"]
@@ -161,7 +176,7 @@ def test_app_pods_running(ctx):
     assert not not_running, f"Pods not Running: {not_running}"
 
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_deployment_available(ctx):
     """The app Deployment must have at least 1 available replica."""
     ns = ctx["eks_namespace"]
@@ -179,7 +194,7 @@ def test_deployment_available(ctx):
 # Layer 4 — Persistent storage
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_pvcs_bound(ctx):
     """All four EFS PersistentVolumeClaims must be Bound."""
     ns = ctx["eks_namespace"]
@@ -198,7 +213,7 @@ def test_pvcs_bound(ctx):
 # Layer 5 — Networking / ALB
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_ingress_has_alb(ctx):
     """The Ingress must have an ALB hostname assigned."""
     ns = ctx["eks_namespace"]
@@ -214,12 +229,12 @@ def test_ingress_has_alb(ctx):
     assert hostname, "Ingress loadBalancer.ingress[0].hostname is empty"
 
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_alb_active(ctx):
-    """The ALB named in cdk.json must exist and be active."""
-    alb_dns = ctx.get("eks_alb_dns", "")
+    """The ALB fronting the Ingress must exist and be active."""
+    alb_dns = _alb_dns(ctx)
     if not alb_dns:
-        pytest.skip("eks_alb_dns not set in cdk.json — run `make eks-set-alb`")
+        pytest.skip("Ingress has no ALB hostname yet — LB Controller not done")
     elbv2 = boto3.client("elbv2", region_name=_region())
     lbs = elbv2.describe_load_balancers()["LoadBalancers"]
     matching = [lb for lb in lbs if lb["DNSName"] == alb_dns]
@@ -232,7 +247,7 @@ def test_alb_active(ctx):
 # Layer 6 — CloudFront
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_cloudfront_deployed(ctx):
     """The EKS CloudFront distribution must exist and be Deployed."""
     dist_id = ctx.get("eks_cf_distribution_id", "")
@@ -253,7 +268,7 @@ def test_cloudfront_deployed(ctx):
 # Layer 7 — Application HTTP
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_app_http_via_cloudfront(ctx):
     """GET / via the CloudFront URL must return HTTP 200."""
     cf_url = ctx.get("eks_cf_url", "")
@@ -267,12 +282,12 @@ def test_app_http_via_cloudfront(ctx):
     )
 
 
-@pytest.mark.integration
+@pytest.mark.infra
 def test_app_http_via_alb(ctx):
     """GET / directly on the ALB must return HTTP 200 (bypasses CloudFront)."""
-    alb_dns = ctx.get("eks_alb_dns", "")
+    alb_dns = _alb_dns(ctx)
     if not alb_dns:
-        pytest.skip("eks_alb_dns not set in cdk.json — run `make eks-set-alb`")
+        pytest.skip("Ingress has no ALB hostname yet — LB Controller not done")
     url = f"http://{alb_dns}"
     resp = requests.get(url, timeout=15, allow_redirects=True)
     assert resp.status_code == 200, (
@@ -281,18 +296,16 @@ def test_app_http_via_alb(ctx):
 
 
 # ---------------------------------------------------------------------------
-# Layer 8 — cdk.json completeness (checks the deploy wrote back all values)
+# Layer 8 — deploy produced a usable URL (source of truth: the stack output)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.integration
-def test_cdk_json_fully_populated(ctx):
-    """All cdk.json EKS fields that eks-full-deploy should write must be non-empty."""
-    required = {
-        "eks_alb_dns": "run `make eks-set-alb`",
-        "eks_cf_distribution_id": "run `make eks-cloudfront-deploy`",
-        "eks_cf_url": "run `make eks-cloudfront-deploy`",
-    }
-    missing = {k: hint for k, hint in required.items() if not ctx.get(k)}
-    if missing:
-        details = "\n".join(f"  {k}: {hint}" for k, hint in missing.items())
-        pytest.fail(f"cdk.json fields not populated:\n{details}")
+@pytest.mark.infra
+def test_cloudfront_url_output_present(ctx):
+    """The deploy's public URL is read from the NceEksStack `CloudFrontUrl`
+    output — the source of truth — not from cdk-eks.json (issue #236). The
+    local file is a cache at most and is stale on any box that didn't deploy."""
+    cf = boto3.client("cloudformation", region_name=_region())
+    outputs = cf.describe_stacks(StackName="NceEksStack")["Stacks"][0].get("Outputs", [])
+    url = next((o["OutputValue"] for o in outputs if o["OutputKey"] == "CloudFrontUrl"), "")
+    assert url, "NceEksStack has no CloudFrontUrl output — CloudFront not deployed"
+    assert url.startswith("https://"), f"CloudFrontUrl is not an https URL: {url!r}"
