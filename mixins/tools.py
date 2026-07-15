@@ -166,7 +166,7 @@ TOOLS = [
         "method":      "export_epic_cards",
         "params": [
             {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
-            {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "2"},
+            {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "1"},
             {"name": "label_filter",  "prompt": "Only epics with these labels (comma-separated, all required)", "type": str, "optional": True},
             {"name": "taxonomy_path", "prompt": "Label taxonomy JSON (blank until #238 lands)", "type": str, "optional": True, "cli_only": True},
             {"name": "output_path",   "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},

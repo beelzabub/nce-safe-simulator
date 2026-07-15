@@ -709,16 +709,21 @@ class ImportExportMixin:
         all_epics = group.epics.list(all=True)
 
         # Optional filter: comma-separated labels; an epic must carry ALL of them.
+        # A trailing '*' makes a token a scope wildcard — e.g. `mission-thread::*`
+        # matches an epic carrying any `mission-thread::…` label. The capability
+        # card set is `epic::capability,mission-thread::*`.
         wanted = [l.strip() for l in (label_filter or "").split(",") if l.strip()]
         if wanted:
-            all_epics = [e for e in all_epics if set(wanted).issubset(set(e.labels or []))]
+            all_epics = [e for e in all_epics
+                         if self._epic_label_match(e.labels or [], wanted)]
         print(f"  {len(all_epics)} epic(s) after filter")
         if not all_epics:
             print("  Nothing to render — no epics matched the filter.")
             return
 
         weights = self._fetch_epic_weights(all_epics)
-        cards   = [self._epic_to_card(e, weights, taxonomy) for e in all_epics]
+        label_colors = self._fetch_label_colors(group)
+        cards   = [self._epic_to_card(e, weights, taxonomy, label_colors) for e in all_epics]
         render_cards(cards, path, per_page=per)
         print(f"  Rendered {len(cards)} card(s), {per}-up → {path}")
         url = self._export_url(path)
@@ -727,7 +732,7 @@ class ImportExportMixin:
 
     def _load_card_taxonomy(self, taxonomy_path):
         """Load the #238 label taxonomy (family -> {scoped, names}) so unscoped
-        labels can be split into activities vs project/system codes. Returns {}
+        labels can be split into buckets vs project/system codes. Returns {}
         when no file is given/found — scoped fields still resolve; unscoped ones
         are left empty until the taxonomy file exists."""
         if not taxonomy_path:
@@ -742,6 +747,21 @@ class ImportExportMixin:
             names = spec.get("names", spec) if isinstance(spec, dict) else spec
             fams[fam] = set(names or [])
         return fams
+
+    @staticmethod
+    def _epic_label_match(labels, wanted):
+        """True when ``labels`` satisfies every token in ``wanted`` (AND). A token
+        ending in '*' is a scope wildcard: `mission-thread::*` matches any
+        `mission-thread::…` label. The capability card set is
+        `epic::capability,mission-thread::*`."""
+        labs = set(labels or [])
+        for w in wanted:
+            if w.endswith("*"):
+                if not any(l.startswith(w[:-1]) for l in labs):
+                    return False
+            elif w not in labs:
+                return False
+        return True
 
     @staticmethod
     def _scoped_value(labels, prefix):
@@ -761,23 +781,35 @@ class ImportExportMixin:
                    "#3b7d7d", "#7d3b6b", "#556b2f"]
         return palette[sum(ord(c) for c in system) % len(palette)]
 
-    def _epic_to_card(self, epic, weights, taxonomy):
+    def _fetch_label_colors(self, group):
+        """Map label name -> #rrggbb from the group's live GitLab labels so the
+        card chips can honor the colors set in GitLab. Best-effort — an empty map
+        just falls back to the renderer's default chip colors."""
+        try:
+            return {l.name: getattr(l, "color", None)
+                    for l in group.labels.list(all=True, iterator=True)}
+        except Exception as e:
+            print(f"  WARN: could not fetch label colors: {e}")
+            return {}
+
+    def _epic_to_card(self, epic, weights, taxonomy, label_colors=None):
         """Map a live epic + the #238 taxonomy to a card dict (see epic_cards.py)."""
         labels   = list(epic.labels or [])
         unscoped = [l for l in labels if "::" not in l]
-        main_system    = self._scoped_value(labels, "project")
-        activity_vocab = taxonomy.get("activity", set())
-        project_vocab  = taxonomy.get("project", set())
-        actions = [l for l in unscoped if l in activity_vocab] if activity_vocab else []
+        main_system   = self._scoped_value(labels, "project")
+        bucket_vocab  = taxonomy.get("bucket", set())
+        project_vocab = taxonomy.get("project", set())
+        buckets = [l for l in unscoped if l in bucket_vocab] if bucket_vocab else []
         related = [l for l in unscoped
                    if l in project_vocab and l != main_system] if project_vocab else []
+        colors = label_colors or {}
         return {
             "title":           epic.title or "",
             "weight":          weights.get(epic.web_url) if weights else None,
             "description":     getattr(epic, "description", "") or "",
             "mission_thread":  self._scoped_value(labels, "mission-thread"),
-            "phase":           self._scoped_value(labels, "phase"),
-            "actions":         actions,
+            "buckets":         buckets,
+            "bucket_colors":   {b: colors.get(b) for b in buckets},
             "main_system":     main_system,
             "related_systems": related,
             "due_date":        getattr(epic, "due_date", None) or getattr(epic, "end_date", None),
