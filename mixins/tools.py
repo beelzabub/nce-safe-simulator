@@ -161,6 +161,18 @@ TOOLS = [
         ],
     },
     {
+        "key":         "epic-cards",
+        "description": "Render filtered epics as a printable PDF of cut-apart cards (1/2/4 per page)",
+        "method":      "export_epic_cards",
+        "params": [
+            {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
+            {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "2"},
+            {"name": "label_filter",  "prompt": "Only epics with these labels (comma-separated, all required)", "type": str, "optional": True},
+            {"name": "taxonomy_path", "prompt": "Label taxonomy JSON (blank until #238 lands)", "type": str, "optional": True, "cli_only": True},
+            {"name": "output_path",   "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
+        ],
+    },
+    {
         "key":         "import-epics",
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",

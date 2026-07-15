@@ -1438,7 +1438,8 @@ def download_export(filename: str):
     target = (exports_dir / safe_name).resolve()
     if target.parent != exports_dir or not target.is_file():
         raise HTTPException(status_code=404, detail=f"{safe_name} not found")
-    media_type = "application/json" if target.suffix.lower() == ".json" else "text/csv"
+    media_type = {".json": "application/json",
+                  ".pdf":  "application/pdf"}.get(target.suffix.lower(), "text/csv")
     return FileResponse(str(target), media_type=media_type, filename=safe_name)
 
 
