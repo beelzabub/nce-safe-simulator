@@ -6,11 +6,30 @@ Usage: python3 scripts/audit.py   (or: make audit)
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
+
+
+def _live_alb_dns(ctx: dict) -> str:
+    """Resolve the EKS ALB DNS live from the Ingress (issue #236). The value is
+    dynamic and no longer persisted to cdk-eks.json; fall back to the file only
+    if kubectl can't reach the cluster."""
+    try:
+        out = subprocess.run(
+            ["kubectl", "get", "ingress", ctx["app_name"],
+             "-n", ctx["eks_namespace"],
+             "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}"],
+            capture_output=True, text=True, check=False, timeout=15,
+        ).stdout.strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    return ctx.get("eks_alb_dns", "")
 
 # ── Load context from the two CDK config files ──────────────────────────────
 _root = Path(__file__).parent.parent
@@ -28,7 +47,7 @@ ECS_STACK        = "NceStack"
 EKS_CLUSTER_NAME = _eks_ctx["eks_cluster_name"]   # nce-eks
 LOG_GROUP_EKS    = f"/eks/{EKS_CLUSTER_NAME}"
 EKS_CF_ID        = _eks_ctx.get("eks_cf_distribution_id", "")
-EKS_ALB_DNS      = _eks_ctx.get("eks_alb_dns", "")
+EKS_ALB_DNS      = _live_alb_dns(_eks_ctx)
 EKS_STACK        = "NceEksStack"
 
 ENABLE_GRAFANA   = str(_ecs_ctx.get("enable_grafana", False)).lower() in ("true", "1")
@@ -305,7 +324,7 @@ def main():
         else:
             missing(f"CloudFront (EKS): (origin: {EKS_ALB_DNS[:40]})")
     else:
-        missing("CloudFront (EKS):", "eks_alb_dns not set in cdk-eks.json")
+        missing("CloudFront (EKS):", "ALB not resolvable (Ingress has no hostname yet)")
 
     # EKS EFS (RETAIN — survives stack destroy)
     eks_efs = efs_for_stack(EKS_STACK)
