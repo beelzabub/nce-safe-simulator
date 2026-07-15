@@ -159,8 +159,10 @@ validate_eks() {
     fail "No pods running in $NAMESPACE"
   fi
 
-  # Check ALB
-  ALB_DNS=$(jq -r '.context.eks_alb_dns // empty' "$EKS_CTX")
+  # Check ALB — resolve live from the Ingress (issue #236); the file no longer carries it
+  APP_NAME=$(jq -r '.context.app_name' "$EKS_CTX")
+  ALB_DNS=$(kubectl get ingress -n "$NAMESPACE" "$APP_NAME" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
   if [ -n "$ALB_DNS" ]; then
     log "  ALB DNS: $ALB_DNS"
     HTTP_CODE=$(curl -sf --max-time 15 -o /dev/null -w "%{http_code}" "http://$ALB_DNS/" 2>/dev/null || echo "000")
@@ -170,7 +172,7 @@ validate_eks() {
       log "  WARN: HTTP $HTTP_CODE from ALB (may be warming up)"
     fi
   else
-    log "  WARN: eks_alb_dns not set in cdk-eks.json — skipping HTTP check"
+    log "  WARN: Ingress has no ALB hostname yet — skipping HTTP check"
   fi
   log "EKS validation complete"
 }

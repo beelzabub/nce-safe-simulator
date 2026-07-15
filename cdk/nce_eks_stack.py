@@ -29,7 +29,11 @@ class NceEksStack(Stack):
         eks_cluster_name  = ctx("eks_cluster_name")
         eks_namespace     = ctx("eks_namespace")
         eks_node_instance = ctx("eks_node_instance")
-        eks_alb_dns       = ctx("eks_alb_dns")
+        # ALB DNS is dynamic and derived live at deploy time (issue #236): the
+        # Makefile resolves it from the Ingress and passes --context eks_alb_dns.
+        # On the first pass (no ALB yet) it is empty, so fall back to a harmless
+        # placeholder origin; the second pass repoints CloudFront at the real ALB.
+        eks_alb_dns       = ctx("eks_alb_dns") or "placeholder.invalid"
         eks_admin_iam_user = ctx("eks_admin_iam_user")
         _grafana_ctx      = ctx("enable_grafana")
         enable_grafana    = str(_grafana_ctx).lower() in ("true", "1") if _grafana_ctx is not None else False
