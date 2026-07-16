@@ -48,3 +48,37 @@ def test_interactive_still_prompts():
         with patch("builtins.input", return_value="") as inp:
             assert _prompt_param(p) is None      # blank → None for optional
         inp.assert_called_once()                 # it really did prompt
+
+
+# ─── #253: pseudo-TTY (docker exec -t, no -i) — isatty() True but input() EOFs ──
+# A pseudo-TTY makes isatty() return True, so the non-interactive guard is
+# skipped, but the first input() hits EOF. That EOFError must be handled exactly
+# like a non-interactive stdin, not bubble up as an unhandled traceback.
+
+def _run_eof(param):
+    with patch("mixins.tools.sys.stdin") as stdin:
+        stdin.isatty.return_value = True                     # pseudo-TTY lies
+        with patch("builtins.input", side_effect=EOFError):  # but stdin is at EOF
+            return _prompt_param(param)
+
+
+def test_optional_str_returns_none_on_eof():
+    p = {"name": "label_filter", "prompt": "Labels", "type": str, "optional": True}
+    assert _run_eof(p) is None
+
+
+def test_default_is_used_on_eof():
+    p = {"name": "per_page", "prompt": "Cards per page", "type": str, "default": "1"}
+    assert _run_eof(p) == "1"
+
+
+def test_optional_bool_returns_false_on_eof():
+    p = {"name": "dry_run", "prompt": "Dry run?", "type": bool}
+    assert _run_eof(p) is False
+
+
+def test_required_without_default_raises_on_eof():
+    p = {"name": "input_path", "prompt": "Input file", "type": str, "optional": False}
+    with pytest.raises(ValueError) as e:
+        _run_eof(p)
+    assert "input_path" in str(e.value)          # names the missing param, not EOFError

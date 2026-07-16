@@ -650,44 +650,94 @@ def _check_back(raw):
         raise _BackSignal
 
 
+def _noninteractive_param_value(param):
+    """Resolve a param's value without prompting — used when stdin is not
+    interactive (no TTY) or when a prompt hits EOF (#253). Mirrors a blank
+    interactive answer: the param's ``default``, else ``None`` for an optional
+    param, else ``False`` for a bool. A required param with no default and no CLI
+    value is a hard error naming it, so a pipeline fails loudly instead of
+    hanging.
+    """
+    default = param.get("default")
+    if default is not None:
+        return default
+    if param.get("optional", False):
+        return None
+    if param["type"] is bool:
+        return False
+    raise ValueError(
+        f"Required parameter '{param['name']}' has no value and stdin is not "
+        f"interactive — pass --{param['name']} <value> on the command line."
+    )
+
+
 def _prompt_param(param):
     """Prompt the user for a single parameter value and return the typed result.
 
     Typing 'b' at any prompt raises _BackSignal to cancel the tool.
 
-    Non-interactive (no TTY on stdin — e.g. a CI runner): don't call input()
-    (it would raise EOFError and abort the tool). Instead resolve the value the
-    same way a blank interactive answer would — the param's default, else None
-    for an optional param. A required param with no default and no CLI value is a
-    hard error naming the param, so a pipeline fails loudly instead of hanging.
+    Non-interactive stdin: don't hang on input(). Resolve the value the same way
+    a blank interactive answer would (see _noninteractive_param_value). This
+    covers two cases: no TTY at all (e.g. a CI runner, `sys.stdin.isatty()` is
+    False), and — the #253 trap — a pseudo-TTY with no readable stdin (`docker
+    exec -t` without `-i`), where isatty() lies and returns True but the first
+    input() raises EOFError.
     """
     ptype    = param["type"]
     optional = param.get("optional", False)
     default  = param.get("default")
 
     if not sys.stdin.isatty():
-        if default is not None:
-            return default
-        if optional:
-            return None
+        return _noninteractive_param_value(param)
+
+    # isatty() can return True while stdin is still unreadable (a pseudo-TTY
+    # allocated by `docker exec -t` with no `-i`), so the first input() raises
+    # EOFError (#253). Treat that identically to a non-interactive stdin.
+    try:
         if ptype is bool:
-            return False
-        raise ValueError(
-            f"Required parameter '{param['name']}' has no value and stdin is not "
-            f"interactive — pass --{param['name']} <value> on the command line."
-        )
+            default_hint = "Y/n" if default else "y/N"
+            raw = input(f"  {param['prompt']} [{default_hint}]: ").strip()
+            _check_back(raw)
+            if not raw:
+                return default if default is not None else False
+            return raw.lower() in ("y", "yes")
 
-    if ptype is bool:
-        default_hint = "Y/n" if default else "y/N"
-        raw = input(f"  {param['prompt']} [{default_hint}]: ").strip()
-        _check_back(raw)
-        if not raw:
-            return default if default is not None else False
-        return raw.lower() in ("y", "yes")
+        if ptype is int:
+            while True:
+                raw = input(f"  {param['prompt']}: ").strip()
+                _check_back(raw)
+                if not raw:
+                    if optional:
+                        return None
+                    if default is not None:
+                        return default
+                    print("  Required — please enter a value.")
+                    continue
+                try:
+                    return int(raw)
+                except ValueError:
+                    print("  Please enter a whole number.")
 
-    if ptype is int:
+        if ptype is float:
+            while True:
+                hint = f" [{default}]" if default is not None else ""
+                raw  = input(f"  {param['prompt']}{hint}: ").strip()
+                _check_back(raw)
+                if not raw and default is not None:
+                    return default
+                try:
+                    val = float(raw)
+                    if not (0.0 <= val <= 100.0) and "percent" in param["name"]:
+                        print("  Must be between 0 and 100.")
+                        continue
+                    return val
+                except ValueError:
+                    print("  Please enter a number.")
+
+        # str
         while True:
-            raw = input(f"  {param['prompt']}: ").strip()
+            hint = f" [{default}]" if default is not None else ""
+            raw  = input(f"  {param['prompt']}{hint}: ").strip()
             _check_back(raw)
             if not raw:
                 if optional:
@@ -696,40 +746,9 @@ def _prompt_param(param):
                     return default
                 print("  Required — please enter a value.")
                 continue
-            try:
-                return int(raw)
-            except ValueError:
-                print("  Please enter a whole number.")
-
-    if ptype is float:
-        while True:
-            hint = f" [{default}]" if default is not None else ""
-            raw  = input(f"  {param['prompt']}{hint}: ").strip()
-            _check_back(raw)
-            if not raw and default is not None:
-                return default
-            try:
-                val = float(raw)
-                if not (0.0 <= val <= 100.0) and "percent" in param["name"]:
-                    print("  Must be between 0 and 100.")
-                    continue
-                return val
-            except ValueError:
-                print("  Please enter a number.")
-
-    # str
-    while True:
-        hint = f" [{default}]" if default is not None else ""
-        raw  = input(f"  {param['prompt']}{hint}: ").strip()
-        _check_back(raw)
-        if not raw:
-            if optional:
-                return None
-            if default is not None:
-                return default
-            print("  Required — please enter a value.")
-            continue
-        return raw
+            return raw
+    except EOFError:
+        return _noninteractive_param_value(param)
 
 
 class ToolsMixin:
