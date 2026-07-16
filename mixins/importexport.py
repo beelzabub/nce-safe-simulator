@@ -682,12 +682,13 @@ class ImportExportMixin:
     # ── Epic cards (printable PDF, #249) ──────────────────────────────────────
 
     def export_epic_cards(self, output_path=None, group=None, per_page="1",
-                          label_filter=None, card_spec=None):
+                          label_filter=None, card_spec=None, orientation="portrait"):
         with self._group_override(group):
-            return self._export_epic_cards(output_path, per_page, label_filter, card_spec)
+            return self._export_epic_cards(output_path, per_page, label_filter,
+                                           card_spec, orientation)
 
     def _export_epic_cards(self, output_path=None, per_page="1",
-                           label_filter=None, card_spec=None):
+                           label_filter=None, card_spec=None, orientation="portrait"):
         from .epic_cards import render_cards   # lazy — WeasyPrint only needed for this tool
 
         group = self.get_group_by_name(self.parent_group)
@@ -701,6 +702,11 @@ class ImportExportMixin:
             per = 1
         if per not in (1, 2, 3, 4):
             per = 1
+
+        # Orientation is portrait unless explicitly landscape (#254); any other
+        # value (None, unset, typo) normalizes back to portrait — matching the
+        # renderer's own fallback.
+        orient = "landscape" if str(orientation).lower() == "landscape" else "portrait"
 
         if output_path:
             path = self._resolve_path(output_path)
@@ -737,8 +743,8 @@ class ImportExportMixin:
         weights = self._fetch_epic_weights(all_epics)
         label_colors = self._fetch_label_colors(group)
         cards   = [self._epic_to_card(e, weights, taxonomy, label_colors) for e in all_epics]
-        render_cards(cards, path, per_page=per)
-        print(f"  Rendered {len(cards)} card(s), {per}-up → {path}")
+        render_cards(cards, path, per_page=per, orientation=orient)
+        print(f"  Rendered {len(cards)} card(s), {per}-up {orient} → {path}")
         url = self._export_url(path)
         if url:
             print(f"  Download: {url}")
