@@ -26,7 +26,7 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
-from mixins.preflight import profile_for_formats
+from mixins.preflight import profile_for_formats, run_preflight
 from mixins.tools import tool_preflight_profile
 from mixins.utils import _TimeoutAdapter, _clear, _pause, _tee_to_log
 
@@ -536,6 +536,23 @@ _phase = ["starting"]   # mutable so the closure can see updates
 _gl    = [None]
 
 
+def _resolve_preflight_profile(args, formats):
+    """Which preflight profile (and display label) the requested job needs, or
+    (None, None) for ungated paths — the interactive menu, diagnose (it *is* the
+    litmus), serve, and the utilities menu. Derived entirely from args, so the
+    gate can run before the GitLab client is built."""
+    if args.utilities is not None and args.utilities != "__menu__":
+        return tool_preflight_profile(args.utilities), f"utility: {args.utilities}"
+    if args.scaffold is not None:
+        return "scaffold", "scaffold"
+    if args.all or args.report is not None:
+        prof = profile_for_formats(formats)
+        return prof, f"reports ({prof})"
+    if args.clean or args.create:
+        return "core", "clean / create"
+    return None, None
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
@@ -662,13 +679,20 @@ def main():
         return
 
     formats   = _parse_formats(args.formats)
+
+    # Preflight dependency gate — runs BEFORE building the GitLab client so an
+    # air-gapped enclave with missing deps (or no token yet) gets the dependency
+    # report first, instead of an auth/network failure that hides it. Scoped to
+    # the job the args request; None = an ungated path (menu / diagnose / serve).
+    # Skip precedence: --skip-preflight flag > PREFLIGHT_SKIP env > config default.
+    _pf_profile, _pf_label = _resolve_preflight_profile(args, formats)
+    if _pf_profile is not None:
+        run_preflight(_pf_profile, phase_label=_pf_label,
+                      skip_override=True if args.skip_preflight else None)
+
     _phase[0] = "connecting to GitLab"
     gl = NceGitLab(ssl_verify=False if args.no_ssl_verify else None)
     _gl[0] = gl
-    # Preflight skip precedence: --skip-preflight flag (here) > PREFLIGHT_SKIP env
-    # > defaults.preflight.skip config (read in reload_config). The flag can only
-    # turn the gate off, mirroring --no-ssl-verify; leave it None otherwise.
-    gl._preflight_skip_override = True if args.skip_preflight else None
 
     if not any(vars(args).values()):
         _run_main_menu(gl)
@@ -677,11 +701,6 @@ def main():
     if args.utilities is not None:
         _phase[0] = "utilities menu"
         tool_key = None if args.utilities == "__menu__" else args.utilities
-        # Gate a direct `-ut <tool>` run on the deps that tool needs (e.g.
-        # epic-cards needs the PDF render). The interactive menu (tool_key None)
-        # is not gated — the user picks a tool there, so there is nothing to scope.
-        if tool_key is not None:
-            gl._preflight(tool_preflight_profile(tool_key), phase_label=f"utility: {tool_key}")
         prefills = _parse_tool_args(extra)
         if args.all:
             prefills.setdefault("all", True)
@@ -695,7 +714,6 @@ def main():
 
     if args.scaffold is not None:
         _phase[0] = "scaffold"
-        gl._preflight("scaffold", phase_label="scaffold")
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
         return
@@ -711,16 +729,6 @@ def main():
 
         uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
-
-    # Preflight the batch on the deps its heaviest phase actually needs: a
-    # report / --all run is scoped by --formats (markdown needs no quarto/marimo);
-    # a clean- or create-only run just needs the core GitLab client. Runs before
-    # any work so a missing dependency is a clean gap report, not a mid-run crash.
-    if args.all or args.report is not None:
-        _pf_profile = profile_for_formats(formats)
-        gl._preflight(_pf_profile, phase_label=f"reports ({_pf_profile})")
-    elif args.clean or args.create:
-        gl._preflight("core", phase_label="clean / create")
 
     phases = []
 
