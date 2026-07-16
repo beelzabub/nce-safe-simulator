@@ -1,5 +1,6 @@
 import csv
 import json
+import re
 import sys
 from contextlib import contextmanager
 from datetime import datetime
@@ -66,6 +67,24 @@ LINK_EXPORT_FIELDS = [
 
 # Exports land here so FastAPI's static server can serve them for download.
 _EXPORTS_DIR = Path("public/exports")
+
+# A GitLab URL path slug segment: lowercase alnum start, then alnum plus '.', '_', '-'.
+_URL_SLUG_SEG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def _looks_like_group_path(value):
+    """True when ``value`` is a full GitLab URL path — every '/'-separated
+    segment is a URL slug (lowercase alnum + ``. _ -``).
+
+    Such a value is pasted from a group URL or emitted by the UI group picker,
+    and must be resolved *whole* by get_group_by_name (whose full-path branch
+    disambiguates it, #256). Splitting it at the last '/' would reduce it to an
+    ambiguous slug leaf (e.g. ``vs-01`` occurs under many parents). The
+    ``namespace/DisplayName`` override form (#202) carries a display-name leaf
+    (spaces / mixed case), so it does *not* match here and still splits.
+    """
+    segs = str(value).split("/")
+    return len(segs) >= 2 and all(_URL_SLUG_SEG.match(s) for s in segs)
 
 # Default epic-cards spec (filter + taxonomy) shipped at the repo root. Operators
 # edit this file to match the labels of their target system; --card_spec overrides
@@ -142,11 +161,22 @@ class ImportExportMixin:
         orig_ns  = getattr(self, "gitlab_namespace", None)
         orig_grp = self.parent_group
         if group and str(group).strip():
-            parts = str(group).strip().rsplit("/", 1)
-            if len(parts) == 2:
-                self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+            g = str(group).strip()
+            if _looks_like_group_path(g):
+                # Full URL path/slug (pasted from a group URL, or emitted by the
+                # UI group picker) — resolve it whole so get_group_by_name's
+                # full-path branch disambiguates it (#256). Splitting here would
+                # reduce it to an ambiguous leaf. The namespace is left as
+                # configured; the resolved path is self-contained.
+                self.parent_group = g
             else:
-                self.parent_group = parts[0]
+                # namespace/DisplayName override form (#202): the group leaf is a
+                # display name, so split at the last '/'.
+                parts = g.rsplit("/", 1)
+                if len(parts) == 2:
+                    self.gitlab_namespace, self.parent_group = parts[0], parts[1]
+                else:
+                    self.parent_group = parts[0]
         try:
             yield
         finally:
