@@ -6062,6 +6062,93 @@ class ReportsMixin:
         """Standalone report: run diagnostics and write quarto-data/diagnostics.json."""
         self._generate_diagnostics_section()
 
+    def _check_environment(self):
+        """Environment litmus test — verify the local tools & libraries the app
+        needs are present and actually working, with NO GitLab connection
+        required. This is what catches a lift-and-shift that is missing a system
+        dependency (e.g. WeasyPrint's Pango libs), which a pip-version check can
+        never see: 'pip package present' ≠ 'can render'.
+
+        Returns (lines, missing_required): formatted output lines and the names
+        of the REQUIRED checks that failed (empty list = healthy). The caller
+        (diagnose) uses missing_required to gate a CI/CD job.
+        """
+        import shutil
+        from importlib import import_module
+
+        def _import_ok(mod):
+            try:
+                import_module(mod)
+                return True, ""
+            except Exception as e:                       # noqa: BLE001 — report any failure
+                return False, str(e).splitlines()[0][:80]
+
+        def _weasyprint_renders():
+            # pip-present is NOT enough: WeasyPrint wraps Pango, a SYSTEM library.
+            # Actually render one byte to prove the native libs + a font load.
+            try:
+                from weasyprint import HTML
+                HTML(string="<p>x</p>").write_pdf()
+                return True, ""
+            except Exception as e:                       # noqa: BLE001
+                return False, str(e).splitlines()[0][:80]
+
+        def _bin_ok(name):
+            path = shutil.which(name)
+            return bool(path), (path or "not on PATH")
+
+        # (label, ok, detail, required, fix-hint)
+        checks = []
+        for mod, pkg in [("gitlab", "python-gitlab"), ("requests", "requests"),
+                         ("pandas", "pandas"), ("dateutil", "python-dateutil")]:
+            ok, detail = _import_ok(mod)
+            checks.append((f"python: {pkg}", ok, detail, True, f"pip install {pkg}"))
+
+        ok, detail = _weasyprint_renders()
+        checks.append(("WeasyPrint render (Pango + fonts)", ok, detail, True,
+                       "apt-get install libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core"))
+
+        # Report toolchain — needed for the full static site / diagrams, but not
+        # for the epic-cards deck or the data fetch, so: recommended, not required.
+        for name, why, hint in [
+            ("dot",    "graphviz — architecture diagrams", "apt-get install graphviz"),
+            ("quarto", "Quarto — static report site",      "install Quarto (see README)"),
+        ]:
+            ok, detail = _bin_ok(name)
+            checks.append((f"{why}", ok, detail, False, hint))
+
+        # Deploy toolchain — only the ECS/EKS deploy paths use these. Optional.
+        for name, why in [("aws", "AWS CLI"), ("cdk", "CDK / ECS deploy"),
+                          ("kubectl", "EKS deploy"), ("helm", "EKS chart"),
+                          ("node", "CDK / frontend build")]:
+            ok, detail = _bin_ok(name)
+            checks.append((f"{name} — {why}", ok, detail, False, f"install {name}"))
+
+        def _icon(ok, required):
+            if ok:       return "✅"
+            return "❌" if required else "⚠️"
+
+        missing_required = [label for label, ok, _d, req, _h in checks if req and not ok]
+
+        W   = 64
+        out = ["", "🩺  Environment Dependencies (no GitLab connection needed)", "═" * W, ""]
+        nw  = max(len(c[0]) for c in checks)
+        for label, ok, detail, req, hint in checks:
+            tag = "" if req else "  (optional)"
+            out.append(f"  {_icon(ok, req)}  {label:<{nw}}{tag}")
+            if not ok:
+                if detail:
+                    out.append(f"        ↳ {detail}")
+                out.append(f"        ↳ fix: {hint}")
+        out.append("")
+        if missing_required:
+            out.append(f"❌ {len(missing_required)} required dependency(ies) missing "
+                       f"— the deck/reports will fail until fixed (see 'fix:' lines).")
+        else:
+            out.append("✅ All required dependencies present.")
+        out += ["═" * W, ""]
+        return out, missing_required
+
     def _generate_diagnostics_section(self, for_wiki=True) -> list:
         """Return lines for the environment & API diagnostics output.
 

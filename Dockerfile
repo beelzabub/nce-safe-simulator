@@ -37,6 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm /tmp/quarto.deb && \
     apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
+# WeasyPrint (epic-cards PDF export, #249) is a wrapper around Pango; the pip
+# package cannot render without these system libraries + a font. graphviz above
+# covers the diagrams library — this covers the PDF renderer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
