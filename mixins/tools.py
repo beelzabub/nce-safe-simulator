@@ -164,6 +164,7 @@ TOOLS = [
         "key":         "epic-cards",
         "description": "Render filtered epics as a printable PDF of cut-apart cards (1/2/4 per page)",
         "method":      "export_epic_cards",
+        "requires":    ["pdf"],   # preflight profile — WeasyPrint render (Pango + fonts)
         "params": [
             {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
             {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "1"},
@@ -612,6 +613,17 @@ TOOL_CATEGORIES = [
 ]
 
 _TOOL_BY_KEY = {t["key"]: t for t in TOOLS}
+
+
+def tool_preflight_profile(tool_key: str) -> str:
+    """Preflight profile a utility tool needs before it runs, from its optional
+    `requires` metadata. Defaults to 'core' (a GitLab connection only). Used by
+    NceGitLab.main() to gate a direct `-ut <tool>` invocation."""
+    t = _TOOL_BY_KEY.get(tool_key)
+    if not t:
+        return "core"
+    reqs = t.get("requires")
+    return reqs[0] if reqs else "core"
 
 # Map tool key → category slug for descriptive log file names.
 # Category name → kebab slug: "Reset / Clean" → "reset-clean", etc.

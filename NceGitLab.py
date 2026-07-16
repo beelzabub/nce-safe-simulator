@@ -18,6 +18,7 @@ from mixins import (
     IssuesMixin,
     LabelsMixin,
     MilestonesMixin,
+    PreflightMixin,
     ProjectsMixin,
     ReportsMixin,
     ServeMixin,
@@ -25,6 +26,8 @@ from mixins import (
     UtilitiesMixin,
     WikiMixin,
 )
+from mixins.preflight import profile_for_formats
+from mixins.tools import tool_preflight_profile
 from mixins.utils import _TimeoutAdapter, _clear, _pause, _tee_to_log
 
 
@@ -42,6 +45,7 @@ class NceGitLab(
     ToolsMixin,
     ImportExportMixin,
     ServeMixin,
+    PreflightMixin,
 ):
     def __init__(self, config_file="config.json", ssl_verify=None):
         self.config_file = Path(config_file)
@@ -279,6 +283,11 @@ class NceGitLab(
 
         _sd = config.get("defaults", {}).get("serve", {})
         self.serve_port = _sd.get("port", 80)
+
+        # Preflight dependency gate (mixins/preflight.py). Config default is the
+        # lowest tier; --skip-preflight flag and PREFLIGHT_SKIP env override it.
+        _pd = config.get("defaults", {}).get("preflight", {})
+        self.preflight_skip = _pd.get("skip", False)
 
         self.grafana_url = os.getenv("GRAFANA_URL") or config.get("grafana_url", "")
 
@@ -520,13 +529,20 @@ def _parse_formats(raw_list):
     return tokens
 
 
+# Current job phase + client handle, module-level so the SIGINT handler, the
+# preflight gate, and the top-level crash guard can all read them. Mutated in
+# place (never rebound) so no `global` declarations are needed inside main().
+_phase = ["starting"]   # mutable so the closure can see updates
+_gl    = [None]
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     # ------------------------------------------------------------------ #
     # Signal handler — installed before NceGitLab() so it covers init too #
     # ------------------------------------------------------------------ #
-    _phase = ["starting"]   # mutable so the closure can see updates
-    _gl    = [None]
+    _phase[0] = "starting"
+    _gl[0]    = None
 
     def _sigint_handler(sig, frame):
         phase  = _phase[0]
@@ -560,6 +576,9 @@ def main():
                              "(space or comma-separated, default: markdown)")
     parser.add_argument("--no-ssl-verify",           action="store_true",
                         help="Disable SSL certificate verification (Aisle 5 / corporate network)")
+    parser.add_argument("--skip-preflight",          action="store_true",
+                        help="Skip the preflight dependency gate that runs before a job "
+                             "(also: PREFLIGHT_SKIP=1 env, or defaults.preflight.skip in config.json)")
     parser.add_argument("-ut", "--utilities",        nargs="?", const="__menu__", metavar="TOOL",
                         help="Run a utility tool interactively (omit TOOL to show menu)")
     parser.add_argument("-D", "--diagnose",          action="store_true",
@@ -646,6 +665,10 @@ def main():
     _phase[0] = "connecting to GitLab"
     gl = NceGitLab(ssl_verify=False if args.no_ssl_verify else None)
     _gl[0] = gl
+    # Preflight skip precedence: --skip-preflight flag (here) > PREFLIGHT_SKIP env
+    # > defaults.preflight.skip config (read in reload_config). The flag can only
+    # turn the gate off, mirroring --no-ssl-verify; leave it None otherwise.
+    gl._preflight_skip_override = True if args.skip_preflight else None
 
     if not any(vars(args).values()):
         _run_main_menu(gl)
@@ -654,6 +677,11 @@ def main():
     if args.utilities is not None:
         _phase[0] = "utilities menu"
         tool_key = None if args.utilities == "__menu__" else args.utilities
+        # Gate a direct `-ut <tool>` run on the deps that tool needs (e.g.
+        # epic-cards needs the PDF render). The interactive menu (tool_key None)
+        # is not gated — the user picks a tool there, so there is nothing to scope.
+        if tool_key is not None:
+            gl._preflight(tool_preflight_profile(tool_key), phase_label=f"utility: {tool_key}")
         prefills = _parse_tool_args(extra)
         if args.all:
             prefills.setdefault("all", True)
@@ -667,6 +695,7 @@ def main():
 
     if args.scaffold is not None:
         _phase[0] = "scaffold"
+        gl._preflight("scaffold", phase_label="scaffold")
         target = None if args.scaffold == "__prompt__" else args.scaffold
         gl.create_safe_hierarchy(target)
         return
@@ -682,6 +711,16 @@ def main():
 
         uvicorn.run(_fastapi_app, host="0.0.0.0", port=port)
         return
+
+    # Preflight the batch on the deps its heaviest phase actually needs: a
+    # report / --all run is scoped by --formats (markdown needs no quarto/marimo);
+    # a clean- or create-only run just needs the core GitLab client. Runs before
+    # any work so a missing dependency is a clean gap report, not a mid-run crash.
+    if args.all or args.report is not None:
+        _pf_profile = profile_for_formats(formats)
+        gl._preflight(_pf_profile, phase_label=f"reports ({_pf_profile})")
+    elif args.clean or args.create:
+        gl._preflight("core", phase_label="clean / create")
 
     phases = []
 
@@ -735,5 +774,53 @@ def main():
         gl._print_timing_table(phases)
 
 
+def _handle_uncaught(exc, phase):
+    """Last-resort guard: an unexpected failure must not dump a raw traceback at
+    an operator (especially in an air-gapped enclave). Print a clean framed
+    message naming the phase, save the full traceback to a log file for
+    diagnosis, and exit non-zero. Dependency gaps are handled earlier by the
+    preflight gate; this catches everything else.
+    """
+    import traceback
+
+    now      = datetime.now()
+    log_path = Path("logs") / now.strftime("%Y-%m-%d") / f"{now.strftime('%H-%M-%S')}_crash.log"
+    saved    = None
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        saved = log_path
+    except Exception:                            # noqa: BLE001 — logging must never mask the error
+        pass
+
+    W    = 66
+    kind = type(exc).__name__
+    msg  = str(exc).splitlines()[0][:100] if str(exc).strip() else ""
+    lines = [
+        "", "⛔  Unexpected error — the job did not complete", "═" * W, "",
+        f"  phase:  {phase}",
+        f"  error:  {kind}" + (f": {msg}" if msg else ""),
+        "",
+        "  This is not a known dependency gap. Next steps:",
+        "    • run the environment litmus:  python3 NceGitLab.py --diagnose",
+        "    • if the environment is clean, share the log below for a code fix.",
+    ]
+    if saved is not None:
+        lines.append(f"    • full traceback saved to:  {saved}")
+    else:
+        lines.append("    • (could not write a crash log — see stderr)")
+    lines += ["═" * W, ""]
+    print("\n".join(lines))
+    if saved is None:                            # nowhere to save it — surface it
+        import traceback as _tb
+        _tb.print_exception(type(exc), exc, exc.__traceback__)
+    sys.exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        raise                                    # honor interrupts + explicit exit codes
+    except Exception as _exc:                     # noqa: BLE001 — clean-exit any other failure
+        _handle_uncaught(_exc, _phase[0])
