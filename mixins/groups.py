@@ -25,9 +25,28 @@ class GroupsMixin:
             return None
 
     def get_group_by_name(self, name):
-        groups = [g for g in self.gl.groups.list(search=name, all=True) if g.name == name]
-        if len(groups) == 1:
-            return self.gl.groups.get(groups[0].id)
+        """Resolve a group by display name, URL path slug, or full URL path (#256).
+
+        Users copy the full path (or a slug leaf) from a GitLab URL, so accept
+        those alongside the display name. Resolution order is backward-compatible:
+        a full path resolves directly; otherwise a unique **display-name** match
+        wins first (unchanged behavior), and only then does a unique **path
+        slug** match apply — so anything that resolved before still resolves the
+        same way. Ambiguous or unmatched input returns None.
+        """
+        name = str(name)
+        if "/" in name:                                      # a full URL path resolves directly
+            try:
+                return self.gl.groups.get(name)
+            except Exception:                                # noqa: BLE001 — fall back to search
+                pass
+        found = self.gl.groups.list(search=name, all=True)
+        by_name = [g for g in found if g.name == name]       # display name wins (unchanged)
+        if len(by_name) == 1:
+            return self.gl.groups.get(by_name[0].id)
+        by_path = [g for g in found if g.path == name]       # …else accept the URL slug
+        if len(by_path) == 1:
+            return self.gl.groups.get(by_path[0].id)
         return None
 
     def list_descendant_groups(self, root):
