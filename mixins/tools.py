@@ -168,6 +168,7 @@ TOOLS = [
         "params": [
             {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
             {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "1"},
+            {"name": "orientation",   "prompt": "Page orientation", "type": str, "widget": "select", "options": ["portrait", "landscape"], "default": "portrait"},
             {"name": "card_spec",     "prompt": "Card spec JSON — filter + taxonomy (blank = epic-cards-spec.json)", "type": str, "widget": "file", "optional": True,
              "help": "One JSON file defining a card set: a 'filter' (labels every epic must carry) and a 'taxonomy' ('bucket' names → chip row, 'project' names → related systems). Blank uses the repo-root epic-cards-spec.json, which operators edit to match their system. The label_filter field below overrides the spec's filter for a one-off."},
             {"name": "label_filter",  "prompt": "Only epics with these labels (comma-separated, all required; overrides spec filter)", "type": str, "optional": True},

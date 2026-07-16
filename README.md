@@ -1089,12 +1089,13 @@ The run summary reports counts as `N created | N updated | N skipped | N failed`
 
 ### Printable Epic Cards (PDF)
 
-The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart cards** for hard-copy PI planning (#249). Output is Letter-size with dashed cut borders, **1, 2, or 4 landscape cards per page**, written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
+The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart cards** for hard-copy PI planning (#249). Output is Letter-size (**portrait by default, or landscape** — #254) with dashed cut borders, **1, 2, or 4 cards per page**, written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
 
 | Param | Purpose |
 |---|---|
 | `group` | Source group (defaults to the configured root; all subgroups included) |
 | `per_page` | Cards per sheet — `1` (default), `2`, or `4` |
+| `orientation` | Page orientation — `portrait` (default, 8.5×11) or `landscape` (11×8.5) |
 | `card_spec` | Path to a card-spec JSON (**filter + taxonomy**); blank uses the shipped `epic-cards-spec.json` — see below |
 | `label_filter` | Comma-separated labels; an epic must carry **all** of them. A trailing `*` is a scope wildcard — `mission-thread::*` matches any `mission-thread::…` label. **Overrides the spec's `filter`** (the taxonomy always comes from the spec). |
 
@@ -1123,6 +1124,9 @@ python3 NceGitLab.py -ut epic-cards
 # Point at an alternate spec, or override the filter for a one-off:
 python3 NceGitLab.py -ut epic-cards --card_spec specs/mission.json
 python3 NceGitLab.py -ut epic-cards --label_filter "epic::capability,mission-thread::*"
+
+# Landscape sheet (11x8.5) instead of the default portrait (8.5x11):
+python3 NceGitLab.py -ut epic-cards --orientation landscape
 ```
 
 When run from a non-interactive shell (no TTY — e.g. a CI job), the tool never prompts: any option you don't pass takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs unattended (group from `config.json`, filter + taxonomy from the spec). See `ci-recipes/` for a ready-to-copy GitLab CI job that publishes the deck as a pipeline artifact.

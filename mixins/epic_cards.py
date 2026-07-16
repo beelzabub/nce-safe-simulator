@@ -25,9 +25,26 @@ from html import escape
 
 from weasyprint import HTML
 
-# Usable area inside the 0.4in @page margins, and inter-card gap.
-_GAP = 0.28
-_USABLE_W, _USABLE_H = 7.7, 10.2
+# Page geometry. Orientation is a render option (#254); portrait is the default
+# and preserves the original Letter layout. Landscape just rotates the sheet —
+# each per_page card AREA is orientation-invariant (the sheet is rotated, not
+# reshaped), so the description/bucket budgets below carry over unchanged.
+_MARGIN = 0.4
+_GAP    = 0.28
+_PORTRAIT_PAGE  = (8.5, 11.0)
+_LANDSCAPE_PAGE = (11.0, 8.5)
+
+
+def _page_dims(orientation):
+    """(page_w, page_h, usable_w, usable_h) in inches for ``orientation``.
+
+    Anything other than ``"landscape"`` (case-insensitive) — including ``None``
+    and an unset param — falls back to portrait, so existing callers and the
+    default path are unchanged.
+    """
+    page_w, page_h = (_LANDSCAPE_PAGE if str(orientation).lower() == "landscape"
+                      else _PORTRAIT_PAGE)
+    return page_w, page_h, page_w - 2 * _MARGIN, page_h - 2 * _MARGIN
 
 # Description character budget per cards-per-page — sized so the (whitespace-
 # collapsed) text fills the card's description area without reaching the buckets.
@@ -87,27 +104,27 @@ def _bucket_chips(buckets, per_page, colors=None):
     return chips
 
 
-def _dims(per_page):
-    """(card_width, card_height) in inches for a given cards-per-page count.
+def _dims(per_page, usable_w, usable_h):
+    """(card_width, card_height) in inches for a cards-per-page count, within the
+    ``usable_w`` x ``usable_h`` sheet (orientation-dependent, #254).
 
     Fixed dimensions + flexbox tile predictably in WeasyPrint, whose CSS-grid
     support is unreliable.
     """
     if per_page == 1:
-        return (_USABLE_W, _USABLE_H)
+        return (usable_w, usable_h)
     if per_page == 4:
-        return ((_USABLE_W - _GAP) / 2, (_USABLE_H - _GAP) / 2)   # 2x2
+        return ((usable_w - _GAP) / 2, (usable_h - _GAP) / 2)   # 2x2
     if per_page == 3:
-        return (_USABLE_W, (_USABLE_H - 2 * _GAP) / 3)            # 3 stacked
-    return (_USABLE_W, (_USABLE_H - _GAP) / 2)                    # 2 stacked (default)
+        return (usable_w, (usable_h - 2 * _GAP) / 3)            # 3 stacked
+    return (usable_w, (usable_h - _GAP) / 2)                    # 2 stacked (default)
 
 
-_CSS = """
-@page { size: 8.5in 11in; margin: 0.4in; }
+_CSS_STATIC = """
 * { box-sizing: border-box; }
 html { font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif; color: #1a1a1a; }
 .sheet { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0.28in;
-         width: 7.7in; height: 10.2in; page-break-after: always; }
+         page-break-after: always; }
 .sheet:last-child { page-break-after: auto; }
 .card {
   border: 1.5px dashed #9a9a9a; border-left-width: 0.16in; border-left-style: solid;
@@ -137,6 +154,16 @@ html { font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif; color: #
 .sys .related { color: #666; }
 .due { font-weight: 700; color: #333; white-space: nowrap; text-align: right; }
 """
+
+
+def _css(page_w, page_h, usable_w, usable_h):
+    """Full stylesheet, with the orientation-dependent @page size and .sheet
+    dimensions injected ahead of the static rules (#254)."""
+    return (
+        f"@page {{ size: {page_w:g}in {page_h:g}in; margin: {_MARGIN:g}in; }}\n"
+        f".sheet {{ width: {usable_w:.3f}in; height: {usable_h:.3f}in; }}\n"
+        + _CSS_STATIC
+    )
 
 
 def _card_html(c, dim_style="", per_page=2):
@@ -169,19 +196,28 @@ def _card_html(c, dim_style="", per_page=2):
     </div>"""
 
 
-def build_html(cards, per_page=2):
-    """Return the full HTML document for the given cards (testable without PDF)."""
-    w, h = _dims(per_page)
+def build_html(cards, per_page=2, orientation="portrait"):
+    """Return the full HTML document for the given cards (testable without PDF).
+
+    ``orientation`` is ``"portrait"`` (default) or ``"landscape"`` (#254); any
+    other value falls back to portrait via _page_dims.
+    """
+    page_w, page_h, usable_w, usable_h = _page_dims(orientation)
+    w, h = _dims(per_page, usable_w, usable_h)
     dim_style = f"width: {w:.3f}in; height: {h:.3f}in;"
     sheets = []
     for i in range(0, len(cards), per_page):
         chunk = cards[i:i + per_page]
         sheets.append('<div class="sheet">' + "".join(_card_html(c, dim_style, per_page) for c in chunk) + "</div>")
     body = "".join(sheets) or '<div class="sheet"></div>'
-    return f"<!doctype html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{body}</body></html>"
+    css = _css(page_w, page_h, usable_w, usable_h)
+    return f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body>{body}</body></html>"
 
 
-def render_cards(cards, out_pdf, per_page=2):
-    """Render cards to a print-ready Letter PDF at out_pdf. Returns out_pdf."""
-    HTML(string=build_html(cards, per_page=per_page)).write_pdf(str(out_pdf))
+def render_cards(cards, out_pdf, per_page=2, orientation="portrait"):
+    """Render cards to a print-ready Letter PDF at out_pdf. Returns out_pdf.
+
+    ``orientation`` selects portrait (default) or landscape (#254).
+    """
+    HTML(string=build_html(cards, per_page=per_page, orientation=orientation)).write_pdf(str(out_pdf))
     return out_pdf
