@@ -1,8 +1,10 @@
 """Print-ready epic-card renderer (issue #249).
 
 Pure rendering — no GitLab coupling. Takes a list of card dicts and writes a
-Letter-size PDF of cut-apart "cards" (1/2/4 per page) via WeasyPrint. The tool
-that feeds it live epics lives in ImportExportMixin.export_epic_cards.
+PDF via WeasyPrint: by default a Letter-size sheet of cut-apart "cards" (1/2/4
+per page), or — for a large-format plotter "wall" (#241) — an arbitrary
+``page_size`` (preset or WxH inches) with a ``grid`` of many cards tiled per
+sheet. The tool that feeds it live epics lives in ImportExportMixin.export_epic_cards.
 
 Card dict fields (all optional; missing ones render as an em dash):
     title, weight, description,
@@ -21,6 +23,7 @@ keeps WeasyPrint off its O(n²) flex-overflow relayout path:
   * the special bucket value ``ALL`` (buckets only) means "all buckets" and
     renders as a single ALL chip regardless of any others.
 """
+import re
 from html import escape
 
 from weasyprint import HTML
@@ -34,6 +37,22 @@ _GAP    = 0.28
 _PORTRAIT_PAGE  = (8.5, 11.0)
 _LANDSCAPE_PAGE = (11.0, 8.5)
 
+# Named large-format sheet sizes for plotter output (#241), stored portrait
+# (w <= h); orientation swaps them. Plotter/architectural + ANSI engineering rolls.
+_PAGE_PRESETS = {
+    "letter":  (8.5, 11.0),
+    "tabloid": (11.0, 17.0),   # a.k.a. ledger
+    "ledger":  (11.0, 17.0),
+    "arch-a":  (9.0, 12.0),
+    "arch-b":  (12.0, 18.0),
+    "arch-c":  (18.0, 24.0),
+    "arch-d":  (24.0, 36.0),
+    "arch-e":  (36.0, 48.0),
+    "ansi-c":  (17.0, 22.0),
+    "ansi-d":  (22.0, 34.0),
+    "ansi-e":  (34.0, 44.0),
+}
+
 
 def _page_dims(orientation):
     """(page_w, page_h, usable_w, usable_h) in inches for ``orientation``.
@@ -45,6 +64,49 @@ def _page_dims(orientation):
     page_w, page_h = (_LANDSCAPE_PAGE if str(orientation).lower() == "landscape"
                       else _PORTRAIT_PAGE)
     return page_w, page_h, page_w - 2 * _MARGIN, page_h - 2 * _MARGIN
+
+
+def _parse_page_size(page_size, orientation="portrait"):
+    """(page_w, page_h) in inches for a preset name or an explicit ``WxH`` (e.g.
+    ``"36x48"``, ``"36 x 48in"``), or ``None`` for blank/unrecognized input.
+
+    Presets are stored portrait; ``orientation="landscape"`` swaps them. An
+    explicit ``WxH`` is taken verbatim (the caller already stated the dimensions).
+    """
+    if not page_size:
+        return None
+    key = str(page_size).strip().lower()
+    if key in _PAGE_PRESETS:
+        w, h = _PAGE_PRESETS[key]
+        return (h, w) if str(orientation).lower() == "landscape" else (w, h)
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:in|in\.|inch|inches)?\s*$", key)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if w > 0 and h > 0:
+            return (w, h)
+    return None
+
+
+def _resolve_page(page_size, orientation):
+    """(page_w, page_h, usable_w, usable_h) from an explicit/preset ``page_size``
+    when given, else the Letter portrait/landscape default (#254 path)."""
+    dims = _parse_page_size(page_size, orientation)
+    if dims is None:
+        return _page_dims(orientation)
+    page_w, page_h = dims
+    return page_w, page_h, page_w - 2 * _MARGIN, page_h - 2 * _MARGIN
+
+
+def _parse_grid(grid):
+    """(cols, rows) positive ints from ``"COLSxROWS"`` (e.g. ``"6x8"``), else None.
+    Used for the large-format 'wall' layout (#241) — many cards tiled per sheet."""
+    if not grid:
+        return None
+    m = re.match(r"^\s*(\d+)\s*[x×]\s*(\d+)\s*$", str(grid).strip().lower())
+    if not m:
+        return None
+    cols, rows = int(m.group(1)), int(m.group(2))
+    return (cols, rows) if cols > 0 and rows > 0 else None
 
 # Description character budget per cards-per-page — sized so the (whitespace-
 # collapsed) text fills the card's description area without reaching the buckets.
@@ -87,9 +149,14 @@ def _bchip(label, color, extra=""):
     return f'<span class="{cls}"{style}>{escape(str(label))}</span>'
 
 
-def _bucket_chips(buckets, per_page, colors=None):
+def _bucket_chips(buckets, per_page=None, colors=None, cap=None):
     """Bucket chips honoring the ALL shorthand, the two-line '…' cutoff, and each
-    label's live GitLab color (``colors`` maps label name -> #rrggbb)."""
+    label's live GitLab color (``colors`` maps label name -> #rrggbb).
+
+    ``cap`` is the max chips before the trailing '…'. When omitted it is derived
+    from ``per_page`` (the legacy cut-apart path); the large-format grid path
+    passes ``cap`` directly since it isn't tied to a 1/2/4 layout.
+    """
     colors = colors or {}
     vals = [str(b) for b in (buckets or []) if str(b).strip()]
     if not vals:
@@ -97,11 +164,26 @@ def _bucket_chips(buckets, per_page, colors=None):
     allv = [v for v in vals if v.strip().upper() == "ALL"]
     if allv:                                            # ALL subsumes every other bucket
         return _bchip("ALL", colors.get(allv[0]) or colors.get("ALL"), "all")
-    cap = _BUCKET_MAX.get(per_page, 11)
+    if cap is None:
+        cap = _BUCKET_MAX.get(per_page, 11)
     chips = "".join(_bchip(v, colors.get(v)) for v in vals[:cap])
     if len(vals) > cap:
         chips += '<span class="chip bucket more">…</span>'
     return chips
+
+
+# Legacy cards-per-page counts expressed as (cols, rows) grids, so the cut-apart
+# path and the large-format 'wall' path (#241) share one card-sizing routine.
+_PER_PAGE_GRID = {1: (1, 1), 2: (1, 2), 3: (1, 3), 4: (2, 2)}
+
+
+def _card_dims(cols, rows, usable_w, usable_h):
+    """(card_width, card_height) in inches for a ``cols`` x ``rows`` grid within
+    the usable sheet, accounting for the inter-card ``_GAP`` (which matches the
+    ``.sheet`` flex ``gap``, so exactly cols x rows cards tile per sheet)."""
+    w = (usable_w - (cols - 1) * _GAP) / cols
+    h = (usable_h - (rows - 1) * _GAP) / rows
+    return w, h
 
 
 def _dims(per_page, usable_w, usable_h):
@@ -111,13 +193,17 @@ def _dims(per_page, usable_w, usable_h):
     Fixed dimensions + flexbox tile predictably in WeasyPrint, whose CSS-grid
     support is unreliable.
     """
-    if per_page == 1:
-        return (usable_w, usable_h)
-    if per_page == 4:
-        return ((usable_w - _GAP) / 2, (usable_h - _GAP) / 2)   # 2x2
-    if per_page == 3:
-        return (usable_w, (usable_h - 2 * _GAP) / 3)            # 3 stacked
-    return (usable_w, (usable_h - _GAP) / 2)                    # 2 stacked (default)
+    cols, rows = _PER_PAGE_GRID.get(per_page, (1, 2))
+    return _card_dims(cols, rows, usable_w, usable_h)
+
+
+def _area_budget(w, h):
+    """Description character budget for an arbitrary card size (the large-format
+    grid path). A proxy for how much text fits without overflow — proportional to
+    card area, calibrated to the tuned per-page budgets (~22 chars/in²) and
+    clamped. Slightly conservative on purpose: undershooting only shows less
+    text, never overflows the card (which also has overflow:hidden)."""
+    return max(150, min(3000, int(w * h * 22)))
 
 
 _CSS_STATIC = """
@@ -166,14 +252,14 @@ def _css(page_w, page_h, usable_w, usable_h):
     )
 
 
-def _card_html(c, dim_style="", per_page=2):
-    bucket_chips = _bucket_chips(c.get("buckets"), per_page, c.get("bucket_colors"))
+def _card_html(c, dim_style="", desc_budget=1000, bucket_cap=11):
+    bucket_chips = _bucket_chips(c.get("buckets"), colors=c.get("bucket_colors"), cap=bucket_cap)
     bucket_block = f'<div class="chiprow buckets"><span class="k">Buckets</span>{bucket_chips}</div>' if bucket_chips else ""
 
     thread = c.get("mission_thread")
     thread_txt = escape(str(thread)) if thread else "—"
 
-    desc_txt = _truncate(c.get("description") or "", _DESC_BUDGET.get(per_page, 1000))
+    desc_txt = _truncate(c.get("description") or "", desc_budget)
 
     related = c.get("related_systems") or []
     related_txt = (" · " + " · ".join(escape(str(r)) for r in related)) if related else ""
@@ -196,28 +282,51 @@ def _card_html(c, dim_style="", per_page=2):
     </div>"""
 
 
-def build_html(cards, per_page=2, orientation="portrait"):
+def build_html(cards, per_page=2, orientation="portrait", page_size=None, grid=None):
     """Return the full HTML document for the given cards (testable without PDF).
 
-    ``orientation`` is ``"portrait"`` (default) or ``"landscape"`` (#254); any
-    other value falls back to portrait via _page_dims.
+    ``orientation`` is ``"portrait"`` (default) or ``"landscape"`` (#254).
+
+    Large-format 'wall' output (#241):
+      * ``page_size`` — a preset (letter/tabloid/arch-c…e/ansi-c…e) or ``"WxH"``
+        inches (e.g. ``"36x48"``); blank keeps Letter.
+      * ``grid`` — ``"COLSxROWS"`` (e.g. ``"6x8"``) tiles that many cards per
+        sheet at a shared readable size, overriding ``per_page``; extra cards
+        flow onto further sheets.
+    Invalid ``page_size``/``grid`` values fall back to the Letter / per-page path.
     """
-    page_w, page_h, usable_w, usable_h = _page_dims(orientation)
-    w, h = _dims(per_page, usable_w, usable_h)
+    page_w, page_h, usable_w, usable_h = _resolve_page(page_size, orientation)
+
+    g = _parse_grid(grid)
+    if g:
+        cols, rows = g
+        per_sheet   = cols * rows
+        w, h        = _card_dims(cols, rows, usable_w, usable_h)
+        desc_budget = _area_budget(w, h)
+        bucket_cap  = 11 if w >= 3.3 else 5
+    else:
+        per_sheet   = per_page
+        w, h        = _dims(per_page, usable_w, usable_h)
+        desc_budget = _DESC_BUDGET.get(per_page, 1000)
+        bucket_cap  = _BUCKET_MAX.get(per_page, 11)
+
     dim_style = f"width: {w:.3f}in; height: {h:.3f}in;"
     sheets = []
-    for i in range(0, len(cards), per_page):
-        chunk = cards[i:i + per_page]
-        sheets.append('<div class="sheet">' + "".join(_card_html(c, dim_style, per_page) for c in chunk) + "</div>")
+    for i in range(0, len(cards), per_sheet):
+        chunk = cards[i:i + per_sheet]
+        sheets.append('<div class="sheet">' + "".join(_card_html(c, dim_style, desc_budget, bucket_cap) for c in chunk) + "</div>")
     body = "".join(sheets) or '<div class="sheet"></div>'
     css = _css(page_w, page_h, usable_w, usable_h)
     return f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head><body>{body}</body></html>"
 
 
-def render_cards(cards, out_pdf, per_page=2, orientation="portrait"):
-    """Render cards to a print-ready Letter PDF at out_pdf. Returns out_pdf.
+def render_cards(cards, out_pdf, per_page=2, orientation="portrait", page_size=None, grid=None):
+    """Render cards to a print-ready PDF at out_pdf. Returns out_pdf.
 
-    ``orientation`` selects portrait (default) or landscape (#254).
+    ``orientation`` selects portrait (default) or landscape (#254); ``page_size``
+    and ``grid`` drive the large-format plotter 'wall' output (#241) — see
+    ``build_html``.
     """
-    HTML(string=build_html(cards, per_page=per_page, orientation=orientation)).write_pdf(str(out_pdf))
+    HTML(string=build_html(cards, per_page=per_page, orientation=orientation,
+                           page_size=page_size, grid=grid)).write_pdf(str(out_pdf))
     return out_pdf
