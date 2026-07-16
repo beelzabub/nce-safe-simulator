@@ -1150,6 +1150,28 @@ python3 NceGitLab.py -ut strip-wsjf-labels
 
 ---
 
+## Running in a CI/CD pipeline
+
+The CLI is built to run unattended in a pipeline — every job the tool exposes (reports, the epic-cards deck, create/scaffold) runs the same way in CI as on a workstation. Three things make that safe; this section ties them together. (For how the **repository's own** pipeline builds and publishes its container images, see [CI and the Container Registry](#ci-and-the-container-registry) instead — that is a different concern.)
+
+### Copy-and-own recipes
+
+The [`ci-recipes/`](ci-recipes/) directory holds self-contained GitLab CI job snippets — **examples you copy into your project's top-level `.gitlab-ci.yml`**, not files GitLab includes automatically. To use one: open the recipe, read its header (it lists the prerequisites — committed files, CI/CD variables, access tokens), copy the job block into your `.gitlab-ci.yml`, and adjust the marked spots (`stage`, `image`, `rules`). Secrets go in masked CI/CD variables, never in the file. Full instructions and the recipe list live in [`ci-recipes/README.md`](ci-recipes/README.md); the first example, [`epic-cards-deck.yml`](ci-recipes/epic-cards-deck.yml), renders the Capability Card PDF and publishes it as a downloadable pipeline artifact.
+
+### Non-interactive by default
+
+When stdin isn't a TTY (every CI runner), tools never prompt: each option you don't pass on the command line takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs to completion unattended (group from `config.json`, filter + taxonomy from the spec). A genuinely required value with no default fails the job loudly by name instead of hanging on a prompt.
+
+### The preflight gate is the fail-fast
+
+Because the repo is lifted across air-gapped enclaves where package availability differs, every job runs the [preflight dependency gate](#preflight-dependency-gate) first — **before** the GitLab client is even built, so a missing dependency (or a not-yet-configured token) produces a clean gap report rather than an auth or import failure that buries it. On a gap the gate prints the ✅/❌ list with `fix:` and air-gap notes, writes **`logs/preflight-gaps.json`** (publish it as a job artifact to hand to the enclave's platform team, or send it back for a code rework that drops the dependency), and **exits 2** before any work runs. Resolve a few deps at a time and re-run the same command until it passes. To bypass it — e.g. a job you know needs only a subset — set `--skip-preflight`, `PREFLIGHT_SKIP=1`, or `defaults.preflight.skip` in `config.json`.
+
+### No raw tracebacks
+
+Any *unexpected* failure — one that is **not** a known dependency gap — is caught by a top-level guard that prints a framed message naming the phase and saves the full traceback to **`logs/<date>/<time>_crash.log`**, then exits 1. A job log therefore always carries a next step ("run `--diagnose`") and a shareable log, never a wall of traceback.
+
+---
+
 ## Container-Based Development & Registry
 
 The [Installation](#installation) steps above install the toolchain (Python, Node,
