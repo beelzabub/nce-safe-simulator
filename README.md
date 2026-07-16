@@ -1062,16 +1062,39 @@ The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart
 |---|---|
 | `group` | Source group (defaults to the configured root; all subgroups included) |
 | `per_page` | Cards per sheet — `1` (default), `2`, or `4` |
-| `label_filter` | Comma-separated labels; an epic must carry **all** of them. A trailing `*` is a scope wildcard — `mission-thread::*` matches any `mission-thread::…` label |
-| `taxonomy_path` | Path to the #238 label taxonomy JSON (CLI only) — see below |
+| `card_spec` | Path to a card-spec JSON (**filter + taxonomy**); blank uses the shipped `epic-cards-spec.json` — see below |
+| `label_filter` | Comma-separated labels; an epic must carry **all** of them. A trailing `*` is a scope wildcard — `mission-thread::*` matches any `mission-thread::…` label. **Overrides the spec's `filter`** (the taxonomy always comes from the spec). |
 
-```bash
-# The capability-card set: capabilities that carry any mission thread.
-python3 NceGitLab.py -ut epic-cards --per_page 1 \
-    --label_filter "epic::capability,mission-thread::*" --taxonomy_path taxonomy.json
+**Card spec** — a card set is defined by one JSON file at the repo root, `epic-cards-spec.json`, that ships with the tool and is meant to be **edited by the operator to match their target system's labels**:
+
+```json
+{
+  "filter":   ["epic::capability", "mission-thread::*"],
+  "taxonomy": {
+    "bucket":  ["ALL", "bucket1", "…", "bucket20"],
+    "project": ["DCGS", "DO", "RTSO"]
+  }
+}
 ```
 
-Each card shows **mission thread and weight (header), title, description, buckets, project / related systems, and due date**. These map from epic fields and labels per the taxonomy locked in #238: scoped labels resolve directly (`mission-thread::` → thread, `project::` → main system), while the unscoped **bucket** and **related-system** labels are classified against the taxonomy file. Until that file exists, pass `taxonomy_path` to populate those fields; without it the scoped fields still render and the unscoped ones are left empty. Program accent colors are placeholders pending Program's palette (#222).
+`filter` is the label set every epic must carry to appear on a card; `taxonomy` classifies each epic's unscoped labels — `bucket` names become the chip row, `project` names become the related-systems list.
+
+> **Both `bucket` and `project` are explicit whitelists.** Only the unscoped labels you enumerate are classified — every other unscoped label an epic carries (lifecycle tags, workflow states, ad-hoc labels) is ignored and never rendered. There is no wildcard for these lists: the operator must enumerate the real bucket and system/group names, because the unscoped namespace is shared with unrelated labels and a wildcard would sweep them in as bogus systems. (The primary system still comes from the scoped `project::` label; its unscoped twin is de-duplicated out of the related-systems list.)
+
+With the shipped spec in place the tool is self-contained:
+
+```bash
+# Uses epic-cards-spec.json for both the filter and the taxonomy (1 card/page).
+python3 NceGitLab.py -ut epic-cards
+
+# Point at an alternate spec, or override the filter for a one-off:
+python3 NceGitLab.py -ut epic-cards --card_spec specs/mission.json
+python3 NceGitLab.py -ut epic-cards --label_filter "epic::capability,mission-thread::*"
+```
+
+When run from a non-interactive shell (no TTY — e.g. a CI job), the tool never prompts: any option you don't pass takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs unattended (group from `config.json`, filter + taxonomy from the spec). See `ci-recipes/` for a ready-to-copy GitLab CI job that publishes the deck as a pipeline artifact.
+
+Each card shows **mission thread and weight (header), title, description, buckets, project / related systems, and due date**. Scoped labels resolve directly (`mission-thread::` → thread, `project::` → main system); the unscoped **bucket** and **related-system** labels are classified against the spec's `taxonomy`. With no taxonomy the scoped fields still render and the unscoped ones are left empty. Program accent colors are placeholders pending Program's palette (#222).
 
 Content that would overflow a card is **truncated in Python (not clipped by CSS)** so the cut is always visible and WeasyPrint never hits its O(n²) overflow-relayout path: the **description** is trimmed to a per-layout character budget and ends in ` …` when cut, and **buckets** past the ~two-line budget collapse into a trailing `…` chip. The special bucket value **`ALL`** (buckets only) means "all buckets" and renders as a single `ALL` chip regardless of any other bucket labels on the epic.
 

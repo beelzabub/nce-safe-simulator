@@ -67,6 +67,12 @@ LINK_EXPORT_FIELDS = [
 # Exports land here so FastAPI's static server can serve them for download.
 _EXPORTS_DIR = Path("public/exports")
 
+# Default epic-cards spec (filter + taxonomy) shipped at the repo root. Operators
+# edit this file to match the labels of their target system; --card_spec overrides
+# it for one-offs. Anchored to the repo root (this file lives in mixins/) so the
+# default resolves the same whatever the current working directory is.
+_CARD_SPEC_DEFAULT = Path(__file__).resolve().parents[1] / "epic-cards-spec.json"
+
 
 def _gid_int(gid):
     """'gid://gitlab/WorkItem/123' -> 123 (or None); plain ints pass through."""
@@ -675,13 +681,13 @@ class ImportExportMixin:
 
     # ── Epic cards (printable PDF, #249) ──────────────────────────────────────
 
-    def export_epic_cards(self, output_path=None, group=None, per_page="2",
-                          label_filter=None, taxonomy_path=None):
+    def export_epic_cards(self, output_path=None, group=None, per_page="1",
+                          label_filter=None, card_spec=None):
         with self._group_override(group):
-            return self._export_epic_cards(output_path, per_page, label_filter, taxonomy_path)
+            return self._export_epic_cards(output_path, per_page, label_filter, card_spec)
 
-    def _export_epic_cards(self, output_path=None, per_page="2",
-                           label_filter=None, taxonomy_path=None):
+    def _export_epic_cards(self, output_path=None, per_page="1",
+                           label_filter=None, card_spec=None):
         from .epic_cards import render_cards   # lazy — WeasyPrint only needed for this tool
 
         group = self.get_group_by_name(self.parent_group)
@@ -692,9 +698,9 @@ class ImportExportMixin:
         try:
             per = int(per_page)
         except (TypeError, ValueError):
-            per = 2
+            per = 1
         if per not in (1, 2, 3, 4):
-            per = 2
+            per = 1
 
         if output_path:
             path = self._resolve_path(output_path)
@@ -703,7 +709,12 @@ class ImportExportMixin:
         else:
             path = self._default_export_name("epic-cards", "pdf")
 
-        taxonomy = self._load_card_taxonomy(taxonomy_path)
+        # The card spec (filter + taxonomy) is the self-contained definition of a
+        # card set; operators edit epic-cards-spec.json to match their system. An
+        # explicit label_filter still overrides its filter for a one-off; the
+        # taxonomy always comes from the spec.
+        spec = self._load_card_spec(card_spec)
+        taxonomy = self._normalize_taxonomy(spec.get("taxonomy", {}))
 
         print(f"\nBuilding epic cards from '{group.full_path}' (all subgroups included)...")
         all_epics = group.epics.list(all=True)
@@ -711,9 +722,11 @@ class ImportExportMixin:
         # Optional filter: comma-separated labels; an epic must carry ALL of them.
         # A trailing '*' makes a token a scope wildcard — e.g. `mission-thread::*`
         # matches an epic carrying any `mission-thread::…` label. The capability
-        # card set is `epic::capability,mission-thread::*`.
-        wanted = [l.strip() for l in (label_filter or "").split(",") if l.strip()]
+        # card set is `epic::capability,mission-thread::*`. An explicit label_filter
+        # overrides the spec's "filter"; otherwise the spec supplies it.
+        wanted = self._filter_tokens(label_filter) or self._filter_tokens(spec.get("filter"))
         if wanted:
+            print(f"  Filter: {', '.join(wanted)}")
             all_epics = [e for e in all_epics
                          if self._epic_label_match(e.labels or [], wanted)]
         print(f"  {len(all_epics)} epic(s) after filter")
@@ -730,18 +743,39 @@ class ImportExportMixin:
         if url:
             print(f"  Download: {url}")
 
-    def _load_card_taxonomy(self, taxonomy_path):
-        """Load the #238 label taxonomy (family -> {scoped, names}) so unscoped
-        labels can be split into buckets vs project/system codes. Returns {}
-        when no file is given/found — scoped fields still resolve; unscoped ones
-        are left empty until the taxonomy file exists."""
-        if not taxonomy_path:
+    def _load_card_spec(self, card_spec_path):
+        """Load the epic-cards spec — one JSON carrying both the label ``filter``
+        and the label ``taxonomy`` for a card set. Falls back to the shipped
+        ``epic-cards-spec.json`` at the repo root when no path is given; returns
+        {} when the file is missing or unreadable (the tool still runs, just with
+        no filter/taxonomy). Operators edit the spec to match their system."""
+        path = Path(card_spec_path).expanduser() if card_spec_path else _CARD_SPEC_DEFAULT
+        if not path.exists():
+            if card_spec_path:
+                print(f"  WARN: card spec not found: {path}")
             return {}
         try:
-            raw = json.loads(Path(taxonomy_path).expanduser().read_text())
+            return json.loads(path.read_text()) or {}
         except (OSError, ValueError) as e:
-            print(f"  WARN: could not read taxonomy {taxonomy_path}: {e}")
+            print(f"  WARN: could not read card spec {path}: {e}")
             return {}
+
+    @staticmethod
+    def _filter_tokens(value):
+        """Normalize a filter spec to a list of label tokens. Accepts a
+        comma-separated string (``"epic::capability,mission-thread::*"``) or a
+        list of tokens; blanks are dropped. Returns [] for None/empty."""
+        if not value:
+            return []
+        parts = value if isinstance(value, (list, tuple)) else str(value).split(",")
+        return [t.strip() for t in parts if t and str(t).strip()]
+
+    @staticmethod
+    def _normalize_taxonomy(raw):
+        """Turn a taxonomy dict (family -> names, or family -> {names:[...]}) into
+        ``{family: set(names)}`` so unscoped labels can be split into buckets vs
+        project/system codes. Returns {} for a falsy/empty taxonomy — scoped
+        fields still resolve; unscoped ones are left empty."""
         fams = {}
         for fam, spec in (raw or {}).items():
             names = spec.get("names", spec) if isinstance(spec, dict) else spec

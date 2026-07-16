@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: epic-cards deck as a pipeline artifact
+#
+# Renders the filtered epics as a print-ready "Capability Card" PDF and publishes
+# it as a downloadable job artifact. Copy this job into your project's
+# .gitlab-ci.yml and adjust the marked spots (stage, triggers).
+#
+# Prerequisites in YOUR space (this source repo ships neither a token nor a
+# config.json — config.json is git-ignored and the template's token is blank):
+#   • A GitLab token with 'api' scope. Provide it EITHER by setting a masked
+#     CI/CD variable GITLAB_API_TOKEN (recommended — keeps it out of git), OR by
+#     committing your own config.json with the token filled in.
+#   • config.json          — url, private_token, parent_group. Seeded from
+#                            config.example.json below if your repo doesn't carry one.
+#   • epic-cards-spec.json  — the 'filter' + 'taxonomy' whitelists that define
+#                            which epics render and how their labels are classified.
+#
+# A commit runs this job and produces the PDF artifact.
+# ─────────────────────────────────────────────────────────────────────────────
+
+epic-cards-deck:
+  stage: build                      # ← change to a stage that exists in your pipeline
+  image: python:3.11
+  before_script:
+    # WeasyPrint is a Pango wrapper — it needs these system libs + a font at
+    # runtime; the pip package alone can't render a PDF.
+    - apt-get update && apt-get install -y --no-install-recommends
+        libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+    - pip install --no-cache-dir -r requirements.txt
+    # config.json is git-ignored, so a fresh fork may not carry one — seed it
+    # from the tracked template (blank token), then fill the token from the
+    # masked CI/CD variable if you're keeping it out of git.
+    - test -f config.json || cp config.example.json config.json
+    - if [ -n "$GITLAB_API_TOKEN" ]; then
+        python -c "import json,os; c=json.load(open('config.json')); c['private_token']=os.environ['GITLAB_API_TOKEN']; json.dump(c,open('config.json','w'),indent=2)";
+      fi
+  script:
+    # No prompts in CI: every option you don't pass takes its default — group
+    # from config.json, filter + taxonomy from epic-cards-spec.json, 1 card per
+    # page. Only the output path is pinned so the artifact has a stable name.
+    - python NceGitLab.py -ut epic-cards --output_path capability-cards.pdf
+  artifacts:
+    name: "capability-cards-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - capability-cards.pdf
+    expire_in: 30 days
+  rules:
+    # Run on every branch commit. To run only when the data/spec actually
+    # changes, replace with a `changes:` rule (shown commented below).
+    - if: $CI_COMMIT_BRANCH
+    # - changes: [config.json, epic-cards-spec.json]
+
+# ── Faster variant ──────────────────────────────────────────────────────────
+# If your project publishes its dev/runtime container image (the `containerize`
+# job), use it instead of python:3.11 and delete the whole before_script — Pango,
+# the fonts, and all Python deps are already baked in:
+#
+#   image: $CI_REGISTRY_IMAGE/dev:latest
+#   # (no before_script needed)

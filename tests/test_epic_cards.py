@@ -1,4 +1,5 @@
 """Unit tests for the epic-card PDF renderer and the epic→card mapping (#249)."""
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -144,6 +145,60 @@ def test_epic_label_match_wildcard():
     # exact tokens still require an exact label
     assert not m(caps, ["epic::feature"])
     assert m(caps, ["bucket7"])
+
+
+@pytest.mark.unit
+def test_filter_tokens_accepts_string_and_list():
+    f = ImportExportMixin._filter_tokens
+    assert f("epic::capability, mission-thread::*") == ["epic::capability", "mission-thread::*"]
+    assert f(["epic::capability", " mission-thread::* "]) == ["epic::capability", "mission-thread::*"]
+    assert f("") == []
+    assert f(None) == []
+    assert f([" ", ""]) == []
+
+
+@pytest.mark.unit
+def test_normalize_taxonomy_builds_name_sets():
+    n = ImportExportMixin._normalize_taxonomy
+    assert n({"bucket": ["b1", "b2"], "project": ["DCGS"]}) == {
+        "bucket": {"b1", "b2"}, "project": {"DCGS"}}
+    # nested {"names": [...]} form is honored too
+    assert n({"bucket": {"names": ["b1"]}}) == {"bucket": {"b1"}}
+    assert n({}) == {}
+    assert n(None) == {}
+
+
+@pytest.mark.unit
+def test_load_card_spec_reads_filter_and_taxonomy(tmp_path):
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({
+        "filter": ["epic::capability", "mission-thread::*"],
+        "taxonomy": {"bucket": ["ALL", "bucket7"], "project": ["DCGS"]},
+    }))
+    loaded = _mixin()._load_card_spec(str(spec))
+    assert _mixin()._filter_tokens(loaded["filter"]) == ["epic::capability", "mission-thread::*"]
+    assert _mixin()._normalize_taxonomy(loaded["taxonomy"]) == {
+        "bucket": {"ALL", "bucket7"}, "project": {"DCGS"}}
+
+
+@pytest.mark.unit
+def test_load_card_spec_missing_path_returns_empty(tmp_path):
+    assert _mixin()._load_card_spec(str(tmp_path / "nope.json")) == {}
+
+
+@pytest.mark.unit
+def test_shipped_card_spec_is_valid():
+    """The repo-root epic-cards-spec.json (the operator-editable default) must
+    parse and carry the capability filter plus a bucket vocab including ALL."""
+    from mixins.importexport import _CARD_SPEC_DEFAULT
+    spec = _mixin()._load_card_spec(None)          # None → shipped default
+    assert _CARD_SPEC_DEFAULT.name == "epic-cards-spec.json"
+    tokens = _mixin()._filter_tokens(spec["filter"])
+    assert "epic::capability" in tokens
+    assert any(t.startswith("mission-thread::") for t in tokens)
+    tax = _mixin()._normalize_taxonomy(spec["taxonomy"])
+    assert "ALL" in tax["bucket"]
+    assert tax["project"]                          # non-empty related-systems vocab
 
 
 @pytest.mark.unit
