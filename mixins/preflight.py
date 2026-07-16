@@ -109,6 +109,21 @@ DEP_CHECKS = [
     dict(key="docker",  kind="binary", target="docker", label="docker",
          provides="ECR image build / push", fix="install Docker",
          removable="only needed for --deploy-ecr publish"),
+
+    # --- TEMPORARY preflight demo (issue #249): two deliberately-absent deps so
+    #     a CI run of `-ut epic-cards` shows the gate reporting BOTH a missing
+    #     python package and a missing system binary at once. Remove these two
+    #     entries and the two "demo_*" keys from the `pdf` profile after the demo.
+    dict(key="demo_pydep", kind="python", target="nce_preflight_demo_pkg_xyz",
+         label="python: nce-preflight-demo (TEMP demo)",
+         provides="preflight demo — not a real dependency",
+         fix="pip install nce-preflight-demo   # (fake — delete this check)",
+         removable="TEMPORARY demo dep — delete from DEP_CHECKS + the pdf profile"),
+    dict(key="demo_bindep", kind="binary", target="nce-preflight-demo-tool",
+         label="nce-preflight-demo-tool (TEMP demo)",
+         provides="preflight demo — not a real binary",
+         fix="install nce-preflight-demo-tool   # (fake — delete this check)",
+         removable="TEMPORARY demo dep — delete from DEP_CHECKS + the pdf profile"),
 ]
 
 _BY_KEY = {c["key"]: c for c in DEP_CHECKS}
@@ -124,7 +139,9 @@ JOB_PROFILES = {
     "report-plotly":      (_CORE + ["markdown", "quarto"], ["dot"]),
     "report-interactive": (_CORE + ["markdown", "marimo"], []),
     "report-all":         (_CORE + ["markdown", "quarto", "marimo"], ["dot"]),
-    "pdf":                (_CORE + ["weasyprint"], []),
+    # NOTE: "demo_pydep"/"demo_bindep" are TEMPORARY (issue #249 preflight demo)
+    # — remove them from this profile and from DEP_CHECKS after the demo.
+    "pdf":                (_CORE + ["weasyprint", "demo_pydep", "demo_bindep"], []),
     "create":             (_CORE, []),
     "scaffold":           (_CORE, []),
     "clean":              (_CORE, []),
