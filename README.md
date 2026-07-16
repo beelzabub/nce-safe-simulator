@@ -144,10 +144,10 @@ Windows:
 python NceGitLab.py --serve
 ```
 
-The server starts on `http://localhost:4645`. Open `http://localhost:4645/app/` in your browser.
+The server starts on `http://localhost` (port **80**). Open `http://localhost/app/` in your browser.
 Run the same command again to stop it.
 
-> **Port override:** the default port is `4645`. To use a different port, pass `--port NNNN` on the command line or set `"port": NNNN` in `config.json`.
+> **Port override:** the default port is `80`. To use a different port, set `defaults.serve.port` in `config.json`. The Docker image publishes the container's port 80 as host port 4645 (`-p 4645:80`), so a containerized run is reached at `http://localhost:4645/app/`.
 
 ---
 
@@ -436,15 +436,15 @@ A Vue 3 browser interface provides an alternative to the CLI for running utility
 
 ```bash
 cd frontend && npm run build && cd ..
-python3 NceGitLab.py --serve          # serves on http://localhost:4645
+python3 NceGitLab.py --serve          # serves on http://localhost (port 80)
 ```
 
-Navigate to `http://localhost:4645/app/`.
+Navigate to `http://localhost/app/`.
 
 **Development (hot-reload, edit frontend without rebuilding):**
 
 ```bash
-python3 NceGitLab.py --serve          # backend on port 4645
+python3 NceGitLab.py --serve          # backend on port 80
 cd frontend && npm run dev            # Vite dev server on http://localhost:5173
 ```
 
@@ -692,7 +692,7 @@ If the target group does not exist and the path matches `parent_group` from conf
 
 ## Reports
 
-All reports are published as GitLab Wiki pages under the root group wiki. Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`). Use `--report all` to run every report non-interactively (required for CI).
+Reports render in three output formats — GitLab **Wiki** pages, static **Quarto HTML**, and **interactive Marimo WASM** pages (see [Output formats](#output-formats) below). Both the web UI's report picker and the CLI (`--formats` omitted) default to **all three**; pass `--formats markdown` for a Wiki-only run. Wiki pages publish under the root group wiki (structure below). Run interactively with `--report` or pass a key directly (e.g. `--report portfolio`); use `--report all` to run every report non-interactively (required for CI).
 
 ### Wiki Structure — Four-Tier Portfolio Home
 
@@ -774,19 +774,20 @@ Data snapshot → reports/20260525/143022/
 The `--formats` flag controls which output types are produced. Combine multiple:
 
 ```bash
-python3 NceGitLab.py --report all --formats markdown          # Wiki only (default)
+python3 NceGitLab.py --report all                            # All formats (--formats omitted)
+python3 NceGitLab.py --report all --formats markdown          # Wiki only
 python3 NceGitLab.py --report all --formats plotly            # Quarto HTML only
 python3 NceGitLab.py --report all --formats interactive       # Marimo WASM only
-python3 NceGitLab.py --report all --formats all               # All formats
+python3 NceGitLab.py --report all --formats all               # All formats (explicit)
 ```
 
 | Format | Output | Description |
 |---|---|---|
-| `markdown` | GitLab Wiki | Default; publishes wiki pages to the root group wiki |
+| `markdown` | GitLab Wiki | Publishes wiki pages to the root group wiki |
 | `plotly` | `public/quarto/` | Static HTML reports (Quarto + Plotly); full site in CI |
 | `interactive` | `public/interactive/` | Marimo WASM interactive pages (filter/drill-down); see below |
 
-When `--formats` is omitted, `markdown` is assumed. Pass `--no-ssl-verify` to disable TLS certificate verification for corporate proxy environments (also configurable via `SSL_VERIFY=false` env var or `"ssl_verify": false` in `config.json`).
+When `--formats` is omitted, **all three** formats are produced (equivalent to `--formats all`) — so an unqualified run needs quarto and marimo; pass an explicit `--formats markdown` for a Wiki-only run. Pass `--no-ssl-verify` to disable TLS certificate verification for corporate proxy environments (also configurable via `SSL_VERIFY=false` env var or `"ssl_verify": false` in `config.json`).
 
 #### Interactive pages
 
@@ -881,6 +882,38 @@ The same diagnostic output is automatically appended as a collapsible **🔧 Env
 | **GraphQL API Capabilities** | Functional probes (not schema introspection) for Epic blocking fields, `Epic.blockedByEpics`, `WorkItemWidgetWeight`, `Namespace.customFields`, `Issue.linkedWorkItems`, and `Group.workItemTypes` |
 | **Label Validation** | Checks every configured Epic Type, PIID, Project, and Risk label against what exists in the target group — missing labels are the most common cause of empty report cells |
 | **Compatibility Assessment** | Traffic-light (✅ / ❌ / ⚠️) verdict per report area with an overall summary sentence |
+
+`diagnose` and the **preflight gate** (below) share one dependency manifest (`mixins/preflight.py`), so the litmus you run by hand and the gate that runs automatically check the exact same things. `--diagnose` renders the *whole* manifest; the gate renders only the slice the current job needs.
+
+### Preflight dependency gate
+
+The repo is lifted into air-gapped enclaves via `git clone` → `cp -R` into an empty repo → push, then run there — where apt mirrors and PyPI may be unreachable, so system and pip package availability differs per enclave. To keep a missing dependency from surfacing as a raw Python traceback mid-run, **every job runs a preflight gate first** that checks only the dependencies that job actually needs and, on a gap, prints a clean report and stops **before any work starts**.
+
+```
+⛔  Preflight -- cannot start "reports (report-plotly)"
+Missing 1 required dependency(ies) for this job:
+  ❌  quarto -- static HTML report site
+        needs:     --formats plotly
+        fix:       install Quarto (see README)
+        air-gap: provision from your internal apt/PyPI mirror
+        removable: drop --formats plotly to skip
+```
+
+- **Job-scoped** — a `--formats markdown` run never demands WeasyPrint or quarto. The profile is derived from the invocation:
+
+  | Job | Checked (required) |
+  |---|---|
+  | `--report … --formats markdown` | python-gitlab, requests, pandas, python-dateutil, markdown |
+  | `--formats plotly` | + quarto (graphviz `dot` optional) |
+  | `--formats interactive` | + marimo |
+  | `--formats all` | + quarto + marimo |
+  | `-ut epic-cards` (PDF) | core + **WeasyPrint render** (Pango + fonts) |
+  | `--create` / `--scaffold` / `--clean` | core |
+
+- **Clean output, no stack traces.** Each missing dependency is shown with a `fix:` hint, an air-gap note (provision from your internal mirror), and a `removable:` note saying how the requirement can be avoided (drop a format, or flag it for a code rework that removes the dependency). Optional items (graphviz, the deploy toolchain) warn but never block. The gate exits with code **2** (distinct from a crash's 1).
+- **Iterative by design.** The gap list is also written to **`logs/preflight-gaps.json`** — resolve a few dependencies at a time and re-run the same command, or hand that file to the enclave's platform team / send it back for a code rework. Each run re-checks and shows only what is still missing.
+- **Skip** (three-tier precedence): `--skip-preflight` flag > `PREFLIGHT_SKIP=1` env var > `defaults.preflight.skip` in `config.json`.
+- **Unexpected failures too.** Any error that is *not* a known dependency gap is caught by a top-level guard that prints a framed message naming the phase and saves the full traceback to `logs/<date>/<time>_crash.log` — so an operator gets a next-step ("run `--diagnose`") and a log to share, never a wall of traceback.
 
 ### Setup
 

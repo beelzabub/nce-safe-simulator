@@ -11,6 +11,7 @@ from .bootstrap import BootstrapMixin
 from .tools import ToolsMixin
 from .importexport import ImportExportMixin
 from .serve import ServeMixin
+from .preflight import PreflightMixin
 
 __all__ = [
     "UtilitiesMixin",
@@ -26,4 +27,5 @@ __all__ = [
     "ToolsMixin",
     "ImportExportMixin",
     "ServeMixin",
+    "PreflightMixin",
 ]
