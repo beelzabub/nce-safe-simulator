@@ -1209,6 +1209,8 @@ make build                          # fetch data, export notebooks, render the s
 python3 NceGitLab.py --serve        # http://localhost:4645 (port published by make dev-shell)
 ```
 
+> **Tip:** run `make` (or `make help`) in the repo root for a grouped, self-documenting list of all targets (the `cdk/Makefile` behaves the same way).
+
 Because only the working tree is mounted, edits in your local IDE are visible
 immediately inside the container, and rebuilding the image is only needed when the
 toolchain itself changes (dependency bumps, tool versions). Your IDE stays on the
