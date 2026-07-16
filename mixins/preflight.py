@@ -315,6 +315,61 @@ def write_gap_manifest(results, path):
         return None
 
 
+def config_preflight_skip(config_file="config.json"):
+    """Read defaults.preflight.skip straight from a config file, for the gate
+    that runs BEFORE the GitLab client (and its config load) exists. Returns
+    False on any error — a config problem must neither silently disable the gate
+    nor crash it. Never raises."""
+    try:
+        with open(config_file) as f:
+            cfg = json.load(f)
+        return bool(cfg.get("defaults", {}).get("preflight", {}).get("skip", False))
+    except Exception:                            # noqa: BLE001
+        return False
+
+
+def _skip_decided(skip_override, config_file):
+    """Three-tier precedence: flag (skip_override) > PREFLIGHT_SKIP env > config."""
+    if skip_override is not None:
+        return bool(skip_override)
+    env = os.getenv("PREFLIGHT_SKIP")
+    if env is not None:
+        return env.strip().lower() not in ("false", "0", "no", "")
+    return config_preflight_skip(config_file)
+
+
+def run_preflight(profile, *, phase_label=None, decided_skip=None,
+                  skip_override=None, config_file="config.json"):
+    """Gate a job on `profile`'s dependencies. Runs the WHOLE profile in one pass
+    and reports every gap at once — it never stops at the first missing item.
+
+    On a missing REQUIRED dep: print the report, write the gap manifest, and
+    sys.exit(PREFLIGHT_EXIT) before any work starts. Returns True to proceed.
+
+    Skip: pass `decided_skip` (a bool) when the caller already resolved its own
+    precedence; otherwise it is `skip_override` > PREFLIGHT_SKIP env > config file.
+    Designed to be callable with no GitLab client — so it can run before auth.
+    """
+    skipped = decided_skip if decided_skip is not None \
+        else _skip_decided(skip_override, config_file)
+    if skipped:
+        print("  ⚠️  preflight skipped (--skip-preflight / PREFLIGHT_SKIP / config)")
+        return True
+    required, optional = JOB_PROFILES.get(profile, JOB_PROFILES["core"])
+    keys = list(required) + list(optional)
+    results = run_checks(keys, required_keys=set(required))
+    missing = [r for r in results if r["required"] and not r["ok"]]
+    if not missing:
+        return True
+    gap_path = write_gap_manifest(results, Path("logs") / "preflight-gaps.json")
+    print("\n".join(render_report(results, job_label=phase_label or profile,
+                                  mode="preflight")))
+    if gap_path is not None:
+        print(f"  Gap manifest written: {gap_path}  "
+              f"(share with enclave ops / send back for rework)\n")
+    sys.exit(PREFLIGHT_EXIT)
+
+
 class PreflightMixin:
     """Preflight dependency gate. Runs before a job to confirm the tools/libs
     that job needs are present, printing a clean gap report instead of letting a
@@ -340,25 +395,10 @@ class PreflightMixin:
         return bool(getattr(self, "preflight_skip", False))
 
     def _preflight(self, profile, *, phase_label=None):
-        """Gate the current job on `profile`'s dependencies.
-
-        On a missing REQUIRED dep: print a clean report, write the gap manifest,
-        and sys.exit(PREFLIGHT_EXIT) before any work starts. Returns True when
-        the job may proceed.
+        """Instance entry to the gate — resolves the three-tier skip from this
+        client's own state, then delegates to run_preflight (the same engine the
+        pre-client gate in main() uses). Returns True when the job may proceed;
+        otherwise prints the gap report and sys.exit(PREFLIGHT_EXIT).
         """
-        if self._preflight_skipped():
-            print("  ⚠️  preflight skipped "
-                  "(--skip-preflight / PREFLIGHT_SKIP / config)")
-            return True
-        required, optional = JOB_PROFILES.get(profile, JOB_PROFILES["core"])
-        keys = list(required) + list(optional)
-        results, missing = self._dependency_check(keys, required_keys=set(required))
-        if not missing:
-            return True
-        gap_path = write_gap_manifest(results, Path("logs") / "preflight-gaps.json")
-        print("\n".join(render_report(results, job_label=phase_label or profile,
-                                       mode="preflight")))
-        if gap_path is not None:
-            print(f"  Gap manifest written: {gap_path}  "
-                  f"(share with enclave ops / send back for rework)\n")
-        sys.exit(PREFLIGHT_EXIT)
+        return run_preflight(profile, phase_label=phase_label,
+                             decided_skip=self._preflight_skipped())

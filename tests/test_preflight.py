@@ -187,6 +187,58 @@ def test_skip_via_config(monkeypatch):
         assert g._preflight("report-plotly") is True
 
 
+# --- pre-construction gate (run_preflight, used by main() before the client) --
+
+def test_run_preflight_reads_config_file_skip(tmp_path, monkeypatch):
+    from mixins.preflight import run_preflight
+    monkeypatch.delenv("PREFLIGHT_SKIP", raising=False)
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"defaults": {"preflight": {"skip": true}}}')
+    with patch("mixins.preflight.shutil.which", return_value=None):
+        assert run_preflight("report-plotly", config_file=str(cfg)) is True  # config skip
+
+
+def test_run_preflight_exits_when_config_absent_and_dep_missing(tmp_path, monkeypatch):
+    from mixins.preflight import run_preflight
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PREFLIGHT_SKIP", raising=False)
+    with patch("mixins.preflight.shutil.which", return_value=None):
+        with pytest.raises(SystemExit) as ei:
+            run_preflight("report-plotly", config_file="nonexistent.json")
+    assert ei.value.code == PREFLIGHT_EXIT                  # missing config -> no skip -> gate
+
+
+def _args(**kw):
+    import argparse
+    base = dict(utilities=None, scaffold=None, all=False, report=None,
+                clean=False, create=False)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+@pytest.mark.parametrize("args,formats,expected_profile", [
+    (_args(report="__menu__"),           {"markdown"},              "report-markdown"),
+    (_args(all=True),                    {"plotly", "interactive"}, "report-all"),
+    (_args(utilities="epic-cards"),      set(),                     "pdf"),
+    (_args(utilities="audit-labels"),    set(),                     "core"),
+    (_args(scaffold="__prompt__"),       set(),                     "scaffold"),
+    (_args(create=True),                 set(),                     "core"),
+])
+def test_resolve_preflight_profile(args, formats, expected_profile):
+    from NceGitLab import _resolve_preflight_profile
+    prof, label = _resolve_preflight_profile(args, formats)
+    assert prof == expected_profile and label
+
+
+@pytest.mark.parametrize("args", [
+    _args(),                             # bare -> interactive menu
+    _args(utilities="__menu__"),         # utilities menu (no specific tool)
+])
+def test_resolve_preflight_profile_ungated(args):
+    from NceGitLab import _resolve_preflight_profile
+    assert _resolve_preflight_profile(args, set()) == (None, None)
+
+
 def test_env_false_overrides_config_true(monkeypatch):
     g = _gate()
     g.preflight_skip = True                                  # config says skip
