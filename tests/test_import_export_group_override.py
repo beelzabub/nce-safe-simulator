@@ -61,6 +61,41 @@ def test_export_issues_override_group_only_keeps_namespace():
     assert h.gitlab_namespace == "ns"
 
 
+# ─── full URL-slug path override (#256 follow-up) ─────────────────────────────
+# A path pasted from a group URL / the UI picker must be resolved WHOLE, not
+# split into an ambiguous slug leaf. get_group_by_name's full-path branch then
+# disambiguates it.
+
+def test_override_full_url_path_resolved_whole():
+    h = IEHarness()
+    full = "gl-demo-ultimate-lmwilliams/twa-pompass/twa-122-testdashboard/vs-01"
+    h.export_epics(group=full)
+    # resolved by the WHOLE path (not the leaf 'vs-01'), namespace left as configured
+    assert h.seen[0] == (full, "ns", full)
+    assert h.parent_group == "Configured Group"   # restored
+    assert h.gitlab_namespace == "ns"
+
+
+def test_override_display_name_path_still_splits():
+    # The namespace/DisplayName form (#202) keeps splitting — the leaf has a space.
+    h = IEHarness()
+    h.export_epics(group="other-ns/Override Group")
+    assert h.seen[0] == ("Override Group", "other-ns", "Override Group")
+
+
+@pytest.mark.parametrize("value,is_path", [
+    ("gl-demo/twa-pompass/vs-01", True),     # all slug segments
+    ("group-a/sub-b", True),
+    ("vs-01", False),                        # single segment (no '/') — not a path
+    ("other-ns/Override Group", False),      # display-name leaf (space)
+    ("TWA-122 - PlatformEngineering/Jamie", False),  # display-name namespace (space/case)
+    ("Ns/Group", False),                     # mixed-case segments
+])
+def test_looks_like_group_path(value, is_path):
+    from mixins.importexport import _looks_like_group_path
+    assert _looks_like_group_path(value) is is_path
+
+
 def test_export_epics_no_override_uses_config():
     h = IEHarness()
     h.export_epics()
