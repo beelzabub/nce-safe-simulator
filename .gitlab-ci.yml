@@ -23,28 +23,6 @@ test:
     - pip install -r requirements.txt
     - python -m pytest tests/
 
-# TEMPORARY (issue #249) — demonstrate the preflight dependency gate in a real
-# CI job. Two deliberately-absent deps (mixins/preflight.py DEP_CHECKS "demo_*")
-# are wired into the epic-cards (pdf) profile, so running the tool makes the gate
-# report BOTH a missing python package AND a missing system binary at once and
-# exit 2 — before any GitLab connection (the gate now runs before the client is
-# built, so no token is needed). allow_failure keeps the pipeline green. Remove
-# this job and the two demo deps after reviewing the output.
-preflight-demo:
-  stage: build
-  image: python:3.11
-  allow_failure: true
-  before_script:
-    # Install the REAL deps so only the two fake demo deps show as missing —
-    # a crisp gap report rather than a wall of everything-absent.
-    - apt-get update && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
-    - pip install --no-cache-dir -r requirements.txt
-  script:
-    - echo "Running a tool (epic-cards) — expect the preflight gate to stop it with two missing deps:"
-    - python NceGitLab.py -ut epic-cards --output_path /tmp/cards.pdf
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "feature/249-epic-print-cards"'
-
 # Build and push the runtime + dev containers to the project's GitLab Container
 # Registry on every merge to develop (issue #244). Kaniko needs no privileged
 # Docker daemon; it authenticates with the built-in per-job $CI_JOB_TOKEN, so no
