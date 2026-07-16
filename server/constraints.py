@@ -72,6 +72,7 @@ WRITER_GROUPS: dict[str, list[str]] = {
 READONLY_TOOLS: frozenset[str] = frozenset([
     "audit-hierarchy",
     "audit-labels",
+    "diagnose",
     "validate-weights",
     "weight-drift-check",
     "clean-reports",
