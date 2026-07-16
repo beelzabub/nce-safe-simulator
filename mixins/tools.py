@@ -161,6 +161,20 @@ TOOLS = [
         ],
     },
     {
+        "key":         "epic-cards",
+        "description": "Render filtered epics as a printable PDF of cut-apart cards (1/2/4 per page)",
+        "method":      "export_epic_cards",
+        "requires":    ["pdf"],   # preflight profile — WeasyPrint render (Pango + fonts)
+        "params": [
+            {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
+            {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "1"},
+            {"name": "card_spec",     "prompt": "Card spec JSON — filter + taxonomy (blank = epic-cards-spec.json)", "type": str, "widget": "file", "optional": True,
+             "help": "One JSON file defining a card set: a 'filter' (labels every epic must carry) and a 'taxonomy' ('bucket' names → chip row, 'project' names → related systems). Blank uses the repo-root epic-cards-spec.json, which operators edit to match their system. The label_filter field below overrides the spec's filter for a one-off."},
+            {"name": "label_filter",  "prompt": "Only epics with these labels (comma-separated, all required; overrides spec filter)", "type": str, "optional": True},
+            {"name": "output_path",   "prompt": "Output file path (blank = auto-named, timestamped)", "type": str, "optional": True, "cli_only": True},
+        ],
+    },
+    {
         "key":         "import-epics",
         "description": "Import epics from a CSV or JSON file with pre-flight validation",
         "method":      "import_epics",
@@ -600,6 +614,17 @@ TOOL_CATEGORIES = [
 
 _TOOL_BY_KEY = {t["key"]: t for t in TOOLS}
 
+
+def tool_preflight_profile(tool_key: str) -> str:
+    """Preflight profile a utility tool needs before it runs, from its optional
+    `requires` metadata. Defaults to 'core' (a GitLab connection only). Used by
+    NceGitLab.main() to gate a direct `-ut <tool>` invocation."""
+    t = _TOOL_BY_KEY.get(tool_key)
+    if not t:
+        return "core"
+    reqs = t.get("requires")
+    return reqs[0] if reqs else "core"
+
 # Map tool key → category slug for descriptive log file names.
 # Category name → kebab slug: "Reset / Clean" → "reset-clean", etc.
 _TOOL_CAT_SLUG: dict[str, str] = {}
@@ -629,10 +654,28 @@ def _prompt_param(param):
     """Prompt the user for a single parameter value and return the typed result.
 
     Typing 'b' at any prompt raises _BackSignal to cancel the tool.
+
+    Non-interactive (no TTY on stdin — e.g. a CI runner): don't call input()
+    (it would raise EOFError and abort the tool). Instead resolve the value the
+    same way a blank interactive answer would — the param's default, else None
+    for an optional param. A required param with no default and no CLI value is a
+    hard error naming the param, so a pipeline fails loudly instead of hanging.
     """
     ptype    = param["type"]
     optional = param.get("optional", False)
     default  = param.get("default")
+
+    if not sys.stdin.isatty():
+        if default is not None:
+            return default
+        if optional:
+            return None
+        if ptype is bool:
+            return False
+        raise ValueError(
+            f"Required parameter '{param['name']}' has no value and stdin is not "
+            f"interactive — pass --{param['name']} <value> on the command line."
+        )
 
     if ptype is bool:
         default_hint = "Y/n" if default else "y/N"
@@ -3721,6 +3764,30 @@ class ToolsMixin:
                   f"freed {freed // 1024} KB.")
 
     def _tool_diagnose(self):
-        """Print software versions, API capabilities, label validation, and compatibility assessment."""
-        lines = self._generate_diagnostics_section(for_wiki=False)
-        print("\n".join(lines))
+        """Environment + API health check (the lift-and-shift litmus test).
+
+        Two independent parts:
+          • Environment — are the local tools/libraries installed and working?
+            Always runs; needs no GitLab connection.
+          • Credentials/API — can we reach GitLab and what can it do? Runs only
+            when a token is configured; otherwise it is skipped with a note
+            (a fresh lift-and-shift has no token yet).
+
+        Exit code: when a REQUIRED dependency is missing AND we're running
+        non-interactively (a CI/CD job — no TTY), exit non-zero so the pipeline
+        fails fast with the readable ✅/❌ list. Interactively it just reports.
+        """
+        env_lines, missing_required = self._check_environment()
+        print("\n".join(env_lines))
+
+        if getattr(self, "private_token", ""):
+            try:
+                print("\n".join(self._generate_diagnostics_section(for_wiki=False)))
+            except Exception as e:                        # noqa: BLE001
+                print(f"\n  ⚠️  GitLab API diagnostics could not run: {str(e).splitlines()[0][:160]}\n")
+        else:
+            print("  ⚠️  No GitLab token configured (GITLAB_TOKEN unset and config.json "
+                  "private_token blank) — skipping API checks.\n")
+
+        if missing_required and not sys.stdin.isatty():
+            sys.exit(1)

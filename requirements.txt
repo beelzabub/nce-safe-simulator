@@ -15,6 +15,7 @@ httpx
 websockets
 markdown
 Pillow
+weasyprint
 
 pytest
 pytest-mock

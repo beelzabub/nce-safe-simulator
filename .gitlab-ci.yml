@@ -8,6 +8,10 @@ test:
   stage: build
   image: python:3.11          # match the runtime image (Dockerfile: python:3.11-slim)
   script:
+    # WeasyPrint (epic-cards, #249) renders a real PDF in the suite and needs
+    # Pango + a font at the system level — pip can't supply these. Mirrors the
+    # runtime-image apt install in the Dockerfile.
+    - apt-get update && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
     # config.json is git-ignored, so a clean CI checkout has none; several test
     # modules read it at import time. Seed it from the tracked template.
     - test -f config.json || cp config.example.json config.json

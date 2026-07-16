@@ -1,0 +1,50 @@
+"""_prompt_param must not block on input() when stdin is not a TTY.
+
+A CI runner has no interactive stdin, so calling input() raises EOFError and
+aborts the tool. Instead each unspecified param should resolve to what a blank
+interactive answer would give (its default, else None for optionals), and a
+genuinely required param with no default must fail loudly by name.
+"""
+import pytest
+from unittest.mock import patch
+
+from mixins.tools import _prompt_param
+
+pytestmark = pytest.mark.unit
+
+
+def _run(param, isatty):
+    with patch("mixins.tools.sys.stdin") as stdin:
+        stdin.isatty.return_value = isatty
+        return _prompt_param(param)
+
+
+def test_optional_str_returns_none_non_interactive():
+    p = {"name": "card_spec", "prompt": "Card spec", "type": str, "optional": True}
+    assert _run(p, isatty=False) is None
+
+
+def test_default_is_used_non_interactive():
+    p = {"name": "per_page", "prompt": "Cards per page", "type": str, "default": "1"}
+    assert _run(p, isatty=False) == "1"
+
+
+def test_optional_bool_returns_false_non_interactive():
+    p = {"name": "dry_run", "prompt": "Dry run?", "type": bool}
+    assert _run(p, isatty=False) is False
+
+
+def test_required_without_default_raises_non_interactive():
+    p = {"name": "input_path", "prompt": "Input file", "type": str, "optional": False}
+    with pytest.raises(ValueError) as e:
+        _run(p, isatty=False)
+    assert "input_path" in str(e.value)      # the message names the missing param
+
+
+def test_interactive_still_prompts():
+    p = {"name": "card_spec", "prompt": "Card spec", "type": str, "optional": True}
+    with patch("mixins.tools.sys.stdin") as stdin:
+        stdin.isatty.return_value = True
+        with patch("builtins.input", return_value="") as inp:
+            assert _prompt_param(p) is None      # blank → None for optional
+        inp.assert_called_once()                 # it really did prompt

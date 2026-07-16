@@ -1,0 +1,25 @@
+{
+  "_comment": "epic-cards tool spec. Edit to match your target system's labels. 'filter' = labels every epic must carry to appear on a card (comma tokens; a trailing '*' is a scope wildcard, e.g. mission-thread::* matches any mission-thread::… label).",
+  "_taxonomy_comment": "'taxonomy' classifies an epic's unscoped labels: 'bucket' names become the chip row (add 'ALL' for the single-chip shorthand); 'project' names become the Related Systems list. Both 'bucket' and 'project' are EXPLICIT WHITELISTS — only the exact unscoped labels you list here are classified; every other unscoped label on an epic (lifecycle tags, workflow states, ad-hoc labels) is ignored and never shown. WILDCARDS ARE NOT SUPPORTED in the taxonomy — the '*' scope wildcard works only in 'filter'. Enumerate the real bucket and system/group names.",
+  "filter": [
+    "epic::capability",
+    "mission-thread::*"
+  ],
+  "taxonomy": {
+    "bucket": [
+      "ALL",
+      "bucket1", "bucket2", "bucket3", "bucket4", "bucket5",
+      "bucket6", "bucket7", "bucket8", "bucket9", "bucket10",
+      "bucket11", "bucket12", "bucket13", "bucket14", "bucket15",
+      "bucket16", "bucket17", "bucket18", "bucket19", "bucket20"
+    ],
+    "project": [
+      "DCGS",
+      "DO",
+      "RTSO",
+      "TestA",
+      "TestB",
+      "TestC"
+    ]
+  }
+}

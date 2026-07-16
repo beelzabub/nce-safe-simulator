@@ -6062,6 +6062,32 @@ class ReportsMixin:
         """Standalone report: run diagnostics and write quarto-data/diagnostics.json."""
         self._generate_diagnostics_section()
 
+    def _check_environment(self):
+        """Environment litmus test — verify the local tools & libraries the app
+        needs are present and actually working, with NO GitLab connection
+        required. This is what catches a lift-and-shift that is missing a system
+        dependency (e.g. WeasyPrint's Pango libs), which a pip-version check can
+        never see: 'pip package present' ≠ 'can render'.
+
+        Delegates to the shared preflight engine (mixins/preflight.py) so this
+        litmus and the per-job preflight gate check the exact same manifest.
+        Runs the WHOLE manifest; REQUIRED = the core app + PDF render (see
+        preflight.DIAGNOSE_REQUIRED), everything else shown as optional.
+
+        Returns (lines, missing_required): formatted output lines and the labels
+        of the REQUIRED checks that failed (empty list = healthy). The caller
+        (diagnose) uses missing_required to gate a CI/CD job.
+        """
+        from mixins.preflight import (
+            DEP_CHECKS, DIAGNOSE_REQUIRED, render_report, run_checks,
+        )
+
+        results = run_checks([c["key"] for c in DEP_CHECKS],
+                             required_keys=DIAGNOSE_REQUIRED)
+        lines   = render_report(results, mode="diagnose")
+        missing = [r["label"] for r in results if r["required"] and not r["ok"]]
+        return lines, missing
+
     def _generate_diagnostics_section(self, for_wiki=True) -> list:
         """Return lines for the environment & API diagnostics output.
 

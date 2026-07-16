@@ -67,6 +67,12 @@ LINK_EXPORT_FIELDS = [
 # Exports land here so FastAPI's static server can serve them for download.
 _EXPORTS_DIR = Path("public/exports")
 
+# Default epic-cards spec (filter + taxonomy) shipped at the repo root. Operators
+# edit this file to match the labels of their target system; --card_spec overrides
+# it for one-offs. Anchored to the repo root (this file lives in mixins/) so the
+# default resolves the same whatever the current working directory is.
+_CARD_SPEC_DEFAULT = Path(__file__).resolve().parents[1] / "epic-cards-spec.json"
+
 
 def _gid_int(gid):
     """'gid://gitlab/WorkItem/123' -> 123 (or None); plain ints pass through."""
@@ -672,6 +678,177 @@ class ImportExportMixin:
         if url:
             print(f"  Download: {url}")
         self._write_group_names_sidecar(group, path)
+
+    # ── Epic cards (printable PDF, #249) ──────────────────────────────────────
+
+    def export_epic_cards(self, output_path=None, group=None, per_page="1",
+                          label_filter=None, card_spec=None):
+        with self._group_override(group):
+            return self._export_epic_cards(output_path, per_page, label_filter, card_spec)
+
+    def _export_epic_cards(self, output_path=None, per_page="1",
+                           label_filter=None, card_spec=None):
+        from .epic_cards import render_cards   # lazy — WeasyPrint only needed for this tool
+
+        group = self.get_group_by_name(self.parent_group)
+        if not group:
+            print(f"ERROR: group '{self.parent_group}' not found.")
+            return
+
+        try:
+            per = int(per_page)
+        except (TypeError, ValueError):
+            per = 1
+        if per not in (1, 2, 3, 4):
+            per = 1
+
+        if output_path:
+            path = self._resolve_path(output_path)
+            if path.suffix.lower() != ".pdf":
+                path = path.with_suffix(".pdf")
+        else:
+            path = self._default_export_name("epic-cards", "pdf")
+
+        # The card spec (filter + taxonomy) is the self-contained definition of a
+        # card set; operators edit epic-cards-spec.json to match their system. An
+        # explicit label_filter still overrides its filter for a one-off; the
+        # taxonomy always comes from the spec.
+        spec = self._load_card_spec(card_spec)
+        taxonomy = self._normalize_taxonomy(spec.get("taxonomy", {}))
+
+        print(f"\nBuilding epic cards from '{group.full_path}' (all subgroups included)...")
+        all_epics = group.epics.list(all=True)
+
+        # Optional filter: comma-separated labels; an epic must carry ALL of them.
+        # A trailing '*' makes a token a scope wildcard — e.g. `mission-thread::*`
+        # matches an epic carrying any `mission-thread::…` label. The capability
+        # card set is `epic::capability,mission-thread::*`. An explicit label_filter
+        # overrides the spec's "filter"; otherwise the spec supplies it.
+        wanted = self._filter_tokens(label_filter) or self._filter_tokens(spec.get("filter"))
+        if wanted:
+            print(f"  Filter: {', '.join(wanted)}")
+            all_epics = [e for e in all_epics
+                         if self._epic_label_match(e.labels or [], wanted)]
+        print(f"  {len(all_epics)} epic(s) after filter")
+        if not all_epics:
+            print("  Nothing to render — no epics matched the filter.")
+            return
+
+        weights = self._fetch_epic_weights(all_epics)
+        label_colors = self._fetch_label_colors(group)
+        cards   = [self._epic_to_card(e, weights, taxonomy, label_colors) for e in all_epics]
+        render_cards(cards, path, per_page=per)
+        print(f"  Rendered {len(cards)} card(s), {per}-up → {path}")
+        url = self._export_url(path)
+        if url:
+            print(f"  Download: {url}")
+
+    def _load_card_spec(self, card_spec_path):
+        """Load the epic-cards spec — one JSON carrying both the label ``filter``
+        and the label ``taxonomy`` for a card set. Falls back to the shipped
+        ``epic-cards-spec.json`` at the repo root when no path is given; returns
+        {} when the file is missing or unreadable (the tool still runs, just with
+        no filter/taxonomy). Operators edit the spec to match their system."""
+        path = Path(card_spec_path).expanduser() if card_spec_path else _CARD_SPEC_DEFAULT
+        if not path.exists():
+            if card_spec_path:
+                print(f"  WARN: card spec not found: {path}")
+            return {}
+        try:
+            return json.loads(path.read_text()) or {}
+        except (OSError, ValueError) as e:
+            print(f"  WARN: could not read card spec {path}: {e}")
+            return {}
+
+    @staticmethod
+    def _filter_tokens(value):
+        """Normalize a filter spec to a list of label tokens. Accepts a
+        comma-separated string (``"epic::capability,mission-thread::*"``) or a
+        list of tokens; blanks are dropped. Returns [] for None/empty."""
+        if not value:
+            return []
+        parts = value if isinstance(value, (list, tuple)) else str(value).split(",")
+        return [t.strip() for t in parts if t and str(t).strip()]
+
+    @staticmethod
+    def _normalize_taxonomy(raw):
+        """Turn a taxonomy dict (family -> names, or family -> {names:[...]}) into
+        ``{family: set(names)}`` so unscoped labels can be split into buckets vs
+        project/system codes. Returns {} for a falsy/empty taxonomy — scoped
+        fields still resolve; unscoped ones are left empty."""
+        fams = {}
+        for fam, spec in (raw or {}).items():
+            names = spec.get("names", spec) if isinstance(spec, dict) else spec
+            fams[fam] = set(names or [])
+        return fams
+
+    @staticmethod
+    def _epic_label_match(labels, wanted):
+        """True when ``labels`` satisfies every token in ``wanted`` (AND). A token
+        ending in '*' is a scope wildcard: `mission-thread::*` matches any
+        `mission-thread::…` label. The capability card set is
+        `epic::capability,mission-thread::*`."""
+        labs = set(labels or [])
+        for w in wanted:
+            if w.endswith("*"):
+                if not any(l.startswith(w[:-1]) for l in labs):
+                    return False
+            elif w not in labs:
+                return False
+        return True
+
+    @staticmethod
+    def _scoped_value(labels, prefix):
+        """Value of a scoped label ``prefix::X`` -> 'X' (first match), else None."""
+        for l in labels:
+            if l.startswith(prefix + "::"):
+                return l.split("::", 1)[1]
+        return None
+
+    @staticmethod
+    def _program_color(system):
+        """Deterministic placeholder color per program until Program's palette
+        (issue #222) lands — stable so a program is always the same hue."""
+        if not system:
+            return "#3b6ea5"
+        palette = ["#2f6f4f", "#8a3b3b", "#2f5c8a", "#6b4e8a", "#8a6a2f",
+                   "#3b7d7d", "#7d3b6b", "#556b2f"]
+        return palette[sum(ord(c) for c in system) % len(palette)]
+
+    def _fetch_label_colors(self, group):
+        """Map label name -> #rrggbb from the group's live GitLab labels so the
+        card chips can honor the colors set in GitLab. Best-effort — an empty map
+        just falls back to the renderer's default chip colors."""
+        try:
+            return {l.name: getattr(l, "color", None)
+                    for l in group.labels.list(all=True, iterator=True)}
+        except Exception as e:
+            print(f"  WARN: could not fetch label colors: {e}")
+            return {}
+
+    def _epic_to_card(self, epic, weights, taxonomy, label_colors=None):
+        """Map a live epic + the #238 taxonomy to a card dict (see epic_cards.py)."""
+        labels   = list(epic.labels or [])
+        unscoped = [l for l in labels if "::" not in l]
+        main_system   = self._scoped_value(labels, "project")
+        bucket_vocab  = taxonomy.get("bucket", set())
+        project_vocab = taxonomy.get("project", set())
+        buckets = [l for l in unscoped if l in bucket_vocab] if bucket_vocab else []
+        related = [l for l in unscoped
+                   if l in project_vocab and l != main_system] if project_vocab else []
+        colors = label_colors or {}
+        return {
+            "title":           epic.title or "",
+            "weight":          weights.get(epic.web_url) if weights else None,
+            "description":     getattr(epic, "description", "") or "",
+            "mission_thread":  self._scoped_value(labels, "mission-thread"),
+            "buckets":         buckets,
+            "bucket_colors":   {b: colors.get(b) for b in buckets},
+            "main_system":     main_system,
+            "related_systems": related,
+            "due_date":        getattr(epic, "due_date", None) or getattr(epic, "end_date", None),
+            "color":           self._program_color(main_system),
+        }
 
     # ── Epic import ───────────────────────────────────────────────────────────
 
