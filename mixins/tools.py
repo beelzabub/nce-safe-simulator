@@ -162,13 +162,17 @@ TOOLS = [
     },
     {
         "key":         "epic-cards",
-        "description": "Render filtered epics as a printable PDF of cut-apart cards (1/2/4 per page)",
+        "description": "Render filtered epics as a printable PDF — cut-apart cards (1/2/4 per page) or a large-format tiled 'wall' (page_size + grid, #241)",
         "method":      "export_epic_cards",
         "requires":    ["pdf"],   # preflight profile — WeasyPrint render (Pango + fonts)
         "params": [
             {"name": "group",         "prompt": "Source group", "type": str, "widget": "group", "optional": True},
             {"name": "per_page",      "prompt": "Cards per page", "type": str, "widget": "select", "options": ["1", "2", "4"], "default": "1"},
             {"name": "orientation",   "prompt": "Page orientation", "type": str, "widget": "select", "options": ["portrait", "landscape"], "default": "portrait"},
+            {"name": "page_size",     "prompt": "Page size — preset or WxH inches (blank = Letter)", "type": str, "optional": True,
+             "help": "Large-format plotter output (#241): set an explicit sheet size instead of Letter. Presets: letter 8.5×11, tabloid 11×17, arch-c 18×24, arch-d 24×36, arch-e 36×48, ansi-c 17×22, ansi-d 22×34, ansi-e 34×44 — or give exact inches as WxH, e.g. 36x48. Orientation swaps width/height for presets. Blank keeps Letter."},
+            {"name": "grid",          "prompt": "Grid COLSxROWS to tile many cards on one sheet, e.g. 6x8 (blank = use cards-per-page)", "type": str, "optional": True,
+             "help": "For a printable PI-planning 'wall' (#241): tile the whole filtered set as a COLS×ROWS grid per sheet — e.g. 6x8 = 48 cards/sheet — at a shared readable size, instead of the 1/2/4 cut-apart layout. Pair with a large page_size; overflow flows onto further sheets. When set, overrides cards-per-page."},
             {"name": "card_spec",     "prompt": "Card spec JSON — filter + taxonomy (blank = epic-cards-spec.json)", "type": str, "widget": "file", "optional": True,
              "help": "One JSON file defining a card set: a 'filter' (labels every epic must carry) and a 'taxonomy' ('bucket' names → chip row, 'project' names → related systems). Blank uses the repo-root epic-cards-spec.json, which operators edit to match their system. The label_filter field below overrides the spec's filter for a one-off."},
             {"name": "label_filter",  "prompt": "Only epics with these labels (comma-separated, all required; overrides spec filter)", "type": str, "optional": True},

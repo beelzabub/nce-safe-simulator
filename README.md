@@ -1089,13 +1089,15 @@ The run summary reports counts as `N created | N updated | N skipped | N failed`
 
 ### Printable Epic Cards (PDF)
 
-The `epic-cards` tool renders filtered epics as a **print-ready PDF of cut-apart cards** for hard-copy PI planning (#249). Output is Letter-size (**portrait by default, or landscape** — #254) with dashed cut borders, **1, 2, or 4 cards per page**, written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
+The `epic-cards` tool renders filtered epics as a **print-ready PDF** for hard-copy PI planning (#249). Two modes: the default **cut-apart cards** — Letter-size (**portrait by default, or landscape** — #254) with dashed cut borders, **1, 2, or 4 cards per page** — or a **large-format tiled "wall"** (#241) sized for a plotter (see [Large-format plotter wall](#large-format-plotter-wall-241) below). Output is written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
 
 | Param | Purpose |
 |---|---|
 | `group` | Source group (defaults to the configured root; all subgroups included) |
-| `per_page` | Cards per sheet — `1` (default), `2`, or `4` |
+| `per_page` | Cards per sheet — `1` (default), `2`, or `4` (ignored when `grid` is set) |
 | `orientation` | Page orientation — `portrait` (default, 8.5×11) or `landscape` (11×8.5) |
+| `page_size` | Sheet size for large-format output (#241) — a preset (`letter`, `tabloid`, `arch-c`/`d`/`e`, `ansi-c`/`d`/`e`) or exact `WxH` inches (e.g. `36x48`); blank = Letter |
+| `grid` | `COLSxROWS` (e.g. `6x8`) to tile many cards per sheet as a printable "wall" (#241), overriding `per_page`; extra cards flow onto further sheets |
 | `card_spec` | Path to a card-spec JSON (**filter + taxonomy**); blank uses the shipped `epic-cards-spec.json` — see below |
 | `label_filter` | Comma-separated labels; an epic must carry **all** of them. A trailing `*` is a scope wildcard — `mission-thread::*` matches any `mission-thread::…` label. **Overrides the spec's `filter`** (the taxonomy always comes from the spec). |
 
@@ -1127,7 +1129,19 @@ python3 NceGitLab.py -ut epic-cards --label_filter "epic::capability,mission-thr
 
 # Landscape sheet (11x8.5) instead of the default portrait (8.5x11):
 python3 NceGitLab.py -ut epic-cards --orientation landscape
+
+# Large-format wall: tile all filtered cards 6-across x 8-down on a 36x48in sheet:
+python3 NceGitLab.py -ut epic-cards --page_size arch-e --grid 6x8
 ```
+
+#### Large-format plotter wall (#241)
+
+For a wall-format PI-planning artifact, set an explicit **`page_size`** and a **`grid`** and the whole filtered set tiles onto one large sheet (overflow flows to further sheets) at a shared, readable card size — using the same card design as the cut-apart deck. Print it on a plotter and pin the sheet up; no cutting.
+
+- **`page_size`** — a preset (`letter` 8.5×11, `tabloid` 11×17, `arch-c` 18×24, `arch-d` 24×36, `arch-e` 36×48, `ansi-c` 17×22, `ansi-d` 22×34, `ansi-e` 34×44) or exact `WxH` inches (e.g. `36x48`). Presets swap with `orientation`; an explicit `WxH` is taken verbatim.
+- **`grid`** — `COLSxROWS`, e.g. `6x8` = 48 cards per sheet.
+
+Because WeasyPrint sets the PDF's `@page` size in **real-world inches**, the media box equals the requested physical dimensions (a `36x48` request yields a 2592×3456 pt / 36×48 in page), so a plotter prints it **1:1 with no fit-to-page scaling** — the "right size" failure mode #222 flagged. Bad `page_size`/`grid` values warn and fall back to the Letter / cards-per-page path.
 
 When run from a non-interactive shell (no TTY — e.g. a CI job), the tool never prompts: any option you don't pass takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs unattended (group from `config.json`, filter + taxonomy from the spec). See `ci-recipes/` for a ready-to-copy GitLab CI job that publishes the deck as a pipeline artifact.
 

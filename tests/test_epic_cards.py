@@ -6,7 +6,7 @@ import pytest
 
 from mixins.epic_cards import (
     build_html, render_cards, _dims, _page_dims, _truncate, _bucket_chips,
-    _BUCKET_MAX, _DESC_BUDGET,
+    _BUCKET_MAX, _DESC_BUDGET, _parse_page_size, _parse_grid, _card_dims,
 )
 from mixins.importexport import ImportExportMixin
 
@@ -156,6 +156,91 @@ def test_build_html_default_is_portrait():
 def test_render_cards_landscape_writes_pdf(tmp_path):
     out = tmp_path / "cards-landscape.pdf"
     render_cards([_sample_card()], out, per_page=1, orientation="landscape")
+    assert out.is_file()
+    assert out.read_bytes()[:5] == b"%PDF-"
+
+
+# ── large-format plotter 'wall' (#241) ────────────────────────────────────────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value,expected", [
+    ("arch-e",     (36.0, 48.0)),
+    ("arch-d",     (24.0, 36.0)),
+    ("tabloid",    (11.0, 17.0)),
+    ("36x48",      (36.0, 48.0)),
+    ("36 x 48in",  (36.0, 48.0)),
+    ("24X36",      (24.0, 36.0)),
+    ("bogus",      None),
+    ("",           None),
+    (None,         None),
+    ("0x10",       None),          # non-positive rejected
+])
+def test_parse_page_size(value, expected):
+    assert _parse_page_size(value) == expected
+
+
+@pytest.mark.unit
+def test_parse_page_size_landscape_swaps_presets_only():
+    assert _parse_page_size("arch-e", "landscape") == (48.0, 36.0)   # preset swaps
+    assert _parse_page_size("36x48", "landscape")  == (36.0, 48.0)   # explicit is verbatim
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value,expected", [
+    ("6x8", (6, 8)), ("1x1", (1, 1)), ("10X4", (10, 4)),
+    ("6 x 8", (6, 8)), ("0x5", None), ("x", None), ("6", None), ("", None), (None, None),
+])
+def test_parse_grid(value, expected):
+    assert _parse_grid(value) == expected
+
+
+@pytest.mark.unit
+def test_card_dims_tiles_exactly():
+    # cols x rows cards + (n-1) gaps must exactly fill the usable sheet.
+    uw, uh = 35.2, 47.2
+    w, h = _card_dims(6, 8, uw, uh)
+    assert pytest.approx(6 * w + 5 * 0.28) == uw
+    assert pytest.approx(8 * h + 7 * 0.28) == uh
+
+
+@pytest.mark.unit
+def test_build_html_large_format_page_and_grid():
+    html = build_html([_sample_card()], page_size="arch-e", grid="6x8")
+    assert "@page { size: 36in 48in;" in html
+    assert ".sheet { width: 35.200in; height: 47.200in;" in html
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cards,grid,sheets", [
+    (20, "6x8", 1),     # 20 <= 48 per sheet
+    (48, "6x8", 1),     # exactly one sheet
+    (50, "6x8", 2),     # overflow flows onto a second sheet
+    (5,  "2x2", 2),     # 4 per sheet -> 2 sheets
+])
+def test_build_html_grid_paginates(cards, grid, sheets):
+    html = build_html([_sample_card() for _ in range(cards)], page_size="arch-e", grid=grid)
+    assert html.count('class="sheet"') == sheets
+
+
+@pytest.mark.unit
+def test_grid_overrides_per_page():
+    # When grid is given, per_page is ignored for the card count per sheet.
+    html = build_html([_sample_card() for _ in range(9)], per_page=1, grid="3x3")
+    assert html.count('class="sheet"') == 1     # 9 cards, 3x3 = 9 per sheet
+
+
+@pytest.mark.unit
+def test_invalid_page_size_and_grid_fall_back_to_letter():
+    # Renderer tolerates junk and produces the default Letter/per-page output.
+    fallback = build_html([_sample_card()], per_page=2, page_size="nope", grid="bad")
+    assert fallback == build_html([_sample_card()], per_page=2)
+
+
+@pytest.mark.unit
+def test_render_cards_large_format_writes_pdf(tmp_path):
+    out = tmp_path / "wall.pdf"
+    cards = [_sample_card(title=f"E{i}") for i in range(12)]
+    render_cards(cards, out, page_size="36x48", grid="6x8")
     assert out.is_file()
     assert out.read_bytes()[:5] == b"%PDF-"
 

@@ -682,14 +682,17 @@ class ImportExportMixin:
     # ── Epic cards (printable PDF, #249) ──────────────────────────────────────
 
     def export_epic_cards(self, output_path=None, group=None, per_page="1",
-                          label_filter=None, card_spec=None, orientation="portrait"):
+                          label_filter=None, card_spec=None, orientation="portrait",
+                          page_size=None, grid=None):
         with self._group_override(group):
             return self._export_epic_cards(output_path, per_page, label_filter,
-                                           card_spec, orientation)
+                                           card_spec, orientation, page_size, grid)
 
     def _export_epic_cards(self, output_path=None, per_page="1",
-                           label_filter=None, card_spec=None, orientation="portrait"):
-        from .epic_cards import render_cards   # lazy — WeasyPrint only needed for this tool
+                           label_filter=None, card_spec=None, orientation="portrait",
+                           page_size=None, grid=None):
+        # lazy — WeasyPrint only needed for this tool
+        from .epic_cards import render_cards, _parse_page_size, _parse_grid
 
         group = self.get_group_by_name(self.parent_group)
         if not group:
@@ -707,6 +710,20 @@ class ImportExportMixin:
         # value (None, unset, typo) normalizes back to portrait — matching the
         # renderer's own fallback.
         orient = "landscape" if str(orientation).lower() == "landscape" else "portrait"
+
+        # Large-format 'wall' output (#241): page_size (preset or WxH inches) and
+        # grid (COLSxROWS). Validate here for a clear message; the renderer also
+        # falls back on bad input, but a silent Letter fallback would surprise.
+        page_size = (page_size or "").strip() or None
+        grid      = (grid or "").strip() or None
+        if page_size and _parse_page_size(page_size, orient) is None:
+            print(f"  ⚠️  Unrecognized page_size '{page_size}' — using Letter. Presets: "
+                  "letter/tabloid/arch-c/arch-d/arch-e/ansi-c/ansi-d/ansi-e, or WxH inches like 36x48.")
+            page_size = None
+        if grid and _parse_grid(grid) is None:
+            print(f"  ⚠️  Unrecognized grid '{grid}' — ignoring (using cards-per-page). "
+                  "Use COLSxROWS like 6x8.")
+            grid = None
 
         if output_path:
             path = self._resolve_path(output_path)
@@ -743,8 +760,13 @@ class ImportExportMixin:
         weights = self._fetch_epic_weights(all_epics)
         label_colors = self._fetch_label_colors(group)
         cards   = [self._epic_to_card(e, weights, taxonomy, label_colors) for e in all_epics]
-        render_cards(cards, path, per_page=per, orientation=orient)
-        print(f"  Rendered {len(cards)} card(s), {per}-up {orient} → {path}")
+        render_cards(cards, path, per_page=per, orientation=orient,
+                     page_size=page_size, grid=grid)
+        # Describe the layout that was actually used: a grid (large-format wall)
+        # supersedes cards-per-page; page_size supersedes Letter.
+        layout = f"grid {grid}" if grid else f"{per}-up"
+        layout += f" {orient} on {page_size}" if page_size else f" {orient}"
+        print(f"  Rendered {len(cards)} card(s), {layout} → {path}")
         url = self._export_url(path)
         if url:
             print(f"  Download: {url}")
