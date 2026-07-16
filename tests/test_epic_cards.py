@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from mixins.epic_cards import (
-    build_html, render_cards, _dims, _truncate, _bucket_chips, _BUCKET_MAX, _DESC_BUDGET,
+    build_html, render_cards, _dims, _page_dims, _truncate, _bucket_chips,
+    _BUCKET_MAX, _DESC_BUDGET,
 )
 from mixins.importexport import ImportExportMixin
 
@@ -104,16 +105,57 @@ def test_bucket_chips_honor_live_colors():
 @pytest.mark.unit
 def test_dims_geometry():
     # 1-up is a full-page card; 2-up halves the height; 4-up keeps that height
-    # but halves the width (two columns).
-    assert _dims(1)[1] > _dims(2)[1]                 # fewer per page -> taller
-    assert _dims(2)[1] == pytest.approx(_dims(4)[1])  # same row height
-    assert _dims(2)[0] > _dims(4)[0]                 # 4-up is two columns -> narrower
+    # but halves the width (two columns). Uses the portrait usable area.
+    uw, uh = 7.7, 10.2
+    assert _dims(1, uw, uh)[1] > _dims(2, uw, uh)[1]                    # fewer per page -> taller
+    assert _dims(2, uw, uh)[1] == pytest.approx(_dims(4, uw, uh)[1])    # same row height
+    assert _dims(2, uw, uh)[0] > _dims(4, uw, uh)[0]                    # 4-up is two columns -> narrower
 
 
 @pytest.mark.unit
 def test_render_cards_writes_pdf(tmp_path):
     out = tmp_path / "cards.pdf"
     render_cards([_sample_card(), _sample_card(title="Second")], out, per_page=2)
+    assert out.is_file()
+    assert out.read_bytes()[:5] == b"%PDF-"
+
+
+# ── orientation (#254) ────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_page_dims_portrait_and_landscape():
+    assert _page_dims("portrait")  == (8.5, 11.0, 7.7, 10.2)
+    assert _page_dims("landscape") == (11.0, 8.5, 10.2, 7.7)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("orientation", [None, "", "portrait", "PORTRAIT", "bogus"])
+def test_page_dims_defaults_to_portrait(orientation):
+    # Anything that isn't "landscape" (case-insensitive) is portrait.
+    assert _page_dims(orientation) == (8.5, 11.0, 7.7, 10.2)
+
+
+@pytest.mark.unit
+def test_build_html_emits_orientation_page_size():
+    portrait  = build_html([_sample_card()], per_page=1, orientation="portrait")
+    landscape = build_html([_sample_card()], per_page=1, orientation="landscape")
+    assert "@page { size: 8.5in 11in;" in portrait
+    assert ".sheet { width: 7.700in; height: 10.200in;" in portrait
+    assert "@page { size: 11in 8.5in;" in landscape
+    assert ".sheet { width: 10.200in; height: 7.700in;" in landscape
+
+
+@pytest.mark.unit
+def test_build_html_default_is_portrait():
+    # Omitting orientation must render exactly as portrait (backward compatible).
+    assert build_html([_sample_card()], per_page=2) == \
+           build_html([_sample_card()], per_page=2, orientation="portrait")
+
+
+@pytest.mark.unit
+def test_render_cards_landscape_writes_pdf(tmp_path):
+    out = tmp_path / "cards-landscape.pdf"
+    render_cards([_sample_card()], out, per_page=1, orientation="landscape")
     assert out.is_file()
     assert out.read_bytes()[:5] == b"%PDF-"
 
