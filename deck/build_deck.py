@@ -676,6 +676,9 @@ class DeckBuilder:
             self._agenda_number(p, RGBColor(0x00, 0x6B, 0xB5))
 
     def build_chrome_slides(self):
+        # Own section divider so the Project Overview cleanly separates from the
+        # preceding Latest Work ("New work") section (issue #257).
+        self._section_divider("Project Overview", "What the system is and how it is built")
         s = os.path.join(self.screenshots_dir, "00-home_light.png")
         self.capability_slide(
             "Project Overview", "SAFe portfolio automation for GitLab",
