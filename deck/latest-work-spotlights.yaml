@@ -48,6 +48,17 @@ spotlights:
       - "Page orientation is now a choice — portrait (8.5×11) or landscape (11×8.5) — exposed as both a CLI flag and a UI select, mirroring how `per_page` already works (#254)."
       - "Vector output prints crisp from any basic PDF reader — no rasterized screenshots, no app required to consume it."
 
+  - title: "Epic Cards — Driven From the Web UI  (#249)"
+    subtitle: "The whole card set is configured from one tool dialog — or the equivalent CLI"
+    issues: [249]
+    images:
+      - "deck/assets/spotlight-extras/epic-cards-ui-dialog.png"
+    caption: "The Epic Cards dialog — source group, cards/page, orientation, page size, wall grid, and card-spec; the matching CLI shown beneath"
+    bullets:
+      - "The epic-cards tool runs straight from the web UI's job picker (under 'Other') as well as the CLI — the same renderer and parameters either way."
+      - "One dialog drives the entire output: source group, 1/2/4 cards per page, portrait or landscape, a large-format page size, an optional COLSxROWS 'wall' grid, and an operator-editable card-spec (filter + taxonomy)."
+      - "Every field mirrors a copy-paste CLI command shown at the bottom of the dialog, so a UI experiment drops straight into a script or a CI job."
+
   - title: "Large-Format PI-Planning Wall  (#241)"
     subtitle: "The same renderer, sized in true inches for a plotter"
     issues: [241]
