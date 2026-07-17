@@ -6,65 +6,94 @@
 # authoring step rewrites this file from the `slides`-labeled issues closed in
 # the current work week. See deck/README.md and issue #213.
 #
+# A single issue (or group) may span 2-3 slides when the work is visual enough
+# to warrant it (issue #257).
+#
 # Fields: title, subtitle, bullets[], images[] (screenshot filenames, 0/1/2),
 #         image_labels[] (captions for the 2-image layout), caption (1-image),
 #         issues[] (source issue numbers — documentation only).
+#
+# image paths resolve first under deck/screenshots/, then repo-relative — so
+# curated committed art (deck/assets/spotlight-extras/, the #243 brief diagrams)
+# can be referenced by its repo path (issue #257 items 2-4).
 
 spotlights:
-  - title: "New Capability — Bundle Export / Import  (#206)"
-    subtitle: "One-file transfer of an entire portfolio slice, end to end"
-    issues: [206]
-    images: ["05a-import-export-export-bundle_light.png", "05b-import-export-import-bundle_light.png"]
-    image_labels: ["Export Bundle dialog", "Import Bundle dialog"]
+  - title: "Self-Documenting Makefile Help  (#255)"
+    subtitle: "Bare `make` now prints a grouped target listing instead of silently launching a build"
+    issues: [255]
+    images:
+      - "deck/assets/spotlight-extras/make-help-root.png"
+      - "deck/assets/spotlight-extras/make-help-cdk.png"
+    image_labels:
+      - "Root `make` — reports, deploy, container, deck"
+      - "cdk/ `make` — the pattern it was modeled on"
     bullets:
-      - "One .zip carries the whole slice — group/project containers, epics, issues, blocking links, and container display names — instead of juggling separate epic / issue / link exports."
-      - "Import runs three phases in a single pass: rebuild the container tree, create the epics and issues, then re-link blocking relationships — no manual ordering."
-      - "Cross-instance safe: create_missing rebuilds subgroup / project chains from the bundle's trusted source root; on_missing_bv_field can create the Business Value field on the target when it's absent (#204)."
-      - "Idempotent recovery: on_existing = skip makes a re-run a no-op, so a partially failed import just gets run again (#207)."
-      - "Ships as two UI tools under Import / Export — Export Bundle and Import Bundle — plus the equivalent export-bundle / import-bundle CLI commands."
+      - "Bare `make` used to launch the full data → interactive → static pipeline — hitting GitLab and rendering the Quarto site; it now prints a formatted, grouped list of targets instead (`.DEFAULT_GOAL := help`)."
+      - "The listing is produced from the Makefile itself: each target self-documents with an inline `## description`, and `##@ Section` lines become group headers — one source of truth, no separate help text to drift."
+      - "A single `awk` one-liner over `$(MAKEFILE_LIST)` renders it — bold banners from `##@`, cyan target + description from every `target: ## …` line — the identical pattern already used by `cdk/Makefile`."
+      - "Explicit targets (`make build`, `make redeploy`, `make deck`, …) still behave exactly as before."
 
-  - title: "Import / Export — Full-Fidelity Hardening"
-    subtitle: "The transfer arc behind the bundle — nothing dropped, safe to re-run"
-    issues: [193, 195, 196, 198, 200, 201, 202, 211]
-    images: ["05-import-export-import-epics_light.png"]
-    caption: "Import Epics — one of the hardened import dialogs"
+  - title: "Printable Epic Cards — Portrait & Landscape  (#249, #254)"
+    subtitle: "Filtered GitLab epics rendered to a print-ready vector PDF, cards to cut apart"
+    issues: [249, 254]
+    images:
+      - "deck/assets/spotlight-extras/epic-cards-portrait.png"
+      - "deck/assets/spotlight-extras/epic-cards-landscape.png"
+    image_labels:
+      - "Portrait — 2 cards per Letter sheet"
+      - "Landscape — 2 cards per Letter sheet"
     bullets:
-      - "Full fidelity: issues now land in create_missing_projects and their blocking links export/import with them (#198); epic business_value is carried across a transfer instead of being dropped (#196)."
-      - "Container rebuild: create_missing_groups recreates missing subgroup chains from trusted source roots (#195), and a group-names sidecar carries each container's display name so recreated groups/projects read like the source (#200)."
-      - "Resilient re-runs: visible 429 backoff, batched existence checks, and container-qualified skip messages (#201); a field-level round-trip verification of issues + blocking links (TestDashboard → JamieGroup) proves nothing is lost (#202)."
-      - "Clearer dialogs: destination-fallback / source-root / create-missing params relabeled with precedence help (#193), and the Tools Import/Export list reordered (#211)."
+      - "The `epic-cards` tool pulls filtered epics from GitLab and renders cut-apart cards to a print-ready PDF — 1–4 cards per 8.5×11 sheet, with borders to cut on (#249)."
+      - "Each card carries title, weight, description, mission-thread / action / main-system labels, related systems, and due date, driven by an operator-editable spec file."
+      - "Page orientation is now a choice — portrait (8.5×11) or landscape (11×8.5) — exposed as both a CLI flag and a UI select, mirroring how `per_page` already works (#254)."
+      - "Vector output prints crisp from any basic PDF reader — no rasterized screenshots, no app required to consume it."
 
-  - title: "Portfolio Explorer — Now a Published Report  (#182)"
-    subtitle: "The in-app analysis view, rendered to the report surfaces"
-    issues: [182]
-    images: ["17-analysis-portfolio-explorer_light.png"]
-    caption: "Portfolio Explorer — the in-app view, now mirrored to Wiki + Quarto"
+  - title: "Large-Format PI-Planning Wall  (#241)"
+    subtitle: "The same renderer, sized in true inches for a plotter"
+    issues: [241]
+    images:
+      - "deck/assets/spotlight-extras/epic-cards-largeformat.png"
+    caption: "One wide sheet — media set in real-world inches, prints 1:1"
     bullets:
-      - "The Portfolio Explorer (three-tier BV / weight-at-risk, untyped-epic warnings) is no longer app-only — it now publishes to a Tier-1 Wiki page and a Quarto Executive page."
-      - "The published numbers are pinned to the app's own analysis engine, so the report surfaces and the live UI can't drift apart."
-      - "Brings the newest portfolio-level analysis into the same Wiki + Quarto surfaces as the rest of the report suite."
+      - "The WeasyPrint engine behind the epic cards sizes its media in real-world inches via CSS `@page`, so the same pipeline emits a single large-format sheet a plotter prints at true size."
+      - "Targets banner/roll media in the 36–60 in range with no manual rescaling — the hard part (a vector PDF whose media box is a true physical size) was de-risked by the epic-cards work."
+      - "Lifts the PI-planning wall off the screen and onto a physical wall the team can plan against together."
 
-  - title: "Selective Data Fetch  (#183)"
-    subtitle: "Fetch only what the selected reports actually need"
-    issues: [183]
+  - title: "VM → Container SDLC — the Leadership Brief  (#243)"
+    subtitle: "From hand-built developer VMs no one can fully explain to a container-based SDLC"
+    issues: [243]
+    images:
+      - "slides/243-slide-brief-as-is-to-be/diagrams/asis-vm-sdlc.png"
+      - "slides/243-slide-brief-as-is-to-be/diagrams/tobe-container-sdlc.png"
+    image_labels:
+      - "As-Is — hand-built developer VMs"
+      - "To-Be — container-based SDLC"
     bullets:
-      - "A report run now derives the minimal set of snapshot phases required by the specific reports selected, instead of always fetching the full portfolio snapshot."
-      - "Fewer GitLab API calls and faster runs when only a subset of reports is requested — the fetch scales with what you asked for."
-      - "Groundwork that also makes targeted, on-demand report refreshes cheaper."
+      - "A leadership-facing brief frames the problem: a build the team depends on but that lives in hand-built VMs no one can fully explain or reproduce (#243)."
+      - "The To-Be state moves developers to a container-based SDLC — edit locally in the IDE of choice, build inside a shared image, sync to GitLab for the outer loop."
+      - "Built as a self-contained deck (`slides/243-slide-brief-as-is-to-be/`) on the same branding template, with reviewed As-Is / To-Be architecture diagrams."
+      - "Calls out the advantages: a reproducible environment, forced understanding of the current dev/build VM, and one definition of the toolchain shared by every developer and CI."
 
-  - title: "UI Enhancements & Cleanup  (#187)"
-    subtitle: "Polish surfaced while building the status deck"
-    issues: [187]
-    images: ["15-login-front-door.png"]
-    caption: "Login front door — now with slideshow nav chevrons"
+  - title: "One Image, Three Roles — Dev · Build · CI  (#244)"
+    subtitle: "The simulator itself now ships as a golden container"
+    issues: [244]
+    images:
+      - "slides/243-slide-brief-as-is-to-be/diagrams/container-dev-workflow.png"
+    caption: "Developer inner loop — mount the source, exec in, build with zero host toolchain"
     bullets:
-      - "The CLI-command strip (CliCommandStrip / CommandBar) now shows a single truncated line by default, with an expand control — long commands no longer distort the layout (and read cleanly on a slide)."
-      - "The login slideshow gained subtle left/right chevrons to step through the background imagery."
+      - "One Dockerfile defines the environment once and fills three roles — an interactive dev shell, the build, and CI — so there is a single source of truth for the toolchain (#244)."
+      - "Developers pull the image, bind-mount their working tree at /app, and drop into a shell to build with zero tools installed on the host."
+      - "On merge to develop the simulator's own runtime + dev images publish to the GitLab Container Registry, proving the pattern on a real project."
+      - "`make dev-shell` / `make registry-push` wire the whole loop into the standard developer workflow."
 
-  - title: "Status Deck Tooling  (#144, #210)"
-    subtitle: "The deck you're reading — built from live project data"
-    issues: [144, 210]
+  - title: "Any Toolchain — Python, Java & C/C++ Golden Images  (#247, #248)"
+    subtitle: "The same container loop, demonstrated across three stacks"
+    issues: [247, 248]
+    images:
+      - "slides/243-slide-brief-as-is-to-be/diagrams/tobe-container-sdlc-v2-multitoolchain.png"
+    caption: "One golden-image pattern per team — any toolchain, same loop"
     bullets:
-      - "The status deck is generated from the SAIC-derived template, live GitLab issue/MR data, real SLOC and velocity metrics, and Playwright screenshots of the running app (#144)."
-      - "This iteration added a dated title slide, this 'Latest Work' section, per-capability full-issue footers, a closing slide, and a '-YYYYMMDD' filename (#210)."
-      - "The template is now committed in-repo, so a build needs no external fetch — see the automation that produced this deck (#213)."
+      - "Golden dev/build images prove the brief's claim that any team can adopt the pattern — Python shipped first, with real Java (#247) and C/C++ (#248) demo projects following."
+      - "Each demo builds inside its image with no host toolchain and exercises both host use-cases: serve on a published port, and emit a runnable artifact to a bind-mounted output directory."
+      - "Java uses a minimal Spring Boot service (JDK 21 + Maven → runnable fat jar); C/C++ uses its own compiler toolchain — different stacks, one workflow."
+      - "Turns the brief's illustrative columns into commands that actually run, so the Java and C/C++ stories become demonstrable, not just described."

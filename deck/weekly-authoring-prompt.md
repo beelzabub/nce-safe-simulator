@@ -10,6 +10,13 @@ STEP 2 — see which screenshots exist (for optional images). Run:
 
   ls deck/screenshots/
 
+There is also a pool of curated, committed art you may reference by its repo-relative path (image paths resolve under deck/screenshots/ first, then repo-relative). Prefer these when a candidate issue matches:
+
+  ls deck/assets/spotlight-extras/           # e.g. make-help-root.png / make-help-cdk.png (Makefile help, #255); epic-cards-portrait.png / epic-cards-landscape.png / epic-cards-largeformat.png (epic cards #249/#254/#241)
+  ls slides/243-slide-brief-as-is-to-be/diagrams/   # As-Is / To-Be SDLC architecture diagrams (VM→container brief, #243/#244/#247/#248)
+
+For those issues, use the matching committed image (full repo-relative path, e.g. "deck/assets/spotlight-extras/make-help-root.png") rather than leaving the slide image-less.
+
 STEP 3 — author spotlights. Group closely-related issues onto ONE slide (for example, an import/export hardening arc of many small issues becomes a single "Full-Fidelity Hardening" slide); give genuinely distinct work its own slide. For each spotlight write:
   - a short title (you may cite the issue number(s), e.g. "… (#206)");
   - a one-line subtitle;
