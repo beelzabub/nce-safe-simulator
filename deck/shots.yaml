@@ -53,6 +53,26 @@ ui_shots:
     title: "Import/Export — Import Bundle"
     expand: ["IMPORT / EXPORT"]
     select: "Import Bundle"
+  - out: 05c-import-export-export-epics
+    title: "Import/Export — Export Epics"
+    expand: ["IMPORT / EXPORT"]
+    select: "Export Epics"
+  - out: 05d-import-export-export-issues
+    title: "Import/Export — Export Issues"
+    expand: ["IMPORT / EXPORT"]
+    select: "Export Issues"
+  - out: 05e-import-export-import-issues
+    title: "Import/Export — Import Issues"
+    expand: ["IMPORT / EXPORT"]
+    select: "Import Issues"
+  - out: 05f-import-export-export-links
+    title: "Import/Export — Export Links"
+    expand: ["IMPORT / EXPORT"]
+    select: "Export Links"
+  - out: 05g-import-export-import-links
+    title: "Import/Export — Import Links"
+    expand: ["IMPORT / EXPORT"]
+    select: "Import Links"
   - out: 06-state-progress-simulate-pi
     title: "State & Progress — Simulate PI Progress"
     expand: ["STATE & PROGRESS"]
@@ -89,13 +109,19 @@ ui_shots:
     click:
       - "button.tab-btn:has-text('Analysis')"
       - "button.analysis-row:has-text('Portfolio Explorer')"
+  - out: 18-other-epic-cards
+    title: "Other — Epic Cards (Print-Ready PDF)"
+    expand: ["OTHER"]
+    select: "Epic Cards"
 
-# "Other" only has one tool (Diagnose) and it's parameterless/read-only, so it belongs here,
-# not in ui_shots — selecting it launches the job immediately, there's no dialog to screenshot.
+# Diagnose is parameterless and read-only, so it launches immediately with no dialog to
+# screenshot — it belongs in live_run_shots, not ui_shots. Since #249 reclassified it
+# read-only it now lives under the "Audit & Validation" group in the picker (not "Other",
+# which now holds Epic Cards).
 live_run_shots:
   - out: 14-live-job-diagnose
     title: "Live Job Demo — Diagnose"
-    expand: ["OTHER"]
+    expand: ["AUDIT & VALIDATION"]
     select: "Diagnose"
 
 quarto_shots:
