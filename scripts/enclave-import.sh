@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Import a transfer directory produced by scripts/enclave-export.sh into a
+# Import a transfer artifact produced by scripts/enclave-export.sh into a
 # GitLab instance on this network (issue #263): verifies checksums, creates
 # the project if it does not exist, pushes every branch + tag (and the wiki),
 # uploads all generic packages, enables anonymous package-registry pull (what
@@ -7,12 +7,16 @@
 # container images. Each phase is idempotent — safe to rerun after a partial
 # failure.
 #
-# Requirements: bash, git, curl; docker only for the images phase.
+# Requirements: bash, git, curl, tar, python3 (API JSON parsing); docker only
+# for the images phase.
 #
 # Usage:
-#   scripts/enclave-import.sh -d TRANSFER_DIR -u GITLAB_URL -p GROUP/PROJECT \
+#   scripts/enclave-import.sh -d TRANSFER -u GITLAB_URL -p GROUP/PROJECT \
 #       [--default-branch main] [--skip-repo] [--skip-packages] [--skip-images]
-#   e.g. scripts/enclave-import.sh -d /media/transfer -u https://gitlab.enclave.mil -p tools/nce-safe-simulator
+#   TRANSFER is the <repo>-<date>.txt archive the exporter produced (it is a
+#   gzipped tar; extracted next to itself), or an already-extracted directory.
+#   e.g. scripts/enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
+#          -u https://gitlab.enclave.mil -p tools/nce-safe-simulator
 #
 # Env:
 #   GITLAB_TOKEN  token with api scope on the target instance — required.
@@ -35,12 +39,23 @@ done
 [ -n "$DIR" ] && [ -n "$URL" ] && [ -n "$PROJ" ] || {
   echo "usage: enclave-import.sh -d TRANSFER_DIR -u GITLAB_URL -p GROUP/PROJECT" >&2; exit 2; }
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (api scope on the target instance)}"
+command -v python3 >/dev/null || { echo "python3 is required (API JSON parsing)" >&2; exit 1; }
 
+log() { echo "==> $*"; }
+
+# Accept the single-file .txt artifact (a gzipped tar) or an extracted dir.
+if [ -f "$DIR" ]; then
+  ARCHIVE="$(cd "$(dirname "$DIR")" && pwd)/$(basename "$DIR")"
+  EXTRACT="${ARCHIVE%.txt}-extracted"
+  log "Extracting $(basename "$ARCHIVE") to $EXTRACT ..."
+  mkdir -p "$EXTRACT"
+  tar -xf "$ARCHIVE" -C "$EXTRACT"
+  DIR="$EXTRACT"
+fi
 DIR="$(cd "$DIR" && pwd)"
 API="$URL/api/v4"
 ENC="$(printf '%s' "$PROJ" | sed 's#/#%2F#g')"
 auth=(--header "PRIVATE-TOKEN: $GITLAB_TOKEN")
-log() { echo "==> $*"; }
 
 # ── 0. Integrity ────────────────────────────────────────────────────────────
 log "Verifying checksums..."

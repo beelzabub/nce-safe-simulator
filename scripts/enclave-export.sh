@@ -2,16 +2,21 @@
 # Export EVERYTHING needed to recreate this project on a GitLab instance in a
 # separate network (issue #263): the git repo (all branches + tags, as a
 # git bundle), the project wiki (if any), every generic package in the
-# package registry, and the container images. Produces one self-contained
-# transfer directory with a SHA256SUMS manifest, ready to carry across on
-# approved media. The matching importer is scripts/enclave-import.sh.
+# package registry, and the container images. Output is ONE tar archive named
+# <repo-name>-<YYYY-MM-DD>.txt (the .txt extension is the transfer-media
+# convention; it is a plain gzipped tar) with a SHA256SUMS manifest inside,
+# ready to carry across on approved media. The matching importer is
+# scripts/enclave-import.sh — pass it the .txt file.
 #
-# Run from anywhere inside the clone, on a box connected to the source
-# GitLab. Requirements: bash, git, curl; docker only when exporting images.
+# Run it from any directory inside a clone of this git repo (the script
+# locates the repo root from its own path), on a box connected to the source
+# GitLab. Requirements: bash, git, curl, python3 (JSON parsing of API
+# responses); docker only when exporting images.
 #
 # Usage:
 #   scripts/enclave-export.sh [-o DIR] [--no-images] [--with-base-images]
-#     -o DIR              output directory (default: ./enclave-transfer)
+#     -o DIR              where to write the final .txt archive (default: .)
+#                         staging happens in DIR/<repo>-<date>-staging/
 #     --no-images         skip container images (packages + repo only)
 #     --with-base-images  also save the upstream base images the CI jobs and
 #                         Docker builds pull (python:3.11, python:3.11-slim,
@@ -27,24 +32,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
-OUT="./enclave-transfer"
+OUTDIR="."
 WITH_IMAGES=1
 WITH_BASES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    -o) OUT="$2"; shift 2 ;;
+    -o) OUTDIR="$2"; shift 2 ;;
     --no-images) WITH_IMAGES=0; shift ;;
     --with-base-images) WITH_BASES=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
+command -v python3 >/dev/null || { echo "python3 is required (API JSON parsing)" >&2; exit 1; }
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (read_api scope) — needed to enumerate packages}"
 API="$("$SCRIPT_DIR/quarto-pkg-url.sh")"          # <scheme>://<host>/api/v4/projects/<encoded-path>
 auth=(--header "PRIVATE-TOKEN: $GITLAB_TOKEN")
 
+# Final artifact: <repo-name>-<YYYY-MM-DD>.txt in OUTDIR; staged in a sibling
+# directory (same disk — image tars are large) that is removed on success.
+REPO_NAME="$(basename -s .git "$(git remote get-url origin)")"
+STAMP="$(date +%Y-%m-%d)"
+mkdir -p "$OUTDIR"
+OUTDIR="$(cd "$OUTDIR" && pwd)"
+ARTIFACT="$OUTDIR/$REPO_NAME-$STAMP.txt"
+OUT="$OUTDIR/$REPO_NAME-$STAMP-staging"
 mkdir -p "$OUT"/repo "$OUT"/packages
-OUT="$(cd "$OUT" && pwd)"
 log() { echo "==> $*"; }
 
 # ── 1. Git repo: every branch + tag origin has, as one verified bundle ──────
@@ -123,5 +136,12 @@ fi
 } > "$OUT/MANIFEST.txt"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
-log "Export complete: $OUT"
-log "Verify on the far side, then run: scripts/enclave-import.sh -d <dir> -u https://<enclave-gitlab> -p <group/project>"
+# ── 6. Single-file artifact: gzipped tar, .txt extension by transfer-media
+#      convention. `tar -xf` auto-detects the compression on extract. ───────
+log "Packing $ARTIFACT ..."
+tar -czf "$ARTIFACT" -C "$OUT" .
+rm -rf "$OUT"
+
+log "Export complete: $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1))"
+log "Outer sha256 (note it down for the far side): $(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
+log "Then run: scripts/enclave-import.sh -d $REPO_NAME-$STAMP.txt -u https://<enclave-gitlab> -p <group/project>"

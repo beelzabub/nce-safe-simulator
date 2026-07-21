@@ -1305,11 +1305,11 @@ make registry-push
 
 This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
 
-Two scripts do the whole lift (issue #263); both need only bash, git, and curl (plus docker for the image phases):
+Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases):
 
 | Script | Runs on | What it does |
 |---|---|---|
-| [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, inside this clone | Produces one self-contained transfer directory: git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it |
+| [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, from any directory inside a clone of this repo | Produces **one file**: `<repo-name>-<YYYY-MM-DD>.txt` — a gzipped tar (the `.txt` extension is the transfer-media naming convention) containing a git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it. The outer file's sha256 is printed for verification on the far side |
 | [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
 
 > **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
@@ -1319,12 +1319,13 @@ Two scripts do the whole lift (issue #263); both need only bash, git, and curl (
 ```bash
 export GITLAB_TOKEN=<read_api token>        # needed to ENUMERATE packages; downloads are anonymous
 scripts/enclave-export.sh -o /media/transfer
+# → /media/transfer/nce-safe-simulator-2026-07-21.txt  (single artifact; sha256 printed)
 # no docker on the box?          add --no-images
 # enclave has no image proxy?    add --with-base-images  (python:3.11, python:3.11-slim,
 #                                node:20-slim, kaniko — what CI jobs and builds pull)
 ```
 
-Everything is checksummed into `SHA256SUMS`, and the Quarto debs additionally carry the upstream release manifest for independent re-verification. Move the directory across on approved media per the enclave's transfer process.
+Everything inside is checksummed into `SHA256SUMS` (verified again by the importer), and the Quarto debs additionally carry the upstream release manifest for independent re-verification. Note the printed outer sha256, then move the single `.txt` file across on approved media per the enclave's transfer process.
 
 For a **browser-only export** of the packages: the source project's **Deploy → Package registry** UI has per-file download links (anonymous pull is enabled), so the .debs can be fetched by hand. The git repo and container images have no UI download — those need the script (or `git bundle` / `docker save` directly).
 
@@ -1332,8 +1333,9 @@ For a **browser-only export** of the packages: the source project's **Deploy →
 
 ```bash
 export GITLAB_TOKEN=<api-scope token on the TARGET instance>
-scripts/enclave-import.sh -d /media/transfer \
+scripts/enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
   -u https://<enclave-gitlab> -p <group>/nce-safe-simulator
+# -d takes the .txt artifact (extracted next to itself) or an already-extracted directory
 # --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
 ```
 
