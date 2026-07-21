@@ -274,6 +274,21 @@ def test_live_export_import_roundtrip(tmp_path):
     group, repo_name = path.rsplit("/", 1)
 
     username = _api(f"{api}/user", token)["username"]
+
+    # Land evidence projects in the enclave-imports sandbox subgroup when it
+    # exists (or wherever NCE_E2E_GROUP points): its creator holds Owner
+    # there, so runners can DELETE their projects after review — Maintainer
+    # on the parent group can create projects but not remove them.
+    group_override = os.environ.get("NCE_E2E_GROUP")
+    if group_override:
+        group = group_override
+    else:
+        sandbox = f"{group}/enclave-imports"
+        try:
+            _api(f"{api}/groups/{urllib.parse.quote(sandbox, safe='')}", token)
+            group = sandbox
+        except Exception:
+            pass
     target = f"{group}/{repo_name}-{username}"
 
     workdir = os.environ.get("NCE_E2E_WORKDIR")
