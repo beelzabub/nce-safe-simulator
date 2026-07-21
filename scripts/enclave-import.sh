@@ -102,7 +102,10 @@ fi
 # maps them back to refs/heads/* on the target.
 PUSH_URL="${URL%%://*}://oauth2:$GITLAB_TOKEN@${URL#*://}/$PROJ.git"
 if [ "$DO_REPO" = 1 ]; then
-  TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+  # Scratch clone lives beside the transfer contents, NOT in the system
+  # temp — /tmp is often a small tmpfs while the transfer dir is on a disk
+  # already proven big enough to hold the artifact.
+  TMP="$(mktemp -d "$DIR/.import-XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
   log "Pushing repo (all branches + tags)..."
   git clone --quiet --mirror "$DIR/repo/repo.bundle" "$TMP/repo.git"
   git -C "$TMP/repo.git" push --quiet "$PUSH_URL" \
