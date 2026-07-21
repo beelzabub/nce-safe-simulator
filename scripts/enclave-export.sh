@@ -10,8 +10,8 @@
 #
 # Run it from any directory inside a clone of this git repo (the script
 # locates the repo root from its own path), on a box connected to the source
-# GitLab. Requirements: bash, git, curl, python3 (JSON parsing of API
-# responses); docker only when exporting images.
+# GitLab. Requirements (preflight-checked): bash, git, curl, python3, tar,
+# sha256sum; docker only when exporting images.
 #
 # Usage:
 #   scripts/enclave-export.sh [-o DIR] [--no-images] [--with-base-images]
@@ -26,7 +26,23 @@
 #   GITLAB_TOKEN  token with read_api — required to enumerate packages and
 #                 resolve the container registry path (file downloads
 #                 themselves are anonymous; the *listing* API is not).
+# ── Preflight: check every required tool up front and report ALL gaps in one
+#    message. The bash check runs before `set -o pipefail`, which plain sh
+#    would reject with a far less helpful error. ─────────────────────────────
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "This script requires bash (arrays, pipefail) — run it directly, not via 'sh'" >&2
+  exit 1
+fi
 set -euo pipefail
+missing=""
+for tool in git curl python3 tar sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+  echo "Missing required tools:$missing" >&2
+  echo "Install them and rerun. (docker is additionally needed unless --no-images.)" >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -44,7 +60,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-command -v python3 >/dev/null || { echo "python3 is required (API JSON parsing)" >&2; exit 1; }
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (read_api scope) — needed to enumerate packages}"
 API="$("$SCRIPT_DIR/quarto-pkg-url.sh")"          # <scheme>://<host>/api/v4/projects/<encoded-path>
 auth=(--header "PRIVATE-TOKEN: $GITLAB_TOKEN")

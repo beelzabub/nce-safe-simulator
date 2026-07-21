@@ -7,8 +7,8 @@
 # container images. Each phase is idempotent — safe to rerun after a partial
 # failure.
 #
-# Requirements: bash, git, curl, tar, python3 (API JSON parsing); docker only
-# for the images phase.
+# Requirements (preflight-checked): bash, git, curl, python3, tar, sha256sum;
+# docker only for the images phase.
 #
 # Usage:
 #   scripts/enclave-import.sh -d TRANSFER -u GITLAB_URL -p GROUP/PROJECT \
@@ -20,7 +20,23 @@
 #
 # Env:
 #   GITLAB_TOKEN  token with api scope on the target instance — required.
+# ── Preflight: check every required tool up front and report ALL gaps in one
+#    message. The bash check runs before `set -o pipefail`, which plain sh
+#    would reject with a far less helpful error. ─────────────────────────────
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "This script requires bash (arrays, pipefail) — run it directly, not via 'sh'" >&2
+  exit 1
+fi
 set -euo pipefail
+missing=""
+for tool in git curl python3 tar sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+  echo "Missing required tools:$missing" >&2
+  echo "Install them and rerun. (docker is additionally needed unless --skip-images.)" >&2
+  exit 1
+fi
 
 DIR="" URL="" PROJ="" DEFAULT_BRANCH="main"
 DO_REPO=1 DO_PACKAGES=1 DO_IMAGES=1
@@ -39,7 +55,6 @@ done
 [ -n "$DIR" ] && [ -n "$URL" ] && [ -n "$PROJ" ] || {
   echo "usage: enclave-import.sh -d TRANSFER_DIR -u GITLAB_URL -p GROUP/PROJECT" >&2; exit 2; }
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (api scope on the target instance)}"
-command -v python3 >/dev/null || { echo "python3 is required (API JSON parsing)" >&2; exit 1; }
 
 log() { echo "==> $*"; }
 
