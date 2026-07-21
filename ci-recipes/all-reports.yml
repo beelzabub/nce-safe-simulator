@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: full report suite as a pipeline artifact
+#
+# Runs every report non-interactively (`--report all`) and publishes the
+# rendered site — static Quarto HTML + interactive Marimo pages — as a job
+# artifact under public/. Wiki-format pages publish straight to the group wiki
+# via the API during the run.
+#
+# The job runs inside the project's OWN runtime image from the Container
+# Registry: Quarto (vendored from the package registry, issue #262), Pango,
+# fonts, and every pip requirement are already baked in, so there is no
+# apt/GitHub/PyPI dependency at job time — this recipe works as-is on an
+# air-gapped GitLab instance once the image has been imported or built there
+# (README → "Enclave transfer").
+#
+# Prerequisites in YOUR space:
+#   • The runtime image exists in the Container Registry — i.e. the
+#     `containerize` job has run at least once on your instance (it runs on
+#     every merge to the default branch), or you imported the image during an enclave
+#     lift. A job in a DIFFERENT project can pull it only if this project's
+#     CI/CD job-token allowlist permits it (Settings → CI/CD → Job token
+#     permissions) or via a deploy token.
+#   • A GitLab token with 'api' scope (reports read the live group and write
+#     wiki pages). Provide it EITHER as a masked CI/CD variable
+#     GITLAB_API_TOKEN (recommended), OR by committing your own config.json
+#     with the token filled in.
+#   • config.json — url, private_token, parent_group. Seeded from
+#     config.example.json below if your repo doesn't carry one.
+# ─────────────────────────────────────────────────────────────────────────────
+
+all-reports:
+  stage: build                      # ← change to a stage that exists in your pipeline
+  image: $CI_REGISTRY_IMAGE:latest
+  before_script:
+    # The image already satisfies requirements.txt; this catches deps added on
+    # the branch since the image was last built (seconds when nothing changed).
+    - pip install --no-cache-dir -r requirements.txt
+    # config.json is git-ignored, so a fresh fork may not carry one — seed it
+    # from the tracked template (blank token), then fill the token from the
+    # masked CI/CD variable if you're keeping it out of git.
+    - test -f config.json || cp config.example.json config.json
+    - if [ -n "$GITLAB_API_TOKEN" ]; then
+        python -c "import json,os; c=json.load(open('config.json')); c['private_token']=os.environ['GITLAB_API_TOKEN']; json.dump(c,open('config.json','w'),indent=2)";
+      fi
+  script:
+    # `--report all` runs every report; formats default to all three (wiki
+    # markdown + static Quarto HTML + interactive Marimo). Pass
+    # `--formats plotly,marimo` to skip the wiki writes, or
+    # `--formats markdown` for a wiki-only run (no artifact content).
+    - python NceGitLab.py --report all
+  artifacts:
+    name: "reports-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - public/
+    expire_in: 30 days
+  rules:
+    # A full run reads the whole group and rewrites every wiki report page —
+    # deliberate, not per-commit. Default: scheduled pipelines (Build →
+    # Pipeline schedules; the schedule targets whatever branch you pick) plus
+    # a manual button on branch pipelines. No branch name is hardcoded, so the
+    # rules work unchanged wherever the repo lives (develop- or main-based).
+    # Loosen to `- if: $CI_COMMIT_BRANCH` if you really want it on every push.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+      # Without this, a rules-based manual job leaves every branch pipeline
+      # showing "blocked" until someone presses the button.
+      allow_failure: true
