@@ -8,9 +8,21 @@ format, and the shipped-importer bootstrap — so drift between the pairs
 fails CI rather than surfacing on a transfer box inside an enclave.
 
 Syntax is validated with the real interpreters where available: `bash -n`
-always (bash is in the CI image), a PowerShell AST parse only when `pwsh`
-is on PATH (it is not in CI — the static contract tests carry the load
-there).
+always (bash is in the CI image), and a PowerShell AST parse when a
+PowerShell is on PATH — `pwsh` (7+) or Windows PowerShell 5.1's
+`powershell`, whichever exists. Neither is in the CI image, so the parse
+tests skip there and the static contract tests carry the load; run them
+locally before review. Linux install for the parse tests (portable
+tarball, no package manager — pick linux-x64 or linux-arm64):
+
+    mkdir -p ~/.local/pwsh && curl -fsSL \
+      https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz \
+      | tar -xz -C ~/.local/pwsh && chmod +x ~/.local/pwsh/pwsh
+    PATH=~/.local/pwsh:$PATH python -m pytest tests/test_enclave_scripts.py
+
+On Windows, no install needed — the built-in `powershell` (5.1) is picked
+up automatically, and validating against 5.1 is exactly the floor these
+scripts declare.
 """
 import re
 import shutil
@@ -55,7 +67,15 @@ def test_bash_syntax(name):
     subprocess.run(["bash", "-n", str(SCRIPTS / name)], check=True)
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh not installed")
+# pwsh (PowerShell 7+) or Windows PowerShell 5.1 — whichever this box has.
+# 5.1 is the declared floor, so parsing with it is the strongest check.
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+
+
+@pytest.mark.skipif(
+    POWERSHELL is None,
+    reason="no PowerShell on PATH — see this module's docstring for the Linux install",
+)
 @pytest.mark.parametrize("name", sorted(PS))
 def test_powershell_ast_parses(name):
     check = (
@@ -63,7 +83,7 @@ def test_powershell_ast_parses(name):
         "[System.Management.Automation.Language.Parser]::ParseFile('%s',[ref]$t,[ref]$e)|Out-Null;"
         "if($e){$e|ForEach-Object{Write-Error $_.Message};exit 1}" % (SCRIPTS / name)
     )
-    subprocess.run(["pwsh", "-NoProfile", "-Command", check], check=True)
+    subprocess.run([POWERSHELL, "-NoProfile", "-Command", check], check=True)
 
 
 # ---------------------------------------------------------------------------
