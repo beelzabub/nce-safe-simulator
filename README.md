@@ -1303,76 +1303,55 @@ make registry-push
 
 ## Enclave Transfer (Air-Gapped GitLab)
 
-This project is built to be lifted into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries — the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}`, so the same pipeline runs unmodified against the enclave's own GitLab instance once the artifacts are imported.
+This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
+
+Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases):
+
+| Script | Runs on | What it does |
+|---|---|---|
+| [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, from any directory inside a clone of this repo | Produces **one file**: `<repo-name>-<YYYY-MM-DD>.txt` — a gzipped tar (the `.txt` extension is the transfer-media naming convention) containing a git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it. The outer file's sha256 is printed for verification on the far side |
+| [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
 
 > **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
 
 ### 1 — Export (on a connected box)
 
 ```bash
-SRC=https://gitlab.com/api/v4/projects/81726491
-mkdir -p transfer/packages transfer/images && cd transfer
-
-# Generic packages — anonymous pull (package registry is public)
-for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb; do
-  curl -fsSL -o "packages/$f" "$SRC/packages/generic/weasyprint-apt-debs/2026.07.21/$f"
-done
-for f in quarto-1.9.38-linux-amd64.deb quarto-1.9.38-linux-arm64.deb quarto-1.9.38-checksums.txt; do
-  curl -fsSL -o "packages/$f" "$SRC/packages/generic/quarto/1.9.38/$f"
-done
-# Verify Quarto against the upstream manifest before it crosses the boundary
-(cd packages && grep 'linux-\(amd64\|arm64\).deb' quarto-1.9.38-checksums.txt | sha256sum -c -)
-
-# Container images — needs docker login with read_registry scope
-docker login registry.gitlab.com
-docker pull registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest
-docker pull registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest
-docker save registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest     -o images/nce-runtime.tar
-docker save registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest -o images/nce-dev.tar
+export GITLAB_TOKEN=<read_api token>        # needed to ENUMERATE packages; downloads are anonymous
+scripts/enclave-export.sh -o /media/transfer
+# → /media/transfer/nce-safe-simulator-2026-07-21.txt  (single artifact; sha256 printed)
+# no docker on the box?          add --no-images
+# enclave has no image proxy?    add --with-base-images  (python:3.11, python:3.11-slim,
+#                                node:20-slim, kaniko — what CI jobs and builds pull)
 ```
 
-If the enclave will **rebuild images** (run `containerize`) rather than only consume the imported ones, also export the upstream bases its builds and jobs pull: `python:3.11` (CI test job), `python:3.11-slim`, `node:20-slim` (Dockerfile stages), and `gcr.io/kaniko-project/executor:debug` (the containerize job) — same `docker pull` / `docker save` pattern — unless the enclave registry already proxies them.
+Everything inside is checksummed into `SHA256SUMS` (verified again by the importer), and the Quarto debs additionally carry the upstream release manifest for independent re-verification. Note the printed outer sha256, then move the single `.txt` file across on approved media per the enclave's transfer process.
 
-Move `transfer/` across on approved media per the enclave's transfer process.
+For a **browser-only export** of the packages: the source project's **Deploy → Package registry** UI has per-file download links (anonymous pull is enabled), so the .debs can be fetched by hand. The git repo and container images have no UI download — those need the script (or `git bundle` / `docker save` directly).
 
 ### 2 — Import (on the enclave side)
 
-Prerequisites: a project created on the enclave GitLab (this repo pushed to it), a token with `api` scope, Maintainer access.
+The enclave box starts with **only the `.txt` file** — the repo (and with it the importer's canonical copy) is still locked inside the bundle. The artifact therefore carries a copy of `enclave-import.sh` at its top level; extract just that first:
 
 ```bash
-DST=https://<enclave-gitlab>/api/v4/projects/<project-id>
-TOKEN=<api-scope-token>
-cd transfer
-
-# Generic packages — same package names/versions/filenames the yaml expects
-for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb; do
-  curl -fsS --header "PRIVATE-TOKEN: $TOKEN" --upload-file "packages/$f" \
-    "$DST/packages/generic/weasyprint-apt-debs/2026.07.21/$f"
-done
-for f in quarto-1.9.38-linux-amd64.deb quarto-1.9.38-linux-arm64.deb quarto-1.9.38-checksums.txt; do
-  curl -fsS --header "PRIVATE-TOKEN: $TOKEN" --upload-file "packages/$f" \
-    "$DST/packages/generic/quarto/1.9.38/$f"
-done
-
-# Allow anonymous pull from the package registry (project stays private) —
-# this is what lets Docker builds fetch Quarto with no token in build args.
-curl -fsS --request PUT --header "PRIVATE-TOKEN: $TOKEN" \
-  "$DST?package_registry_access_level=public" > /dev/null
-
-# Container images — load, retag to the enclave registry, push
-docker load -i images/nce-runtime.tar
-docker load -i images/nce-dev.tar
-docker login <enclave-registry-host>
-docker tag registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest     <enclave-registry-host>/<group>/nce-safe-simulator:latest
-docker tag registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
-docker push <enclave-registry-host>/<group>/nce-safe-simulator:latest
-docker push <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
+tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.sh   # bootstrap: pull the importer out of the artifact
+export GITLAB_TOKEN=<api-scope token on the TARGET instance>
+./enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
+  -u https://<enclave-gitlab> -p <group>/nce-safe-simulator
+# -d takes the .txt artifact (extracted next to itself) or an already-extracted directory
+# --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
 ```
+
+The script prints a post-import checklist (runners, the `GITLAB_API_TOKEN` CI variable for the report recipes, `config.json` from the template, branch protection). Notes:
+
+- **There is no UI upload for packages.** GitLab's package-registry UI can browse, download, and delete, but generic-package *upload* exists only as the API `PUT` the script performs — don't hunt for an upload button.
+- **GitLab's project export/import tarball carries neither registry.** It does carry issues/MRs/labels, which the scripts deliberately don't (they lift the *functional* project); if that metadata matters, run a project export/import as a complement — but the packages and images still arrive only via these scripts.
+- The raw API calls, for doing any single step by hand, are exactly what the scripts run — they're short and commented; read them as the reference.
 
 ### 3 — Verify
 
 - Pipeline: run a branch pipeline — the `test` job must fetch the three Pango debs from the *enclave* registry (the job log shows the `$CI_API_V4_URL` host) and go green.
-- Image build: a merge to the enclave's default branch (`main`) runs `containerize` — the trigger is `$CI_DEFAULT_BRANCH`, not a hardcoded branch name; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry-host>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
+- Image build: a merge to the enclave's default branch (`main`) runs `containerize` — the trigger is `$CI_DEFAULT_BRANCH`, not a hardcoded branch name; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
 - Reports: the [`all-reports.yml`](ci-recipes/all-reports.yml) recipe runs entirely from the imported runtime image — no external downloads at job time — and is the end-to-end proof that report generation works inside the enclave.
 
 There is **no gitlab.com reference anywhere in the build chain**: CI composes the registry URL from its own instance variables, and local builds derive it from `git remote origin` ([`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh)) — an enclave clone resolves to the enclave instance automatically. A bare `docker build .` without the build-arg fails loudly by design.
