@@ -1331,9 +1331,12 @@ For a **browser-only export** of the packages: the source project's **Deploy →
 
 ### 2 — Import (on the enclave side)
 
+The enclave box starts with **only the `.txt` file** — the repo (and with it the importer's canonical copy) is still locked inside the bundle. The artifact therefore carries a copy of `enclave-import.sh` at its top level; extract just that first:
+
 ```bash
+tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.sh   # bootstrap: pull the importer out of the artifact
 export GITLAB_TOKEN=<api-scope token on the TARGET instance>
-scripts/enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
+./enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
   -u https://<enclave-gitlab> -p <group>/nce-safe-simulator
 # -d takes the .txt artifact (extracted next to itself) or an already-extracted directory
 # --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
