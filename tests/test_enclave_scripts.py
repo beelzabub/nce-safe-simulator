@@ -24,9 +24,13 @@ On Windows, no install needed — the built-in `powershell` (5.1) is picked
 up automatically, and validating against 5.1 is exactly the floor these
 scripts declare.
 """
+import json
+import os
 import re
 import shutil
 import subprocess
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -217,3 +221,91 @@ def test_importers_accept_txt_or_directory():
     assert 'tar -xf "$ARCHIVE"' in IMPORT_SH.replace("'", '"') or "tar -xf" in IMPORT_SH
     assert "tar -xf" in IMPORT_PS
     assert "-extracted" in IMPORT_SH and "-extracted" in IMPORT_PS
+
+
+# ---------------------------------------------------------------------------
+# Live end-to-end round-trip (opt-in): export the simulator, recreate it in
+# GitLab as <group>/nce-safe-simulator-<username>
+# ---------------------------------------------------------------------------
+#
+# Gated behind NCE_ENCLAVE_E2E=1 + GITLAB_TOKEN (api scope — it CREATES a
+# project) so the normal suite stays offline. Each runner gets their own
+# evidence project named after their GitLab username; reruns are idempotent
+# (the importer is). The project is left in place for review — delete it in
+# the UI when done. Images are excluded (--no-images) so no docker or
+# gigabyte transfers are involved; repo, wiki, and packages are the point.
+#
+# Staging + artifact need ~0.6 GB; pytest's tmp dir is used by default, but
+# if your system temp is small (tmpfs), point NCE_E2E_WORKDIR at a roomier
+# directory — its contents are left behind for inspection.
+#
+# Uses the PowerShell scripts when a PowerShell is on PATH (that is what's
+# under review), the bash pair otherwise.
+
+E2E_ENABLED = os.environ.get("NCE_ENCLAVE_E2E") == "1" and bool(os.environ.get("GITLAB_TOKEN"))
+
+
+def _api(url, token, method="GET"):
+    req = urllib.request.Request(url, method=method, headers={"PRIVATE-TOKEN": token})
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+
+def _origin_parts():
+    remote = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=SCRIPTS.parent, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    m = re.match(r"^(?P<scheme>https?)://(?P<host>[^/]+)/(?P<path>.+?)(\.git)?$", remote)
+    if not m:
+        m = re.match(r"^[^@]+@(?P<host>[^:]+):(?P<path>.+?)(\.git)?$", remote)
+        return "https", m.group("host"), m.group("path")
+    return m.group("scheme"), m.group("host"), m.group("path")
+
+
+@pytest.mark.skipif(
+    not E2E_ENABLED,
+    reason="set NCE_ENCLAVE_E2E=1 and GITLAB_TOKEN (api scope) for the live round-trip",
+)
+def test_live_export_import_roundtrip(tmp_path):
+    token = os.environ["GITLAB_TOKEN"]
+    scheme, host, path = _origin_parts()
+    api = f"{scheme}://{host}/api/v4"
+    group, repo_name = path.rsplit("/", 1)
+
+    username = _api(f"{api}/user", token)["username"]
+    target = f"{group}/{repo_name}-{username}"
+
+    workdir = os.environ.get("NCE_E2E_WORKDIR")
+    if workdir:
+        tmp_path = Path(workdir)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+
+    # Export → single .txt artifact (PowerShell scripts when available)
+    if POWERSHELL:
+        export = [POWERSHELL, "-NoProfile", "-File", str(SCRIPTS / "enclave-export.ps1"),
+                  "-OutDir", str(tmp_path), "-NoImages"]
+    else:
+        export = ["bash", str(SCRIPTS / "enclave-export.sh"), "-o", str(tmp_path), "--no-images"]
+    subprocess.run(export, check=True, timeout=900)
+    artifact = next(tmp_path.glob("*.txt"))
+
+    # Import → recreates the project as <group>/<repo>-<username>
+    if POWERSHELL:
+        imp = [POWERSHELL, "-NoProfile", "-File", str(SCRIPTS / "enclave-import.ps1"),
+               "-TransferPath", str(artifact), "-GitLabUrl", f"{scheme}://{host}",
+               "-Project", target]
+    else:
+        imp = ["bash", str(SCRIPTS / "enclave-import.sh"), "-d", str(artifact),
+               "-u", f"{scheme}://{host}", "-p", target]
+    subprocess.run(imp, check=True, timeout=900)
+
+    # The recreated project must hold the goods
+    enc = urllib.parse.quote(target, safe="")
+    project = _api(f"{api}/projects/{enc}", token)
+    assert project["default_branch"] == "main"
+    assert project["package_registry_access_level"] == "public"
+    branches = _api(f"{api}/projects/{enc}/repository/branches?per_page=100", token)
+    assert any(b["name"] == "develop" for b in branches)
+    packages = {p["name"] for p in _api(f"{api}/projects/{enc}/packages?per_page=100", token)}
+    assert {"quarto", "weasyprint-apt-debs"} <= packages

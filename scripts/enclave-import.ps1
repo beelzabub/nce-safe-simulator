@@ -123,13 +123,20 @@ $scheme = ($GitLabUrl -split '://')[0]
 $hostPart = ($GitLabUrl -split '://')[1]
 $pushUrl = "${scheme}://oauth2:$Token@$hostPart/$Project.git"
 if (-not $SkipRepo) {
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("enclave-import-" + [IO.Path]::GetRandomFileName())
+    # Scratch clone lives beside the transfer contents, NOT in the system
+    # temp — /tmp is often a small tmpfs while the transfer dir is on a
+    # disk already proven big enough to hold the artifact.
+    $tmp = Join-Path $Dir (".import-" + [IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     try {
         Log "Pushing repo (all branches + tags)..."
         & git clone --quiet --mirror (Join-Path $Dir 'repo/repo.bundle') (Join-Path $tmp 'repo.git'); Assert-Native 'git clone (bundle)'
         & git -C (Join-Path $tmp 'repo.git') push --quiet $pushUrl '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; Assert-Native 'git push'
-        Invoke-RestMethod -Headers $Headers -Method Put -Uri "$Api/projects/$Enc" -Body @{ default_branch = $DefaultBranch } | Out-Null
+        # PUT bodies must be explicit JSON: PowerShell form-encodes hashtable
+        # bodies only for GET/POST — on PUT it stringifies the hashtable and
+        # GitLab rejects it with "Invalid JSON format".
+        Invoke-RestMethod -Headers $Headers -Method Put -Uri "$Api/projects/$Enc" `
+            -ContentType 'application/json' -Body (@{ default_branch = $DefaultBranch } | ConvertTo-Json) | Out-Null
         Log "Repo pushed; default branch = $DefaultBranch"
         if (Test-Path (Join-Path $Dir 'repo/wiki.bundle')) {
             Log "Pushing wiki..."
@@ -149,13 +156,17 @@ if (-not $SkipPackages) {
     foreach ($f in Get-ChildItem -Path $pkgRoot -Recurse -File) {
         $rel = $f.FullName.Substring($pkgRoot.Length + 1).Replace('\', '/')   # name/version/file
         Log "  package $rel"
+        # Explicit content type: without it GitLab tries to parse the body
+        # as JSON and rejects the upload with "Invalid JSON format".
         Invoke-RestMethod -Headers $Headers -Method Put -InFile $f.FullName `
+            -ContentType 'application/octet-stream' `
             -Uri "$Api/projects/$Enc/packages/generic/$rel" | Out-Null
     }
     # Anonymous pull from the package registry (project stays private) — this
     # is what lets Docker builds fetch Quarto with no token in build args.
+    # (JSON body: see the default_branch PUT note.)
     Invoke-RestMethod -Headers $Headers -Method Put -Uri "$Api/projects/$Enc" `
-        -Body @{ package_registry_access_level = 'public' } | Out-Null
+        -ContentType 'application/json' -Body (@{ package_registry_access_level = 'public' } | ConvertTo-Json) | Out-Null
     Log "Packages uploaded; anonymous package-registry pull enabled"
 }
 
