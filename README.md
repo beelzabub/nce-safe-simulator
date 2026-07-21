@@ -1314,6 +1314,15 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 
 > **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
 
+**Validating the scripts** (`tests/test_enclave_scripts.py`): the suite pins the bash↔PowerShell contract — phases, flags, artifact layout, checksum format, shipped importers — and syntax-checks with the real interpreters. `bash -n` always runs; the PowerShell AST-parse tests need a PowerShell on PATH and **skip otherwise** (CI has none — run them locally before review). On Windows the built-in `powershell` (5.1, exactly the declared floor) is picked up automatically; on Linux install the portable `pwsh` tarball (no package manager needed; pick `linux-x64` or `linux-arm64`):
+
+```bash
+mkdir -p ~/.local/pwsh && curl -fsSL \
+  https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz \
+  | tar -xz -C ~/.local/pwsh && chmod +x ~/.local/pwsh/pwsh
+PATH=~/.local/pwsh:$PATH python -m pytest tests/test_enclave_scripts.py   # 21 passed, 0 skipped
+```
+
 ### 1 — Export (on a connected box)
 
 ```bash
