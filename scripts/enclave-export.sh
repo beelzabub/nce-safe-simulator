@@ -141,7 +141,13 @@ if [ "$WITH_IMAGES" = 1 ]; then
   fi
 fi
 
-# ── 5. Manifest + checksums ─────────────────────────────────────────────────
+# ── 5. Ship the importer inside the artifact: the enclave box has ONLY the
+#      .txt file, and the import script's canonical home (this repo) is
+#      locked inside repo.bundle — so a copy rides along at the top level,
+#      extractable with a single tar command (see the final hint). ──────────
+cp -p "$SCRIPT_DIR/enclave-import.sh" "$OUT/enclave-import.sh"
+
+# ── 6. Manifest + checksums ─────────────────────────────────────────────────
 {
   echo "source: $(git remote get-url origin)"
   echo "exported: $(date -u '+%Y-%m-%d %H:%M UTC')"
@@ -151,7 +157,7 @@ fi
 } > "$OUT/MANIFEST.txt"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
-# ── 6. Single-file artifact: gzipped tar, .txt extension by transfer-media
+# ── 7. Single-file artifact: gzipped tar, .txt extension by transfer-media
 #      convention. `tar -xf` auto-detects the compression on extract. ───────
 log "Packing $ARTIFACT ..."
 tar -czf "$ARTIFACT" -C "$OUT" .
@@ -159,4 +165,6 @@ rm -rf "$OUT"
 
 log "Export complete: $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1))"
 log "Outer sha256 (note it down for the far side): $(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
-log "Then run: scripts/enclave-import.sh -d $REPO_NAME-$STAMP.txt -u https://<enclave-gitlab> -p <group/project>"
+log "On the enclave box (importer ships inside the artifact):"
+log "  tar -xf $REPO_NAME-$STAMP.txt ./enclave-import.sh"
+log "  GITLAB_TOKEN=<token> ./enclave-import.sh -d $REPO_NAME-$STAMP.txt -u https://<enclave-gitlab> -p <group/project>"

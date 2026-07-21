@@ -18,6 +18,11 @@
 #   e.g. scripts/enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
 #          -u https://gitlab.enclave.mil -p tools/nce-safe-simulator
 #
+# Bootstrap: the artifact carries a copy of this script at its top level —
+# on a box that has ONLY the .txt file (the repo is still inside the bundle):
+#   tar -xf <repo>-<date>.txt ./enclave-import.sh
+#   GITLAB_TOKEN=<token> ./enclave-import.sh -d <repo>-<date>.txt -u ... -p ...
+#
 # Env:
 #   GITLAB_TOKEN  token with api scope on the target instance — required.
 # ── Preflight: check every required tool up front and report ALL gaps in one
