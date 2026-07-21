@@ -141,11 +141,13 @@ if [ "$WITH_IMAGES" = 1 ]; then
   fi
 fi
 
-# ── 5. Ship the importer inside the artifact: the enclave box has ONLY the
-#      .txt file, and the import script's canonical home (this repo) is
-#      locked inside repo.bundle — so a copy rides along at the top level,
-#      extractable with a single tar command (see the final hint). ──────────
+# ── 5. Ship both importers inside the artifact: the enclave box has ONLY the
+#      .txt file, and the import scripts' canonical home (this repo) is
+#      locked inside repo.bundle — so copies ride along at the top level,
+#      extractable with a single tar command (see the final hint). The .ps1
+#      variant (issue #264) covers Windows transfer boxes. ──────────────────
 cp -p "$SCRIPT_DIR/enclave-import.sh" "$OUT/enclave-import.sh"
+cp -p "$SCRIPT_DIR/enclave-import.ps1" "$OUT/enclave-import.ps1"
 
 # ── 6. Manifest + checksums ─────────────────────────────────────────────────
 {
@@ -165,6 +167,6 @@ rm -rf "$OUT"
 
 log "Export complete: $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1))"
 log "Outer sha256 (note it down for the far side): $(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
-log "On the enclave box (importer ships inside the artifact):"
+log "On the enclave box (importers ship inside the artifact; use .ps1 on Windows):"
 log "  tar -xf $REPO_NAME-$STAMP.txt ./enclave-import.sh"
 log "  GITLAB_TOKEN=<token> ./enclave-import.sh -d $REPO_NAME-$STAMP.txt -u https://<enclave-gitlab> -p <group/project>"
