@@ -807,12 +807,30 @@ Available interactive reports: health-dashboard, pi-predictability, flow-metrics
 
 | Job | Stage | Trigger | What it does |
 |---|---|---|---|
-| `test` | build | every push | `pip install -r requirements.txt && pytest tests/` |
+| `test` | build | every push | Installs WeasyPrint's system packages from the project package registry (below), then `pip install -r requirements.txt && pytest tests/` |
 | `containerize` | containerize | `develop` branch only | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
 
 `containerize` gates on `test` (`needs: [test]`), so an image is never published from a failing suite. It uses the built-in `$CI_JOB_TOKEN` to authenticate to the registry — no secret to configure. See [Container-Based Development & Registry](#container-based-development--registry) for how developers consume the published images.
 
 > The report site was previously published to GitLab Pages by a `pages` job; that job was retired once the site was no longer consumed. Reports are still generated on demand with `python3 NceGitLab.py --report all` and served by the running app.
+
+##### CI system packages (`weasyprint-apt-debs`)
+
+The `test` job needs Pango and a font at the system level (WeasyPrint renders a real PDF in the suite; pip can't supply these). Rather than `apt-get install` from `deb.debian.org` on every run, the exact `.deb` files live in this project's **generic package registry** as package `weasyprint-apt-debs`, and the job fetches them with the built-in `$CI_JOB_TOKEN` and installs via `dpkg -i` — no external mirror dependency, no apt index download (issue #261).
+
+Current version **`2026.07.21`** holds `libpango-1.0-0_1.56.3-1_amd64.deb`, `libpangoft2-1.0-0_1.56.3-1_amd64.deb`, and `fonts-dejavu-core_2.37-8_all.deb`, captured from the amd64 `python:3.11` image (Debian trixie — the job's image, on gitlab.com's amd64 shared runners).
+
+To refresh (e.g. after the `python:3.11` tag moves to a new Debian release):
+
+```bash
+# 1. Capture the current debs from the CI image (on arm64 hosts add: docker run --privileged --rm tonistiigi/binfmt --install amd64)
+docker run --platform linux/amd64 --rm -v "$PWD/debs:/out" python:3.11 \
+  bash -c 'apt-get update -q && cd /out && apt-get download libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core'
+# 2. Upload under a new date version
+for f in debs/*.deb; do glab api --method PUT --input "$f" \
+  "projects/<project-id>/packages/generic/weasyprint-apt-debs/$(date +%Y.%m.%d)/$(basename "$f")"; done
+# 3. Update the version folder and filenames in .gitlab-ci.yml's test job
+```
 
 ### Report Index
 
