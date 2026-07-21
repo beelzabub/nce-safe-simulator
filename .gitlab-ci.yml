@@ -15,7 +15,9 @@ test:
     # mirror dependency, no apt index download. Captured from amd64
     # python:3.11 (trixie); refresh procedure in README → "CI system packages".
     - PKG="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/weasyprint-apt-debs/2026.07.21"
-    - for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb; do curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" -o "/tmp/$f" "$PKG/$f"; done
+    - >-
+      for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb;
+      do curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" -o "/tmp/$f" "$PKG/$f"; done
     - dpkg -i /tmp/libpango-1.0-0_1.56.3-1_amd64.deb /tmp/libpangoft2-1.0-0_1.56.3-1_amd64.deb /tmp/fonts-dejavu-core_2.37-8_all.deb
     # config.json is git-ignored, so a clean CI checkout has none; several test
     # modules read it at import time. Seed it from the tracked template.
