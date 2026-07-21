@@ -62,7 +62,7 @@ mixins/            # Mixin modules — NceGitLab inherits from all of these
 
 - **Core** — Python 3.9+, Node.js 18+, Git, and a GitLab Personal Access Token with `api` scope.
 - **Report & diagram generation** — building reports in the `plotly` / `interactive` / `all` formats shells out to two system binaries that are **not** installed by `pip`/`npm`:
-  - **[Quarto CLI](https://quarto.org/docs/get-started/)** — renders the static Quarto site (`mixins/serve.py` runs `quarto render`). The container pins **v1.9.38** (`Dockerfile`).
+  - **[Quarto CLI](https://quarto.org/docs/get-started/)** — renders the static Quarto site (`mixins/serve.py` runs `quarto render`). The container pins **v1.9.38** (`Dockerfile`) and installs it from this project's package registry, not GitHub (see [Vendored Quarto](#vendored-quarto-quarto)).
   - **[Graphviz](https://graphviz.org/download/)** — the `dot` binary must be on `PATH`; the `diagrams` package uses it to render the architecture views.
 
   Markdown-only reports (`--formats markdown`, the default) need neither. Quick install — Debian/Ubuntu: `apt-get install graphviz` + Quarto's `.deb`; macOS: `brew install graphviz quarto`.
@@ -832,6 +832,20 @@ for f in debs/*.deb; do glab api --method PUT --input "$f" \
 # 3. Update the version folder and filenames in .gitlab-ci.yml's test job
 ```
 
+##### Vendored Quarto (`quarto`)
+
+The Quarto CLI is the one build dependency that upstream ships only via GitHub releases — there is no apt repo to mirror. So the pinned `.deb`s are vendored in the same generic package registry as package **`quarto`**, version **`1.9.38`** (matching `QUARTO_VERSION` in the Dockerfile), for **both architectures**: `quarto-1.9.38-linux-amd64.deb` (CI image builds) and `quarto-1.9.38-linux-arm64.deb` (Graviton `ecr-push` builds), plus the upstream `quarto-1.9.38-checksums.txt` for re-verification (issue #262).
+
+The Dockerfile downloads from the registry, not GitHub. The project URL comes from the `QUARTO_PKG_PROJECT` build-arg, which defaults to this project on gitlab.com — so plain `docker build .`, `make dev-image`, and `make -C cdk ecr-push` work unchanged — while the `containerize` CI job passes `${CI_API_V4_URL}/projects/${CI_PROJECT_ID}`, making the pipeline pull from **whatever GitLab instance it runs on**. On another instance (or an enclave), either rely on the CI-provided value or override by hand:
+
+```bash
+docker build --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id> .
+```
+
+The download is anonymous: the project sets **`package_registry_access_level=public`**, which lets anyone pull from the *package registry only* while the project itself stays private — so no token is ever passed as a build-arg (build-args are recorded in image history). Uploads still require authentication.
+
+To bump Quarto: download the new release's `linux-amd64.deb` + `linux-arm64.deb` + checksums from [quarto-cli releases](https://github.com/quarto-dev/quarto-cli/releases), verify (`sha256sum -c`), upload the three files under `packages/generic/quarto/<new-version>/`, and update `QUARTO_VERSION` in the Dockerfile.
+
 ### Report Index
 
 > **Label discovery:** Reports derive label sets (`PIID::`, `project::`, `risk::`, `type::`, `lifecycle::`, `wsjf-*`) from the live data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group.
@@ -1192,7 +1206,7 @@ The CLI is built to run unattended in a pipeline — every job the tool exposes 
 
 ### Copy-and-own recipes
 
-The [`ci-recipes/`](ci-recipes/) directory holds self-contained GitLab CI job snippets — **examples you copy into your project's top-level `.gitlab-ci.yml`**, not files GitLab includes automatically. To use one: open the recipe, read its header (it lists the prerequisites — committed files, CI/CD variables, access tokens), copy the job block into your `.gitlab-ci.yml`, and adjust the marked spots (`stage`, `image`, `rules`). Secrets go in masked CI/CD variables, never in the file. Full instructions and the recipe list live in [`ci-recipes/README.md`](ci-recipes/README.md); the first example, [`epic-cards-deck.yml`](ci-recipes/epic-cards-deck.yml), renders the Capability Card PDF and publishes it as a downloadable pipeline artifact.
+The [`ci-recipes/`](ci-recipes/) directory holds self-contained GitLab CI job snippets — **examples you copy into your project's top-level `.gitlab-ci.yml`**, not files GitLab includes automatically. To use one: open the recipe, read its header (it lists the prerequisites — committed files, CI/CD variables, access tokens), copy the job block into your `.gitlab-ci.yml`, and adjust the marked spots (`stage`, `image`, `rules`). Secrets go in masked CI/CD variables, never in the file. Full instructions and the recipe list live in [`ci-recipes/README.md`](ci-recipes/README.md). Two examples ship today: [`epic-cards-deck.yml`](ci-recipes/epic-cards-deck.yml) renders the Capability Card PDF as a downloadable pipeline artifact, and [`all-reports.yml`](ci-recipes/all-reports.yml) runs the full report suite (`--report all`) inside the project's own runtime image — Quarto, Pango, and every pip dependency baked in, no external downloads at job time — publishing the rendered `public/` site as the artifact (scheduled + manual by default, since a full run rewrites the wiki report pages).
 
 ### Non-interactive by default
 
@@ -1279,6 +1293,84 @@ make registry-push
 > images are amd64 — ideal for developer laptops pulling the `dev` image. The
 > arm64 (Graviton) production images used by the AWS deploys are unchanged; they
 > still build via `make -C cdk ecr-push`.
+
+---
+
+## Enclave Transfer (Air-Gapped GitLab)
+
+This project is built to be lifted into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries — the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}`, so the same pipeline runs unmodified against the enclave's own GitLab instance once the artifacts are imported.
+
+> **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
+
+### 1 — Export (on a connected box)
+
+```bash
+SRC=https://gitlab.com/api/v4/projects/81726491
+mkdir -p transfer/packages transfer/images && cd transfer
+
+# Generic packages — anonymous pull (package registry is public)
+for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb; do
+  curl -fsSL -o "packages/$f" "$SRC/packages/generic/weasyprint-apt-debs/2026.07.21/$f"
+done
+for f in quarto-1.9.38-linux-amd64.deb quarto-1.9.38-linux-arm64.deb quarto-1.9.38-checksums.txt; do
+  curl -fsSL -o "packages/$f" "$SRC/packages/generic/quarto/1.9.38/$f"
+done
+# Verify Quarto against the upstream manifest before it crosses the boundary
+(cd packages && grep 'linux-\(amd64\|arm64\).deb' quarto-1.9.38-checksums.txt | sha256sum -c -)
+
+# Container images — needs docker login with read_registry scope
+docker login registry.gitlab.com
+docker pull registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest
+docker pull registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest
+docker save registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest     -o images/nce-runtime.tar
+docker save registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest -o images/nce-dev.tar
+```
+
+If the enclave will **rebuild images** (run `containerize`) rather than only consume the imported ones, also export the upstream bases its builds and jobs pull: `python:3.11` (CI test job), `python:3.11-slim`, `node:20-slim` (Dockerfile stages), and `gcr.io/kaniko-project/executor:debug` (the containerize job) — same `docker pull` / `docker save` pattern — unless the enclave registry already proxies them.
+
+Move `transfer/` across on approved media per the enclave's transfer process.
+
+### 2 — Import (on the enclave side)
+
+Prerequisites: a project created on the enclave GitLab (this repo pushed to it), a token with `api` scope, Maintainer access.
+
+```bash
+DST=https://<enclave-gitlab>/api/v4/projects/<project-id>
+TOKEN=<api-scope-token>
+cd transfer
+
+# Generic packages — same package names/versions/filenames the yaml expects
+for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb; do
+  curl -fsS --header "PRIVATE-TOKEN: $TOKEN" --upload-file "packages/$f" \
+    "$DST/packages/generic/weasyprint-apt-debs/2026.07.21/$f"
+done
+for f in quarto-1.9.38-linux-amd64.deb quarto-1.9.38-linux-arm64.deb quarto-1.9.38-checksums.txt; do
+  curl -fsS --header "PRIVATE-TOKEN: $TOKEN" --upload-file "packages/$f" \
+    "$DST/packages/generic/quarto/1.9.38/$f"
+done
+
+# Allow anonymous pull from the package registry (project stays private) —
+# this is what lets Docker builds fetch Quarto with no token in build args.
+curl -fsS --request PUT --header "PRIVATE-TOKEN: $TOKEN" \
+  "$DST?package_registry_access_level=public" > /dev/null
+
+# Container images — load, retag to the enclave registry, push
+docker load -i images/nce-runtime.tar
+docker load -i images/nce-dev.tar
+docker login <enclave-registry-host>
+docker tag registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator:latest     <enclave-registry-host>/<group>/nce-safe-simulator:latest
+docker tag registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
+docker push <enclave-registry-host>/<group>/nce-safe-simulator:latest
+docker push <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
+```
+
+### 3 — Verify
+
+- Pipeline: run a branch pipeline — the `test` job must fetch the three Pango debs from the *enclave* registry (the job log shows the `$CI_API_V4_URL` host) and go green.
+- Image build: a merge to `develop` runs `containerize`; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry-host>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
+- Reports: the [`all-reports.yml`](ci-recipes/all-reports.yml) recipe runs entirely from the imported runtime image — no external downloads at job time — and is the end-to-end proof that report generation works inside the enclave.
+
+The only gitlab.com reference in the build chain is the `QUARTO_PKG_PROJECT` **default** in the Dockerfile (kept so plain `docker build .` works on connected boxes); CI always overrides it with the local instance, and enclave-side manual builds pass `--build-arg QUARTO_PKG_PROJECT=$DST`.
 
 ---
 

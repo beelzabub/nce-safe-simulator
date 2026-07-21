@@ -27,11 +27,19 @@ RUN mkdir -p /diagrams \
 FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# Install Quarto (required for plotly/static site build format)
+# Install Quarto (required for plotly/static site build format). The pinned
+# .deb (both arches) is vendored in this project's generic package registry
+# (package `quarto`, issue #262) rather than fetched from GitHub releases, so
+# image builds work on networks without GitHub egress. The registry allows
+# anonymous pull (package_registry_access_level=public) — no token in the
+# build, none can leak into image history. CI passes its own instance/project
+# via --build-arg; an enclave build overrides the same way:
+#   --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id>
 ARG QUARTO_VERSION=1.9.38
+ARG QUARTO_PKG_PROJECT=https://gitlab.com/api/v4/projects/81726491
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-${ARCH}.deb" \
+    curl -fsSL "${QUARTO_PKG_PROJECT}/packages/generic/quarto/${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-${ARCH}.deb" \
          -o /tmp/quarto.deb && \
     dpkg -i /tmp/quarto.deb && \
     rm /tmp/quarto.deb && \

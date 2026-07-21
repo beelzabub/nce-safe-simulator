@@ -50,12 +50,17 @@ containerize:
     - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
   script:
+    # QUARTO_PKG_PROJECT points the Dockerfile's Quarto download at THIS
+    # instance's package registry (issue #262) — composed from CI variables, so
+    # the same yaml pulls from gitlab.com here and from the enclave's own
+    # registry after the repo is lifted. See README → "Enclave transfer".
     - >-
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target runtime
       --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
+      --build-arg QUARTO_PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE:latest"
       --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
     - >-
@@ -63,6 +68,7 @@ containerize:
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target dev
+      --build-arg QUARTO_PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE/dev:latest"
       --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
   only:
