@@ -808,7 +808,7 @@ Available interactive reports: health-dashboard, pi-predictability, flow-metrics
 | Job | Stage | Trigger | What it does |
 |---|---|---|---|
 | `test` | build | every push | Installs WeasyPrint's system packages from the project package registry (below), then `pip install -r requirements.txt && pytest tests/` |
-| `containerize` | containerize | `develop` branch only | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
+| `containerize` | containerize | default branch only (`$CI_DEFAULT_BRANCH` — `develop` here, `main` on a lifted repo) | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
 
 `containerize` gates on `test` (`needs: [test]`), so an image is never published from a failing suite. It uses the built-in `$CI_JOB_TOKEN` to authenticate to the registry — no secret to configure. See [Container-Based Development & Registry](#container-based-development--registry) for how developers consume the published images.
 
@@ -1277,7 +1277,7 @@ docker run --rm -it -v "$PWD":/app -w /app -p 4645:80 \
 
 ### Registry & CI
 
-On every merge to `develop`, the `containerize` CI job (`.gitlab-ci.yml`) builds
+On every merge to the default branch (`$CI_DEFAULT_BRANCH` — `develop` here, `main` on a lifted repo), the `containerize` CI job (`.gitlab-ci.yml`) builds
 both images with [Kaniko](https://github.com/GoogleContainerTools/kaniko) and
 pushes them to this project's GitLab Container Registry, tagged `:latest` and
 `:<short-sha>`:
@@ -1372,7 +1372,7 @@ docker push <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
 ### 3 — Verify
 
 - Pipeline: run a branch pipeline — the `test` job must fetch the three Pango debs from the *enclave* registry (the job log shows the `$CI_API_V4_URL` host) and go green.
-- Image build: a merge to `develop` runs `containerize`; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry-host>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
+- Image build: a merge to the enclave's default branch (`main`) runs `containerize` — the trigger is `$CI_DEFAULT_BRANCH`, not a hardcoded branch name; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry-host>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
 - Reports: the [`all-reports.yml`](ci-recipes/all-reports.yml) recipe runs entirely from the imported runtime image — no external downloads at job time — and is the end-to-end proof that report generation works inside the enclave.
 
 There is **no gitlab.com reference anywhere in the build chain**: CI composes the registry URL from its own instance variables, and local builds derive it from `git remote origin` ([`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh)) — an enclave clone resolves to the enclave instance automatically. A bare `docker build .` without the build-arg fails loudly by design.
