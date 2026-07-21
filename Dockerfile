@@ -28,16 +28,26 @@ FROM python:3.11-slim AS runtime
 WORKDIR /app
 
 # Install Quarto (required for plotly/static site build format). The pinned
-# .deb (both arches) is vendored in this project's generic package registry
+# .deb (both arches) is vendored in the project's generic package registry
 # (package `quarto`, issue #262) rather than fetched from GitHub releases, so
 # image builds work on networks without GitHub egress. The registry allows
 # anonymous pull (package_registry_access_level=public) — no token in the
-# build, none can leak into image history. CI passes its own instance/project
-# via --build-arg; an enclave build overrides the same way:
-#   --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id>
+# build, none can leak into image history.
+#
+# QUARTO_PKG_PROJECT has NO default on purpose: a hardcoded host would
+# silently point at the wrong network after an enclave lift. Every make
+# target / script derives it from the clone's own `git remote origin` via
+# scripts/quarto-pkg-url.sh, and CI passes its own instance — a bare
+# `docker build .` without the arg fails loudly instead:
+#   --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id-or-url-encoded-path>
 ARG QUARTO_VERSION=1.9.38
-ARG QUARTO_PKG_PROJECT=https://gitlab.com/api/v4/projects/81726491
-RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+ARG QUARTO_PKG_PROJECT
+RUN test -n "$QUARTO_PKG_PROJECT" || { \
+      echo "ERROR: QUARTO_PKG_PROJECT build-arg is required (no default — issue #262)." >&2; \
+      echo "  Use the make targets / scripts (they derive it from git remote origin)," >&2; \
+      echo "  or pass: --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id>" >&2; \
+      exit 1; } && \
+    apt-get update && apt-get install -y --no-install-recommends curl && \
     ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "${QUARTO_PKG_PROJECT}/packages/generic/quarto/${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-${ARCH}.deb" \
          -o /tmp/quarto.deb && \

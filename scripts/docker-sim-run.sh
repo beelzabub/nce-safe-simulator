@@ -24,6 +24,7 @@ if [ "${1:-}" = "--build" ] || [ -n "$BUILD_TARGET" ]; then
   docker build $BUILD_TARGET \
     --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
     --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
+    --build-arg QUARTO_PKG_PROJECT="$(scripts/quarto-pkg-url.sh)" \
     -t "$IMAGE" .
 fi
 
