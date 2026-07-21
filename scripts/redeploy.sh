@@ -36,6 +36,7 @@ echo "==> Building image ($IMAGE)..."
 docker build "${BUILD_TARGET[@]}" \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
+  --build-arg QUARTO_PKG_PROJECT="$(scripts/quarto-pkg-url.sh)" \
   -t "$IMAGE" .
 
 # Guard (issue #186): never swap the live container for an image that can't

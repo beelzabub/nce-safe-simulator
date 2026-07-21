@@ -45,7 +45,9 @@ log "==> Deploying infra with service scaled to 0 tasks..."
 cdk deploy NceStack --app "python ecs_app.py" --require-approval never --context desired_count=0
 
 log "==> Building Docker image for linux/arm64..."
-docker build --platform linux/arm64 -t "${APP_NAME}" ../
+docker build --platform linux/arm64 \
+  --build-arg QUARTO_PKG_PROJECT="$(../scripts/quarto-pkg-url.sh)" \
+  -t "${APP_NAME}" ../
 
 log "==> Pushing image to ECR..."
 aws ecr get-login-password --region "${REGION}" | \

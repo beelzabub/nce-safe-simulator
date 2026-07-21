@@ -836,10 +836,15 @@ for f in debs/*.deb; do glab api --method PUT --input "$f" \
 
 The Quarto CLI is the one build dependency that upstream ships only via GitHub releases — there is no apt repo to mirror. So the pinned `.deb`s are vendored in the same generic package registry as package **`quarto`**, version **`1.9.38`** (matching `QUARTO_VERSION` in the Dockerfile), for **both architectures**: `quarto-1.9.38-linux-amd64.deb` (CI image builds) and `quarto-1.9.38-linux-arm64.deb` (Graviton `ecr-push` builds), plus the upstream `quarto-1.9.38-checksums.txt` for re-verification (issue #262).
 
-The Dockerfile downloads from the registry, not GitHub. The project URL comes from the `QUARTO_PKG_PROJECT` build-arg, which defaults to this project on gitlab.com — so plain `docker build .`, `make dev-image`, and `make -C cdk ecr-push` work unchanged — while the `containerize` CI job passes `${CI_API_V4_URL}/projects/${CI_PROJECT_ID}`, making the pipeline pull from **whatever GitLab instance it runs on**. On another instance (or an enclave), either rely on the CI-provided value or override by hand:
+The Dockerfile downloads from the registry, not GitHub. The project URL comes from the `QUARTO_PKG_PROJECT` build-arg, which **deliberately has no default** — a hardcoded host would silently point at the wrong network after an enclave lift. Instead:
+
+- The `containerize` CI job passes `${CI_API_V4_URL}/projects/${CI_PROJECT_ID}` — the pipeline pulls from **whatever GitLab instance it runs on**.
+- Every local build path (`make dev-shell`, `make registry-push`, `make -C cdk ecr-push`/`ecs-deploy`, the redeploy scripts) derives it from the clone's own `git remote origin` via [`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh) — so a clone from an enclave GitLab automatically resolves to that instance's registry, zero configuration.
+- A bare `docker build .` without the arg **fails immediately with a clear error** instead of quietly reaching for the wrong network. To build by hand:
 
 ```bash
-docker build --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id> .
+docker build --build-arg QUARTO_PKG_PROJECT="$(scripts/quarto-pkg-url.sh)" .
+# or explicitly: --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id-or-url-encoded-path>
 ```
 
 The download is anonymous: the project sets **`package_registry_access_level=public`**, which lets anyone pull from the *package registry only* while the project itself stays private — so no token is ever passed as a build-arg (build-args are recorded in image history). Uploads still require authentication.
@@ -1370,7 +1375,7 @@ docker push <enclave-registry-host>/<group>/nce-safe-simulator/dev:latest
 - Image build: a merge to `develop` runs `containerize`; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry-host>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
 - Reports: the [`all-reports.yml`](ci-recipes/all-reports.yml) recipe runs entirely from the imported runtime image — no external downloads at job time — and is the end-to-end proof that report generation works inside the enclave.
 
-The only gitlab.com reference in the build chain is the `QUARTO_PKG_PROJECT` **default** in the Dockerfile (kept so plain `docker build .` works on connected boxes); CI always overrides it with the local instance, and enclave-side manual builds pass `--build-arg QUARTO_PKG_PROJECT=$DST`.
+There is **no gitlab.com reference anywhere in the build chain**: CI composes the registry URL from its own instance variables, and local builds derive it from `git remote origin` ([`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh)) — an enclave clone resolves to the enclave instance automatically. A bare `docker build .` without the build-arg fails loudly by design.
 
 ---
 
