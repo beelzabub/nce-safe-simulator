@@ -109,6 +109,19 @@ def test_ps_no_ps7_only_syntax(name):
 
 
 @pytest.mark.parametrize("name", sorted(PS))
+def test_ps_stderr_redirects_only_in_tolerant_helper(name):
+    """WinPS 5.1 + $ErrorActionPreference='Stop' promotes redirected native
+    stderr (2>$null / 2>&1) into a terminating NativeCommandError — git's
+    success chatter (a wiki fetch's "From <url>" ref summary) killed real
+    exports on the exact box the ports target. Stderr may only be discarded
+    inside Invoke-GitTolerant, which relaxes the preference around the call
+    (callers still branch on $LASTEXITCODE)."""
+    for line in _code_lines(PS[name]):
+        if re.search(r"2>\s*(\$null|&1)", line):
+            assert "@GitArgs" in line, f"bare native stderr redirect: {line.strip()}"
+
+
+@pytest.mark.parametrize("name", sorted(PS))
 def test_ps_51_transfer_hygiene(name):
     text = PS[name]
     assert "$ErrorActionPreference = 'Stop'" in text

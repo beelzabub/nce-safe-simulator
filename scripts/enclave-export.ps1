@@ -53,6 +53,18 @@ function Log([string]$msg) { Write-Host "==> $msg" }
 function Assert-Native([string]$what) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
+function Invoke-GitTolerant {
+    # git reports success chatter on stderr (e.g. a fetch's "From <url>" ref
+    # summary). Under $ErrorActionPreference='Stop', WinPS 5.1 wraps redirected
+    # native stderr in ErrorRecords and promotes them to terminating errors —
+    # a SUCCESSFUL wiki fetch would kill the export. Relax the preference for
+    # the one call whose stderr is deliberately discarded; callers branch on
+    # $LASTEXITCODE as usual.
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & git @GitArgs 2>$null } finally { $ErrorActionPreference = $eap }
+}
 
 # ── Preflight: report ALL missing tools in one message ──────────────────────
 $missing = @()
@@ -103,7 +115,7 @@ Log ("repo.bundle OK ({0:N0} MB)" -f ((Get-Item $repoBundle).Length / 1MB))
 # ── 2. Project wiki (skipped if absent/empty). Fetched through this clone so
 #      the repo's own git credentials apply. ────────────────────────────────
 $wikiUrl = ($remote -replace '\.git$', '') + '.wiki.git'
-& git fetch $wikiUrl '+refs/heads/*:refs/enclave-wiki/*' 2>$null
+Invoke-GitTolerant fetch $wikiUrl '+refs/heads/*:refs/enclave-wiki/*'
 if ($LASTEXITCODE -eq 0 -and (& git for-each-ref 'refs/enclave-wiki/')) {
     Log "Writing wiki bundle..."
     $wikiBundle = Join-Path $Stage 'repo/wiki.bundle'
@@ -162,7 +174,7 @@ Copy-Item (Join-Path $PSScriptRoot 'enclave-import.sh') (Join-Path $Stage 'encla
 Copy-Item (Join-Path $PSScriptRoot 'enclave-import.ps1') (Join-Path $Stage 'enclave-import.ps1')
 
 # ── 6. Manifest + checksums (sha256sum -c compatible: "<hash>  ./<path>") ───
-$head = & git rev-parse origin/HEAD 2>$null
+$head = Invoke-GitTolerant rev-parse origin/HEAD
 if ($LASTEXITCODE -ne 0) { $head = & git rev-parse origin/develop }
 $stageFiles = Get-ChildItem -Path $Stage -Recurse -File
 $manifest = @(
