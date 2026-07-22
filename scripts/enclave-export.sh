@@ -79,11 +79,18 @@ log() { echo "==> $*"; }
 log "Fetching all refs from origin..."
 git fetch origin --prune --tags
 log "Writing repo bundle..."
-# --exclude origin/HEAD: some gits (e.g. Git for Windows builds) write the
-# symref into the bundle DEREFERENCED — a second entry under its target name —
-# and any clone of that bundle dies with "multiple updates for ref
-# 'refs/remotes/origin/<default>' not allowed". The importer never needs it.
-git bundle create "$OUT/repo/repo.bundle" --exclude=refs/remotes/origin/HEAD --remotes=origin --tags
+# Enumerate the refs explicitly instead of using the remotes glob: gits up to
+# at least 2.46 (Git for Windows included) write the origin/HEAD symref into
+# the bundle DEREFERENCED — a second entry under its target name — and any clone
+# of that bundle dies with "multiple updates for ref
+# 'refs/remotes/origin/<default>' not allowed". --exclude does NOT prevent it
+# (the pattern never matches the resolved name); leaving the symref out of an
+# explicit list does. The importer never needs origin/HEAD. Refnames cannot
+# contain whitespace, so the unquoted expansion is safe.
+BUNDLE_REFS=$(git for-each-ref --format='%(refname)' refs/remotes/origin \
+  | grep -v '^refs/remotes/origin/HEAD$')
+# shellcheck disable=SC2086
+git bundle create "$OUT/repo/repo.bundle" --tags $BUNDLE_REFS
 git bundle verify "$OUT/repo/repo.bundle" >/dev/null
 log "repo.bundle OK ($(du -h "$OUT/repo/repo.bundle" | cut -f1))"
 

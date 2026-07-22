@@ -134,11 +134,15 @@ Log "Fetching all refs from origin..."
 & git fetch origin --prune --tags; Assert-Native 'git fetch'
 Log "Writing repo bundle..."
 $repoBundle = Join-Path $Stage 'repo/repo.bundle'
-# --exclude origin/HEAD: some gits (e.g. Git for Windows builds) write the
-# symref into the bundle DEREFERENCED — a second entry under its target
-# name — and any clone of that bundle dies with "multiple updates for ref
-# 'refs/remotes/origin/<default>' not allowed". The importer never needs it.
-& git bundle create $repoBundle --exclude=refs/remotes/origin/HEAD --remotes=origin --tags; Assert-Native 'git bundle create'
+# Enumerate the refs explicitly instead of using the remotes glob: gits up
+# to at least 2.46 (Git for Windows included) write the origin/HEAD symref
+# into the bundle DEREFERENCED — a second entry under its target name — and any
+# clone of that bundle dies with "multiple updates for ref
+# 'refs/remotes/origin/<default>' not allowed". --exclude does NOT prevent
+# it (the pattern never matches the resolved name); leaving the symref out
+# of an explicit list does. The importer never needs origin/HEAD.
+$bundleRefs = @(& git for-each-ref --format='%(refname)' refs/remotes/origin) -ne 'refs/remotes/origin/HEAD'
+& git bundle create $repoBundle --tags $bundleRefs; Assert-Native 'git bundle create'
 & git bundle verify $repoBundle | Out-Null; Assert-Native 'git bundle verify'
 Log ("repo.bundle OK ({0:N0} MB)" -f ((Get-Item $repoBundle).Length / 1MB))
 
