@@ -111,9 +111,13 @@ function Invoke-HistoryFilter([string]$RepoPath) {
     $env:FILTER_BRANCH_SQUELCH_WARNING = '1'
     $fbArgs = @('filter-branch', '-f')
     if ($RewriteCommitter) {
-        $fbArgs += @('--env-filter',
-            "export GIT_AUTHOR_NAME='$RwName' GIT_AUTHOR_EMAIL='$RwEmail'" +
-            " GIT_COMMITTER_NAME='$RwName' GIT_COMMITTER_EMAIL='$RwEmail'")
+        # One variable, then the array: inside @(...) the comma binds tighter
+        # than '+', so concatenating across elements would emit the second
+        # string as a THIRD element — a stray arg filter-branch rejects as
+        # "bad revision", and only the author half would ever be exported.
+        $envFilter = "export GIT_AUTHOR_NAME='$RwName' GIT_AUTHOR_EMAIL='$RwEmail'" +
+            " GIT_COMMITTER_NAME='$RwName' GIT_COMMITTER_EMAIL='$RwEmail'"
+        $fbArgs += @('--env-filter', $envFilter)
     }
     if ($SignCommits) {
         # --commit-filter replaces the stock commit-tree call; -S signs with

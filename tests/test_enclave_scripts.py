@@ -244,6 +244,55 @@ def test_import_rewrite_committer_parity():
         assert len(re.findall(re.escape(rewriter), text)) >= 3, rewriter
 
 
+@pytest.mark.skipif(
+    POWERSHELL is None,
+    reason="no PowerShell on PATH — see this module's docstring for the Linux install",
+)
+def test_ps_history_filter_rewrites_author_and_committer(tmp_path):
+    """Run the real Invoke-HistoryFilter on a scratch mirror and check the
+    result. The env-filter must reach filter-branch as ONE argument: inside
+    @(...) the comma binds tighter than '+', so a concatenation split across
+    elements becomes a stray third element that filter-branch fatals on as a
+    bad revision — and the committer half never gets exported, so the
+    committer-restriction push rule keeps rejecting (first real enclave run,
+    issue #270)."""
+    m = re.search(r"function Invoke-HistoryFilter.*?\n\}", IMPORT_PS, re.S)
+    assert m, "Invoke-HistoryFilter not found in enclave-import.ps1"
+    src = tmp_path / "src"
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Source Author",
+        "GIT_AUTHOR_EMAIL": "author@source.example",
+        "GIT_COMMITTER_NAME": "Source Committer",
+        "GIT_COMMITTER_EMAIL": "committer@source.example",
+    }
+    subprocess.run(["git", "init", "-q", "-b", "main", str(src)], check=True)
+    (src / "f.txt").write_text("x\n")
+    subprocess.run(["git", "-C", str(src), "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", str(src), "commit", "-q", "-m", "one"], check=True, env=env)
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "clone", "-q", "--mirror", str(src), str(mirror)], check=True)
+    harness = tmp_path / "harness.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Log([string]$msg) {}\n"
+        "function Assert-Native([string]$what) {\n"
+        "    if ($LASTEXITCODE -ne 0) { throw \"$what failed (exit $LASTEXITCODE)\" }\n"
+        "}\n"
+        "$RewriteCommitter = 'New Name <new@target.example>'\n"
+        "$SignCommits = $false\n"
+        "$RwName = 'New Name'; $RwEmail = 'new@target.example'\n"
+        f"{m.group(0)}\n"
+        f"Invoke-HistoryFilter '{mirror}'\n"
+    )
+    subprocess.run([POWERSHELL, "-NoProfile", "-File", str(harness)], check=True)
+    out = subprocess.run(
+        ["git", "-C", str(mirror), "log", "--format=%an|%ae|%cn|%ce", "main"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert out == "New Name|new@target.example|New Name|new@target.example"
+
+
 def test_import_phases_and_flags_parity():
     # bash long options ↔ PowerShell switch params, same defaults
     assert '--skip-repo' in IMPORT_SH and '--skip-packages' in IMPORT_SH and '--skip-images' in IMPORT_SH
