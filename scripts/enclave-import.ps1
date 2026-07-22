@@ -36,6 +36,14 @@
 .PARAMETER DefaultBranch
   Default branch to set after the push (default: main).
 
+.PARAMETER RewriteCommitter
+  'Full Name <email@domain>' — rewrite author AND committer on every commit
+  of the repo and wiki before pushing. For targets enforcing the "committer
+  restriction" push rule (only commits whose committer email is a verified
+  email of the pushing account are accepted), which rejects any transferred
+  history wholesale. Changes every commit hash (deterministically — reruns
+  yield identical hashes, so imports stay idempotent).
+
 .NOTES
   Env: GITLAB_TOKEN — token with api scope on the TARGET instance, required.
 #>
@@ -45,6 +53,7 @@ param(
     [Parameter(Mandatory = $true)][string]$GitLabUrl,
     [Parameter(Mandatory = $true)][string]$Project,
     [string]$DefaultBranch = 'main',
+    [string]$RewriteCommitter,
     [switch]$SkipRepo,
     [switch]$SkipPackages,
     [switch]$SkipImages
@@ -77,6 +86,19 @@ function Invoke-UploadWithRetry([string]$InFile, [string]$Uri) {
         Start-Sleep -Seconds (2 * $try)
     }
 }
+function Set-HistoryIdentity([string]$RepoPath) {
+    # Rewrite author+committer on every commit of a scratch mirror before it
+    # is pushed (see -RewriteCommitter). filter-branch rather than
+    # git-filter-repo because it ships inside git — nothing to install on an
+    # enclave box. Its refs/original/* backups never match the push refspecs,
+    # so only rewritten history leaves the mirror.
+    Log "  rewriting history authorship to $RwName <$RwEmail> (large histories take minutes)..."
+    $env:FILTER_BRANCH_SQUELCH_WARNING = '1'
+    $filter = "export GIT_AUTHOR_NAME='$RwName' GIT_AUTHOR_EMAIL='$RwEmail'" +
+              " GIT_COMMITTER_NAME='$RwName' GIT_COMMITTER_EMAIL='$RwEmail'"
+    & git -C $RepoPath filter-branch -f --env-filter $filter --tag-name-filter cat -- --all
+    Assert-Native 'git filter-branch'
+}
 
 # ── Preflight: report ALL missing tools in one message ──────────────────────
 $missing = @()
@@ -97,6 +119,14 @@ if ($missing.Count -gt 0) {
 if (-not $env:GITLAB_TOKEN) {
     Write-Error "Set GITLAB_TOKEN (api scope on the target instance)"
     exit 1
+}
+$RwName = $null; $RwEmail = $null
+if ($RewriteCommitter) {
+    if ($RewriteCommitter -notmatch '^(?<n>[^<>]+?)\s*<(?<e>[^<>@\s]+@[^<>\s]+)>$') {
+        Write-Error "RewriteCommitter must look like 'Full Name <email@domain>'"
+        exit 1
+    }
+    $RwName = $Matches.n; $RwEmail = $Matches.e
 }
 $Token = $env:GITLAB_TOKEN
 $Headers = @{ 'PRIVATE-TOKEN' = $Token }
@@ -157,6 +187,7 @@ if (-not $SkipRepo) {
     try {
         Log "Pushing repo (all branches + tags)..."
         & git clone --quiet --mirror (Join-Path $Dir 'repo/repo.bundle') (Join-Path $tmp 'repo.git'); Assert-Native 'git clone (bundle)'
+        if ($RewriteCommitter) { Set-HistoryIdentity (Join-Path $tmp 'repo.git') }
         & git -C (Join-Path $tmp 'repo.git') push --quiet $pushUrl '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; Assert-Native 'git push'
         # PUT bodies must be explicit JSON: PowerShell form-encodes hashtable
         # bodies only for GET/POST — on PUT it stringifies the hashtable and
@@ -167,6 +198,7 @@ if (-not $SkipRepo) {
         if (Test-Path (Join-Path $Dir 'repo/wiki.bundle')) {
             Log "Pushing wiki..."
             & git clone --quiet --mirror (Join-Path $Dir 'repo/wiki.bundle') (Join-Path $tmp 'wiki.git'); Assert-Native 'git clone (wiki bundle)'
+            if ($RewriteCommitter) { Set-HistoryIdentity (Join-Path $tmp 'wiki.git') }
             $wikiPush = $pushUrl -replace '\.git$', '.wiki.git'
             & git -C (Join-Path $tmp 'wiki.git') push --quiet $wikiPush '+refs/enclave-wiki/*:refs/heads/*'; Assert-Native 'git push (wiki)'
             Log "Wiki pushed"
