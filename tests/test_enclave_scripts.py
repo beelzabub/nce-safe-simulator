@@ -189,6 +189,10 @@ def test_bundle_refspec_parity():
     """Bundles carry origin's refs; importers must map them back to heads."""
     for text in (EXPORT_SH, EXPORT_PS):
         assert "--remotes=origin" in text and "--tags" in text
+        # origin/HEAD must never enter the bundle: some gits write the symref
+        # dereferenced (a duplicate entry under its target name), and cloning
+        # such a bundle fails with "multiple updates for ref ... not allowed".
+        assert "--exclude=refs/remotes/origin/HEAD --remotes=origin" in text
         assert "refs/enclave-wiki/" in text
     for text in (IMPORT_SH, IMPORT_PS):
         assert "+refs/remotes/origin/*:refs/heads/*" in text
