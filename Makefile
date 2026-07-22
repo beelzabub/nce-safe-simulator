@@ -42,7 +42,7 @@ redeploy-ops: ## redeploy, but with the ops image variant (CDK toolchain baked i
 # app's container :80 (`--serve` binds :80), reachable at http://localhost:4645.
 dev-shell: ## Container dev shell: dev image + working tree mounted at /app
 	docker build --target dev \
-	  --build-arg QUARTO_PKG_PROJECT=$$(scripts/quarto-pkg-url.sh) \
+	  --build-arg PKG_PROJECT=$$(scripts/pkg-project-url.sh) \
 	  -t nce-safe-simulator:dev .
 	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:80 nce-safe-simulator:dev
 
@@ -54,10 +54,10 @@ registry-push: ## Build + push runtime + dev images to the GitLab Container Regi
 	VER=$$(git describe --tags --exact-match 2>/dev/null || true); \
 	docker build --target runtime \
 	  --build-arg VCS_REF=$$REF --build-arg NCE_VERSION=$$VER \
-	  --build-arg QUARTO_PKG_PROJECT=$$(scripts/quarto-pkg-url.sh) \
+	  --build-arg PKG_PROJECT=$$(scripts/pkg-project-url.sh) \
 	  -t $(REGISTRY):latest -t $(REGISTRY):$$REF . && \
 	docker build --target dev \
-	  --build-arg QUARTO_PKG_PROJECT=$$(scripts/quarto-pkg-url.sh) \
+	  --build-arg PKG_PROJECT=$$(scripts/pkg-project-url.sh) \
 	  -t $(REGISTRY)/dev:latest -t $(REGISTRY)/dev:$$REF . && \
 	docker push $(REGISTRY):latest && docker push $(REGISTRY):$$REF && \
 	docker push $(REGISTRY)/dev:latest && docker push $(REGISTRY)/dev:$$REF && \
