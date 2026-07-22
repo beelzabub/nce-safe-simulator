@@ -1305,7 +1305,7 @@ make registry-push
 
 This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
 
-Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases):
+Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases). **Windows boxes are covered too**: PowerShell ports ([`enclave-export.ps1`](scripts/enclave-export.ps1) / [`enclave-import.ps1`](scripts/enclave-import.ps1), issue #264) mirror the bash pair phase-for-phase and need only PowerShell 5.1+, git, and tar (built into Windows 10+/Server 2019+) — `Invoke-RestMethod` and `Get-FileHash` replace the python3 and sha256sum dependencies. The two families are cross-compatible: checksums are written in `sha256sum -c` format either way, and every artifact carries **both** importers, so a Windows export imports on Linux and vice versa.
 
 | Script | Runs on | What it does |
 |---|---|---|
@@ -1313,6 +1313,15 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 | [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
 
 > **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
+
+**Validating the scripts** (`tests/test_enclave_scripts.py`): the suite pins the bash↔PowerShell contract — phases, flags, artifact layout, checksum format, shipped importers — and syntax-checks with the real interpreters. `bash -n` always runs; the PowerShell AST-parse tests need a PowerShell on PATH and **skip otherwise** (CI has none — run them locally before review). On Windows the built-in `powershell` (5.1, exactly the declared floor) is picked up automatically; on Linux install the portable `pwsh` tarball (no package manager needed; pick `linux-x64` or `linux-arm64`):
+
+```bash
+mkdir -p ~/.local/pwsh && curl -fsSL \
+  https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz \
+  | tar -xz -C ~/.local/pwsh && chmod +x ~/.local/pwsh/pwsh
+PATH=~/.local/pwsh:$PATH python -m pytest tests/test_enclave_scripts.py   # 21 passed, 0 skipped
+```
 
 ### 1 — Export (on a connected box)
 
@@ -1325,13 +1334,20 @@ scripts/enclave-export.sh -o /media/transfer
 #                                node:20-slim, kaniko — what CI jobs and builds pull)
 ```
 
+Windows equivalent (`-OutDir`, `-NoImages`, `-WithBaseImages`):
+
+```powershell
+$env:GITLAB_TOKEN = '<read_api token>'
+scripts/enclave-export.ps1 -OutDir D:\transfer
+```
+
 Everything inside is checksummed into `SHA256SUMS` (verified again by the importer), and the Quarto debs additionally carry the upstream release manifest for independent re-verification. Note the printed outer sha256, then move the single `.txt` file across on approved media per the enclave's transfer process.
 
 For a **browser-only export** of the packages: the source project's **Deploy → Package registry** UI has per-file download links (anonymous pull is enabled), so the .debs can be fetched by hand. The git repo and container images have no UI download — those need the script (or `git bundle` / `docker save` directly).
 
 ### 2 — Import (on the enclave side)
 
-The enclave box starts with **only the `.txt` file** — the repo (and with it the importer's canonical copy) is still locked inside the bundle. The artifact therefore carries a copy of `enclave-import.sh` at its top level; extract just that first:
+The enclave box starts with **only the `.txt` file** — the repo (and with it the importers' canonical copies) is still locked inside the bundle. The artifact therefore carries copies of both importers at its top level; extract just the one for your shell first:
 
 ```bash
 tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.sh   # bootstrap: pull the importer out of the artifact
@@ -1340,6 +1356,15 @@ export GITLAB_TOKEN=<api-scope token on the TARGET instance>
   -u https://<enclave-gitlab> -p <group>/nce-safe-simulator
 # -d takes the .txt artifact (extracted next to itself) or an already-extracted directory
 # --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
+```
+
+On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
+
+```powershell
+tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.ps1
+$env:GITLAB_TOKEN = '<api-scope token on the TARGET instance>'
+./enclave-import.ps1 -TransferPath nce-safe-simulator-2026-07-21.txt `
+  -GitLabUrl https://<enclave-gitlab> -Project <group>/nce-safe-simulator
 ```
 
 The script prints a post-import checklist (runners, the `GITLAB_API_TOKEN` CI variable for the report recipes, `config.json` from the template, branch protection). Notes:
