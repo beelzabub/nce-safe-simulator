@@ -12,7 +12,8 @@
 #
 # Usage:
 #   scripts/enclave-import.sh -d TRANSFER -u GITLAB_URL -p GROUP/PROJECT \
-#       [--default-branch main] [--skip-repo] [--skip-packages] [--skip-images]
+#       [--default-branch main] [--rewrite-committer 'Full Name <email@domain>'] \
+#       [--skip-repo] [--skip-packages] [--skip-images]
 #   TRANSFER is the <repo>-<date>.txt archive the exporter produced (it is a
 #   gzipped tar; extracted next to itself), or an already-extracted directory.
 #   e.g. scripts/enclave-import.sh -d nce-safe-simulator-2026-07-21.txt \
@@ -43,7 +44,7 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
-DIR="" URL="" PROJ="" DEFAULT_BRANCH="main"
+DIR="" URL="" PROJ="" DEFAULT_BRANCH="main" REWRITE_COMMITTER=""
 DO_REPO=1 DO_PACKAGES=1 DO_IMAGES=1
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -51,6 +52,7 @@ while [ $# -gt 0 ]; do
     -u) URL="${2%/}"; shift 2 ;;
     -p) PROJ="$2"; shift 2 ;;
     --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
+    --rewrite-committer) REWRITE_COMMITTER="$2"; shift 2 ;;
     --skip-repo) DO_REPO=0; shift ;;
     --skip-packages) DO_PACKAGES=0; shift ;;
     --skip-images) DO_IMAGES=0; shift ;;
@@ -58,10 +60,35 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$DIR" ] && [ -n "$URL" ] && [ -n "$PROJ" ] || {
-  echo "usage: enclave-import.sh -d TRANSFER_DIR -u GITLAB_URL -p GROUP/PROJECT" >&2; exit 2; }
+  echo "usage: enclave-import.sh -d TRANSFER_DIR -u GITLAB_URL -p GROUP/PROJECT [--rewrite-committer 'Full Name <email@domain>']" >&2; exit 2; }
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (api scope on the target instance)}"
 
 log() { echo "==> $*"; }
+
+# --rewrite-committer: for targets enforcing the "committer restriction" push
+# rule (only commits whose committer email is a verified email of the pushing
+# account are accepted), which rejects any transferred history wholesale.
+# Rewrites author AND committer on every commit of the repo and wiki mirrors
+# before pushing. Deterministic — reruns yield identical hashes, so imports
+# stay idempotent.
+RW_NAME="" RW_EMAIL=""
+if [ -n "$REWRITE_COMMITTER" ]; then
+  case "$REWRITE_COMMITTER" in
+    *"<"*"@"*">"*)
+      RW_NAME="$(printf '%s' "${REWRITE_COMMITTER%%<*}" | sed 's/ *$//')"
+      RW_EMAIL="${REWRITE_COMMITTER#*<}"; RW_EMAIL="${RW_EMAIL%%>*}" ;;
+    *) echo "--rewrite-committer must look like 'Full Name <email@domain>'" >&2; exit 2 ;;
+  esac
+fi
+rewrite_identity() {
+  # filter-branch rather than git-filter-repo because it ships inside git —
+  # nothing to install on an enclave box. Its refs/original/* backups never
+  # match the push refspecs, so only rewritten history leaves the mirror.
+  log "  rewriting history authorship to $RW_NAME <$RW_EMAIL> (large histories take minutes)..."
+  FILTER_BRANCH_SQUELCH_WARNING=1 git -C "$1" filter-branch -f \
+    --env-filter "export GIT_AUTHOR_NAME='$RW_NAME' GIT_AUTHOR_EMAIL='$RW_EMAIL' GIT_COMMITTER_NAME='$RW_NAME' GIT_COMMITTER_EMAIL='$RW_EMAIL'" \
+    --tag-name-filter cat -- --all
+}
 
 # Accept the single-file .txt artifact (a gzipped tar) or an extracted dir.
 if [ -f "$DIR" ]; then
@@ -108,6 +135,7 @@ if [ "$DO_REPO" = 1 ]; then
   TMP="$(mktemp -d "$DIR/.import-XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
   log "Pushing repo (all branches + tags)..."
   git clone --quiet --mirror "$DIR/repo/repo.bundle" "$TMP/repo.git"
+  if [ -n "$REWRITE_COMMITTER" ]; then rewrite_identity "$TMP/repo.git"; fi
   git -C "$TMP/repo.git" push --quiet "$PUSH_URL" \
     '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
   curl -fsS "${auth[@]}" --request PUT "$API/projects/$ENC" \
@@ -116,6 +144,7 @@ if [ "$DO_REPO" = 1 ]; then
   if [ -f "$DIR/repo/wiki.bundle" ]; then
     log "Pushing wiki..."
     git clone --quiet --mirror "$DIR/repo/wiki.bundle" "$TMP/wiki.git"
+    if [ -n "$REWRITE_COMMITTER" ]; then rewrite_identity "$TMP/wiki.git"; fi
     git -C "$TMP/wiki.git" push --quiet "${PUSH_URL%.git}.wiki.git" \
       '+refs/enclave-wiki/*:refs/heads/*'
     log "Wiki pushed"

@@ -222,6 +222,22 @@ def test_image_tar_mapping_parity():
         assert "--password-stdin" in text
 
 
+def test_import_rewrite_committer_parity():
+    """Targets enforcing GitLab's 'committer restriction' push rule (committer
+    email must be a verified email of the pushing account) reject a
+    transferred history wholesale. Both importers expose an opt-in authorship
+    rewrite — applied to the repo AND wiki mirrors before push — built on
+    filter-branch, which ships inside git (nothing to install on an enclave
+    box)."""
+    assert "--rewrite-committer" in IMPORT_SH
+    assert "$RewriteCommitter" in IMPORT_PS
+    for text, rewriter in ((IMPORT_SH, "rewrite_identity"), (IMPORT_PS, "Set-HistoryIdentity")):
+        assert "FILTER_BRANCH_SQUELCH_WARNING" in text
+        assert "--tag-name-filter cat -- --all" in text
+        # definition + repo call + wiki call
+        assert len(re.findall(re.escape(rewriter), text)) >= 3, rewriter
+
+
 def test_import_phases_and_flags_parity():
     # bash long options ↔ PowerShell switch params, same defaults
     assert '--skip-repo' in IMPORT_SH and '--skip-packages' in IMPORT_SH and '--skip-images' in IMPORT_SH

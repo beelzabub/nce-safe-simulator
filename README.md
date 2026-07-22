@@ -1358,7 +1358,9 @@ export GITLAB_TOKEN=<api-scope token on the TARGET instance>
 # --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
 ```
 
-On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
+**If the target enforces the "committer restriction" push rule** — every branch bounces off the pre-receive hook with `You cannot push commits for '<source email>'. You can only push commits if the committer email is one of your own verified emails` — add `--rewrite-committer 'Full Name <email@domain>'` (PowerShell: `-RewriteCommitter`) with the importing account's verified identity. It rewrites author + committer on every commit of the repo **and wiki** before pushing (via `git filter-branch`, which ships inside git — nothing to install). Trade-offs: every commit hash changes (deterministically, so reruns stay idempotent) and in-repo attribution moves to the importing user. If an admin can instead drop that push rule for the target group, prefer that — it keeps the history untouched.
+
+On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-RewriteCommitter`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
 
 ```powershell
 tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.ps1
