@@ -17,8 +17,9 @@
   Run it from any directory inside a clone of this git repo, on a box
   connected to the source GitLab.
 
-  Requirements (preflight-checked): PowerShell 5.1+, git, tar
-  (built into Windows 10+/Server 2019+); docker unless -NoImages.
+  Requirements (preflight-checked): PowerShell 5.1+, git, curl and tar
+  (curl.exe and tar are built into Windows 10+/Server 2019+); docker
+  unless -NoImages.
   JSON parsing and sha256 hashing use PowerShell built-ins — no python or
   sha256sum needed (unlike the bash variant).
 
@@ -66,23 +67,22 @@ function Invoke-GitTolerant {
     try { & git @GitArgs 2>$null } finally { $ErrorActionPreference = $eap }
 }
 function Invoke-DownloadWithRetry([string]$Uri, [string]$OutFile) {
-    # GitLab occasionally drops a long TLS stream mid-file; WinPS 5.1 surfaces
-    # that as IOException "The decryption operation failed" (SChannel). One
-    # transient reset must not abort a whole export — retry the file, backing
-    # off, and discard any partial download so nothing corrupt gets staged
-    # (SHA256SUMS is computed FROM staged files, so a partial would otherwise
-    # checksum as "valid").
+    # WinPS 5.1's Invoke-WebRequest (SChannel) reproducibly loses long TLS
+    # streams on large files — real transfer runs died on the ~120 MB quarto
+    # .deb with IOException "The decryption operation failed" on every
+    # attempt. Stream with the real curl instead ($CurlBin, preflighted),
+    # keeping the backoff loop because mid-stream resets (curl exit 56 etc.)
+    # are not covered by plain --retry. Partials are discarded between
+    # tries: SHA256SUMS is computed FROM staged files, so a partial would
+    # otherwise checksum as "valid".
     $max = 4
     for ($try = 1; $try -le $max; $try++) {
-        try {
-            Invoke-WebRequest -Headers $Headers -Uri $Uri -OutFile $OutFile
-            return
-        } catch [System.IO.IOException], [System.Net.WebException] {
-            Remove-Item -Force -ErrorAction SilentlyContinue $OutFile
-            if ($try -eq $max) { throw }
-            Log "  transient download failure - retry $try/$($max - 1) in $(2 * $try)s ($($_.Exception.Message.Trim()))"
-            Start-Sleep -Seconds (2 * $try)
-        }
+        & $CurlBin -fsSL -H "PRIVATE-TOKEN: $env:GITLAB_TOKEN" -o $OutFile $Uri
+        if ($LASTEXITCODE -eq 0) { return }
+        Remove-Item -Force -ErrorAction SilentlyContinue $OutFile
+        if ($try -eq $max) { throw "download failed after $max attempts (curl exit $LASTEXITCODE): $Uri" }
+        Log "  transient download failure - retry $try/$($max - 1) in $(2 * $try)s (curl exit $LASTEXITCODE)"
+        Start-Sleep -Seconds (2 * $try)
     }
 }
 
@@ -91,6 +91,12 @@ $missing = @()
 foreach ($tool in @('git', 'tar')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { $missing += $tool }
 }
+# curl streams the large package transfers that WinPS 5.1's SChannel-backed
+# web cmdlets reproducibly drop mid-file. Probe curl.exe first: bare 'curl'
+# is an Invoke-WebRequest ALIAS in WinPS 5.1. curl.exe ships with Windows
+# 10+/Server 2019+ (same floor as tar); plain curl covers pwsh on Linux.
+$CurlBin = Get-Command curl.exe, curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $CurlBin) { $missing += 'curl' }
 if (-not $NoImages -and -not (Get-Command docker -ErrorAction SilentlyContinue)) { $missing += 'docker' }
 if ($missing.Count -gt 0) {
     Write-Error ("Missing required tools: {0}`nInstall them and rerun. (docker is only needed without -NoImages.)" -f ($missing -join ' '))

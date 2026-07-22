@@ -1305,7 +1305,7 @@ make registry-push
 
 This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
 
-Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases). **Windows boxes are covered too**: PowerShell ports ([`enclave-export.ps1`](scripts/enclave-export.ps1) / [`enclave-import.ps1`](scripts/enclave-import.ps1), issue #264) mirror the bash pair phase-for-phase and need only PowerShell 5.1+, git, and tar (built into Windows 10+/Server 2019+) — `Invoke-RestMethod` and `Get-FileHash` replace the python3 and sha256sum dependencies. The two families are cross-compatible: checksums are written in `sha256sum -c` format either way, and every artifact carries **both** importers, so a Windows export imports on Linux and vice versa.
+Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases). **Windows boxes are covered too**: PowerShell ports ([`enclave-export.ps1`](scripts/enclave-export.ps1) / [`enclave-import.ps1`](scripts/enclave-import.ps1), issue #264) mirror the bash pair phase-for-phase and need only PowerShell 5.1+, git, curl, and tar (`curl.exe` and `tar` are built into Windows 10+/Server 2019+) — `Invoke-RestMethod` and `Get-FileHash` replace the python3 and sha256sum dependencies, while package file bodies stream through real curl, since Windows PowerShell 5.1's web cmdlets reliably drop long TLS transfers. Package downloads and uploads retry with backoff on all four scripts, so one transient network reset doesn't abort a transfer. The two families are cross-compatible: checksums are written in `sha256sum -c` format either way, and every artifact carries **both** importers, so a Windows export imports on Linux and vice versa.
 
 | Script | Runs on | What it does |
 |---|---|---|
@@ -1320,7 +1320,7 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 mkdir -p ~/.local/pwsh && curl -fsSL \
   https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz \
   | tar -xz -C ~/.local/pwsh && chmod +x ~/.local/pwsh/pwsh
-PATH=~/.local/pwsh:$PATH python -m pytest tests/test_enclave_scripts.py   # 21 passed, 0 skipped
+PATH=~/.local/pwsh:$PATH python -m pytest tests/test_enclave_scripts.py   # parse tests included; live e2e stays opt-in
 ```
 
 ### 1 — Export (on a connected box)
