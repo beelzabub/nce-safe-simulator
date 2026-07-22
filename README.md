@@ -1360,7 +1360,9 @@ export GITLAB_TOKEN=<api-scope token on the TARGET instance>
 
 **If the target enforces the "committer restriction" push rule** — every branch bounces off the pre-receive hook with `You cannot push commits for '<source email>'. You can only push commits if the committer email is one of your own verified emails` — add `--rewrite-committer 'Full Name <email@domain>'` (PowerShell: `-RewriteCommitter`) with the importing account's verified identity. It rewrites author + committer on every commit of the repo **and wiki** before pushing (via `git filter-branch`, which ships inside git — nothing to install). Trade-offs: every commit hash changes (deterministically, so reruns stay idempotent) and in-repo attribution moves to the importing user. If an admin can instead drop that push rule for the target group, prefer that — it keeps the history untouched.
 
-On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-RewriteCommitter`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
+**If the target also enforces "reject unsigned commits"** (`Commit must be signed with a GPG key` from the pre-receive hook), add `--sign-commits` (PowerShell: `-SignCommits`): the same history pass then GPG-signs every commit with the key matching the (possibly rewritten) committer identity. Requires gpg set up for git on the importing box — `gpg.program`/`user.signingkey` in the global git config, or a secret key whose uid matches the committer email; expect one pinentry passphrase prompt, after which gpg-agent caches it (for multi-hour histories, watch for it re-prompting when the cache expires). Unlike the bare authorship rewrite, signing is not deterministic — each rerun produces new hashes and force-pushes over the previous import.
+
+On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-RewriteCommitter`, `-SignCommits`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
 
 ```powershell
 tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.ps1

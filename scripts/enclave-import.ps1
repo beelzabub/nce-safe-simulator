@@ -44,6 +44,16 @@
   history wholesale. Changes every commit hash (deterministically — reruns
   yield identical hashes, so imports stay idempotent).
 
+.PARAMETER SignCommits
+  GPG-sign every commit of the repo and wiki during the history pass — for
+  targets enforcing the "reject unsigned commits" push rule. Requires gpg
+  set up for git on THIS box (gpg.program/user.signingkey in the global git
+  config, or a secret key matching the committer email); expect one
+  pinentry passphrase prompt, then gpg-agent caches it. Composes with
+  -RewriteCommitter: the rewritten identity chooses the signing key.
+  Signing is NOT deterministic — every run yields new hashes, and a rerun
+  force-pushes the fresh history over the previous one.
+
 .NOTES
   Env: GITLAB_TOKEN — token with api scope on the TARGET instance, required.
 #>
@@ -54,6 +64,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Project,
     [string]$DefaultBranch = 'main',
     [string]$RewriteCommitter,
+    [switch]$SignCommits,
     [switch]$SkipRepo,
     [switch]$SkipPackages,
     [switch]$SkipImages
@@ -86,17 +97,32 @@ function Invoke-UploadWithRetry([string]$InFile, [string]$Uri) {
         Start-Sleep -Seconds (2 * $try)
     }
 }
-function Set-HistoryIdentity([string]$RepoPath) {
-    # Rewrite author+committer on every commit of a scratch mirror before it
-    # is pushed (see -RewriteCommitter). filter-branch rather than
-    # git-filter-repo because it ships inside git — nothing to install on an
-    # enclave box. Its refs/original/* backups never match the push refspecs,
-    # so only rewritten history leaves the mirror.
-    Log "  rewriting history authorship to $RwName <$RwEmail> (large histories take minutes)..."
+function Invoke-HistoryFilter([string]$RepoPath) {
+    # Rewrite author+committer and/or GPG-sign every commit of a scratch
+    # mirror before it is pushed (see -RewriteCommitter / -SignCommits).
+    # filter-branch rather than git-filter-repo because it ships inside
+    # git — nothing to install on an enclave box. Its refs/original/*
+    # backups never match the push refspecs, so only rewritten history
+    # leaves the mirror.
+    $what = @()
+    if ($RewriteCommitter) { $what += "authorship -> $RwName <$RwEmail>" }
+    if ($SignCommits) { $what += 'gpg signing' }
+    Log "  rewriting history ($($what -join ' + ')) - large histories take a while..."
     $env:FILTER_BRANCH_SQUELCH_WARNING = '1'
-    $filter = "export GIT_AUTHOR_NAME='$RwName' GIT_AUTHOR_EMAIL='$RwEmail'" +
-              " GIT_COMMITTER_NAME='$RwName' GIT_COMMITTER_EMAIL='$RwEmail'"
-    & git -C $RepoPath filter-branch -f --env-filter $filter --tag-name-filter cat -- --all
+    $fbArgs = @('filter-branch', '-f')
+    if ($RewriteCommitter) {
+        $fbArgs += @('--env-filter',
+            "export GIT_AUTHOR_NAME='$RwName' GIT_AUTHOR_EMAIL='$RwEmail'" +
+            " GIT_COMMITTER_NAME='$RwName' GIT_COMMITTER_EMAIL='$RwEmail'")
+    }
+    if ($SignCommits) {
+        # --commit-filter replaces the stock commit-tree call; -S signs with
+        # the key matching the (possibly rewritten) committer identity, per
+        # the box's global git/gpg config.
+        $fbArgs += @('--commit-filter', 'git commit-tree -S "$@"')
+    }
+    $fbArgs += @('--tag-name-filter', 'cat', '--', '--all')
+    & git -C $RepoPath @fbArgs
     Assert-Native 'git filter-branch'
 }
 
@@ -187,7 +213,7 @@ if (-not $SkipRepo) {
     try {
         Log "Pushing repo (all branches + tags)..."
         & git clone --quiet --mirror (Join-Path $Dir 'repo/repo.bundle') (Join-Path $tmp 'repo.git'); Assert-Native 'git clone (bundle)'
-        if ($RewriteCommitter) { Set-HistoryIdentity (Join-Path $tmp 'repo.git') }
+        if ($RewriteCommitter -or $SignCommits) { Invoke-HistoryFilter (Join-Path $tmp 'repo.git') }
         & git -C (Join-Path $tmp 'repo.git') push --quiet $pushUrl '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; Assert-Native 'git push'
         # PUT bodies must be explicit JSON: PowerShell form-encodes hashtable
         # bodies only for GET/POST — on PUT it stringifies the hashtable and
@@ -198,7 +224,7 @@ if (-not $SkipRepo) {
         if (Test-Path (Join-Path $Dir 'repo/wiki.bundle')) {
             Log "Pushing wiki..."
             & git clone --quiet --mirror (Join-Path $Dir 'repo/wiki.bundle') (Join-Path $tmp 'wiki.git'); Assert-Native 'git clone (wiki bundle)'
-            if ($RewriteCommitter) { Set-HistoryIdentity (Join-Path $tmp 'wiki.git') }
+            if ($RewriteCommitter -or $SignCommits) { Invoke-HistoryFilter (Join-Path $tmp 'wiki.git') }
             $wikiPush = $pushUrl -replace '\.git$', '.wiki.git'
             & git -C (Join-Path $tmp 'wiki.git') push --quiet $wikiPush '+refs/enclave-wiki/*:refs/heads/*'; Assert-Native 'git push (wiki)'
             Log "Wiki pushed"
