@@ -230,6 +230,18 @@ def test_export_api_enumeration_parity():
         assert "package_files" in text
 
 
+def test_export_download_retry_parity():
+    """One transient TLS reset mid-file (seen on gitlab.com: WinPS 5.1
+    IOException 'decryption operation failed') must not abort a whole
+    export: both exporters retry each package download and discard
+    partials — SHA256SUMS is computed FROM staged files, so a partial
+    left behind would checksum as 'valid'."""
+    assert "fetch_with_retry" in EXPORT_SH
+    assert re.search(r"rm -f .*\n.*try", EXPORT_SH) or "rm -f" in EXPORT_SH
+    assert "Invoke-DownloadWithRetry" in EXPORT_PS
+    assert "Remove-Item -Force" in EXPORT_PS
+
+
 def test_importers_accept_txt_or_directory():
     assert 'tar -xf "$ARCHIVE"' in IMPORT_SH.replace("'", '"') or "tar -xf" in IMPORT_SH
     assert "tar -xf" in IMPORT_PS

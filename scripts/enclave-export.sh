@@ -101,6 +101,23 @@ fi
 
 # ── 3. Generic packages: enumerate via API so new packages/versions are
 #      picked up automatically; download every file. ────────────────────────
+# One transient TLS reset mid-file must not abort a whole export: retry each
+# download with backoff, discarding partials so nothing corrupt gets staged
+# (SHA256SUMS is computed FROM staged files, so a partial would otherwise
+# checksum as "valid"). A bash loop, not curl --retry: plain --retry skips
+# mid-stream resets and --retry-all-errors needs curl >= 7.71.
+fetch_with_retry() {
+  local url=$1 dest=$2 try
+  for try in 1 2 3 4; do
+    curl -fsSL "${auth[@]}" -o "$dest" "$url" && return 0
+    rm -f "$dest"
+    [ "$try" = 4 ] && break
+    log "  transient download failure - retry $try/3 in $((2 * try))s"
+    sleep $((2 * try))
+  done
+  echo "download failed after 4 attempts: $url" >&2
+  return 1
+}
 log "Enumerating generic packages..."
 curl -fsS "${auth[@]}" "$API/packages?package_type=generic&per_page=100" \
   | python3 -c 'import json,sys; [print(p["id"], p["name"], p["version"]) for p in json.load(sys.stdin)]' \
@@ -111,7 +128,7 @@ curl -fsS "${auth[@]}" "$API/packages?package_type=generic&per_page=100" \
             dest="$OUT/packages/$name/$version/$fname"
             mkdir -p "$(dirname "$dest")"
             log "  package $name/$version/$fname"
-            curl -fsSL "${auth[@]}" -o "$dest" "$API/packages/generic/$name/$version/$fname"
+            fetch_with_retry "$API/packages/generic/$name/$version/$fname" "$dest"
           done
     done
 
