@@ -17,9 +17,10 @@
     tar -xf <repo>-<date>.txt ./enclave-import.ps1
     $env:GITLAB_TOKEN='<token>'; ./enclave-import.ps1 -TransferPath <repo>-<date>.txt -GitLabUrl https://... -Project group/project
 
-  Requirements (preflight-checked): PowerShell 5.1+, git, tar (built into
-  Windows 10+/Server 2019+); docker only for the images phase. JSON parsing
-  and sha256 hashing use PowerShell built-ins.
+  Requirements (preflight-checked): PowerShell 5.1+, git, curl and tar
+  (curl.exe and tar are built into Windows 10+/Server 2019+); docker only
+  for the images phase. JSON parsing and sha256 hashing use PowerShell
+  built-ins.
 
 .PARAMETER TransferPath
   The <repo>-<date>.txt archive the exporter produced (a gzipped tar;
@@ -57,12 +58,37 @@ function Log([string]$msg) { Write-Host "==> $msg" }
 function Assert-Native([string]$what) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
+function Invoke-UploadWithRetry([string]$InFile, [string]$Uri) {
+    # Mirror of the exporter's Invoke-DownloadWithRetry: WinPS 5.1's
+    # SChannel-backed web cmdlets reproducibly drop long TLS streams, and a
+    # ~120 MB package PUT is exactly that. Stream with the real curl
+    # ($CurlBin, preflighted); the backoff loop covers mid-stream resets
+    # that plain --retry does not. Uploads are idempotent, so a half-sent
+    # file is safe to resend. Explicit content type: without it GitLab
+    # parses the body as JSON and rejects the upload ("Invalid JSON
+    # format").
+    $max = 4
+    for ($try = 1; $try -le $max; $try++) {
+        & $CurlBin -fsS -H "PRIVATE-TOKEN: $env:GITLAB_TOKEN" -H 'Content-Type: application/octet-stream' `
+            --upload-file $InFile $Uri | Out-Null
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($try -eq $max) { throw "upload failed after $max attempts (curl exit $LASTEXITCODE): $Uri" }
+        Log "  transient upload failure - retry $try/$($max - 1) in $(2 * $try)s (curl exit $LASTEXITCODE)"
+        Start-Sleep -Seconds (2 * $try)
+    }
+}
 
 # ── Preflight: report ALL missing tools in one message ──────────────────────
 $missing = @()
 foreach ($tool in @('git', 'tar')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { $missing += $tool }
 }
+# curl streams the large package transfers that WinPS 5.1's SChannel-backed
+# web cmdlets reproducibly drop mid-file. Probe curl.exe first: bare 'curl'
+# is an Invoke-WebRequest ALIAS in WinPS 5.1. curl.exe ships with Windows
+# 10+/Server 2019+ (same floor as tar); plain curl covers pwsh on Linux.
+$CurlBin = Get-Command curl.exe, curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $CurlBin) { $missing += 'curl' }
 if (-not $SkipImages -and -not (Get-Command docker -ErrorAction SilentlyContinue)) { $missing += 'docker' }
 if ($missing.Count -gt 0) {
     Write-Error ("Missing required tools: {0}`nInstall them and rerun. (docker is only needed without -SkipImages.)" -f ($missing -join ' '))
@@ -156,11 +182,7 @@ if (-not $SkipPackages) {
     foreach ($f in Get-ChildItem -Path $pkgRoot -Recurse -File) {
         $rel = $f.FullName.Substring($pkgRoot.Length + 1).Replace('\', '/')   # name/version/file
         Log "  package $rel"
-        # Explicit content type: without it GitLab tries to parse the body
-        # as JSON and rejects the upload with "Invalid JSON format".
-        Invoke-RestMethod -Headers $Headers -Method Put -InFile $f.FullName `
-            -ContentType 'application/octet-stream' `
-            -Uri "$Api/projects/$Enc/packages/generic/$rel" | Out-Null
+        Invoke-UploadWithRetry $f.FullName "$Api/projects/$Enc/packages/generic/$rel"
     }
     # Anonymous pull from the package registry (project stays private) — this
     # is what lets Docker builds fetch Quarto with no token in build args.
