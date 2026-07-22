@@ -65,6 +65,26 @@ function Invoke-GitTolerant {
     $ErrorActionPreference = 'Continue'
     try { & git @GitArgs 2>$null } finally { $ErrorActionPreference = $eap }
 }
+function Invoke-DownloadWithRetry([string]$Uri, [string]$OutFile) {
+    # GitLab occasionally drops a long TLS stream mid-file; WinPS 5.1 surfaces
+    # that as IOException "The decryption operation failed" (SChannel). One
+    # transient reset must not abort a whole export — retry the file, backing
+    # off, and discard any partial download so nothing corrupt gets staged
+    # (SHA256SUMS is computed FROM staged files, so a partial would otherwise
+    # checksum as "valid").
+    $max = 4
+    for ($try = 1; $try -le $max; $try++) {
+        try {
+            Invoke-WebRequest -Headers $Headers -Uri $Uri -OutFile $OutFile
+            return
+        } catch [System.IO.IOException], [System.Net.WebException] {
+            Remove-Item -Force -ErrorAction SilentlyContinue $OutFile
+            if ($try -eq $max) { throw }
+            Log "  transient download failure - retry $try/$($max - 1) in $(2 * $try)s ($($_.Exception.Message.Trim()))"
+            Start-Sleep -Seconds (2 * $try)
+        }
+    }
+}
 
 # ── Preflight: report ALL missing tools in one message ──────────────────────
 $missing = @()
@@ -139,7 +159,7 @@ foreach ($pkg in $packages) {
         $dest = Join-Path $Stage "packages/$($pkg.name)/$($pkg.version)/$($f.file_name)"
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
         Log "  package $($pkg.name)/$($pkg.version)/$($f.file_name)"
-        Invoke-WebRequest -Headers $Headers -Uri "$Api/packages/generic/$($pkg.name)/$($pkg.version)/$($f.file_name)" -OutFile $dest
+        Invoke-DownloadWithRetry "$Api/packages/generic/$($pkg.name)/$($pkg.version)/$($f.file_name)" $dest
     }
 }
 
