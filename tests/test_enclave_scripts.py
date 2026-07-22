@@ -231,9 +231,15 @@ def test_import_rewrite_committer_parity():
     box)."""
     assert "--rewrite-committer" in IMPORT_SH
     assert "$RewriteCommitter" in IMPORT_PS
-    for text, rewriter in ((IMPORT_SH, "rewrite_identity"), (IMPORT_PS, "Set-HistoryIdentity")):
+    # --sign-commits / -SignCommits: same history pass also satisfies the
+    # "reject unsigned commits" push rule, signing with the key matching the
+    # (possibly rewritten) committer identity.
+    assert "--sign-commits" in IMPORT_SH
+    assert "$SignCommits" in IMPORT_PS
+    for text, rewriter in ((IMPORT_SH, "history_filter"), (IMPORT_PS, "Invoke-HistoryFilter")):
         assert "FILTER_BRANCH_SQUELCH_WARNING" in text
-        assert "--tag-name-filter cat -- --all" in text
+        assert "--tag-name-filter" in text
+        assert """git commit-tree -S "$@\"""" in text
         # definition + repo call + wiki call
         assert len(re.findall(re.escape(rewriter), text)) >= 3, rewriter
 
