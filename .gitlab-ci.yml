@@ -44,6 +44,16 @@ containerize:
   # Gate on `test` so we never publish an image built from a red suite.
   needs:
     - test
+  # Runners with Docker init injection (FF_USE_INIT_WITH_DOCKER_EXECUTOR;
+  # hardwired on in Runner 16.6.0) bind-mount a supervisor at
+  # /sbin/docker-init, which breaks kaniko's /sbin replacement on Debian
+  # usrmerge bases with "device or resource busy" (issue #276, upstream
+  # kaniko#946). Two independent guards, each inert when the other applies:
+  # this variable turns the injection off at the source (job-level wins
+  # unless the flag is pinned in the runner's own config.toml), and
+  # --ignore-path=/sbin below makes kaniko skip the /sbin swap entirely.
+  variables:
+    FF_USE_INIT_WITH_DOCKER_EXECUTOR: "false"
   image:
     name: gcr.io/kaniko-project/executor:debug
     entrypoint: [""]
@@ -57,17 +67,22 @@ containerize:
     # gitlab.com here and from the enclave's own registry after the repo is
     # lifted. See README → "Enclave transfer".
     #
-    # --ignore-path=/sbin/docker-init: runners configured with init injection
-    # (docker run --init) bind-mount that supervisor binary into the job
-    # container; kaniko's rootfs swap for Debian usrmerge bases must replace
-    # /sbin wholesale and dies on the live mount with "device or resource
-    # busy" (issue #276). Inert on runners without init (gitlab.com).
+    # --ignore-path=/sbin (issue #276): with the runner's docker-init
+    # bind-mounted inside /sbin, kaniko's usrmerge symlink swap does
+    # RemoveAll("/sbin") and dies on the live mount — the ignore list is
+    # never consulted for a removed path's children (kaniko#946), so
+    # ignoring /sbin/docker-init alone does NOT work; the whole /sbin entry
+    # must be skipped. Build-time /sbin stays a plain dir (real binaries
+    # live in /usr/sbin on usrmerge Debian; nothing in the Dockerfile uses
+    # a literal /sbin/ path) and the pushed image is unaffected — kaniko
+    # ships the base layers unmodified, so the base's sbin symlink arrives
+    # intact. Inert on runners without init injection (gitlab.com).
     - >-
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target runtime
-      --ignore-path=/sbin/docker-init
+      --ignore-path=/sbin
       --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
       --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE:latest"
@@ -77,7 +92,7 @@ containerize:
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target dev
-      --ignore-path=/sbin/docker-init
+      --ignore-path=/sbin
       --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE/dev:latest"
       --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
