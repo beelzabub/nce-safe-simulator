@@ -74,7 +74,7 @@ ecs-deploy: ## Deploy (or update) the ECS stack
 	  docker build --platform linux/arm64 \
 	    --build-arg VCS_REF=$$(git -C .. rev-parse --short HEAD) \
 	    --build-arg NCE_VERSION=$$(git -C .. describe --tags --exact-match 2>/dev/null || true) \
-	    --build-arg QUARTO_PKG_PROJECT=$$(../scripts/quarto-pkg-url.sh) \
+	    --build-arg PKG_PROJECT=$$(../scripts/pkg-project-url.sh) \
 	    -t $$APP_NAME ../ && \
 	  docker tag $$APP_NAME:latest "$$REPO:latest" && \
 	  docker push "$$REPO:latest" && \
@@ -147,7 +147,7 @@ ecr-push: ## Build and push :latest to ECR (creates the repo if absent — issue
 	docker build --platform linux/arm64 \
 	  --build-arg VCS_REF=$$(git -C .. rev-parse --short HEAD) \
 	  --build-arg NCE_VERSION=$$(git -C .. describe --tags --exact-match 2>/dev/null || true) \
-	  --build-arg QUARTO_PKG_PROJECT=$$(../scripts/quarto-pkg-url.sh) \
+	  --build-arg PKG_PROJECT=$$(../scripts/pkg-project-url.sh) \
 	  -t nce-safe-simulator ../ && \
 	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
 	docker push "$$REPO:latest" && \

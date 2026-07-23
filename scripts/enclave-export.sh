@@ -61,7 +61,7 @@ while [ $# -gt 0 ]; do
 done
 
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN (read_api scope) — needed to enumerate packages}"
-API="$("$SCRIPT_DIR/quarto-pkg-url.sh")"          # <scheme>://<host>/api/v4/projects/<encoded-path>
+API="$("$SCRIPT_DIR/pkg-project-url.sh")"          # <scheme>://<host>/api/v4/projects/<encoded-path>
 auth=(--header "PRIVATE-TOKEN: $GITLAB_TOKEN")
 
 # Final artifact: <repo-name>-<YYYY-MM-DD>.txt in OUTDIR; staged in a sibling
