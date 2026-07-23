@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: baseline .gitlab-ci.yml (ground zero)
+#
+# This is the project's shipped default pipeline — `test` + `containerize`,
+# nothing else (issue #275 pinned that as the baseline). Unlike the other
+# recipes, this is NOT a job to copy IN: it's the file to copy back OVER your
+# .gitlab-ci.yml when you want to return to ground zero after experimenting
+# (e.g. after pasting in epic-cards-deck.yml or all-reports.yml).
+#
+#   cp ci-recipes/baseline-gitlab-ci.yml .gitlab-ci.yml
+#
+# Everything below the marker is a verbatim copy of the repo's .gitlab-ci.yml;
+# a test (tests/test_ci_recipes.py) fails if the two ever drift, so this file
+# is always current.
+#
+# ── verbatim baseline below — do not edit here; edit .gitlab-ci.yml ──────────
+image: python:latest
+
+stages:
+  - build
+  - containerize
+
+test:
+  stage: build
+  image: python:3.11          # match the runtime image (Dockerfile: python:3.11-slim)
+  script:
+    # WeasyPrint (epic-cards, #249) renders a real PDF in the suite and needs
+    # Pango + a font at the system level — pip can't supply these. The .debs
+    # are served from this project's generic package registry (package
+    # weasyprint-apt-debs, issue #261) instead of deb.debian.org: no external
+    # mirror dependency, no apt index download. Captured from amd64
+    # python:3.11 (trixie); refresh procedure in README → "CI system packages".
+    - PKG="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/weasyprint-apt-debs/2026.07.21"
+    - >-
+      for f in libpango-1.0-0_1.56.3-1_amd64.deb libpangoft2-1.0-0_1.56.3-1_amd64.deb fonts-dejavu-core_2.37-8_all.deb;
+      do curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" -o "/tmp/$f" "$PKG/$f"; done
+    - dpkg -i /tmp/libpango-1.0-0_1.56.3-1_amd64.deb /tmp/libpangoft2-1.0-0_1.56.3-1_amd64.deb /tmp/fonts-dejavu-core_2.37-8_all.deb
+    # config.json is git-ignored, so a clean CI checkout has none; several test
+    # modules read it at import time. Seed it from the tracked template.
+    - test -f config.json || cp config.example.json config.json
+    # public/ is a git-ignored build artifact; the server only registers its
+    # static mount when the dir exists (server/app.py). Create it so the
+    # mount-registration test reflects a real deployment (the content probe
+    # skips itself when the dir is empty).
+    - mkdir -p public
+    - pip install -r requirements.txt
+    - python -m pytest tests/
+
+# Build and push the runtime + dev containers to the project's GitLab Container
+# Registry on every merge to the default branch (issue #244; develop here,
+# main on the lifted enclave repo). Kaniko needs no privileged
+# Docker daemon; it authenticates with the built-in per-job $CI_JOB_TOKEN, so no
+# registry secret has to be configured. Images land at:
+#   $CI_REGISTRY_IMAGE          → runtime (the served app), :latest + :<sha>
+#   $CI_REGISTRY_IMAGE/dev      → dev/build toolchain image, :latest + :<sha>
+# Note: gitlab.com shared runners are amd64, so these images are amd64. The
+# arm64 (Graviton) deploy path is unchanged — it still builds via cdk ecr-push.
+containerize:
+  stage: containerize
+  # Gate on `test` so we never publish an image built from a red suite.
+  needs:
+    - test
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+  script:
+    # PKG_PROJECT points the Dockerfile's registry fetches (Quarto, issue
+    # #262; apt-debs system packages, issue #269) at THIS instance's package
+    # registry — composed from CI variables, so the same yaml pulls from
+    # gitlab.com here and from the enclave's own registry after the repo is
+    # lifted. See README → "Enclave transfer".
+    #
+    # --ignore-path=/sbin/docker-init: runners configured with init injection
+    # (docker run --init) bind-mount that supervisor binary into the job
+    # container; kaniko's rootfs swap for Debian usrmerge bases must replace
+    # /sbin wholesale and dies on the live mount with "device or resource
+    # busy" (issue #276). Inert on runners without init (gitlab.com).
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target runtime
+      --ignore-path=/sbin/docker-init
+      --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
+      --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
+      --destination "$CI_REGISTRY_IMAGE:latest"
+      --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target dev
+      --ignore-path=/sbin/docker-init
+      --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
+      --destination "$CI_REGISTRY_IMAGE/dev:latest"
+      --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
+  rules:
+    # Default branch, not a hardcoded name: `develop` here, `main` on the
+    # lifted enclave repo — the same yaml rebuilds images on both (issue #262).
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Opt-in from any branch: an explicitly requested pipeline (Run pipeline
+    # button → source "web", pipelines API → source "api") also builds the
+    # image, so an MR branch can prove the full build before it gates the
+    # default branch — e.g. auditing #269's registry-only apt closure from
+    # the job log. Ordinary pushes stay test-only. A pipeline-variable gate
+    # would be cleaner, but this project caps variable overrides at owner.
+    # Tags carry the branch SHA; the next default-branch pipeline reclaims
+    # :latest.
+    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"
