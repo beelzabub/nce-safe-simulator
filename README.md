@@ -808,15 +808,15 @@ Available interactive reports: health-dashboard, pi-predictability, flow-metrics
 | Job | Stage | Trigger | What it does |
 |---|---|---|---|
 | `test` | build | every push | Installs WeasyPrint's system packages from the project package registry (below), then `pip install -r requirements.txt && pytest tests/` |
-| `containerize` | containerize | default branch only (`$CI_DEFAULT_BRANCH` — `develop` here, `main` on a lifted repo) | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
+| `containerize` | containerize | default branch (`$CI_DEFAULT_BRANCH` — `develop` here, `main` on a lifted repo), **or any branch when the pipeline is explicitly requested** (Run pipeline button / pipelines API) | Builds and pushes the runtime and dev images to the GitLab Container Registry (`:latest` + `:<sha>`) via Kaniko |
 
-`containerize` gates on `test` (`needs: [test]`), so an image is never published from a failing suite. It uses the built-in `$CI_JOB_TOKEN` to authenticate to the registry — no secret to configure. See [Container-Based Development & Registry](#container-based-development--registry) for how developers consume the published images.
+`containerize` gates on `test` (`needs: [test]`), so an image is never published from a failing suite. It uses the built-in `$CI_JOB_TOKEN` to authenticate to the registry — no secret to configure. The explicit-request path lets an MR branch prove the full image build *before* it gates the default branch (used to audit issue #269's registry-only closure from the kaniko log); ordinary pushes stay test-only, and branch-built tags are reclaimed by the next default-branch pipeline. See [Container-Based Development & Registry](#container-based-development--registry) for how developers consume the published images.
 
 > The report site was previously published to GitLab Pages by a `pages` job; that job was retired once the site was no longer consumed. Reports are still generated on demand with `python3 NceGitLab.py --report all` and served by the running app.
 
 ##### CI system packages (`weasyprint-apt-debs`)
 
-The `test` job needs Pango and a font at the system level (WeasyPrint renders a real PDF in the suite; pip can't supply these). Rather than `apt-get install` from `deb.debian.org` on every run, the exact `.deb` files live in this project's **generic package registry** as package `weasyprint-apt-debs`, and the job fetches them with the built-in `$CI_JOB_TOKEN` and installs via `dpkg -i` — no external mirror dependency, no apt index download (issue #261).
+The `test` job needs Pango and a font at the system level (WeasyPrint renders a real PDF in the suite; pip can't supply these). Rather than `apt-get install` from `deb.debian.org` on every run, the exact `.deb` files live in this project's **generic package registry** as package `weasyprint-apt-debs`, and the job fetches them with the built-in `$CI_JOB_TOKEN` and installs via `dpkg -i` — no external mirror dependency, no apt index download (issue #261). (The *image builds* need the same libraries on the slim base plus more — they use the separate, larger [`apt-debs`](#image-build-system-packages-apt-debs) package, issue #269.)
 
 Current version **`2026.07.21`** holds `libpango-1.0-0_1.56.3-1_amd64.deb`, `libpangoft2-1.0-0_1.56.3-1_amd64.deb`, and `fonts-dejavu-core_2.37-8_all.deb`, captured from the amd64 `python:3.11` image (Debian trixie — the job's image, on gitlab.com's amd64 shared runners).
 
@@ -836,20 +836,36 @@ for f in debs/*.deb; do glab api --method PUT --input "$f" \
 
 The Quarto CLI is the one build dependency that upstream ships only via GitHub releases — there is no apt repo to mirror. So the pinned `.deb`s are vendored in the same generic package registry as package **`quarto`**, version **`1.9.38`** (matching `QUARTO_VERSION` in the Dockerfile), for **both architectures**: `quarto-1.9.38-linux-amd64.deb` (CI image builds) and `quarto-1.9.38-linux-arm64.deb` (Graviton `ecr-push` builds), plus the upstream `quarto-1.9.38-checksums.txt` for re-verification (issue #262).
 
-The Dockerfile downloads from the registry, not GitHub. The project URL comes from the `QUARTO_PKG_PROJECT` build-arg, which **deliberately has no default** — a hardcoded host would silently point at the wrong network after an enclave lift. Instead:
+The Dockerfile downloads from the registry, not GitHub. The project URL comes from the `PKG_PROJECT` build-arg (named `QUARTO_PKG_PROJECT` before issue #269 widened it to every registry fetch), which **deliberately has no default** — a hardcoded host would silently point at the wrong network after an enclave lift. Instead:
 
 - The `containerize` CI job passes `${CI_API_V4_URL}/projects/${CI_PROJECT_ID}` — the pipeline pulls from **whatever GitLab instance it runs on**.
-- Every local build path (`make dev-shell`, `make registry-push`, `make -C cdk ecr-push`/`ecs-deploy`, the redeploy scripts) derives it from the clone's own `git remote origin` via [`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh) — so a clone from an enclave GitLab automatically resolves to that instance's registry, zero configuration.
+- Every local build path (`make dev-shell`, `make registry-push`, `make -C cdk ecr-push`/`ecs-deploy`, the redeploy scripts) derives it from the clone's own `git remote origin` via [`scripts/pkg-project-url.sh`](scripts/pkg-project-url.sh) — so a clone from an enclave GitLab automatically resolves to that instance's registry, zero configuration.
 - A bare `docker build .` without the arg **fails immediately with a clear error** instead of quietly reaching for the wrong network. To build by hand:
 
 ```bash
-docker build --build-arg QUARTO_PKG_PROJECT="$(scripts/quarto-pkg-url.sh)" .
-# or explicitly: --build-arg QUARTO_PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id-or-url-encoded-path>
+docker build --build-arg PKG_PROJECT="$(scripts/pkg-project-url.sh)" .
+# or explicitly: --build-arg PKG_PROJECT=https://<gitlab-host>/api/v4/projects/<id-or-url-encoded-path>
 ```
 
 The download is anonymous: the project sets **`package_registry_access_level=public`**, which lets anyone pull from the *package registry only* while the project itself stays private — so no token is ever passed as a build-arg (build-args are recorded in image history). Uploads still require authentication.
 
 To bump Quarto: download the new release's `linux-amd64.deb` + `linux-arm64.deb` + checksums from [quarto-cli releases](https://github.com/quarto-dev/quarto-cli/releases), verify (`sha256sum -c`), upload the three files under `packages/generic/quarto/<new-version>/`, and update `QUARTO_VERSION` in the Dockerfile.
+
+##### Image-build system packages (`apt-debs`)
+
+Every system package the **image builds** install — graphviz for the diagram-builder stage, the WeasyPrint/Pango closure for the runtime stage, and the dev stage's toolchain (make, git, jq, curl, graphviz, and the NodeSource **nodejs 20** deb) — also comes from the generic package registry, as package **`apt-debs`** (issue #269). No Dockerfile stage that CI builds touches `deb.debian.org` or `deb.nodesource.com`; only the `ops` stage (never built in CI; AWS-deploy tooling, meaningless inside an enclave) still reaches the internet.
+
+The package holds per-layer, per-architecture manifests (`manifest-<layer>-<arch>.txt`) plus every `.deb` they list, for **amd64** (CI shared runners) and **arm64** (Graviton `ecr-push`, local ARM dev boxes). Each Dockerfile layer runs [`scripts/fetch-apt-debs.py`](scripts/fetch-apt-debs.py) (stdlib-only — no curl needed, which is itself one of the removed apt installs) to pull its manifest and debs, then installs them with an **offline** `apt-get install /tmp/debs/*.deb` — apt orders Pre-Depends chains (the NodeSource nodejs deb drags in Debian's `python3`, whose `python3-minimal` a flat `dpkg -i` cannot sequence), and since the slim images ship with no apt indexes, a missing dep fails loudly rather than reaching a mirror. The `APT_DEBS_VERSION` build-arg at the top of the Dockerfile pins the captured set, exactly like `QUARTO_VERSION` pins Quarto.
+
+To refresh (base image moved to a new Debian release, or the dev toolchain list changed):
+
+```bash
+# needs docker; for the non-native arch: docker run --privileged --rm tonistiigi/binfmt --install amd64
+GITLAB_TOKEN=<api-scope token> scripts/capture-apt-debs.sh          # captures both arches, uploads as today's date
+# then set APT_DEBS_VERSION=<printed version> in the Dockerfile
+```
+
+The capture script computes each layer's closure against the same image state the Dockerfile installs into (the dev layer, for instance, on top of the runtime state), so the manifests always contain exactly what `dpkg -i` needs — see the header of [`scripts/capture-apt-debs.sh`](scripts/capture-apt-debs.sh) for the layer↔stage mapping.
 
 ### Report Index
 
@@ -1303,7 +1319,7 @@ make registry-push
 
 ## Enclave Transfer (Air-Gapped GitLab)
 
-This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs) and [`quarto`](#vendored-quarto-quarto)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
+This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub — or, since issue #269, from any Debian/NodeSource mirror — is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs), [`quarto`](#vendored-quarto-quarto), and [`apt-debs`](#image-build-system-packages-apt-debs)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
 
 Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases). **Windows boxes are covered too**: PowerShell ports ([`enclave-export.ps1`](scripts/enclave-export.ps1) / [`enclave-import.ps1`](scripts/enclave-import.ps1), issue #264) mirror the bash pair phase-for-phase and need only PowerShell 5.1+, git, curl, and tar (`curl.exe` and `tar` are built into Windows 10+/Server 2019+) — `Invoke-RestMethod` and `Get-FileHash` replace the python3 and sha256sum dependencies, while package file bodies stream through real curl, since Windows PowerShell 5.1's web cmdlets reliably drop long TLS transfers. Package downloads and uploads retry with backoff on all four scripts, so one transient network reset doesn't abort a transfer. The two families are cross-compatible: checksums are written in `sha256sum -c` format either way, and every artifact carries **both** importers, so a Windows export imports on Linux and vice versa.
 
@@ -1312,7 +1328,7 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 | [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, from any directory inside a clone of this repo | Produces **one file**: `<repo-name>-<YYYY-MM-DD>.txt` — a gzipped tar (the `.txt` extension is the transfer-media naming convention) containing a git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it. The outer file's sha256 is printed for verification on the far side |
 | [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
 
-> **Stated assumption:** Debian apt, PyPI, and npm are served by enclave mirrors/proxies (standard practice). Quarto is the piece that has no mirrorable package repo — hence the registry vendoring. If the enclave has no apt mirror, the Docker *builds* (which `apt-get install` graphviz, node, etc.) won't run there — import the prebuilt images instead and skip `containerize`.
+> **Stated assumption:** PyPI and npm are served by enclave mirrors/proxies (standard practice; making the builds independent of those too is deliberately deferred — issue #269). **Apt is no longer assumed at all**: since issue #269 the image builds install every system package from the [`apt-debs`](#image-build-system-packages-apt-debs) registry package, so `containerize` runs on an enclave with no Debian mirror. Base-image pulls (python/node/kaniko) are runner configuration — cover them with `--with-base-images` below or an enclave image proxy.
 
 **Validating the scripts** (`tests/test_enclave_scripts.py`): the suite pins the bash↔PowerShell contract — phases, flags, artifact layout, checksum format, shipped importers — and syntax-checks with the real interpreters. `bash -n` always runs; the PowerShell AST-parse tests need a PowerShell on PATH and **skip otherwise** (CI has none — run them locally before review). On Windows the built-in `powershell` (5.1, exactly the declared floor) is picked up automatically; on Linux install the portable `pwsh` tarball (no package manager needed; pick `linux-x64` or `linux-arm64`):
 
@@ -1380,10 +1396,10 @@ The script prints a post-import checklist (runners, the `GITLAB_API_TOKEN` CI va
 ### 3 — Verify
 
 - Pipeline: run a branch pipeline — the `test` job must fetch the three Pango debs from the *enclave* registry (the job log shows the `$CI_API_V4_URL` host) and go green.
-- Image build: a merge to the enclave's default branch (`main`) runs `containerize` — the trigger is `$CI_DEFAULT_BRANCH`, not a hardcoded branch name; the kaniko log's Quarto `curl` must hit the enclave host. (Or verify offline: `docker run --rm <enclave-registry>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
+- Image build: a merge to the enclave's default branch (`main`) runs `containerize` — the trigger is `$CI_DEFAULT_BRANCH`, not a hardcoded branch name. (A freshly imported `main` is the *lifted* history: until something merges to it, no image build has run yet — that first merge is the trigger.) In the kaniko log, every Quarto and `apt-debs` fetch must hit the enclave host, and there must be **no `deb.debian.org` / `deb.nodesource.com` line anywhere** — the pass condition for issue #269. (Or verify offline: `docker run --rm <enclave-registry>/<group>/nce-safe-simulator:latest quarto --version` → `1.9.38`.)
 - Reports: the [`all-reports.yml`](ci-recipes/all-reports.yml) recipe runs entirely from the imported runtime image — no external downloads at job time — and is the end-to-end proof that report generation works inside the enclave.
 
-There is **no gitlab.com reference anywhere in the build chain**: CI composes the registry URL from its own instance variables, and local builds derive it from `git remote origin` ([`scripts/quarto-pkg-url.sh`](scripts/quarto-pkg-url.sh)) — an enclave clone resolves to the enclave instance automatically. A bare `docker build .` without the build-arg fails loudly by design.
+There is **no gitlab.com reference anywhere in the build chain**: CI composes the registry URL from its own instance variables, and local builds derive it from `git remote origin` ([`scripts/pkg-project-url.sh`](scripts/pkg-project-url.sh)) — an enclave clone resolves to the enclave instance automatically. A bare `docker build .` without the build-arg fails loudly by design.
 
 ---
 

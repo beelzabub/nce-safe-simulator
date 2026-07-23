@@ -46,7 +46,7 @@ cdk deploy NceStack --app "python ecs_app.py" --require-approval never --context
 
 log "==> Building Docker image for linux/arm64..."
 docker build --platform linux/arm64 \
-  --build-arg QUARTO_PKG_PROJECT="$(../scripts/quarto-pkg-url.sh)" \
+  --build-arg PKG_PROJECT="$(../scripts/pkg-project-url.sh)" \
   -t "${APP_NAME}" ../
 
 log "==> Pushing image to ECR..."
