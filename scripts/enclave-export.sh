@@ -129,12 +129,29 @@ fetch_with_retry() {
   echo "download failed after 4 attempts: $url" >&2
   return 1
 }
+# GitLab caps per_page at 100 and a single request silently truncates larger
+# sets — the 225-file apt-debs package lost every manifest-*.txt this way and
+# imported registries 404'd the image build (#273). Walk pages until a short
+# page marks the end; emit one parsed line per item.
+list_paged() {
+  local url=$1 parse=$2 page=1 sep batch count
+  case "$url" in *\?*) sep='&' ;; *) sep='?' ;; esac
+  while :; do
+    batch="$(curl -fsS "${auth[@]}" "$url${sep}per_page=100&page=$page" \
+      | python3 -c "$parse")"
+    [ -n "$batch" ] && printf '%s\n' "$batch"
+    count=$(printf '%s\n' "$batch" | grep -c . || true)
+    [ "$count" -lt 100 ] && return 0
+    page=$((page + 1))
+  done
+}
 log "Enumerating generic packages..."
-curl -fsS "${auth[@]}" "$API/packages?package_type=generic&per_page=100" \
-  | python3 -c 'import json,sys; [print(p["id"], p["name"], p["version"]) for p in json.load(sys.stdin)]' \
+list_paged "$API/packages?package_type=generic" \
+    'import json,sys; [print(p["id"], p["name"], p["version"]) for p in json.load(sys.stdin)]' \
   | while read -r pid name version; do
-      curl -fsS "${auth[@]}" "$API/packages/$pid/package_files?per_page=100" \
-        | python3 -c 'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]' \
+      list_paged "$API/packages/$pid/package_files" \
+          'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]' \
+        | sort -u \
         | while read -r fname; do
             dest="$OUT/packages/$name/$version/$fname"
             mkdir -p "$(dirname "$dest")"
