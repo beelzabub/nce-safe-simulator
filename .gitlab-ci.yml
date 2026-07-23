@@ -77,3 +77,12 @@ containerize:
     # Default branch, not a hardcoded name: `develop` here, `main` on the
     # lifted enclave repo — the same yaml rebuilds images on both (issue #262).
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Opt-in from any branch: an explicitly requested pipeline (Run pipeline
+    # button → source "web", pipelines API → source "api") also builds the
+    # image, so an MR branch can prove the full build before it gates the
+    # default branch — e.g. auditing #269's registry-only apt closure from
+    # the job log. Ordinary pushes stay test-only. A pipeline-variable gate
+    # would be cleaner, but this project caps variable overrides at owner.
+    # Tags carry the branch SHA; the next default-branch pipeline reclaims
+    # :latest.
+    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"
