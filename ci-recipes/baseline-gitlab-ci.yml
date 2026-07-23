@@ -9,9 +9,9 @@
 #
 #   cp ci-recipes/baseline-gitlab-ci.yml .gitlab-ci.yml
 #
-# Everything below the marker is a verbatim copy of the repo's .gitlab-ci.yml;
-# a test (tests/test_ci_recipes.py) fails if the two ever drift, so this file
-# is always current.
+# Everything below the marker is a snapshot of the shipped .gitlab-ci.yml.
+# Local edits to .gitlab-ci.yml are fine and fail nothing — this file only
+# needs refreshing when the shipped baseline itself changes.
 #
 # ── verbatim baseline below — do not edit here; edit .gitlab-ci.yml ──────────
 image: python:latest
