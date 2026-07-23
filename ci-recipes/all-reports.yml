@@ -30,7 +30,11 @@
 
 all-reports:
   stage: build                      # ← change to a stage that exists in your pipeline
-  image: $CI_REGISTRY_IMAGE:latest
+  image:
+    name: $CI_REGISTRY_IMAGE:latest
+    # The runtime image's ENTRYPOINT is the served app — it would swallow the
+    # runner's job script. Blank it so the runner gets a plain shell.
+    entrypoint: [""]
   before_script:
     # The image already satisfies requirements.txt; this catches deps added on
     # the branch since the image was last built (seconds when nothing changed).
