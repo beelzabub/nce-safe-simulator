@@ -5,11 +5,23 @@
 # it as a downloadable job artifact. Copy this job into your project's
 # .gitlab-ci.yml and adjust the marked spots (stage, triggers).
 #
+# The job runs inside the project's OWN runtime image from the Container
+# Registry: Pango, fonts, and every pip requirement are already baked in, so
+# there is no apt/PyPI dependency at job time — this recipe works as-is on an
+# air-gapped GitLab instance once the image has been imported or built there
+# (README → "Enclave transfer"). A standalone python:3.11 variant that installs
+# its own deps from the internet is at the bottom for spaces without the image.
+#
 # Prerequisites in YOUR space (this source repo ships neither a token nor a
 # config.json — config.json is git-ignored and the template's token is blank):
+#   • The runtime image exists in the Container Registry — i.e. the
+#     `containerize` job has run at least once on your instance, or you
+#     imported the image during an enclave lift.
 #   • A GitLab token with 'api' scope. Provide it EITHER by setting a masked
 #     CI/CD variable GITLAB_API_TOKEN (recommended — keeps it out of git), OR by
-#     committing your own config.json with the token filled in.
+#     committing your own config.json with the token filled in. NOTE: a CI/CD
+#     variable marked "Protected" is only injected into pipelines on protected
+#     refs — if the job's branch isn't protected the variable arrives empty.
 #   • config.json          — url, private_token, parent_group. Seeded from
 #                            config.example.json below if your repo doesn't carry one.
 #   • epic-cards-spec.json  — the 'filter' + 'taxonomy' whitelists that define
@@ -20,12 +32,14 @@
 
 epic-cards-deck:
   stage: build                      # ← change to a stage that exists in your pipeline
-  image: python:3.11
+  image:
+    name: $CI_REGISTRY_IMAGE:latest
+    # The runtime image's ENTRYPOINT is the served app — it would swallow the
+    # runner's job script. Blank it so the runner gets a plain shell.
+    entrypoint: [""]
   before_script:
-    # WeasyPrint is a Pango wrapper — it needs these system libs + a font at
-    # runtime; the pip package alone can't render a PDF.
-    - apt-get update && apt-get install -y --no-install-recommends
-        libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+    # The image already satisfies requirements.txt; this catches deps added on
+    # the branch since the image was last built (seconds when nothing changed).
     - pip install --no-cache-dir -r requirements.txt
     # config.json is git-ignored, so a fresh fork may not carry one — seed it
     # from the tracked template (blank token), then fill the token from the
@@ -50,10 +64,19 @@ epic-cards-deck:
     - if: $CI_COMMIT_BRANCH
     # - changes: [config.json, epic-cards-spec.json]
 
-# ── Faster variant ──────────────────────────────────────────────────────────
-# If your project publishes its dev/runtime container image (the `containerize`
-# job), use it instead of python:3.11 and delete the whole before_script — Pango,
-# the fonts, and all Python deps are already baked in:
+# ── Standalone variant (internet required) ──────────────────────────────────
+# For a space whose registry has no runtime image: start from stock python:3.11
+# and install the deps at job time. This pulls from deb.debian.org and PyPI on
+# every run — fine on gitlab.com, unusable on an air-gapped instance.
 #
-#   image: $CI_REGISTRY_IMAGE/dev:latest
-#   # (no before_script needed)
+#   image: python:3.11
+#   before_script:
+#     # WeasyPrint is a Pango wrapper — it needs these system libs + a font at
+#     # runtime; the pip package alone can't render a PDF.
+#     - apt-get update && apt-get install -y --no-install-recommends
+#         libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+#     - pip install --no-cache-dir -r requirements.txt
+#     - test -f config.json || cp config.example.json config.json
+#     - if [ -n "$GITLAB_API_TOKEN" ]; then
+#         python -c "import json,os; c=json.load(open('config.json')); c['private_token']=os.environ['GITLAB_API_TOKEN']; json.dump(c,open('config.json','w'),indent=2)";
+#       fi
