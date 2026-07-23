@@ -24,6 +24,7 @@ reference it than paste it — but the intent here is copy-and-own.
 | [`epic-cards-deck.yml`](epic-cards-deck.yml) | Renders the epic-cards "Capability Card" PDF and publishes it as a downloadable pipeline artifact. Runs in the project's own runtime image — Pango/fonts/deps baked in, no external downloads (a standalone python:3.11 variant is included for spaces without the image). |
 | [`all-reports.yml`](all-reports.yml) | Runs the full report suite (`--report all`) inside the project's own runtime image — Quarto/Pango/deps baked in, no external downloads — and publishes the rendered `public/` site as an artifact. Scheduled + manual by default. |
 | [`baseline-gitlab-ci.yml`](baseline-gitlab-ci.yml) | **Ground zero.** Verbatim copy of the shipped `.gitlab-ci.yml` (`test` + `containerize` only — issue #275). Not a job to paste in — the file to `cp` back over your `.gitlab-ci.yml` to undo experiments. Refresh it when the shipped baseline itself changes. |
+| [`kaniko-runner-diag.yml`](kaniko-runner-diag.yml) | **Diagnostic.** Whole-file pipeline that discriminates every known cause of the `containerize` "unlinkat //sbin/docker-init: device or resource busy" failure (issue #276): stale-yaml retries, runner init injection / pinned feature flag, umount privileges, stale kaniko image. Swap in, run one pipeline, save the log, swap the baseline back. |
 
 ## Why these work unattended
 
