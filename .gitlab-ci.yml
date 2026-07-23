@@ -30,6 +30,47 @@ test:
     - pip install -r requirements.txt
     - python -m pytest tests/
 
+# Render the filtered epics as a print-ready "Capability Card" PDF and publish
+# it as a downloadable job artifact (issue #274). Manual — play it from any
+# pipeline. Runs in this project's own runtime image (same pattern as the
+# all-reports recipe): Pango + fonts (weasyprint apt layer, #269) and every
+# Python dep are already baked in, so the job needs no apt and no PyPI tree
+# at run time — the same zero-egress contract as the image builds, which is
+# what keeps it working on a lifted enclave repo (with the images import
+# phase run).
+# Prerequisite: CI/CD variable GITLAB_API_TOKEN (masked; api or read_api
+# scope) — injected into the git-ignored config.json seeded from the
+# template. A variable marked Protected only reaches pipelines on protected
+# refs; this project must protect the refs the deck runs from (or the
+# variable must be unprotected), else the job stops early with the message
+# below.
+epic-cards-deck:
+  stage: build
+  needs: []
+  image: $CI_REGISTRY_IMAGE:latest
+  script:
+    # The image already satisfies requirements.txt; this catches deps added on
+    # the branch since the image was last built (seconds when nothing changed).
+    - pip install --no-cache-dir -r requirements.txt
+    - test -f config.json || cp config.example.json config.json
+    - >-
+      if [ -n "$GITLAB_API_TOKEN" ];
+      then python -c "import json,os; c=json.load(open('config.json')); c['private_token']=os.environ['GITLAB_API_TOKEN']; json.dump(c,open('config.json','w'),indent=2)";
+      else echo "GITLAB_API_TOKEN is empty: variable unset, or marked Protected while this ref ($CI_COMMIT_REF_NAME) is not protected" >&2; exit 1;
+      fi
+    # No prompts in CI: every option not passed takes its default — group from
+    # config.json, filter + taxonomy whitelists from epic-cards-spec.json,
+    # 1 card per page. Only the output path is pinned for a stable artifact.
+    - python NceGitLab.py -ut epic-cards --output_path capability-cards.pdf
+  artifacts:
+    name: "capability-cards-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - capability-cards.pdf
+    expire_in: 30 days
+  rules:
+    - when: manual
+      allow_failure: true
+
 # Build and push the runtime + dev containers to the project's GitLab Container
 # Registry on every merge to the default branch (issue #244; develop here,
 # main on the lifted enclave repo). Kaniko needs no privileged
