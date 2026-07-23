@@ -165,10 +165,30 @@ if ($LASTEXITCODE -eq 0 -and (& git for-each-ref 'refs/enclave-wiki/')) {
 
 # ── 3. Generic packages: enumerate via API so new packages/versions are
 #      picked up automatically; download every file. ────────────────────────
+# GitLab caps per_page at 100 and a single request silently truncates larger
+# sets — the 225-file apt-debs package lost every manifest-*.txt this way and
+# imported registries 404'd the image build (#273). Walk pages until a short
+# page marks the end.
+function Get-AllPages([string]$Uri) {
+    $sep = if ($Uri.Contains('?')) { '&' } else { '?' }
+    $all = @(); $page = 1
+    while ($true) {
+        # ForEach-Object forces enumeration: Invoke-RestMethod can emit a JSON
+        # array as ONE object, and @() around that is a 1-element array — the
+        # count check would end the walk on page 1 regardless of page size.
+        $batch = @(Invoke-RestMethod -Headers $Headers -Uri "$Uri${sep}per_page=100&page=$page" |
+            ForEach-Object { $_ })
+        $all += $batch
+        if ($batch.Count -lt 100) { break }
+        $page++
+    }
+    $all
+}
 Log "Enumerating generic packages..."
-$packages = Invoke-RestMethod -Headers $Headers -Uri "$Api/packages?package_type=generic&per_page=100"
+$packages = Get-AllPages "$Api/packages?package_type=generic"
 foreach ($pkg in $packages) {
-    $files = Invoke-RestMethod -Headers $Headers -Uri "$Api/packages/$($pkg.id)/package_files?per_page=100"
+    $files = Get-AllPages "$Api/packages/$($pkg.id)/package_files" |
+        Sort-Object -Property file_name -Unique
     foreach ($f in $files) {
         $dest = Join-Path $Stage "packages/$($pkg.name)/$($pkg.version)/$($f.file_name)"
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null

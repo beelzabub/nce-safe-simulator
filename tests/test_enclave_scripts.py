@@ -29,8 +29,10 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import urllib.parse
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -312,6 +314,92 @@ def test_export_api_enumeration_parity():
     for text in (EXPORT_SH, EXPORT_PS):
         assert "package_type=generic" in text
         assert "package_files" in text
+
+
+def test_export_package_listing_paginates_parity():
+    """GitLab caps per_page at 100 and a single request silently truncates
+    larger sets — the 225-file apt-debs package lost every manifest-*.txt
+    and imported registries 404'd the image build (#273). Both exporters
+    must route every listing through their pager (definition + packages
+    call + package_files call) and never issue a bare one-shot listing."""
+    assert len(re.findall(r"\blist_paged\b", EXPORT_SH)) >= 3
+    assert len(re.findall(r"\bGet-AllPages\b", EXPORT_PS)) >= 3
+    for name, text in (("enclave-export.sh", EXPORT_SH), ("enclave-export.ps1", EXPORT_PS)):
+        for line in _code_lines(text):
+            if "package_files" in line or "package_type=generic" in line:
+                assert "per_page" not in line, f"{name}: unpaginated listing: {line.strip()}"
+
+
+class _PagedRegistryHandler(BaseHTTPRequestHandler):
+    """Pages of {"file_name": ...} items — the real 225-file apt-debs shape."""
+    TOTAL = 225
+
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        per = int(q.get("per_page", ["20"])[0])
+        page = int(q.get("page", ["1"])[0])
+        lo = (page - 1) * per
+        items = [{"file_name": f"f-{i:03d}"} for i in range(lo, min(lo + per, self.TOTAL))]
+        body = json.dumps(items).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture()
+def paged_registry():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _PagedRegistryHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}/files"
+    finally:
+        srv.shutdown()
+
+
+def test_sh_pager_fetches_all_pages(paged_registry):
+    """Run the real list_paged against a 225-item endpoint: all three pages
+    must come back, in order, as one line per item."""
+    m = re.search(r"list_paged\(\) \{.*?\n\}", EXPORT_SH, re.S)
+    assert m, "list_paged not found in enclave-export.sh"
+    script = (
+        "auth=()\n"
+        f"{m.group(0)}\n"
+        f"list_paged '{paged_registry}' "
+        "'import json,sys; [print(f[\"file_name\"]) for f in json.load(sys.stdin)]'\n"
+    )
+    out = subprocess.run(
+        ["bash", "-c", script], check=True, capture_output=True, text=True
+    ).stdout.split()
+    assert len(out) == 225
+    assert out[0] == "f-000" and out[-1] == "f-224"
+
+
+@pytest.mark.skipif(
+    POWERSHELL is None,
+    reason="no PowerShell on PATH — see this module's docstring for the Linux install",
+)
+def test_ps_pager_fetches_all_pages(paged_registry, tmp_path):
+    """Same 225-item endpoint through the real Get-AllPages."""
+    m = re.search(r"function Get-AllPages.*?\n\}", EXPORT_PS, re.S)
+    assert m, "Get-AllPages not found in enclave-export.ps1"
+    harness = tmp_path / "pager.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$Headers = @{}\n"
+        f"{m.group(0)}\n"
+        f"(Get-AllPages '{paged_registry}') | ForEach-Object {{ $_.file_name }}\n"
+    )
+    out = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(harness)],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    assert len(out) == 225
+    assert out[0] == "f-000" and out[-1] == "f-224"
 
 
 def test_package_transfer_retry_parity():
