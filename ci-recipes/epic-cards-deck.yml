@@ -49,10 +49,12 @@ epic-cards-deck:
         python -c "import json,os; c=json.load(open('config.json')); c['private_token']=os.environ['GITLAB_API_TOKEN']; json.dump(c,open('config.json','w'),indent=2)";
       fi
   script:
-    # No prompts in CI: every option you don't pass takes its default — group
-    # from config.json, filter + taxonomy from epic-cards-spec.json, 1 card per
-    # page. Only the output path is pinned so the artifact has a stable name.
-    - python NceGitLab.py -ut epic-cards --output_path capability-cards.pdf
+    # No prompts in CI: options you don't pass take their defaults — group
+    # from config.json, filter + taxonomy from epic-cards-spec.json. Layout is
+    # pinned explicitly here (landscape sheet, 1 card per page — drop or change
+    # the flags for portrait/2-up/4-up); the output path is pinned so the
+    # artifact has a stable name.
+    - python NceGitLab.py -ut epic-cards --orientation landscape --per_page 1 --output_path capability-cards.pdf
   artifacts:
     name: "capability-cards-$CI_COMMIT_SHORT_SHA"
     paths:
