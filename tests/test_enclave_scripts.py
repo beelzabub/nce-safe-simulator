@@ -109,6 +109,19 @@ def test_ps_no_ps7_only_syntax(name):
 
 
 @pytest.mark.parametrize("name", sorted(PS))
+def test_ps_stderr_redirects_only_in_tolerant_helper(name):
+    """WinPS 5.1 + $ErrorActionPreference='Stop' promotes redirected native
+    stderr (2>$null / 2>&1) into a terminating NativeCommandError — git's
+    success chatter (a wiki fetch's "From <url>" ref summary) killed real
+    exports on the exact box the ports target. Stderr may only be discarded
+    inside Invoke-GitTolerant, which relaxes the preference around the call
+    (callers still branch on $LASTEXITCODE)."""
+    for line in _code_lines(PS[name]):
+        if re.search(r"2>\s*(\$null|&1)", line):
+            assert "@GitArgs" in line, f"bare native stderr redirect: {line.strip()}"
+
+
+@pytest.mark.parametrize("name", sorted(PS))
 def test_ps_51_transfer_hygiene(name):
     text = PS[name]
     assert "$ErrorActionPreference = 'Stop'" in text
@@ -132,6 +145,10 @@ def test_ps_preflight_tool_lists():
     for text in PS.values():
         assert re.search(r"@\('git',\s*'tar'\)", text)
         assert "Get-Command docker" in text  # contextual, image phases only
+        # Real curl streams the large package transfers WinPS 5.1's web
+        # cmdlets drop; probed as curl.exe first because bare 'curl' is an
+        # Invoke-WebRequest alias there, plain curl on pwsh/Linux.
+        assert "Get-Command curl.exe, curl -CommandType Application" in text
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +188,16 @@ def test_checksum_format_cross_compatible():
 def test_bundle_refspec_parity():
     """Bundles carry origin's refs; importers must map them back to heads."""
     for text in (EXPORT_SH, EXPORT_PS):
-        assert "--remotes=origin" in text and "--tags" in text
+        assert "--tags" in text
+        # origin/HEAD must never enter the bundle: gits up to at least 2.46
+        # write the symref dereferenced (a duplicate entry under its target
+        # name), and cloning such a bundle fails with "multiple updates for
+        # ref ... not allowed". Neither --remotes=origin nor --exclude is
+        # safe there — the refs must be enumerated explicitly with the
+        # symref filtered out.
+        assert "--remotes=origin" not in text
+        assert re.search(r"for-each-ref --format='?%\(refname\)'? refs/remotes/origin", text)
+        assert "refs/remotes/origin/HEAD" in text
         assert "refs/enclave-wiki/" in text
     for text in (IMPORT_SH, IMPORT_PS):
         assert "+refs/remotes/origin/*:refs/heads/*" in text
@@ -215,6 +241,32 @@ def test_export_api_enumeration_parity():
     for text in (EXPORT_SH, EXPORT_PS):
         assert "package_type=generic" in text
         assert "package_files" in text
+
+
+def test_package_transfer_retry_parity():
+    """One transient TLS reset mid-file (seen on gitlab.com: WinPS 5.1
+    IOException 'decryption operation failed', repeatably on the ~120 MB
+    quarto .deb) must not abort a whole transfer: all four scripts retry
+    each package download/upload with backoff. Exporters must also discard
+    partial downloads — SHA256SUMS is computed FROM staged files, so a
+    partial left behind would checksum as 'valid'."""
+    assert "fetch_with_retry" in EXPORT_SH
+    assert "rm -f" in EXPORT_SH
+    assert "Invoke-DownloadWithRetry" in EXPORT_PS
+    assert "Remove-Item -Force" in EXPORT_PS
+    assert "upload_with_retry" in IMPORT_SH
+    assert "Invoke-UploadWithRetry" in IMPORT_PS
+
+
+def test_ps_large_transfers_use_real_curl():
+    """WinPS 5.1's SChannel-backed web cmdlets reproducibly drop long TLS
+    streams, so neither package phase may move file bodies with them —
+    both stream through the preflighted $CurlBin instead. (API JSON calls
+    are small and stay on Invoke-RestMethod.)"""
+    for name, text in PS.items():
+        assert "$CurlBin" in text, name
+        assert not re.search(r"Invoke-WebRequest .*-OutFile", text), name
+        assert not re.search(r"Invoke-RestMethod .*-InFile", text), name
 
 
 def test_importers_accept_txt_or_directory():

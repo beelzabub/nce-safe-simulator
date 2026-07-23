@@ -123,12 +123,26 @@ if [ "$DO_REPO" = 1 ]; then
 fi
 
 # ── 3. Generic packages (layout: packages/<name>/<version>/<file>) ──────────
+# One transient TLS reset mid-file must not abort a whole import: retry each
+# upload with backoff (uploads are idempotent, so a half-sent file is safe to
+# resend). A bash loop, not curl --retry: plain --retry skips mid-stream
+# resets and --retry-all-errors needs curl >= 7.71.
+upload_with_retry() {
+  local src=$1 url=$2 try
+  for try in 1 2 3 4; do
+    curl -fsS "${auth[@]}" --upload-file "$src" "$url" >/dev/null && return 0
+    [ "$try" = 4 ] && break
+    log "  transient upload failure - retry $try/3 in $((2 * try))s"
+    sleep $((2 * try))
+  done
+  echo "upload failed after 4 attempts: $url" >&2
+  return 1
+}
 if [ "$DO_PACKAGES" = 1 ]; then
   find "$DIR/packages" -type f | while read -r f; do
     rel="${f#"$DIR/packages/"}"                       # name/version/file
     log "  package $rel"
-    curl -fsS "${auth[@]}" --upload-file "$f" \
-      "$API/projects/$ENC/packages/generic/$rel" >/dev/null
+    upload_with_retry "$f" "$API/projects/$ENC/packages/generic/$rel"
   done
   # Anonymous pull from the package registry (project stays private) — this
   # is what lets Docker builds fetch Quarto with no token in build args.

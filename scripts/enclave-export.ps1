@@ -17,8 +17,9 @@
   Run it from any directory inside a clone of this git repo, on a box
   connected to the source GitLab.
 
-  Requirements (preflight-checked): PowerShell 5.1+, git, tar
-  (built into Windows 10+/Server 2019+); docker unless -NoImages.
+  Requirements (preflight-checked): PowerShell 5.1+, git, curl and tar
+  (curl.exe and tar are built into Windows 10+/Server 2019+); docker
+  unless -NoImages.
   JSON parsing and sha256 hashing use PowerShell built-ins — no python or
   sha256sum needed (unlike the bash variant).
 
@@ -53,12 +54,49 @@ function Log([string]$msg) { Write-Host "==> $msg" }
 function Assert-Native([string]$what) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
+function Invoke-GitTolerant {
+    # git reports success chatter on stderr (e.g. a fetch's "From <url>" ref
+    # summary). Under $ErrorActionPreference='Stop', WinPS 5.1 wraps redirected
+    # native stderr in ErrorRecords and promotes them to terminating errors —
+    # a SUCCESSFUL wiki fetch would kill the export. Relax the preference for
+    # the one call whose stderr is deliberately discarded; callers branch on
+    # $LASTEXITCODE as usual.
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & git @GitArgs 2>$null } finally { $ErrorActionPreference = $eap }
+}
+function Invoke-DownloadWithRetry([string]$Uri, [string]$OutFile) {
+    # WinPS 5.1's Invoke-WebRequest (SChannel) reproducibly loses long TLS
+    # streams on large files — real transfer runs died on the ~120 MB quarto
+    # .deb with IOException "The decryption operation failed" on every
+    # attempt. Stream with the real curl instead ($CurlBin, preflighted),
+    # keeping the backoff loop because mid-stream resets (curl exit 56 etc.)
+    # are not covered by plain --retry. Partials are discarded between
+    # tries: SHA256SUMS is computed FROM staged files, so a partial would
+    # otherwise checksum as "valid".
+    $max = 4
+    for ($try = 1; $try -le $max; $try++) {
+        & $CurlBin -fsSL -H "PRIVATE-TOKEN: $env:GITLAB_TOKEN" -o $OutFile $Uri
+        if ($LASTEXITCODE -eq 0) { return }
+        Remove-Item -Force -ErrorAction SilentlyContinue $OutFile
+        if ($try -eq $max) { throw "download failed after $max attempts (curl exit $LASTEXITCODE): $Uri" }
+        Log "  transient download failure - retry $try/$($max - 1) in $(2 * $try)s (curl exit $LASTEXITCODE)"
+        Start-Sleep -Seconds (2 * $try)
+    }
+}
 
 # ── Preflight: report ALL missing tools in one message ──────────────────────
 $missing = @()
 foreach ($tool in @('git', 'tar')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { $missing += $tool }
 }
+# curl streams the large package transfers that WinPS 5.1's SChannel-backed
+# web cmdlets reproducibly drop mid-file. Probe curl.exe first: bare 'curl'
+# is an Invoke-WebRequest ALIAS in WinPS 5.1. curl.exe ships with Windows
+# 10+/Server 2019+ (same floor as tar); plain curl covers pwsh on Linux.
+$CurlBin = Get-Command curl.exe, curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $CurlBin) { $missing += 'curl' }
 if (-not $NoImages -and -not (Get-Command docker -ErrorAction SilentlyContinue)) { $missing += 'docker' }
 if ($missing.Count -gt 0) {
     Write-Error ("Missing required tools: {0}`nInstall them and rerun. (docker is only needed without -NoImages.)" -f ($missing -join ' '))
@@ -96,14 +134,22 @@ Log "Fetching all refs from origin..."
 & git fetch origin --prune --tags; Assert-Native 'git fetch'
 Log "Writing repo bundle..."
 $repoBundle = Join-Path $Stage 'repo/repo.bundle'
-& git bundle create $repoBundle --remotes=origin --tags; Assert-Native 'git bundle create'
+# Enumerate the refs explicitly instead of using the remotes glob: gits up
+# to at least 2.46 (Git for Windows included) write the origin/HEAD symref
+# into the bundle DEREFERENCED — a second entry under its target name — and any
+# clone of that bundle dies with "multiple updates for ref
+# 'refs/remotes/origin/<default>' not allowed". --exclude does NOT prevent
+# it (the pattern never matches the resolved name); leaving the symref out
+# of an explicit list does. The importer never needs origin/HEAD.
+$bundleRefs = @(& git for-each-ref --format='%(refname)' refs/remotes/origin) -ne 'refs/remotes/origin/HEAD'
+& git bundle create $repoBundle --tags $bundleRefs; Assert-Native 'git bundle create'
 & git bundle verify $repoBundle | Out-Null; Assert-Native 'git bundle verify'
 Log ("repo.bundle OK ({0:N0} MB)" -f ((Get-Item $repoBundle).Length / 1MB))
 
 # ── 2. Project wiki (skipped if absent/empty). Fetched through this clone so
 #      the repo's own git credentials apply. ────────────────────────────────
 $wikiUrl = ($remote -replace '\.git$', '') + '.wiki.git'
-& git fetch $wikiUrl '+refs/heads/*:refs/enclave-wiki/*' 2>$null
+Invoke-GitTolerant fetch $wikiUrl '+refs/heads/*:refs/enclave-wiki/*'
 if ($LASTEXITCODE -eq 0 -and (& git for-each-ref 'refs/enclave-wiki/')) {
     Log "Writing wiki bundle..."
     $wikiBundle = Join-Path $Stage 'repo/wiki.bundle'
@@ -127,7 +173,7 @@ foreach ($pkg in $packages) {
         $dest = Join-Path $Stage "packages/$($pkg.name)/$($pkg.version)/$($f.file_name)"
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
         Log "  package $($pkg.name)/$($pkg.version)/$($f.file_name)"
-        Invoke-WebRequest -Headers $Headers -Uri "$Api/packages/generic/$($pkg.name)/$($pkg.version)/$($f.file_name)" -OutFile $dest
+        Invoke-DownloadWithRetry "$Api/packages/generic/$($pkg.name)/$($pkg.version)/$($f.file_name)" $dest
     }
 }
 
@@ -162,7 +208,7 @@ Copy-Item (Join-Path $PSScriptRoot 'enclave-import.sh') (Join-Path $Stage 'encla
 Copy-Item (Join-Path $PSScriptRoot 'enclave-import.ps1') (Join-Path $Stage 'enclave-import.ps1')
 
 # ── 6. Manifest + checksums (sha256sum -c compatible: "<hash>  ./<path>") ───
-$head = & git rev-parse origin/HEAD 2>$null
+$head = Invoke-GitTolerant rev-parse origin/HEAD
 if ($LASTEXITCODE -ne 0) { $head = & git rev-parse origin/develop }
 $stageFiles = Get-ChildItem -Path $Stage -Recurse -File
 $manifest = @(
