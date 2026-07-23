@@ -1,3 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: baseline .gitlab-ci.yml (ground zero)
+#
+# This is the project's shipped default pipeline — `test` + `containerize`,
+# nothing else (issue #275 pinned that as the baseline). Unlike the other
+# recipes, this is NOT a job to copy IN: it's the file to copy back OVER your
+# .gitlab-ci.yml when you want to return to ground zero after experimenting
+# (e.g. after pasting in epic-cards-deck.yml or all-reports.yml).
+#
+#   cp ci-recipes/baseline-gitlab-ci.yml .gitlab-ci.yml
+#
+# Everything below the marker is a snapshot of the shipped .gitlab-ci.yml.
+# Local edits to .gitlab-ci.yml are fine and fail nothing — this file only
+# needs refreshing when the shipped baseline itself changes.
+#
+# ── verbatim baseline below — do not edit here; edit .gitlab-ci.yml ──────────
 image: python:latest
 
 stages:
