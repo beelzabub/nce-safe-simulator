@@ -33,7 +33,9 @@
 #       whether --ignore-path=/sbin registered, and "Not adding /sbin because
 #       it is ignored" shows the guard working; REPRO FAILED with the
 #       "resource busy" error plus an old version in §2 points at a stale
-#       executor:debug image behind the instance's proxy.
+#       executor:debug image behind the instance's proxy. A clean finish
+#       ("RUN true" executed, no error) means the guard works on this runner
+#       and the real containerize job should pass with --ignore-path=/sbin.
 #
 # Prerequisites: the kaniko debug image and python:3.11-slim must be pullable
 # (both already are wherever containerize itself runs).
@@ -61,9 +63,12 @@ diag:
     - umount /sbin/docker-init 2>&1 && echo "UMOUNT WORKED" || echo "umount failed"
     - ls -la /sbin 2>/dev/null || true
     - echo "== 5. minimal kaniko repro with --ignore-path=/sbin =="
-    - printf 'FROM python:3.11-slim\nRUN true\n' > /tmp/Dockerfile.diag
-    - /kaniko/executor --context /tmp --dockerfile /tmp/Dockerfile.diag --no-push --ignore-path=/sbin --verbosity=debug > /tmp/kaniko-diag.log 2>&1 && echo "REPRO PASSED" || echo "REPRO FAILED"
-    - grep -iE "ignore list|not adding /sbin|docker-init|error removing|resource busy" /tmp/kaniko-diag.log | head -40
-    - tail -20 /tmp/kaniko-diag.log
+    # The kaniko debug image ships no /tmp — create the context dir first.
+    # The executor runs LAST with output straight to the job log: it unpacks
+    # the base rootfs over the container's /, so nothing that matters may run
+    # after it and a log file could be clobbered mid-build.
+    - mkdir -p /tmp/diag
+    - printf 'FROM python:3.11-slim\nRUN true\n' > /tmp/diag/Dockerfile
+    - /kaniko/executor --context /tmp/diag --dockerfile /tmp/diag/Dockerfile --no-push --ignore-path=/sbin --verbosity=debug 2>&1 || echo "REPRO FAILED (error above)"
   rules:
     - when: always
