@@ -56,11 +56,18 @@ containerize:
     # registry — composed from CI variables, so the same yaml pulls from
     # gitlab.com here and from the enclave's own registry after the repo is
     # lifted. See README → "Enclave transfer".
+    #
+    # --ignore-path=/sbin/docker-init: runners configured with init injection
+    # (docker run --init) bind-mount that supervisor binary into the job
+    # container; kaniko's rootfs swap for Debian usrmerge bases must replace
+    # /sbin wholesale and dies on the live mount with "device or resource
+    # busy" (issue #276). Inert on runners without init (gitlab.com).
     - >-
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target runtime
+      --ignore-path=/sbin/docker-init
       --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
       --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE:latest"
@@ -70,6 +77,7 @@ containerize:
       --context "$CI_PROJECT_DIR"
       --dockerfile "$CI_PROJECT_DIR/Dockerfile"
       --target dev
+      --ignore-path=/sbin/docker-init
       --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
       --destination "$CI_REGISTRY_IMAGE/dev:latest"
       --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
