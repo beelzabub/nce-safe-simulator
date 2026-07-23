@@ -21,7 +21,7 @@ reference it than paste it — but the intent here is copy-and-own.
 
 | File | What it does |
 |------|--------------|
-| [`epic-cards-deck.yml`](epic-cards-deck.yml) | Renders the epic-cards "Capability Card" PDF and publishes it as a downloadable pipeline artifact. |
+| [`epic-cards-deck.yml`](epic-cards-deck.yml) | Renders the epic-cards "Capability Card" PDF and publishes it as a downloadable pipeline artifact. Runs in the project's own runtime image — Pango/fonts/deps baked in, no external downloads (a standalone python:3.11 variant is included for spaces without the image). |
 | [`all-reports.yml`](all-reports.yml) | Runs the full report suite (`--report all`) inside the project's own runtime image — Quarto/Pango/deps baked in, no external downloads — and publishes the rendered `public/` site as an artifact. Scheduled + manual by default. |
 
 ## Why these work unattended
