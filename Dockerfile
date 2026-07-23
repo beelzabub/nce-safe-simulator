@@ -115,15 +115,49 @@ EXPOSE 80
 
 ENTRYPOINT ["python", "NceGitLab.py", "--serve"]
 
-# Stage 4 — ops variant (issue #231): runtime + the CDK deploy toolchain, so a
+# Stage 4 — dev/build container (issue #244): the golden toolchain image a
+# developer pulls, then volume-mounts their working tree into /app to run the
+# whole pipeline (make build, pytest, npm run build, quarto render, diagram
+# gen) with zero local toolchain. Source is NOT baked in — it is mounted at
+# run time (`make dev-shell`, or `docker run -v "$PWD":/app ...`), so the image
+# stays reusable across every checkout. CI pushes it to the GitLab registry as
+# .../nce-safe-simulator/dev on merges to develop. Built explicitly:
+#   docker build --target dev -t nce-safe-simulator:dev .
+FROM runtime AS dev
+
+# The runtime base already carries Python 3.11 + requirements.txt (incl. pytest,
+# diagrams) and the pinned Quarto CLI. The dev image adds the rest of the build
+# toolchain: Node 20 (matches the frontend-builder stage) for `npm ci && npm run
+# build`, graphviz for the `diagrams` library's `dot`, and make/git/jq/curl for
+# the everyday loop. The closure — including the NodeSource nodejs .deb — comes
+# from the apt-debs package (issue #269): no deb.debian.org, no
+# deb.nodesource.com setup script, and gnupg (only ever needed to install the
+# NodeSource signing key) drops out entirely.
+ARG PKG_PROJECT
+ARG APT_DEBS_VERSION
+RUN python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" \
+      dev "$(dpkg --print-architecture)" /tmp/debs && \
+    apt-get install -y --no-install-recommends /tmp/debs/*.deb && rm -rf /tmp/debs
+
+# Working tree is bind-mounted here at run time; drop to an interactive shell
+# instead of the runtime's `--serve` entrypoint.
+WORKDIR /app
+ENTRYPOINT []
+CMD ["bash"]
+
+# Stage 5 — ops variant (issue #231): runtime + the CDK deploy toolchain, so a
 # container run on an operator box (host ~/.aws mounted) can drive the in-app
 # ECS/EKS deploys, which shell to `make -C cdk ...`. Built only explicitly:
 #   docker build --target ops -t nce-safe-simulator:ops .
 # Never pushed to ECR — the trailing default stage keeps plain builds slim.
 # NOTE: ops is deliberately outside the enclave/air-gap scope of issue #269 —
-# it is never built in CI, and its toolchain (AWS CLI, cdk, nodesource, docker
-# static binary) exists to drive AWS deploys, which no enclave build performs.
-# Its layers still reach the public internet; build it only on open networks.
+# its toolchain (AWS CLI, cdk, nodesource, docker static binary) exists to
+# drive AWS deploys, which no enclave build performs. Its layers still reach
+# the public internet; build it only on open networks. Ordering matters: ops
+# MUST sit BELOW dev. kaniko builds every stage that precedes --target in
+# file order (no dependency pruning), so with ops above dev, CI's
+# `--target dev` build executed these internet-reaching layers — which would
+# be fatal on the enclave (caught auditing the #269 containerize log).
 FROM runtime AS ops
 
 # make + jq (cdk Makefile), Node 22 LTS (nodesource; bookworm's node is too
@@ -163,36 +197,6 @@ RUN ARCH=$(uname -m) \
 
 # Python deps for the CDK apps under cdk/ (aws-cdk-lib, constructs, kubectl layer)
 RUN pip install --no-cache-dir -r cdk/requirements.txt
-
-# Stage 5 — dev/build container (issue #244): the golden toolchain image a
-# developer pulls, then volume-mounts their working tree into /app to run the
-# whole pipeline (make build, pytest, npm run build, quarto render, diagram
-# gen) with zero local toolchain. Source is NOT baked in — it is mounted at
-# run time (`make dev-shell`, or `docker run -v "$PWD":/app ...`), so the image
-# stays reusable across every checkout. CI pushes it to the GitLab registry as
-# .../nce-safe-simulator/dev on merges to develop. Built explicitly:
-#   docker build --target dev -t nce-safe-simulator:dev .
-FROM runtime AS dev
-
-# The runtime base already carries Python 3.11 + requirements.txt (incl. pytest,
-# diagrams) and the pinned Quarto CLI. The dev image adds the rest of the build
-# toolchain: Node 20 (matches the frontend-builder stage) for `npm ci && npm run
-# build`, graphviz for the `diagrams` library's `dot`, and make/git/jq/curl for
-# the everyday loop. The closure — including the NodeSource nodejs .deb — comes
-# from the apt-debs package (issue #269): no deb.debian.org, no
-# deb.nodesource.com setup script, and gnupg (only ever needed to install the
-# NodeSource signing key) drops out entirely.
-ARG PKG_PROJECT
-ARG APT_DEBS_VERSION
-RUN python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" \
-      dev "$(dpkg --print-architecture)" /tmp/debs && \
-    apt-get install -y --no-install-recommends /tmp/debs/*.deb && rm -rf /tmp/debs
-
-# Working tree is bind-mounted here at run time; drop to an interactive shell
-# instead of the runtime's `--serve` entrypoint.
-WORKDIR /app
-ENTRYPOINT []
-CMD ["bash"]
 
 # Final stage — re-select the slim runtime so a plain `docker build .` (all
 # existing call sites: cdk/Makefile ecr-push/ecs-deploy, redeploy scripts)
