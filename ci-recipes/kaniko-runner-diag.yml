@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: kaniko / runner diagnostic pipeline (issue #276)
+#
+# Like baseline-gitlab-ci.yml, this is a WHOLE-FILE recipe, not a job snippet:
+# temporarily copy it over .gitlab-ci.yml on the instance under investigation,
+# run ONE new pipeline, capture the full job log, then restore ground zero:
+#
+#   cp ci-recipes/kaniko-runner-diag.yml .gitlab-ci.yml     # swap in
+#   ... commit, run pipeline, save the job log ...
+#   cp ci-recipes/baseline-gitlab-ci.yml .gitlab-ci.yml     # swap back
+#
+# Purpose: when `containerize` dies unpacking a base image with
+#   "unlinkat //sbin/docker-init: device or resource busy"
+# this job discriminates between every known cause. The runner bind-mounts a
+# supervisor at /sbin/docker-init when Docker init injection is on
+# (FF_USE_INIT_WITH_DOCKER_EXECUTOR; hardwired on in GitLab Runner 16.6.0);
+# kaniko's /sbin usrmerge swap then hits the live mount (upstream kaniko#946).
+#
+# How to read the output:
+#   §1  If the greps print nothing, the job is NOT running the yaml you think:
+#       GitLab's Retry button re-runs the ORIGINAL commit's yaml — fixes only
+#       apply to a new pipeline on the edited commit.
+#   hdr The runner prints its version and any non-default feature flags at the
+#       very top of the log — check both against the notes above.
+#   §3  If /sbin/docker-init is still mounted despite this job setting the
+#       feature flag "false", the flag is pinned in the runner's config.toml
+#       [runners.feature_flags] (job-level cannot override that) or the
+#       runner is exactly 16.6.0.
+#   §4  "UMOUNT WORKED" means the container is privileged enough to simply
+#       unmount the file — that becomes a guaranteed fix: add the umount to
+#       the containerize job's before_script.
+#   §5  Minimal repro at debug verbosity: the "Ignore list:" line shows
+#       whether --ignore-path=/sbin registered, and "Not adding /sbin because
+#       it is ignored" shows the guard working; REPRO FAILED with the
+#       "resource busy" error plus an old version in §2 points at a stale
+#       executor:debug image behind the instance's proxy. A clean finish
+#       ("RUN true" executed, no error) means the guard works on this runner
+#       and the real containerize job should pass with --ignore-path=/sbin.
+#
+# Prerequisites: the kaniko debug image and python:3.11-slim must be pullable
+# (both already are wherever containerize itself runs).
+# ─────────────────────────────────────────────────────────────────────────────
+stages: [diag]
+
+diag:
+  stage: diag
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  variables:
+    FF_USE_INIT_WITH_DOCKER_EXECUTOR: "false"
+  script:
+    - echo "== 1. which yaml is this job actually running? =="
+    - echo "CI_COMMIT_SHA=$CI_COMMIT_SHA SOURCE=$CI_PIPELINE_SOURCE"
+    - grep -n "ignore-path\|FF_USE_INIT" "$CI_PROJECT_DIR/.gitlab-ci.yml" || echo "(none in checked-out yaml)"
+    - echo "== 2. kaniko version =="
+    - /kaniko/executor version || true
+    - echo "== 3. is docker-init mounted despite the FF variable? =="
+    - ls -la /sbin 2>/dev/null || echo "/sbin does not exist"
+    - grep -E "sbin|init" /proc/self/mountinfo || echo "(no sbin/init mounts)"
+    - echo "== 4. can this container umount it? =="
+    - grep Cap /proc/self/status
+    - umount /sbin/docker-init 2>&1 && echo "UMOUNT WORKED" || echo "umount failed"
+    - ls -la /sbin 2>/dev/null || true
+    - echo "== 5. minimal kaniko repro with --ignore-path=/sbin =="
+    # The kaniko debug image ships no /tmp — create the context dir first.
+    # The executor runs LAST with output straight to the job log: it unpacks
+    # the base rootfs over the container's /, so nothing that matters may run
+    # after it and a log file could be clobbered mid-build.
+    - mkdir -p /tmp/diag
+    - printf 'FROM python:3.11-slim\nRUN true\n' > /tmp/diag/Dockerfile
+    - /kaniko/executor --context /tmp/diag --dockerfile /tmp/diag/Dockerfile --no-push --ignore-path=/sbin --verbosity=debug 2>&1 || echo "REPRO FAILED (error above)"
+  rules:
+    - when: always
