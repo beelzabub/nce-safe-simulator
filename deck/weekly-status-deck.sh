@@ -15,6 +15,7 @@ BUCKET="workflow-bootstrap-20260626-055227-881490118830"
 S3_PREFIX="nce-safe-simulator/status"
 APP_URL="https://nce-safe-sim.com/app/"
 GEN_SPOTLIGHTS="$REPO/deck/dist/latest-work-spotlights.gen.yaml"
+GEN_CAPS="$REPO/deck/dist/capabilities-updates.gen.yaml"
 LOGDIR="$REPO/deck/dist/weekly-logs"
 
 export HOME=/root
@@ -71,7 +72,7 @@ echo "--- fetch metrics ---"
 python3 deck/fetch_metrics.py || fail "fetch_metrics"
 
 echo "--- author spotlights (headless) ---"
-rm -f "$GEN_SPOTLIGHTS"
+rm -f "$GEN_SPOTLIGHTS" "$GEN_CAPS"
 claude -p "$(cat "$REPO/deck/weekly-authoring-prompt.md")" \
   --allowedTools "Bash(python3 *),Bash(ls *),Bash(glab *),Read,Write,Edit" 2>&1 | tail -25 \
   || echo "WARN: authoring step returned non-zero"
@@ -89,11 +90,20 @@ aws s3 cp "$DECK" "s3://$BUCKET/$KEY" --only-show-errors || fail "s3 upload"
 URL="$(aws s3 presign "s3://$BUCKET/$KEY" --expires-in 604800)"
 SLIDES="$(python3 -c "from pptx import Presentation;print(len(Presentation('$DECK').slides))" 2>/dev/null || echo '?')"
 
+# Capability updates proposed by the authoring step render in this week's deck
+# but still need review + committing into capabilities.yaml — call that out.
+CAPS_NOTE=""
+[ -f "$GEN_CAPS" ] && CAPS_NOTE="
+Capability-area updates were proposed (already rendered in this deck):
+review $GEN_CAPS and fold accepted changes into deck/capabilities.yaml.
+"
+
 echo "--- notify success ---"
 notify "NCE Safe Simulator - Weekly Status Deck ready" "The weekly status deck built successfully.
 
 Deck:  $(basename "$DECK")  ($SLIDES slides)
 Built: $(TZ=America/Los_Angeles date '+%A %F %H:%M %Z')
+$CAPS_NOTE
 
 Download (link valid 7 days):
 $URL

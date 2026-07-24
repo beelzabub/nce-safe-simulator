@@ -187,11 +187,19 @@ The service runs `deck/weekly-status-deck.sh`, which:
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
    and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build
-   falls back to auto-derived spotlights rather than aborting,
-5. builds the deck, uploads the dated `.pptx` to
-   `s3://…/nce-safe-simulator/status/`,
+   falls back to auto-derived spotlights rather than aborting. The same step also **keeps
+   the background matter current**: `build_deck.py --print-coverage-gap` lists every closed
+   issue (both repos) cited in no capability area, and the authoring step proposes homes
+   for them in `deck/dist/capabilities-updates.gen.yaml` (extensions to existing areas
+   and/or new areas — schema in the prompt),
+5. builds the deck — proposed capability updates are merged in-memory
+   (`--capabilities-updates`, default = the gen file) so the Friday deck is current before
+   review, and the build warns about any closed issue still in no capability area —
+   then uploads the dated `.pptx` to `s3://…/nce-safe-simulator/status/`,
 6. **emails** via the SNS topic `nce-status-deck` (us-east-1) — a summary plus a 7-day
-   presigned download link; any failure emails a failure notice instead.
+   presigned download link, noting when capability updates were proposed (review the gen
+   file and fold accepted changes into `deck/capabilities.yaml` on a branch); any failure
+   emails a failure notice instead.
 
 Logs land in `deck/dist/weekly-logs/` and the systemd journal
 (`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the
