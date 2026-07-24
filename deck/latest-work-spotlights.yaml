@@ -58,6 +58,9 @@ spotlights:
   - title: "GitOps Platform — Infrastructure as Code From Zero  (nce-git-ops #1–#2, #7–#12)"
     subtitle: "Terraform + Ansible + kubeadm: from an empty AWS account to a running Kubernetes cluster with one command"
     issues: [259, "nce-git-ops#1", "nce-git-ops#2", "nce-git-ops#7", "nce-git-ops#8", "nce-git-ops#9", "nce-git-ops#10", "nce-git-ops#11", "nce-git-ops#12"]
+    images:
+      - "deck/assets/spotlight-extras/gitops-rancher-cluster-dashboard.png"
+    caption: "The freshly provisioned cluster minutes after `make up` — 3 nodes (v1.35.7), 960 resources, 20 deployments, all control-plane components green"
     bullets:
       - "Terraform declares the entire AWS footprint — VPC, per-role security groups, arm64 EC2 nodes, Route 53 records — with remote state locked in S3; its outputs generate the Ansible inventory directly, so the two tools chain without hand-copied values."
       - "Idempotent Ansible roles turn fresh instances into a kubeadm cluster — containerd setup, control-plane init, worker join — ending in three Ready nodes; re-running is a safe no-op."
@@ -67,8 +70,28 @@ spotlights:
   - title: "GitOps Live on AWS — Simulator Deployed by Argo CD  (nce-git-ops #3, #13–#16)"
     subtitle: "One repo drives both clusters, Rancher gives one view of them — and the simulator itself now ships from git"
     issues: [259, "nce-git-ops#3", "nce-git-ops#13", "nce-git-ops#14", "nce-git-ops#15", "nce-git-ops#16"]
+    images:
+      - "deck/assets/spotlight-extras/gitops-argocd-applications.png"
+      - "deck/assets/spotlight-extras/gitops-argocd-simulator-tree.png"
+    image_labels:
+      - "Argo CD — all six applications Synced / Healthy from `main`"
+      - "The simulator's resource tree — Deployment, Service, Ingress, Certificate, pod"
     bullets:
       - "Argo CD bootstrapped onto the AWS cluster with the same script as local; ApplicationSet generators emit per-cluster applications from one repo, with per-cluster values overlays where the environments differ."
       - "Real HTTPS on real subdomains — argocd. / rancher. / keycloak.nce-safe-sim.com — with cert-manager issuing Let's Encrypt certificates via Route 53 DNS-01, which needs no open port 80 and survives cluster recreation."
       - "Rancher — itself deployed by Argo — imports both the local and AWS clusters into a single management view; Argo remains the one GitOps engine (Rancher's Fleet deliberately left off)."
       - "The headline: the simulator's own Helm chart now deploys to AWS through Argo CD, with its EKS-specific pieces swapped for nginx ingress, local-path storage, and instance-profile auth — the application is fully GitOps-managed."
+
+  - title: "The Platform, Live — Real Services on Real URLs  (nce-git-ops #14–#16)"
+    subtitle: "Every platform service answering on its own HTTPS subdomain, minutes after bring-up"
+    issues: ["nce-git-ops#14", "nce-git-ops#15", "nce-git-ops#16"]
+    images:
+      - "deck/assets/spotlight-extras/gitops-rancher-home.png"
+      - "deck/assets/spotlight-extras/gitops-simulator-app.png"
+    image_labels:
+      - "rancher.nce-safe-sim.com — the kubeadm cluster imported and Active"
+      - "sim.nce-safe-sim.com — the simulator served from the cluster, 51 jobs available"
+    bullets:
+      - "rancher.nce-safe-sim.com, argocd.nce-safe-sim.com, keycloak.nce-safe-sim.com, and sim.nce-safe-sim.com all live with valid Let's Encrypt certificates — no self-signed warnings, no port juggling."
+      - "The simulator app runs signed-in from the cluster with its full tool catalog — 51 jobs across scaffolding, import/export, label management, and audit & validation."
+      - "Keycloak's admin console is up on its subdomain; the dedicated realm and single sign-on wiring is the next phase of work (nce-git-ops#18)."
