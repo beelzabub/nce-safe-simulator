@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Build the #243 leadership brief: VM-based SDLC (As-Is) -> container-based SDLC (To-Be).
+"""Build the #243/#266 leadership brief: VM-based SDLC (As-Is) -> container-based SDLC (To-Be).
 
-Self-contained: uses the repo's committed branding template
-(deck/assets/template.pptx) for masters/layouts/theme, and the four reviewed
-diagrams in ./diagrams/. It does NOT touch the weekly status-deck pipeline.
+Self-contained: uses the committed NCE 120 branding template
+(./assets/20260721_NCE_120_Template.pptx, issue #266) for masters/layouts/theme,
+and the reviewed diagrams in ./diagrams/. It does NOT touch the weekly
+status-deck pipeline.
 
     python3 slides/243-slide-brief-as-is-to-be/build_brief.py
 
 Output: ./dist/NCE-Safe-Simulator-SDLC-Modernization.pptx
 
-House style is borrowed from deck/build_deck.py (Gill Sans MT, blue title band +
-yellow rule, accent palette read from the template theme) so the brief matches
-the status deck without importing its heavy, metrics-coupled machinery.
+House style mirrors deck/build_deck.py (title band + brand rule, accent palette
+read from the template theme) without importing its heavy, metrics-coupled
+machinery.
 """
 import os
 
@@ -24,11 +25,29 @@ from lxml import etree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-TEMPLATE = os.path.join(REPO_ROOT, "deck", "assets", "template.pptx")
+TEMPLATE = os.path.join(HERE, "assets", "20260721_NCE_120_Template.pptx")
 DIAGRAMS = os.path.join(HERE, "diagrams")
 OUT = os.path.join(HERE, "dist", "Golden-Container-Image-SDLC-Modernization.pptx")
 
-FONT = "Gill Sans MT"
+# The NCE 120 template is 12192000 x 6858000 EMU; this file's geometry was
+# authored against the older 9144000 x 5143500 deck template — exactly 3/4 the
+# size in both axes — so Emu and Pt are wrapped to scale every authored
+# coordinate and font size uniformly by 4/3. self.SW/self.SH stay the real
+# (new) slide dimensions, so mixed expressions like `self.SW - Emu(640000)`
+# remain consistent.
+_SCALE = 4 / 3
+_Emu, _Pt = Emu, Pt
+
+
+def Emu(v):  # noqa: F811 — deliberate shadow, see comment above
+    return _Emu(int(v * _SCALE))
+
+
+def Pt(v):  # noqa: F811
+    return _Pt(v * _SCALE)
+
+
+FONT = "Arial"
 MONO = "Consolas"
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 INK = RGBColor(0x1F, 0x28, 0x33)
@@ -53,23 +72,31 @@ def load_theme_colors(prs):
         srgb = child.find("a:srgbClr", ns)
         if srgb is not None:
             vals[tag] = RGBColor.from_string(srgb.get("val"))
+    # NCE 120 theme slots: accent1 deep navy, accent2 light teal, accent3 mid
+    # blue, accent4 pale gray fill, accent5 orange, accent6 gold.
     return {
-        "blue": vals.get("accent1", RGBColor(0x00, 0x6B, 0xB5)),
-        "green": vals.get("accent2", RGBColor(0xBC, 0xD6, 0x3E)),
-        "teal": vals.get("accent3", RGBColor(0x00, 0xAC, 0xD4)),
-        "gray": vals.get("accent4", GRAY),
-        "lgray": vals.get("accent5", RGBColor(0xE1, 0xE1, 0xE1)),
-        "yellow": vals.get("accent6", RGBColor(0xFD, 0xB9, 0x13)),
+        "blue": vals.get("accent1", RGBColor(0x19, 0x28, 0x59)),
+        "green": vals.get("accent2", RGBColor(0x8D, 0xC4, 0xCA)),
+        "teal": vals.get("accent3", RGBColor(0x43, 0x8A, 0xAA)),
+        "gray": GRAY,   # keep a neutral mid-gray — accent4 is a pale fill tone
+        "lgray": vals.get("accent4", RGBColor(0xDE, 0xDD, 0xDC)),
+        "yellow": vals.get("accent6", RGBColor(0xEC, 0xBC, 0x00)),
+        "orange": vals.get("accent5", RGBColor(0xFF, 0x65, 0x28)),
     }
 
 
 class Brief:
     def __init__(self):
         self.prs = Presentation(TEMPLATE)
+        # The NCE 120 template ships with example content slides — drop them
+        # on load, keeping only the masters/layouts/theme.
+        for sld_id in list(self.prs.slides._sldIdLst):
+            self.prs.part.drop_rel(sld_id.rId)
+            self.prs.slides._sldIdLst.remove(sld_id)
         self.SW = self.prs.slide_width
         self.SH = self.prs.slide_height
         self.C = load_theme_colors(self.prs)
-        self.BLANK = self.prs.slide_layouts[7]  # '1_Blank'
+        self.BLANK = self.prs.slide_masters[0].slide_layouts[23]  # '24 - Blank Slide (light)'
 
     # -- primitives (mirrors deck/build_deck.py) --------------------------------
     def add_rect(self, slide, x, y, w, h, color):
@@ -153,7 +180,7 @@ class Brief:
         s = self.new_slide()
         # Explicit colors — the template's theme slots resolve oddly (its
         # "yellow" is black, "lgray" is magenta), so set them directly here.
-        AMBER = RGBColor(0xFD, 0xB9, 0x13)
+        AMBER = self.C["yellow"]
         SOFT = RGBColor(0xE8, 0xF3, 0xF8)
         self.add_rect(s, 0, 0, self.SW, self.SH, self.C["blue"])
         self.add_rect(s, 0, Emu(2700000), self.SW, Emu(20000), AMBER)
@@ -191,23 +218,66 @@ class Brief:
                          self.SH - Emu(1200000), items, size, INK, space_after=space_after)
         return s
 
-    def two_col_slide(self, title, subtitle, left_head, left, right_head, right):
+    def two_col_slide(self, title, subtitle, left_head, left, right_head, right,
+                      note=None):
         s = self.new_slide()
         self.header_band(s, title, subtitle)
         colw = (self.SW - Emu(430000) * 2 - Emu(300000)) // 2
         lx = Emu(430000)
         rx = lx + colw + Emu(300000)
+        body_h = self.SH - Emu(1560000) - (Emu(560000) if note else 0)
         for x, head, items in ((lx, left_head, left), (rx, right_head, right)):
             self.add_rect(s, x, Emu(900000), colw, Emu(340000), self.C["blue"])
             self.add_text(s, x + Emu(140000), Emu(900000), colw - Emu(240000),
                           Emu(340000), head, 13, WHITE, bold=True,
                           anchor=MSO_ANCHOR.MIDDLE)
-            self.add_bullets(s, x, Emu(1330000), colw, self.SH - Emu(1560000),
+            self.add_bullets(s, x, Emu(1330000), colw, body_h,
                              items, 12.5, INK, space_after=9)
+        if note:
+            ny = self.SH - Emu(500000)
+            self.add_rect(s, Emu(430000), ny, self.SW - Emu(860000), Emu(6000),
+                          self.C["lgray"])
+            self.add_text(s, Emu(430000), ny + Emu(70000), self.SW - Emu(860000),
+                          Emu(400000), note, 11, self.C["teal"], italic=True)
+        return s
+
+    def layers_slide(self, title, subtitle, layers, bullets, takeaway):
+        """Kent's layering model (#266): a stacked container-image diagram on
+        the left (foundation at the bottom, each layer FROM the one below,
+        with an ownership label beside it), bullets on the right."""
+        s = self.new_slide()
+        self.header_band(s, title, subtitle)
+        stack_x, stack_w = Emu(430000), Emu(4300000)
+        layer_h, gap = Emu(760000), Emu(330000)
+        n = len(layers)
+        top = Emu(1150000)
+        for i, (name, detail, owner, color) in enumerate(layers):
+            y = top + i * (layer_h + gap)
+            self.add_rect(s, stack_x, y, stack_w, layer_h, color)
+            self.add_text(s, stack_x + Emu(160000), y + Emu(90000),
+                          stack_w - Emu(320000), Emu(280000), name, 13.5, WHITE,
+                          bold=True)
+            self.add_text(s, stack_x + Emu(160000), y + Emu(380000),
+                          stack_w - Emu(320000), Emu(330000), detail, 10.5, WHITE)
+            self.add_text(s, stack_x + stack_w + Emu(140000), y, Emu(1100000),
+                          layer_h, owner, 10.5, GRAY, italic=True,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            if i < n - 1:   # FROM arrow up from the layer below into this one
+                self.add_text(s, stack_x, y + layer_h, stack_w, gap,
+                              "▲  FROM", 10, GRAY, bold=True,
+                              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        bx = stack_x + stack_w + Emu(1340000)
+        self.add_bullets(s, bx, Emu(1000000), self.SW - bx - Emu(300000),
+                         self.SH - Emu(1750000), bullets, 11.5, INK, space_after=8)
+        ty = self.SH - Emu(620000)
+        self.add_rect(s, Emu(430000), ty, self.SW - Emu(860000), Emu(6000),
+                      self.C["lgray"])
+        self.add_text(s, Emu(430000), ty + Emu(80000), self.SW - Emu(860000),
+                      Emu(440000), takeaway, 12, self.C["teal"], bold=True)
         return s
 
     def closing(self, title, subtitle, lines):
-        AMBER = RGBColor(0xFD, 0xB9, 0x13)
+        AMBER = self.C["yellow"]
         s = self.new_slide()
         self.add_rect(s, 0, 0, self.SW, self.SH, self.C["blue"])
         self.add_rect(s, Emu(520000), Emu(1980000), Emu(1500000), Emu(20000), AMBER)
@@ -327,7 +397,7 @@ class Brief:
             self.add_label_text(s, bx, yc - Emu(220000), bw, Emu(440000),
                                 label, rest, 12.5)
         self.add_text(s, bx, self.SH - Emu(900000), bw, Emu(560000), takeaway, 12.5,
-                      RGBColor(0x00, 0x6B, 0xB5), bold=True)
+                      self.C["teal"], bold=True)
         return s
 
     def two_ways_slide(self, title, subtitle, left_head, left_code, left_bul,
@@ -392,12 +462,12 @@ class Brief:
         self.add_rect(s, margin, by, self.SW - margin * 2, Emu(6000),
                       RGBColor(0xC8, 0xD0, 0xD8))
         self.add_text(s, margin, by + Emu(70000), self.SW - margin * 2, Emu(560000),
-                      banner, 12.5, RGBColor(0x00, 0x6B, 0xB5), italic=True)
+                      banner, 12.5, self.C["teal"], italic=True)
         return s
 
     def add_links_line(self, slide, x, y, w, label, links, size=11.5):
         """A line of clickable hyperlinks: 'label  name1 | name2 | ...'."""
-        LINK = RGBColor(0x00, 0x6B, 0xB5)
+        LINK = RGBColor(0x43, 0x8A, 0xAA)
         tb = slide.shapes.add_textbox(x, y, w, Emu(340000))
         tf = tb.text_frame
         tf.word_wrap = True
@@ -429,7 +499,7 @@ class Brief:
         """A label line, then one row per link showing the full (hyperlinked)
         URL as visible text — so it's obviously a link and is copy-pasteable
         even in a viewer that doesn't follow clicks."""
-        LINK = RGBColor(0x00, 0x6B, 0xB5)
+        LINK = RGBColor(0x43, 0x8A, 0xAA)
         tb = slide.shapes.add_textbox(x, y, w, Emu(1150000))
         tf = tb.text_frame
         tf.word_wrap = True
@@ -506,7 +576,7 @@ def build():
         "",
         "From Hand-Built VMs to a Golden Container Image",
         "Modernizing the development SDLC:  As-Is → To-Be",
-        "One reproducible image for dev, build, and CI",
+        "One definition — layered images for dev, build, and deploy",
     )
 
     b.bullets_slide(
@@ -532,16 +602,16 @@ def build():
 
     b.diagram_slide(
         "To-Be — container-based SDLC",
-        "One golden image is dev, build, and CI; developers keep their local IDE",
+        "One golden definition, layered images; developers keep their local IDE",
         "tobe-container-sdlc.png",
-        "A single golden image in the GitLab Container Registry is the source of truth. Developers pull it, volume-mount their working tree, and edit in their own IDE — dev == build == CI.",
+        "One Dockerfile in the repo is the source of truth; CI publishes its layered images (runtime for deploy, dev = runtime + toolchain) to the registry. Developers pull the dev image, volume-mount their working tree, and edit in their own IDE.",
     )
 
     b.diagram_slide(
         "Developer workflow — inner and outer loops",
-        "Fast local iteration and full-scale CI, both in the same image",
+        "Fast local iteration and full-scale CI, from the same definition",
         "container-dev-workflow.png",
-        "Inner loop: edit locally, build and unit-test in the dev container for fast feedback. Outer loop: GitLab CI runs the full suite in the same image and republishes it on merge to develop.",
+        "Inner loop: edit locally, build and unit-test in the dev container for fast feedback. Outer loop: GitLab CI runs the full suite and republishes both images on every merge to develop (running the CI suite inside the dev image itself is queued as #279).",
     )
 
     b.diagram_slide(
@@ -571,29 +641,30 @@ def build():
         "Two stages, one file — the deploy image and the dev image share one base.",
         ("Deploy env — ", "the slim runtime image CI pushes to the registry and production runs."),
         ("Dev env — ", "the toolchain you develop in; it drops to a shell with your source mounted."),
-        "Same base ⇒ dev == build == CI: the image you develop in is the one that ships.",
+        "Same base ⇒ no drift: the image you develop in is the deploy image plus tools.",
     )
 
     b.roles_slide(
-        "One image, three roles — dev · build · CI",
-        "The same golden image is your dev environment, your build, and your CI — so they can’t drift",
-        "One Dockerfile   →   one golden image",
+        "One definition, three roles — dev · build · CI",
+        "Two published images, one Dockerfile lineage — dev is runtime + toolchain, so they can’t drift",
+        "One Dockerfile   →   one lineage, two published images (runtime · dev)",
         [
             ("DEV", "you, interactively",
              "Pull the image, mount your source, and run the fast inner loop — edit, build, test, repeat.",
              [[("docker run -it \\", "code")], [('  -v "$PWD":/app  …:dev', "code")]],
-             RGBColor(0x00, 0x6B, 0xB5)),
+             b.C["blue"]),
             ("BUILD", "produce the deliverable",
              "The same toolchain compiles and packages the app into the slim deploy image.",
              [[("docker build .", "code")], [("  → runtime image", "note")]],
-             RGBColor(0x00, 0x83, 0x8F)),
+             b.C["teal"]),
             ("CI", "automated, every merge",
              "Runs the tests, then rebuilds and publishes both images to the registry.",
              [[(".gitlab-ci.yml", "code")], [("  kaniko → push", "note")]],
-             RGBColor(0x2E, 0x7D, 0x32)),
+             b.C["orange"]),
         ],
-        "One Dockerfile is the single source of truth: the image you develop in is the image CI ships. "
-        "dev == build == CI — a person or the pipeline, identical environment, no “works on my machine.”",
+        "One Dockerfile is the single source of truth. Two images publish from it — the slim runtime that "
+        "deploys, and dev built FROM runtime — so the environment you develop in is the deploy "
+        "environment plus tools, by construction. No “works on my machine.”",
     )
 
     b.code_slide(
@@ -667,6 +738,43 @@ def build():
         ],
     )
 
+    # -- Kent's layering model + the variant sweet spot (#266) ----------------
+    b.layers_slide(
+        "Container layers — who provides what",
+        "PMW-120 ships the foundation; each program layers its toolchain and dev comforts on top",
+        [
+            ("Program dev layer", "IDE server, debuggers, local test tools",
+             "program team", b.C["teal"]),
+            ("Program build layer", "team toolchain + pinned dependencies",
+             "program team", b.C["orange"]),
+            ("PMW-120 foundational image", "OS + language runtime — Debian slim + Python · JDK · GCC",
+             "PMW-120", b.C["blue"]),
+        ],
+        [
+            ("Foundation from PMW-120.", "One patched base per OS + language, republished centrally."),
+            ("Programs own their layers.", "Build layer = toolchain; dev layer = IDE/test comfort. A layer is a few Dockerfile lines."),
+            ("Shipped proof in this repo.", "runtime → dev is exactly this pattern."),
+            ("Patches flow down.", "Rebuilding the base rebuilds every program's images in CI."),
+        ],
+        "Tailored per program — by layering, so nothing forks.",
+    )
+
+    b.table_slide(
+        "How many image variants? Five needs, two images",
+        "The variant count scales by layering, not forking",
+        ["Need", "Served by", "How"],
+        [
+            ["Local Dev", "dev image", "pull, mount source, edit in your own IDE"],
+            ["Local Build", "dev image", "make build / mvn package in the container"],
+            ["Local Test", "dev image", "pytest / unit suite in the same shell"],
+            ["Pipeline Build", "dev image", "CI rebuilds + publishes both images (kaniko)"],
+            ["Pipeline Test", "dev image", "CI runs the full suite every push (#279)"],
+            ["Deploy / Run", "runtime image", "the slim image production actually runs"],
+        ],
+        note="Sweet spot: two published images per program cover every need. Add a layer when a "
+             "need genuinely differs — never a parallel Dockerfile.",
+    )
+
     b.two_col_slide(
         "As-Is → To-Be transition",
         "How an organization moves its programs from hand-built VMs to the golden-image workflow",
@@ -681,12 +789,31 @@ def build():
         ],
         "Rolling out across the organization",
         [
-            ("Prove it once.", "Migrate one program end to end to establish the pattern — dev == build == CI."),
+            ("Prove it once.", "Migrate one program end to end to establish the pattern — one definition, layered images."),
             ("Replicate.", "Every other program follows the identical playbook; only the image contents differ."),
             ("Toolchain-agnostic.", "The same loop covers any stack — Python, Java, C/C++, and beyond."),
             ("Standardize.", "A shared registry gives every team a governed, versioned image to pull."),
             ("Decommission.", "Legacy build servers retire once CI is the system of record everywhere."),
         ],
+    )
+
+    b.two_col_slide(
+        "Local vs cloud-hosted dev · build · test",
+        "Same images, different host — and classified work makes the hosted path mandatory",
+        "Truly local — unclassified day-to-day",
+        [
+            ("Pull and go.", "The registry images run on any workstation Docker — the laptop is just a host."),
+            ("Fast inner loop.", "Source bind-mounted, IDE local; the containers do build and test."),
+            ("Nothing to install but Docker.", "The toolchain lives in the image, not the machine."),
+        ],
+        "Hosted — required for classified",
+        [
+            ("Same images, hosted runners.", "The enclave pipeline already builds and tests these images on hosted runners with zero internet at job time."),
+            ("Hosted dev too.", "A dev container on the cluster plus a browser/remote IDE gives a full environment where the code can't leave the enclave."),
+            ("Proven substrate.", "The GitOps platform (kubeadm · Argo CD · Rancher) runs this app from the same registry today."),
+        ],
+        note="“Would those be the same things?” — at the image level, yes: hosting is a where-question. "
+             "One definition serves both; only the host changes.",
     )
 
     b.bullets_slide(
@@ -695,7 +822,7 @@ def build():
         [
             ("Recovers lost knowledge.", "Capturing the build as a Dockerfile forces us to discover and record how the build server actually works — the image becomes living documentation."),
             ("Reproducible and versioned.", "The environment is pinned in the registry and rebuilt automatically on every merge — no more undocumented, unrecoverable build box."),
-            ("One environment for dev, build, and CI.", "The same image runs everywhere, so builds are consistent and there’s no separate mystery build server or dev VM."),
+            ("One definition for dev, build, and deploy.", "The images are layers of one Dockerfile — dev is runtime plus the toolchain — so environments can’t drift and there’s no separate mystery build server or dev VM."),
             ("Onboarding is a single docker pull.", "Minutes to a working environment instead of inheriting an unexplained VM."),
             ("Developers keep their own IDE.", "Only the toolchain moves into the container; the local edit experience is unchanged."),
             ("It scales to any language.", "Python today, Java and C/C++ next — same workflow, different image contents."),
@@ -703,10 +830,10 @@ def build():
     )
 
     b.closing(
-        "One image. Dev, build, and CI.",
-        "From opaque build servers to one reproducible image",
+        "One definition. Dev to deploy.",
+        "From opaque build servers to one reproducible lineage",
         [
-            "One golden image per program — the single source of truth for dev, build, and CI.",
+            "One golden Dockerfile per program — layered images for dev, build, and deploy, from one source of truth.",
             "Developers keep their own IDE; the toolchain lives in a versioned, reproducible image.",
             "The result: reproducible builds, fast onboarding, and the end of “works on my machine.”",
         ],

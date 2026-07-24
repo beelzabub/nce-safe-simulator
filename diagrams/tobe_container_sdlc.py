@@ -35,7 +35,7 @@ def main():
         "rankdir": "LR",
         "splines": "spline",
         "labelloc": "t",
-        "label": "To-Be — one golden image per team in a shared registry; same pull → mount → develop → CI loop for any toolchain",
+        "label": "To-Be — one golden lineage per team in a shared registry; same pull → mount → develop → CI loop for any toolchain",
     }
     node_attr = {"fontsize": "13"}
 
@@ -63,7 +63,7 @@ def main():
         repo = Gitlab("GitLab repos\nsource + .gitlab-ci.yml")
 
         with Cluster("GitLab CI — each project builds in its OWN image"):
-            ci = GitlabCI("test + containerize\ndev == build == CI\n(rebuilds image on merge)")
+            ci = GitlabCI("test + containerize\none definition per team\n(rebuilds images on merge)")
 
         # Each developer pulls only their team's image; identical workflow across toolchains.
         py_img   >> Edge(color="darkgreen", style="bold", label="docker pull\n+ mount source") >> py_dev
