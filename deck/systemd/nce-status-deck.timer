@@ -1,10 +1,10 @@
 [Unit]
-Description=Weekly NCE Safe Simulator status deck (Fridays 14:00 America/Los_Angeles)
+Description=Weekly NCE Safe Simulator status deck (Fridays 15:00 America/Los_Angeles)
 
 [Timer]
-# 2:00 PM Pacific every Friday. The timezone suffix makes this DST-safe (systemd
+# 3:00 PM Pacific every Friday. The timezone suffix makes this DST-safe (systemd
 # resolves PDT/PST automatically); the box is up 08:00-01:00 PT, so it fires while up.
-OnCalendar=Fri *-*-* 14:00:00 America/Los_Angeles
+OnCalendar=Fri *-*-* 15:00:00 America/Los_Angeles
 Persistent=true
 Unit=nce-status-deck.service
 

@@ -11,7 +11,7 @@ Usage:
 Requires deck/metrics.json (run fetch_metrics.py first) and deck/screenshots/ (run
 capture_screenshots.py first, or point --screenshots-dir at an existing set).
 
---since sets the Latest Work window start (default: the previous Friday 14:00 Pacific — the
+--since sets the Latest Work window start (default: the previous Friday 15:00 Pacific — the
 prior weekly run — so a Friday build covers the trailing 7 days incl. the weekend);
 --review-date sets the cover/closing date (default: today, Pacific). The saved filename
 always ends with a -YYYYMMDD (review-date) postfix.
@@ -219,8 +219,8 @@ def _now_pacific():
 
 
 def _window_start_pacific():
-    """Start of the 'Latest Work' window: the previous Friday 14:00 Pacific — the
-    time of the prior weekly run. A Friday-14:00 build therefore covers the
+    """Start of the 'Latest Work' window: the previous Friday 15:00 Pacific — the
+    time of the prior weekly run. A Friday-15:00 build therefore covers the
     trailing ~7 days *including the weekend just past*, so Saturday/Sunday work
     lands in the following Friday's deck instead of falling into a gap between a
     Monday-anchored week and the Friday run. (--since overrides for an off-cadence
@@ -230,7 +230,7 @@ def _window_start_pacific():
     if days == 0:                  # today is Friday → anchor to the *previous* Friday
         days = 7
     prev_friday = d - timedelta(days=days)
-    return prev_friday.replace(hour=14, minute=0, second=0, microsecond=0)
+    return prev_friday.replace(hour=15, minute=0, second=0, microsecond=0)
 
 
 def _long_date(d):
