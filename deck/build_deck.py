@@ -163,6 +163,53 @@ def fetch_issues():
     return rows
 
 
+def capabilities_coverage_gap(capabilities, issues):
+    """Closed deck-visible issues (both repos) cited in no capability area —
+    the background-matter drift the weekly authoring step proposes homes for
+    (issue #258). Citation = the row's `ref` appearing in an area's
+    `all_issues`, title, or bullets. Bare `#N` refs match only when not part
+    of a longer ref: `#21` never matches `#210`, and simulator `#7` never
+    matches a `nce-git-ops#7` citation."""
+    text = "\n".join(
+        " ".join([c.get("all_issues") or "", c.get("title") or ""]
+                 + list(c.get("bullets") or []))
+        for c in capabilities)
+    gap = []
+    for row in issues:
+        if row["state"] != "closed":
+            continue
+        pattern = (r"(?<![\w#])" if not row["repo"] else "") + re.escape(row["ref"]) + r"(?!\d)"
+        if not re.search(pattern, text):
+            gap.append(row)
+    return gap
+
+
+def merge_capability_updates(capabilities, updates):
+    """Merge the weekly authoring step's proposed capability deltas
+    (deck/dist/capabilities-updates.gen.yaml — see weekly-authoring-prompt.md
+    for the schema) into the loaded capability list, so the Friday deck stays
+    current before the proposals are reviewed and folded into
+    capabilities.yaml. `extend` entries append refs/bullets to an existing
+    area (matched by exact title; unknown titles warn and are skipped) and
+    bump its count; `new_areas` entries append whole areas."""
+    caps = [dict(c) for c in capabilities]
+    by_title = {c["title"]: c for c in caps}
+    for ext in (updates.get("extend") or []):
+        cap = by_title.get(ext.get("title"))
+        if cap is None:
+            print(f"  warn: capabilities update targets unknown area {ext.get('title')!r} — skipped")
+            continue
+        add_refs = [r.strip() for r in (ext.get("add_issues") or "").split(",") if r.strip()]
+        if add_refs:
+            existing = cap.get("all_issues") or ""
+            cap["all_issues"] = f"{existing}, {', '.join(add_refs)}" if existing else ", ".join(add_refs)
+            cap["count"] = (cap.get("count") or 0) + len(add_refs)
+        if ext.get("add_bullets"):
+            cap["bullets"] = list(cap.get("bullets") or []) + list(ext["add_bullets"])
+    caps.extend(updates.get("new_areas") or [])
+    return caps
+
+
 def _now_pacific():
     """Current time in America/Los_Angeles (the user's timezone). The deck's
     dates are stated in Pacific even though builds run on UTC hosts, so the
@@ -1825,6 +1872,14 @@ class DeckBuilder:
         self.metrics["issues_closed"] = sum(1 for i in self.issues if i["state"] == "closed")
         self.metrics["issues_open"] = self.metrics["issues_total"] - self.metrics["issues_closed"]
 
+        # Self-check (issue #258): background matter must not silently drift
+        # behind the work — every closed issue should live in some capability
+        # area (directly or via the merged weekly updates file).
+        gap = capabilities_coverage_gap(self.capabilities, self.issues)
+        if gap:
+            print(f"  warn: {len(gap)} closed issue(s) in no capability area "
+                  f"(capabilities.yaml drift): {', '.join(r['ref'] for r in gap)}")
+
         self.build_cover()
         self.build_agenda()
         self.build_latest_work()
@@ -1866,7 +1921,23 @@ def main():
     ap.add_argument("--spotlights", default=os.path.join(HERE, "latest-work-spotlights.yaml"),
                     help="authored Latest-Work spotlight slides (YAML). If absent, spotlights "
                          "are auto-derived from `slides`-labeled issues closed this week.")
+    ap.add_argument("--capabilities-updates",
+                    default=os.path.join(HERE, "dist", "capabilities-updates.gen.yaml"),
+                    help="proposed capability-area deltas from the weekly authoring step; "
+                         "merged into --capabilities at build time when the file exists.")
+    ap.add_argument("--print-coverage-gap", action="store_true",
+                    help="print the closed issues cited in no capability area (JSON) and exit "
+                         "— used by the weekly authoring step to propose updates.")
     args = ap.parse_args()
+
+    if args.print_coverage_gap:
+        with open(args.capabilities) as f:
+            capabilities = yaml.safe_load(f)["capabilities"]
+        if args.capabilities_updates and os.path.exists(args.capabilities_updates):
+            with open(args.capabilities_updates) as f:
+                capabilities = merge_capability_updates(capabilities, yaml.safe_load(f) or {})
+        print(json.dumps(capabilities_coverage_gap(capabilities, fetch_issues()), indent=2))
+        return
 
     if not os.path.exists(args.metrics):
         raise SystemExit(f"{args.metrics} not found — run `python3 deck/fetch_metrics.py` first")
@@ -1888,6 +1959,13 @@ def main():
         metrics = json.load(f)
     with open(args.capabilities) as f:
         capabilities = yaml.safe_load(f)["capabilities"]
+    if args.capabilities_updates and os.path.exists(args.capabilities_updates):
+        with open(args.capabilities_updates) as f:
+            updates = yaml.safe_load(f) or {}
+        capabilities = merge_capability_updates(capabilities, updates)
+        print(f"  capabilities: merged weekly updates from {args.capabilities_updates} "
+              f"({len(updates.get('extend') or [])} extension(s), "
+              f"{len(updates.get('new_areas') or [])} new area(s))")
     with open(args.shots) as f:
         shots = yaml.safe_load(f)
 

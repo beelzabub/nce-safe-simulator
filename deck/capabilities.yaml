@@ -242,7 +242,7 @@ capabilities:
 
   - title: "Platform GitOps — nce-git-ops"
     count: 14
-    all_issues: "#259 + nce-git-ops#1–#3, #7–#16"
+    all_issues: "#259, nce-git-ops#1, nce-git-ops#2, nce-git-ops#3, nce-git-ops#7, nce-git-ops#8, nce-git-ops#9, nce-git-ops#10, nce-git-ops#11, nce-git-ops#12, nce-git-ops#13, nce-git-ops#14, nce-git-ops#15, nce-git-ops#16"
     blurb: "A Kubernetes platform built from zero and run by GitOps — Terraform, Ansible, kubeadm, Argo CD, Rancher, Keycloak"
     bullets:
       - "nce-git-ops#10 AWS infrastructure as code — Terraform provisions, Ansible configures, kubeadm bootstraps."
