@@ -53,6 +53,15 @@ REPO_ROOT = os.path.dirname(HERE)
 DEFAULT_TEMPLATE = os.path.join(HERE, "assets", "template.pptx")
 DEFAULT_TEMPLATE_S3 = "s3://workflow-bootstrap-20260626-055227-881490118830/x-bookmarks-obsidian/Powerpoint Template SAIC copy.pptx"
 
+# Companion projects whose issues the deck also covers (issue #268). Each entry
+# is (ref-prefix, URL-encoded project path or numeric ID): the main repo's
+# issues stay bare `#N`, companion issues render as `<prefix>#N` everywhere.
+# The main repo still resolves via `projects/:id` (no hardcoded ID); companions
+# need an explicit path since glab can only resolve the checkout's own project.
+# A companion that isn't reachable (e.g. on an enclave instance that only has
+# the main repo) is skipped with a warning, not an error.
+COMPANION_PROJECTS = [("nce-git-ops", "gl-demo-ultimate-lmwilliams%2Fnce-git-ops")]
+
 # Theme colors are read from the template's own theme XML at build time (see
 # _load_theme_colors) rather than hardcoded, so a template swap doesn't silently
 # mismatch the deck's palette against the new file's real brand colors.
@@ -103,27 +112,54 @@ def _decode_concatenated_json_arrays(text):
     return items
 
 
+def _issue_row(x, repo=""):
+    """Normalize one GitLab API issue into the deck's row dict. `repo` is ""
+    for the main project (bare `#N` references) or a companion key like
+    "nce-git-ops" (references render as `nce-git-ops#N`)."""
+    issue_type = ""
+    for label in x.get("labels", []):
+        if label.startswith("type::"):
+            issue_type = label.split("::", 1)[1]
+            break
+    assignee = (x.get("assignee") or {}).get("username", "")
+    iid = x["iid"]
+    return {"iid": iid, "repo": repo,
+            "ref": f"{repo}#{iid}" if repo else f"#{iid}",
+            "title": x["title"], "state": x["state"],
+            "type": issue_type, "assignee": assignee,
+            "closed_at": x.get("closed_at") or ""}
+
+
+def _is_deck_issue(row):
+    """Housekeeping issues never reach the deck (issue #268): the recurring
+    'Work state sync - <datetime>' context snapshots exist for session
+    continuity, not as work."""
+    return not row["title"].startswith("Work state sync")
+
+
 def fetch_issues():
-    """Pull every issue (open + closed) for the project the current git remote
-    points at — same `glab api projects/:id/...` project-resolution approach as
-    fetch_metrics.py, so there's no hardcoded project ID. Returns a list of
-    {iid, title, state, type, assignee} dicts sorted by issue number ascending."""
-    out = subprocess.run(
-        ["glab", "api", "projects/:id/issues?state=all&per_page=100&order_by=created_at&sort=asc",
-         "--paginate"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
-    ).stdout
+    """Pull every issue (open + closed) for the deck's projects: the project the
+    current git remote points at (same `glab api projects/:id/...` resolution as
+    fetch_metrics.py — no hardcoded ID) plus each companion project (issue #268).
+    Work-state-sync issues are dropped for all projects. Returns row dicts (see
+    _issue_row) sorted main-project-first, then by issue number ascending. A
+    companion that can't be fetched (e.g. absent on this GitLab instance) is
+    skipped with a warning rather than failing the build."""
     rows = []
-    for x in _decode_concatenated_json_arrays(out):
-        issue_type = ""
-        for label in x.get("labels", []):
-            if label.startswith("type::"):
-                issue_type = label.split("::", 1)[1]
-                break
-        assignee = (x.get("assignee") or {}).get("username", "")
-        rows.append({"iid": x["iid"], "title": x["title"], "state": x["state"],
-                     "type": issue_type, "assignee": assignee})
-    rows.sort(key=lambda r: r["iid"])
+    for repo, proj in [("", ":id")] + COMPANION_PROJECTS:
+        res = subprocess.run(
+            ["glab", "api",
+             f"projects/{proj}/issues?state=all&per_page=100&order_by=created_at&sort=asc",
+             "--paginate"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=(repo == ""),
+        )
+        if res.returncode != 0:
+            print(f"  warn: companion project {repo} ({proj}) not fetchable — skipped")
+            continue
+        rows.extend(_issue_row(x, repo)
+                    for x in _decode_concatenated_json_arrays(res.stdout))
+    rows = [r for r in rows if _is_deck_issue(r)]
+    rows.sort(key=lambda r: (r["repo"], r["iid"]))
     return rows
 
 
@@ -187,33 +223,48 @@ def fetch_completed_since(since_dt):
     return ids
 
 
+def _closed_in_window(x, since_dt):
+    """True when the raw API issue closed on/after since_dt."""
+    ca = x.get("closed_at")
+    if not ca:
+        return False
+    ca = ca[:-1] + "+00:00" if ca.endswith("Z") else ca
+    try:
+        cdt = datetime.fromisoformat(ca)
+    except ValueError:
+        return False
+    return cdt >= since_dt
+
+
 def fetch_slides_issues(since_dt):
-    """Issues labeled `slides` that closed since the previous weekly run — the
-    candidates for a dedicated spotlight slide. How related issues are grouped
-    onto a single slide is a judgement call made when authoring the spotlights
-    file; this just reports the candidates (used for the deterministic fallback
-    and to tell the weekly authoring step what to write up)."""
+    """Issues labeled `slides` that closed since the previous weekly run, across
+    the main project and every companion (issue #268) — the candidates for a
+    dedicated spotlight slide. How related issues are grouped onto a single
+    slide is a judgement call made when authoring the spotlights file; this just
+    reports the candidates (used for the deterministic fallback and to tell the
+    weekly authoring step what to write up). Each row carries `ref` (`#N` or
+    `<companion>#N`) for unambiguous cross-project citation."""
     if since_dt.tzinfo is None:
         since_dt = since_dt.replace(tzinfo=timezone.utc)
-    out = subprocess.run(
-        ["glab", "api", "projects/:id/issues?labels=slides&state=closed&per_page=100",
-         "--paginate"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout
     rows = []
-    for x in _decode_concatenated_json_arrays(out):
-        ca = x.get("closed_at")
-        if not ca:
+    for repo, proj in [("", ":id")] + COMPANION_PROJECTS:
+        res = subprocess.run(
+            ["glab", "api",
+             f"projects/{proj}/issues?labels=slides&state=closed&per_page=100",
+             "--paginate"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=(repo == ""))
+        if res.returncode != 0:
+            print(f"  warn: companion project {repo} ({proj}) not fetchable — skipped")
             continue
-        ca = ca[:-1] + "+00:00" if ca.endswith("Z") else ca
-        try:
-            cdt = datetime.fromisoformat(ca)
-        except ValueError:
-            continue
-        if cdt < since_dt:
-            continue
-        rows.append({"iid": x["iid"], "title": x["title"],
-                     "description": x.get("description") or ""})
-    rows.sort(key=lambda r: r["iid"])
+        for x in _decode_concatenated_json_arrays(res.stdout):
+            if not _closed_in_window(x, since_dt):
+                continue
+            iid = x["iid"]
+            rows.append({"iid": iid, "repo": repo,
+                         "ref": f"{repo}#{iid}" if repo else f"#{iid}",
+                         "title": x["title"],
+                         "description": x.get("description") or ""})
+    rows.sort(key=lambda r: (r["repo"], r["iid"]))
     return rows
 
 
@@ -661,10 +712,10 @@ class DeckBuilder:
         agenda = self.new_slide(self.TOC)
         agenda.placeholders[0].text_frame.paragraphs[0].text = "Agenda"
         items = [f"Latest Work — since {self.since_dt.strftime('%b')} {self.since_dt.day}",
+                 "By the Numbers — Metrics",
                  "Project Overview", "Architecture", "DoD Architecture Views",
                  "Deployment Methods", "CLI vs. UI",
                  "Development Process & Tools", "Technology Stack",
-                 "By the Numbers — Metrics",
                  "Issues — Full Backlog",
                  f"Capability Areas ({len(self.capabilities)})",
                  "Appendix — Full UI & Report Reference"]
@@ -1341,8 +1392,8 @@ class DeckBuilder:
         # (label, width EMU, key, align) — Title is the wide column, mirroring
         # the FMS "Summary" column. Widths sum to content_w.
         cols = [
-            ("#",        Emu(620000),  "iid",      PP_ALIGN.CENTER),
-            ("Title",    Emu(4744000), "title",    PP_ALIGN.LEFT),
+            ("#",        Emu(1350000), "ref",      PP_ALIGN.CENTER),
+            ("Title",    Emu(4014000), "title",    PP_ALIGN.LEFT),
             ("Type",     Emu(900000),  "type",     PP_ALIGN.CENTER),
             ("Assignee", Emu(1560000), "assignee", PP_ALIGN.LEFT),
             ("Status",   Emu(960000),  "status",   PP_ALIGN.CENTER),
@@ -1356,11 +1407,13 @@ class DeckBuilder:
         rendered = 0
         for page in range(pages):
             chunk = issues[page * rows_per_page:(page + 1) * rows_per_page]
+            n_companion = sum(1 for i in issues if i["repo"])
+            scope = (f"{total - n_companion} simulator + {n_companion} nce-git-ops"
+                     if n_companion else f"#{issues[0]['iid']}–#{issues[-1]['iid']}")
             s = self.new_slide()
             self.header_band(
                 s, "Issues",
-                f"All {total} issues (#{issues[0]['iid']}–#{issues[-1]['iid']})  ·  "
-                f"page {page + 1} of {pages}",
+                f"All {total} issues ({scope})  ·  page {page + 1} of {pages}",
             )
 
             # Column-header row: solid blue bar, white bold labels.
@@ -1384,8 +1437,8 @@ class DeckBuilder:
                 status_txt = "Closed" if closed else "Open"
                 status_color = self.C["green"] if closed else self.C["blue"]
                 values = {
-                    "iid": f"#{issue['iid']}",
-                    "title": (issue["title"][:86] + "…") if len(issue["title"]) > 87 else issue["title"],
+                    "ref": issue["ref"],
+                    "title": (issue["title"][:78] + "…") if len(issue["title"]) > 79 else issue["title"],
                     "type": issue["type"].capitalize() if issue["type"] else "Issue",
                     "assignee": "Jamie Powers" if issue["assignee"] in ("", "beelzabub") else issue["assignee"],
                     "status": status_txt,
@@ -1487,10 +1540,16 @@ class DeckBuilder:
         since_str = _long_date(self.since_dt)
         self._section_divider("Latest Work", f"New work completed since {since_str}")
 
+        # Main-repo completions come from merge commits into develop (precise
+        # about what actually landed); companion-repo completions (issue #268)
+        # from issue close dates, since those repos aren't checked out here.
+        # Work-state-sync issues are already excluded by fetch_issues.
         completed = fetch_completed_since(self.since_dt)
-        by_iid = {i["iid"]: i for i in self.issues}
-        items = [by_iid[i] for i in sorted(completed)
-                 if i in by_iid and not by_iid[i]["title"].startswith("Work state sync")]
+        since_utc = (self.since_dt if self.since_dt.tzinfo
+                     else self.since_dt.replace(tzinfo=timezone.utc))
+        items = [i for i in self.issues
+                 if (i["repo"] == "" and i["iid"] in completed)
+                 or (i["repo"] and _closed_in_window(i, since_utc))]
 
         # type:: label -> (section heading, matching label set, accent). The last
         # group (types=None) sweeps up everything untyped/unmatched.
@@ -1504,14 +1563,14 @@ class DeckBuilder:
         used, grouped = set(), []
         for heading, types, color in GROUPS:
             bucket = [it for it in items
-                      if (it["iid"] not in used) and (types is None or it["type"] in types)]
-            used.update(it["iid"] for it in bucket)
+                      if (it["ref"] not in used) and (types is None or it["type"] in types)]
+            used.update(it["ref"] for it in bucket)
             if bucket:
                 grouped.append((heading, color, bucket))
 
         s = self.new_slide()
         self.header_band(s, "Latest Work",
-                         f"Merged to develop since {since_str}  ·  {len(items)} issues")
+                         f"Completed since {since_str}  ·  {len(items)} issues")
         margin, col_gap = Emu(180000), Emu(220000)
         col_w = (self.SW - 2 * margin - col_gap) // 2
         top, bottom = Emu(880000), self.SH - Emu(160000)
@@ -1528,7 +1587,7 @@ class DeckBuilder:
                 title = it["title"]
                 title = (title[:60] + "…") if len(title) > 61 else title
                 self.add_text(s, x + Emu(60000), y, col_w - Emu(60000), Emu(230000),
-                              f"#{it['iid']}   {title}", 9, body_color,
+                              f"{it['ref']}   {title}", 9, body_color,
                               anchor=MSO_ANCHOR.MIDDLE, wrap=False)
                 y += Emu(232000)
             return y + Emu(150000)
@@ -1550,7 +1609,7 @@ class DeckBuilder:
         spots = self.spotlights
         if spots is None:
             spots = [
-                {"title": f"#{i['iid']} — {i['title']}", "subtitle": "",
+                {"title": f"{i['ref']} — {i['title']}", "subtitle": "",
                  "bullets": self._desc_to_bullets(i["description"]), "images": []}
                 for i in fetch_slides_issues(self.since_dt)
             ]
@@ -1715,10 +1774,12 @@ class DeckBuilder:
         self.build_cover()
         self.build_agenda()
         self.build_latest_work()
-        self.build_chrome_slides()
-        self.build_tech_stack()
+        # Metrics ride directly behind Latest Work — the week's story then its
+        # numbers — ahead of the standing what-is-this-project material.
         self._section_divider("By the Numbers", "Project Metrics")
         self.build_metrics_slide()
+        self.build_chrome_slides()
+        self.build_tech_stack()
         self._section_divider("Issues", "Full Backlog — every issue by number")
         self.build_issues_table()
         self._section_divider("Capability Areas", "The same work, grouped by capability area")

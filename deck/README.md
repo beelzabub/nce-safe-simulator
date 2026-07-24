@@ -125,8 +125,20 @@ issues merged into `develop` since the previous weekly run, grouped by type
 for the standout items. It closes with a **"Status Update Complete"** slide. The cover and
 closing slides are stamped with the status date.
 
+**Two repos, one deck** (issue #268): alongside this repo the deck also covers the
+**nce-git-ops** platform repo — its issues appear in the Latest Work groups, the issues
+table, the KPI counts, and the spotlight-candidate list. References disambiguate the two
+trackers: simulator issues stay bare `#N`, platform issues render as `nce-git-ops#N`
+everywhere. The covered companions are listed in `COMPANION_PROJECTS` in `build_deck.py`;
+a companion that isn't reachable (e.g. an enclave GitLab that only hosts this repo) is
+skipped with a warning rather than failing the build. Simulator completions are derived
+from merge commits into `develop`; companion completions from issue close dates (those
+repos aren't checked out on the build box). Recurring **"Work state sync" housekeeping
+issues are excluded** from every deck surface, for both repos. Commit-velocity and SLOC
+metrics remain simulator-only (they come from the local git checkout).
+
 Which issues get a spotlight is driven by a GitLab **`slides` label**: any issue tagged
-`slides` and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
+`slides` (in either repo) and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
 is authored (not derived verbatim) into `deck/latest-work-spotlights.yaml` — a list of
 `{title, subtitle, bullets[], images[], caption}` entries, one per slide, with related
 issues grouped onto a single slide (e.g. the import/export hardening arc). `build_deck.py`
