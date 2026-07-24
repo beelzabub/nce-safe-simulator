@@ -4,7 +4,7 @@ STEP 1 — get this week's candidate issues. Run exactly:
 
   python3 -c 'import sys;sys.path.insert(0,"deck");import build_deck as b,json;print(json.dumps(b.fetch_slides_issues(b._window_start_pacific())))'
 
-That prints a JSON list of the issues labeled `slides` that closed since the previous weekly run (the trailing ~7 days incl. the weekend): each has iid, title, and description.
+That prints a JSON list of the issues labeled `slides` that closed since the previous weekly run (the trailing ~7 days incl. the weekend), across BOTH covered repos — nce-safe-simulator and nce-git-ops: each has iid, repo, ref, title, and description. `ref` is the citation form: `#N` for the simulator, `nce-git-ops#N` for the platform repo — use `ref` (never bare iid) whenever you cite a nce-git-ops issue in a title or `issues` list, so numbers from the two trackers can't be confused. Work-state-sync issues are excluded automatically and never get slides.
 
 STEP 2 — see which screenshots exist (for optional images). Run:
 
