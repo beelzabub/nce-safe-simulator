@@ -327,9 +327,29 @@ class DeckBuilder:
         r.font.name = FONT
         return tb
 
+    @staticmethod
+    def _fit_bullet_size(w, h, items, size, space_after, floor=9):
+        """Step the font size down (to `floor`) until the estimated rendered
+        height of the bullet list fits the box. python-pptx can't measure text,
+        so this uses an average-character-width wrap estimate; sizes that
+        already fit come back unchanged. Returns (size, space_after) with
+        space_after scaled to the chosen size."""
+        texts = ["".join(seg[0] for seg in ([(it, False)] if isinstance(it, str) else it))
+                 for it in items]
+        w_pt, h_pt = w / 12700, h / 12700
+        for pt in range(int(size), floor, -1):
+            per_line = max(1, int(w_pt / (0.5 * pt)))
+            lines = sum(-(-(len(t) + 3) // per_line) for t in texts)
+            if lines * pt * 1.25 + len(texts) * space_after * pt / size <= h_pt:
+                return pt, space_after * pt / size
+        return floor, space_after * floor / size
+
     def add_bullets(self, slide, x, y, w, h, items, size, color, space_after=8):
         """Each item is a string, or a list of (text, italic) segments for
-        mixed formatting within one bullet (e.g. italicized dates)."""
+        mixed formatting within one bullet (e.g. italicized dates). A list too
+        long for the box steps its font down rather than bleeding past the
+        bottom edge (deck-review fix, 2026-07-24)."""
+        size, space_after = self._fit_bullet_size(w, h, items, size, space_after)
         tb = slide.shapes.add_textbox(x, y, w, h)
         tf = tb.text_frame
         tf.word_wrap = True
@@ -929,13 +949,14 @@ class DeckBuilder:
         ], 11, body_color, space_after=8)
         self.add_rect(s2, right_x, head_y, col_w, Emu(260000), self.C["green"])
         self.add_text(s2, right_x + Emu(80000), head_y, col_w - Emu(160000), Emu(260000),
-                      "Known gaps (candidate roadmap)", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+                      "Known gaps & open work (candidate roadmap)", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
         self.add_bullets(s2, right_x + Emu(40000), body_y, col_w - Emu(80000), body_h, [
             "No CAC/PIV or federated identity yet — basic is dev-only (AAA methods tracked in #152–#156).",
             "No RBAC — access is authenticated-vs-not; job conflicts use writer/read-only groups, not permissions.",
             "CI runs tests only — no SAST, dependency/container scanning, or SBOM stages; images deploy operator-driven.",
             "No per-user structured audit trail (job/stdout logs to CloudWatch, 1-month retention).",
             "Commercial us-east-1 — a GovCloud / Impact-Level target would need its own accreditation work.",
+            "Open evaluation spikes: S3 for the simulator (#84); backup strategy for GitLab projects/groups (#205).",
         ], 11, body_color, space_after=8)
 
     def _build_deployment_slide(self):
@@ -1575,28 +1596,46 @@ class DeckBuilder:
         col_w = (self.SW - 2 * margin - col_gap) // 2
         top, bottom = Emu(880000), self.SH - Emu(160000)
         col2_x = margin + col_w + col_gap
-        mid = top + int((bottom - top) * 0.52)
         body_color = RGBColor(0x2A, 0x2E, 0x32)
+        HEAD_H, ITEM_H, GROUP_GAP = Emu(330000), Emu(232000), Emu(150000)
 
-        def render_group(x, y, heading, color, bucket):
-            self.add_rect(s, x, y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
-            self.add_text(s, x + Emu(190000), y, col_w - Emu(190000), Emu(280000),
-                          f"{heading}  ({len(bucket)})", 13, color, bold=True)
-            y += Emu(330000)
+        # Flow layout: fill column 1, then column 2, then continue onto a fresh
+        # slide — nothing may render past `bottom`, however many issues land in
+        # a week. A group that splits repeats its heading as "(cont.)".
+        cur_x, cur_y = margin, top
+
+        def next_column():
+            nonlocal s, cur_x, cur_y
+            if cur_x == margin:
+                cur_x, cur_y = col2_x, top
+            else:
+                s = self.new_slide()
+                self.header_band(s, "Latest Work",
+                                 f"Completed since {since_str}  ·  continued")
+                cur_x, cur_y = margin, top
+
+        def add_heading(label, color):
+            nonlocal cur_y
+            self.add_rect(s, cur_x, cur_y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
+            self.add_text(s, cur_x + Emu(190000), cur_y, col_w - Emu(190000), Emu(280000),
+                          label, 13, color, bold=True)
+            cur_y += HEAD_H
+
+        for heading, color, bucket in grouped:
+            if cur_y + HEAD_H + ITEM_H > bottom:  # heading must bring an item with it
+                next_column()
+            add_heading(f"{heading}  ({len(bucket)})", color)
             for it in bucket:
+                if cur_y + ITEM_H > bottom:
+                    next_column()
+                    add_heading(f"{heading}  (cont.)", color)
                 title = it["title"]
                 title = (title[:60] + "…") if len(title) > 61 else title
-                self.add_text(s, x + Emu(60000), y, col_w - Emu(60000), Emu(230000),
+                self.add_text(s, cur_x + Emu(60000), cur_y, col_w - Emu(60000), Emu(230000),
                               f"{it['ref']}   {title}", 9, body_color,
                               anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-                y += Emu(232000)
-            return y + Emu(150000)
-
-        cur_x, cur_y = margin, top
-        for heading, color, bucket in grouped:
-            if cur_x == margin and cur_y > mid:
-                cur_x, cur_y = col2_x, top   # spill into the second column
-            cur_y = render_group(cur_x, cur_y, heading, color, bucket)
+                cur_y += ITEM_H
+            cur_y += GROUP_GAP
 
         self._build_spotlights()
 
