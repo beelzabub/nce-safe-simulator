@@ -712,10 +712,10 @@ class DeckBuilder:
         agenda = self.new_slide(self.TOC)
         agenda.placeholders[0].text_frame.paragraphs[0].text = "Agenda"
         items = [f"Latest Work — since {self.since_dt.strftime('%b')} {self.since_dt.day}",
+                 "By the Numbers — Metrics",
                  "Project Overview", "Architecture", "DoD Architecture Views",
                  "Deployment Methods", "CLI vs. UI",
                  "Development Process & Tools", "Technology Stack",
-                 "By the Numbers — Metrics",
                  "Issues — Full Backlog",
                  f"Capability Areas ({len(self.capabilities)})",
                  "Appendix — Full UI & Report Reference"]
@@ -1774,10 +1774,12 @@ class DeckBuilder:
         self.build_cover()
         self.build_agenda()
         self.build_latest_work()
-        self.build_chrome_slides()
-        self.build_tech_stack()
+        # Metrics ride directly behind Latest Work — the week's story then its
+        # numbers — ahead of the standing what-is-this-project material.
         self._section_divider("By the Numbers", "Project Metrics")
         self.build_metrics_slide()
+        self.build_chrome_slides()
+        self.build_tech_stack()
         self._section_divider("Issues", "Full Backlog — every issue by number")
         self.build_issues_table()
         self._section_divider("Capability Areas", "The same work, grouped by capability area")
