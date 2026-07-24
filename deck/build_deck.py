@@ -1788,6 +1788,21 @@ class DeckBuilder:
             if os.path.exists(path):
                 self.full_bleed_image_slide(f"{shot['title']} (Light)", path, dark=False)
 
+        # ── Platform group: the nce-git-ops GitOps platform, from the committed
+        # spotlight art (captured from the live AWS cluster — no capture pass here).
+        self._section_divider("Platform GitOps", "nce-git-ops — the live platform services")
+        for fname, title in [
+            ("gitops-rancher-home.png", "Rancher — Home (both clusters)"),
+            ("gitops-rancher-cluster-dashboard.png", "Rancher — Cluster Dashboard"),
+            ("gitops-argocd-applications.png", "Argo CD — Applications"),
+            ("gitops-argocd-simulator-tree.png", "Argo CD — Simulator Resource Tree"),
+            ("gitops-keycloak-admin-console.png", "Keycloak — Admin Console"),
+            ("gitops-simulator-app.png", "Simulator — Deployed via GitOps"),
+        ]:
+            path = os.path.join(REPO_ROOT, "deck", "assets", "spotlight-extras", fname)
+            if os.path.exists(path):
+                self.full_bleed_image_slide(title, path, dark=False)
+
         # ── Quarto group: the published report site gets its own section.
         self._section_divider("Quarto Reports", "The published report site, page by page")
         for shot in self.shots.get("quarto_shots", []):

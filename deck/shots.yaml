@@ -113,6 +113,9 @@ ui_shots:
     title: "Other — Epic Cards (Print-Ready PDF)"
     expand: ["OTHER"]
     select: "Epic Cards"
+  - out: 19-deployments-dialog
+    title: "Web UI — Deployments"
+    click: "text=Deployments…"
 
 # Diagnose is parameterless and read-only, so it launches immediately with no dialog to
 # screenshot — it belongs in live_run_shots, not ui_shots. Since #249 reclassified it
