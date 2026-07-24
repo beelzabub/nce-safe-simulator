@@ -1252,6 +1252,15 @@ repo, mount it into the container, and develop with nothing installed locally.
 This is the container-based SDLC the project uses to demonstrate moving teams off
 per-developer VMs (issues #243 / #244).
 
+The leadership brief for that transition lives in `slides/243-slide-brief-as-is-to-be/`
+(`python3 build_brief.py` → `dist/`, previews via `render_preview.py`). It builds on the
+committed NCE 120 template (`assets/20260721_NCE_120_Template.pptx`, issue #266) and
+presents the honest two-image framing — one Dockerfile lineage, runtime + dev published
+per program — plus the container-layering model (PMW-120 foundation, program layers),
+the image-variant sweet spot, and the local vs cloud-hosted dev/build/test assessment.
+The As-Is/To-Be diagrams regenerate from `diagrams/tobe_container_sdlc_single.py`,
+`diagrams/tobe_container_sdlc.py`, and `diagrams/container_dev_workflow.py`.
+
 Two images are built from the multi-stage `Dockerfile`:
 
 | Image | Target | Purpose |
