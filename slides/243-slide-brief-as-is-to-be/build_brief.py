@@ -14,6 +14,7 @@ House style mirrors deck/build_deck.py (title band + brand rule, accent palette
 read from the template theme) without importing its heavy, metrics-coupled
 machinery.
 """
+import io
 import os
 
 from pptx import Presentation
@@ -97,6 +98,13 @@ class Brief:
         self.SH = self.prs.slide_height
         self.C = load_theme_colors(self.prs)
         self.BLANK = self.prs.slide_masters[0].slide_layouts[23]  # '24 - Blank Slide (light)'
+        # The white PMW-120 logo from the Blank Slide (dark) layout, re-stamped
+        # onto every content slide's navy header band (the band would otherwise
+        # paint over the light layout's own top-right logo). Geometry is kept
+        # at the layout's native position.
+        dark_blank = self.prs.slide_masters[0].slide_layouts[22]
+        pic = next(sh for sh in dark_blank.shapes if sh.shape_type == 13)
+        self._logo = (pic.image.blob, pic.left, pic.top, pic.width, pic.height)
 
     # -- primitives (mirrors deck/build_deck.py) --------------------------------
     def add_rect(self, slide, x, y, w, h, color):
@@ -152,14 +160,18 @@ class Brief:
 
     def header_band(self, slide, title, subtitle=None):
         self.add_rect(slide, 0, 0, self.SW, Emu(685800), self.C["blue"])
+        # Keep the title/subtitle clear of the logo stamped at the band's right.
+        tw = self.SW - Emu(320000) - 830000
         tsize = 22 if len(title) <= 46 else (18 if len(title) <= 60 else 15)
-        self.add_text(slide, Emu(320000), Emu(90000), self.SW - Emu(640000), Emu(360000),
+        self.add_text(slide, Emu(320000), Emu(90000), tw, Emu(360000),
                       title, tsize, WHITE, bold=True,
                       anchor=MSO_ANCHOR.MIDDLE if not subtitle else MSO_ANCHOR.TOP, wrap=False)
         if subtitle:
-            self.add_text(slide, Emu(320000), Emu(430000), self.SW - Emu(640000),
+            self.add_text(slide, Emu(320000), Emu(430000), tw,
                           Emu(220000), subtitle, 10.5, WHITE)
         self.add_rect(slide, 0, Emu(685800), self.SW, Emu(27000), self.C["yellow"])
+        blob, lx, ly, lw, lh = self._logo
+        slide.shapes.add_picture(io.BytesIO(blob), lx, ly, lw, lh)
 
     def add_picture_contain(self, slide, img_path, box_x, box_y, box_w, box_h):
         with Image.open(img_path) as im:
@@ -177,21 +189,20 @@ class Brief:
 
     # -- slide templates --------------------------------------------------------
     def cover(self, kicker, title, subtitle, footer):
-        s = self.new_slide()
-        # Explicit colors — the template's theme slots resolve oddly (its
-        # "yellow" is black, "lgray" is magenta), so set them directly here.
-        AMBER = self.C["yellow"]
-        SOFT = RGBColor(0xE8, 0xF3, 0xF8)
-        self.add_rect(s, 0, 0, self.SW, self.SH, self.C["blue"])
-        self.add_rect(s, 0, Emu(2700000), self.SW, Emu(20000), AMBER)
-        self.add_text(s, Emu(520000), Emu(1150000), self.SW - Emu(1040000), Emu(300000),
-                      kicker, 13, AMBER, bold=True)
-        self.add_text(s, Emu(520000), Emu(1500000), self.SW - Emu(1040000), Emu(1100000),
-                      title, 34, WHITE, bold=True)
-        self.add_text(s, Emu(520000), Emu(2820000), self.SW - Emu(1040000), Emu(600000),
-                      subtitle, 15, WHITE)
-        self.add_text(s, Emu(520000), self.SH - Emu(560000), self.SW - Emu(1040000),
-                      Emu(360000), footer, 10.5, SOFT)
+        """Use the template's own Title Slide (dark) layout so the cover keeps
+        its PMW-120 art (wave banner, seals). Text goes into the layout's
+        placeholders; kicker is unused here (the layout brands the page)."""
+        s = self.prs.slides.add_slide(self.prs.slide_masters[0].slide_layouts[0])
+        for ph in s.placeholders:
+            idx = ph.placeholder_format.idx
+            if idx == 0:          # center title
+                ph.text_frame.text = title
+            elif idx == 18:       # 'Subtitle' slot under the title
+                ph.text_frame.text = subtitle
+            elif idx == 1:        # left info block ('Prepared By:' slot)
+                ph.text_frame.text = footer
+            elif idx == 14:       # 'DD Month YYYY'
+                ph.text_frame.text = "24 July 2026"
         return s
 
     def diagram_slide(self, title, subtitle, img, caption):
@@ -277,16 +288,21 @@ class Brief:
         return s
 
     def closing(self, title, subtitle, lines):
-        AMBER = self.C["yellow"]
-        s = self.new_slide()
-        self.add_rect(s, 0, 0, self.SW, self.SH, self.C["blue"])
-        self.add_rect(s, Emu(520000), Emu(1980000), Emu(1500000), Emu(20000), AMBER)
-        self.add_text(s, Emu(520000), Emu(1150000), self.SW - Emu(1040000), Emu(700000),
-                      title, 30, WHITE, bold=True)
-        self.add_text(s, Emu(520000), Emu(2120000), self.SW - Emu(1040000), Emu(400000),
-                      subtitle, 15, AMBER, bold=True)
-        self.add_bullets(s, Emu(520000), Emu(2680000), self.SW - Emu(1040000),
-                         Emu(1600000), lines, 13, WHITE, space_after=10)
+        """Use the template's Closing Slide (dark) layout — the centered
+        PMW-120 seal and wave art come from the layout. Our text takes the
+        free strip above the seal and the band under the layout's motto line.
+        Positions are native-canvas EMU (plain ints, not the scaled Emu
+        wrapper)."""
+        s = self.prs.slides.add_slide(self.prs.slide_masters[0].slide_layouts[26])
+        self.add_text(s, 0, 170000, self.SW, 560000, title, 20, WHITE, bold=True,
+                      align=PP_ALIGN.CENTER)
+        self.add_text(s, 0, 730000, self.SW, 280000, subtitle, 11, self.C["yellow"],
+                      bold=True, align=PP_ALIGN.CENTER)
+        y = 4780000
+        for line in lines:
+            self.add_text(s, 0, y, self.SW, 330000, line, 10.5, WHITE,
+                          align=PP_ALIGN.CENTER)
+            y += 350000
         return s
 
     # -- code + table primitives -----------------------------------------------
