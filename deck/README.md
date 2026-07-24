@@ -141,7 +141,10 @@ skipped with a warning rather than failing the build. Simulator completions are 
 from merge commits into `develop`; companion completions from issue close dates (those
 repos aren't checked out on the build box). Recurring **"Work state sync" housekeeping
 issues are excluded** from every deck surface, for both repos. Commit-velocity and SLOC
-metrics remain simulator-only (they come from the local git checkout).
+metrics remain simulator-only (they come from the local git checkout). The platform repo
+also has standing coverage: a "Platform GitOps — nce-git-ops" capability area in
+`capabilities.yaml` and a "Platform GitOps" appendix section rendered from the committed
+screenshots in `deck/assets/spotlight-extras/`.
 
 Which issues get a spotlight is driven by a GitLab **`slides` label**: any issue tagged
 `slides` (in either repo) and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
