@@ -10,7 +10,7 @@ chmod +x "$HERE/../weekly-status-deck.sh"
 systemctl daemon-reload
 
 echo "Installed. Next scheduled run:"
-systemd-analyze calendar "Fri *-*-* 14:00:00 America/Los_Angeles" | sed -n '1,3p' || true
+systemd-analyze calendar "Fri *-*-* 15:00:00 America/Los_Angeles" | sed -n '1,3p' || true
 echo
 echo "Enable the weekly timer with:   systemctl enable --now nce-status-deck.timer"
 echo "Run once now (validation):      systemctl start nce-status-deck.service"
