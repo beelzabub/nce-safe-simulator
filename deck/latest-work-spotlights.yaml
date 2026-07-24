@@ -11,100 +11,64 @@
 #
 # Fields: title, subtitle, bullets[], images[] (screenshot filenames, 0/1/2),
 #         image_labels[] (captions for the 2-image layout), caption (1-image),
-#         issues[] (source issue numbers — documentation only).
+#         issues[] (source issue numbers — documentation only; `nce-git-ops#N`
+#         strings reference the platform repo, per issue #268).
 #
 # image paths resolve first under deck/screenshots/, then repo-relative — so
 # curated committed art (deck/assets/spotlight-extras/, the #243 brief diagrams)
 # can be referenced by its repo path (issue #257 items 2-4).
 
 spotlights:
-  - title: "Self-Documenting Makefile Help  (#255)"
-    subtitle: "Bare `make` now prints a grouped target listing instead of silently launching a build"
-    issues: [255]
-    images:
-      - "deck/assets/spotlight-extras/make-help-root.png"
-      - "deck/assets/spotlight-extras/make-help-cdk.png"
-    image_labels:
-      - "Root `make` — reports, deploy, container, deck"
-      - "cdk/ `make` — the pattern it was modeled on"
+  - title: "Enclave Lift & Shift — One Artifact, Either Direction  (#263, #264, #273)"
+    subtitle: "The whole project — repo, wiki, packages, images — exports to a single file and imports with one command"
+    issues: [263, 264, 273]
     bullets:
-      - "Bare `make` used to launch the full data → interactive → static pipeline — hitting GitLab and rendering the Quarto site; it now prints a formatted, grouped list of targets instead (`.DEFAULT_GOAL := help`)."
-      - "The listing is produced from the Makefile itself: each target self-documents with an inline `## description`, and `##@ Section` lines become group headers — one source of truth, no separate help text to drift."
-      - "A single `awk` one-liner over `$(MAKEFILE_LIST)` renders it — bold banners from `##@`, cyan target + description from every `target: ## …` line — the identical pattern already used by `cdk/Makefile`."
-      - "Explicit targets (`make build`, `make redeploy`, `make deck`, …) still behave exactly as before."
+      - "enclave-export stages the repo, wiki, every package-registry artifact, and the container images into one checksummed tar; enclave-import rebuilds the complete project on any GitLab instance from just that file."
+      - "Both directions ship as bash and PowerShell, behavior-identical and cross-compatible — a Windows transfer box can import a Linux export and vice versa; every artifact carries both importers so the receiving box bootstraps with whichever shell it has."
+      - "Hardening from real transfer runs: a transient mid-file TLS reset no longer aborts a whole export or import — each download/upload retries with backoff and discards partials (plain `curl --retry` misses mid-stream resets); uploads are idempotent, so resends are safe."
+      - "Found and fixed on the way: package file lists were silently truncated at 100 entries by API pagination, so large packages never fully reached the artifact (#273)."
 
-  - title: "Printable Epic Cards — Portrait & Landscape  (#249, #254)"
-    subtitle: "Filtered GitLab epics rendered to a print-ready vector PDF, cards to cut apart"
-    issues: [249, 254]
-    images:
-      - "deck/assets/spotlight-extras/epic-cards-portrait.png"
-      - "deck/assets/spotlight-extras/epic-cards-landscape.png"
-    image_labels:
-      - "Portrait — 2 cards per Letter sheet"
-      - "Landscape — 2 cards per Letter sheet"
+  - title: "Getting History Past the Destination's Push Rules  (#270)"
+    subtitle: "The first real import had every branch rejected — imports can now rewrite and sign their way through"
+    issues: [270]
     bullets:
-      - "The `epic-cards` tool pulls filtered epics from GitLab and renders cut-apart cards to a print-ready PDF — 1–4 cards per 8.5×11 sheet, with borders to cut on (#249)."
-      - "Each card carries title, weight, description, mission-thread / action / main-system labels, related systems, and due date, driven by an operator-editable spec file."
-      - "Page orientation is now a choice — portrait (8.5×11) or landscape (11×8.5) — exposed as both a CLI flag and a UI select, mirroring how `per_page` already works (#254)."
-      - "Vector output prints crisp from any basic PDF reader — no rasterized screenshots, no app required to consume it."
+      - "The destination GitLab enforces a committer-restriction push rule — it only accepts commits whose committer email is verified on the pushing account — so a transferred history, authored entirely by the source org's users, was rejected wholesale at the pre-receive hook."
+      - "Fix: an opt-in authorship rewrite at import time (`--rewrite-committer 'Name <email>'`) — git filter-branch rewrites author and committer on every commit of the repo and wiki mirrors before pushing; chosen because it ships inside git, so nothing extra installs on an enclave box."
+      - "The rewrite is deterministic — re-runs produce identical hashes, keeping imports idempotent; the trade-off (in-repo attribution moves to the importing user) is exactly what makes the rule pass."
+      - "A second rule — reject unsigned commits — is handled in the same pass: `--sign-commits` GPG-signs every rewritten commit. Proven 2026-07-23 with a fully green import into the destination instance."
 
-  - title: "Epic Cards — Driven From the Web UI  (#249)"
-    subtitle: "The whole card set is configured from one tool dialog — or the equivalent CLI"
-    issues: [249]
-    images:
-      - "deck/assets/spotlight-extras/epic-cards-ui-dialog.png"
-    caption: "The Epic Cards dialog — source group, cards/page, orientation, page size, wall grid, and card-spec; the matching CLI shown beneath"
+  - title: "Container Builds With Zero Internet  (#261, #262, #269, #274, #275)"
+    subtitle: "Every build input now resolves from the project's own package registry"
+    issues: [261, 262, 269, 274, 275]
     bullets:
-      - "The epic-cards tool runs straight from the web UI's job picker (under 'Other') as well as the CLI — the same renderer and parameters either way."
-      - "One dialog drives the entire output: source group, 1/2/4 cards per page, portrait or landscape, a large-format page size, an optional COLSxROWS 'wall' grid, and an operator-editable card-spec (filter + taxonomy)."
-      - "Every field mirrors a copy-paste CLI command shown at the bottom of the dialog, so a UI experiment drops straight into a script or a CI job."
+      - "Every apt package the images install — the WeasyPrint PDF stack and all — plus the pinned Quarto installer (amd64 and arm64, sha256-verified against upstream) is vendored in the project's generic package registry; image builds touch nothing on the public internet."
+      - "Registry URLs are composed from `$CI_API_V4_URL`/`$CI_PROJECT_ID`, so the identical CI yaml runs unmodified on gitlab.com and on the enclave's instance — no per-environment edits."
+      - "The epic-cards status deck itself now builds as an enclave-clean CI job: dev image, no network at job time (#274)."
+      - "With the debugging experiments done, the shipped default pipeline is restored to its normal test + containerize flow (#275)."
 
-  - title: "Large-Format PI-Planning Wall  (#241)"
-    subtitle: "The same renderer, sized in true inches for a plotter"
-    issues: [241]
-    images:
-      - "deck/assets/spotlight-extras/epic-cards-largeformat.png"
-    caption: "One wide sheet — media set in real-world inches, prints 1:1"
+  - title: "Landing `containerize` on the Enclave Runner  (#276)"
+    subtitle: "A three-layer root cause, a reusable diagnostic pipeline, and a one-flag fix"
+    issues: [276]
     bullets:
-      - "The WeasyPrint engine behind the epic cards sizes its media in real-world inches via CSS `@page`, so the same pipeline emits a single large-format sheet a plotter prints at true size."
-      - "Targets banner/roll media in the 36–60 in range with no manual rescaling — the hard part (a vector PDF whose media box is a true physical size) was de-risked by the epic-cards work."
-      - "Lifts the PI-planning wall off the screen and onto a physical wall the team can plan against together."
+      - "On the destination runner every image build died unpacking its Debian base: `unlinkat /sbin/docker-init: device or resource busy`. The runner's config pins an init process bind-mounted into each job container — exactly where kaniko must replace /sbin with a symlink. The upstream kaniko bug has been open since 2020 and the project is archived, so no fix was coming."
+      - "The first attempted fix was proven a no-op against kaniko's own source — its ignore list already contained the mount, and ignoring a child path cannot protect its parent from removal — and the on-enclave retry failed identically."
+      - "A five-section diagnostic pipeline (`ci-recipes/kaniko-runner-diag.yml`, now a reusable recipe) ran on the enclave itself: it detected the pinned runner flag, established that the mount can't be removed in-job, and passed a minimal repro of the corrected fix before the real pipeline was touched."
+      - "The fix: `--ignore-path=/sbin` makes kaniko skip the conflicting path entirely. Pushed images are unaffected — the base layers ship untouched, verified by pulling and inspecting the result — and enclave containerize now runs green."
 
-  - title: "VM → Container SDLC — the Leadership Brief  (#243)"
-    subtitle: "From hand-built developer VMs no one can fully explain to a container-based SDLC"
-    issues: [243]
-    images:
-      - "slides/243-slide-brief-as-is-to-be/diagrams/asis-vm-sdlc.png"
-      - "slides/243-slide-brief-as-is-to-be/diagrams/tobe-container-sdlc.png"
-    image_labels:
-      - "As-Is — hand-built developer VMs"
-      - "To-Be — container-based SDLC"
+  - title: "GitOps Platform — Infrastructure as Code From Zero  (nce-git-ops #1–#2, #7–#12)"
+    subtitle: "Terraform + Ansible + kubeadm: from an empty AWS account to a running Kubernetes cluster with one command"
+    issues: [259, "nce-git-ops#1", "nce-git-ops#2", "nce-git-ops#7", "nce-git-ops#8", "nce-git-ops#9", "nce-git-ops#10", "nce-git-ops#11", "nce-git-ops#12"]
     bullets:
-      - "A leadership-facing brief frames the problem: a build the team depends on but that lives in hand-built VMs no one can fully explain or reproduce (#243)."
-      - "The To-Be state moves developers to a container-based SDLC — edit locally in the IDE of choice, build inside a shared image, sync to GitLab for the outer loop."
-      - "Built as a self-contained deck (`slides/243-slide-brief-as-is-to-be/`) on the same branding template, with reviewed As-Is / To-Be architecture diagrams."
-      - "Calls out the advantages: a reproducible environment, forced understanding of the current dev/build VM, and one definition of the toolchain shared by every developer and CI."
+      - "Terraform declares the entire AWS footprint — VPC, per-role security groups, arm64 EC2 nodes, Route 53 records — with remote state locked in S3; its outputs generate the Ansible inventory directly, so the two tools chain without hand-copied values."
+      - "Idempotent Ansible roles turn fresh instances into a kubeadm cluster — containerd setup, control-plane init, worker join — ending in three Ready nodes; re-running is a safe no-op."
+      - "`make up` goes from nothing to a working, kubeconfig'd cluster in about 30 minutes; `make down` tears it back to zero billable resources. The cluster is deliberately ephemeral — infrastructure-as-code is what makes that daily rhythm affordable."
+      - "It was proven green locally first: the same Argo CD bootstrap and ApplicationSets (ingress-nginx, cert-manager, Rancher, Keycloak) ran on Docker Desktop before any AWS resources existed."
 
-  - title: "One Image, Three Roles — Dev · Build · CI  (#244)"
-    subtitle: "The simulator itself now ships as a golden container"
-    issues: [244]
-    images:
-      - "slides/243-slide-brief-as-is-to-be/diagrams/container-dev-workflow.png"
-    caption: "Developer inner loop — mount the source, exec in, build with zero host toolchain"
+  - title: "GitOps Live on AWS — Simulator Deployed by Argo CD  (nce-git-ops #3, #13–#16)"
+    subtitle: "One repo drives both clusters, Rancher gives one view of them — and the simulator itself now ships from git"
+    issues: [259, "nce-git-ops#3", "nce-git-ops#13", "nce-git-ops#14", "nce-git-ops#15", "nce-git-ops#16"]
     bullets:
-      - "One Dockerfile defines the environment once and fills three roles — an interactive dev shell, the build, and CI — so there is a single source of truth for the toolchain (#244)."
-      - "Developers pull the image, bind-mount their working tree at /app, and drop into a shell to build with zero tools installed on the host."
-      - "On merge to develop the simulator's own runtime + dev images publish to the GitLab Container Registry, proving the pattern on a real project."
-      - "`make dev-shell` / `make registry-push` wire the whole loop into the standard developer workflow."
-
-  - title: "Any Toolchain — Python, Java & C/C++ Golden Images  (#247, #248)"
-    subtitle: "The same container loop, demonstrated across three stacks"
-    issues: [247, 248]
-    images:
-      - "slides/243-slide-brief-as-is-to-be/diagrams/tobe-container-sdlc-v2-multitoolchain.png"
-    caption: "One golden-image pattern per team — any toolchain, same loop"
-    bullets:
-      - "Golden dev/build images prove the brief's claim that any team can adopt the pattern — Python shipped first, with real Java (#247) and C/C++ (#248) demo projects following."
-      - "Each demo builds inside its image with no host toolchain and exercises both host use-cases: serve on a published port, and emit a runnable artifact to a bind-mounted output directory."
-      - "Java uses a minimal Spring Boot service (JDK 21 + Maven → runnable fat jar); C/C++ uses its own compiler toolchain — different stacks, one workflow."
-      - "Turns the brief's illustrative columns into commands that actually run, so the Java and C/C++ stories become demonstrable, not just described."
+      - "Argo CD bootstrapped onto the AWS cluster with the same script as local; ApplicationSet generators emit per-cluster applications from one repo, with per-cluster values overlays where the environments differ."
+      - "Real HTTPS on real subdomains — argocd. / rancher. / keycloak.nce-safe-sim.com — with cert-manager issuing Let's Encrypt certificates via Route 53 DNS-01, which needs no open port 80 and survives cluster recreation."
+      - "Rancher — itself deployed by Argo — imports both the local and AWS clusters into a single management view; Argo remains the one GitOps engine (Rancher's Fleet deliberately left off)."
+      - "The headline: the simulator's own Helm chart now deploys to AWS through Argo CD, with its EKS-specific pieces swapped for nginx ingress, local-path storage, and instance-profile auth — the application is fully GitOps-managed."
