@@ -193,14 +193,3 @@ capabilities:
       - "#114 Document the issue-block seeding capability"
     image: "13-audit-validation-audit-hierarchy_light.png"
     caption: "Audit & Validation — Audit Hierarchy"
-
-  - title: "Open & Future Work"
-    count: 3
-    all_issues: "#84, #191, #205"
-    blurb: "Remaining evaluation work; the active roadmap now has its own slides"
-    bullets:
-      - "#84 Evaluate the use of S3 for the safe simulator (analysis spike)."
-      - "Enterprise authentication methods (#152–#156) — see the Login & Authentication slide."
-      - "In-app Analysis panel (#165–#169) — see the In-App Reports & Analysis slide."
-    image: "media/login-backgrounds/carrier-flight-deck-sunset.jpg"
-    caption: "U.S. Navy photo — carrier flight deck at sunset"

@@ -125,6 +125,12 @@ issues merged into `develop` since the previous weekly run, grouped by type
 for the standout items. It closes with a **"Status Update Complete"** slide. The cover and
 closing slides are stamped with the status date.
 
+Both layouts are overflow-safe: the Latest Work list flows down two columns and, in a
+heavy week, continues onto additional "continued" slides (a group that splits repeats its
+heading as "(cont.)"); bullet lists everywhere step their font down (9 pt floor) when the
+authored text would render taller than its box, so content never bleeds past the slide
+edge.
+
 **Two repos, one deck** (issue #268): alongside this repo the deck also covers the
 **nce-git-ops** platform repo — its issues appear in the Latest Work groups, the issues
 table, the KPI counts, and the spotlight-candidate list. References disambiguate the two
