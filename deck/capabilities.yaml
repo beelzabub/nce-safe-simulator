@@ -39,8 +39,8 @@ capabilities:
     caption: "Initial Setup — Create Lorem Data"
 
   - title: "WSJF, Business Value & Risk Reporting"
-    count: 19
-    all_issues: "#8, #10, #11, #12, #13, #14, #20, #21, #32, #34, #54, #77, #79, #81, #101, #108, #172, #188, #189"
+    count: 20
+    all_issues: "#8, #10, #11, #12, #13, #14, #20, #21, #32, #34, #54, #77, #79, #81, #101, #108, #172, #188, #189, #212"
     blurb: "Largest reporting arc — the core prioritization logic"
     bullets:
       - "#32 WSJF Priority Board: add BV at Risk summary table"
@@ -142,9 +142,22 @@ capabilities:
       - "#168 Analysis API — a blocked-chains endpoint with weight / Business-Value rollups."
       - "#169 Analysis tab — a Blocked Work Explorer that grew into a portfolio-level Portfolio Explorer (three-tier BV/weight-at-risk, untyped-epic warnings)."
       - "#182 Portfolio Explorer published as a report — the same view now renders to a Tier-1 wiki page and a Quarto Executive page, with numbers pinned to the app's own analysis engine so they can't drift."
-      - "#134 Deploy Options surfaced in the Run Reports dialog (adjacent forward work). The panel work has started landing (#182 merged); the rest is the project's current momentum."
+      - "#134 Deploy Options epic kicked off from the Run Reports dialog — delivered as its own capability area (next slide)."
     image: "17-analysis-portfolio-explorer_light.png"
     caption: "Portfolio Explorer — the in-app Analysis panel, live (#169)"
+
+  - title: "In-App Cloud Deployments & Durable Jobs"
+    count: 20
+    all_issues: "#214, #215, #216, #217, #218, #219, #223, #224, #225, #226, #227, #228, #229, #230, #231, #232, #233, #234, #235, #236"
+    blurb: "Deploy Options epic (#134) delivered — the app deploys itself to AWS"
+    bullets:
+      - "#214 Durable background job engine — subprocess jobs, reattach on refresh, explicit cancel."
+      - "#215 Deploy Options in Run Reports with pre-flight resource & architecture checks."
+      - "#216 S3 static-site publish behind CloudFront with a private bucket (OAC)."
+      - "#217 / #218 ECS and EKS deploy, status, and destroy from inside the app; #234 ECR as a first-class target with its own Deployments row."
+      - "#219 Report runs migrated onto the durable job engine — a browser refresh no longer loses a running report."
+    image: "19-deployments-dialog_light.png"
+    caption: "Web UI — Deployments dialog (S3 / ECR / ECS / EKS)"
 
   - title: "Cloud Deployment & Infrastructure"
     count: 17
@@ -181,26 +194,61 @@ capabilities:
     image: "05-import-export-import-epics_light.png"
     caption: "Import/Export — Import Epics (light)"
 
+  - title: "PI-Planning Print Artifacts"
+    count: 5
+    all_issues: "#222, #238, #241, #249, #254"
+    blurb: "Physical planning-wall artifacts straight from live GitLab data"
+    bullets:
+      - "#249 Printable epic cards — a print-ready PDF generated from the live portfolio."
+      - "#254 Portrait / landscape card layouts."
+      - "#241 Large-format printing for the PI-planning wall."
+      - "#222 PI-planning card artifact; #238 the LCI label taxonomy backing the card fields."
+    image: "18-other-epic-cards_light.png"
+    caption: "Other — Epic Cards (print-ready PDF)"
+
   - title: "Engineering Process & CLI UX"
-    count: 22
-    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #210"
+    count: 27
+    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #191, #210, #213, #255, #256, #257"
     blurb: "Tooling housekeeping and reliability polish"
     bullets:
       - "#18 CLI navigation, logging, UX polish and reliability improvements"
+      - "#213 Weekly automated status deck — build, publish to S3, notify by email"
       - "#103 Evaluate the use of git worktrees"
-      - "#104 Evaluate PMW framework transition"
-      - "#121 Integrate NCE logo"
+      - "#255 Self-documenting Makefile help; #256 group lookup accepts URL paths"
       - "#114 Document the issue-block seeding capability"
     image: "13-audit-validation-audit-hierarchy_light.png"
     caption: "Audit & Validation — Audit Hierarchy"
 
-  - title: "Open & Future Work"
-    count: 3
-    all_issues: "#84, #191, #205"
-    blurb: "Remaining evaluation work; the active roadmap now has its own slides"
+  - title: "Containerization & Golden Images"
+    count: 5
+    all_issues: "#243, #244, #247, #248, #253"
+    blurb: "The VM-to-container roadmap, with working reference containers"
     bullets:
-      - "#84 Evaluate the use of S3 for the safe simulator (analysis spike)."
-      - "Enterprise authentication methods (#152–#156) — see the Login & Authentication slide."
-      - "In-app Analysis panel (#165–#169) — see the In-App Reports & Analysis slide."
-    image: "media/login-backgrounds/carrier-flight-deck-sunset.jpg"
-    caption: "U.S. Navy photo — carrier flight deck at sunset"
+      - "#243 Leadership brief: the VM-to-container migration roadmap."
+      - "#244 Containerized dev & deploy workflow for the project itself."
+      - "#247 / #248 Java and C/C++ golden-container demos — build-once base images other teams can copy."
+      - "#253 CLI tools hardened to run reliably inside containers."
+
+  - title: "Enclave Lift-and-Shift (Air-Gapped)"
+    count: 10
+    all_issues: "#261, #262, #263, #264, #269, #270, #273, #274, #275, #276"
+    blurb: "The whole project transfers to, and builds on, a disconnected enclave"
+    bullets:
+      - "#263 One-command full enclave export — repo, wiki, package registries, and container images in a single artifact."
+      - "#264 PowerShell transfer scripts for the cross-domain hop."
+      - "#270 Imports pass the destination's push rules — history rewrite with GPG signing."
+      - "#261 / #262 / #269 Zero-internet builds: system packages, Quarto, and the PDF toolchain all vendored."
+      - "#276 Container builds fixed on enclave runners — kaniko vs. the runner's pinned /sbin/docker-init."
+
+  - title: "Platform GitOps — nce-git-ops"
+    count: 14
+    all_issues: "#259, nce-git-ops#1, nce-git-ops#2, nce-git-ops#3, nce-git-ops#7, nce-git-ops#8, nce-git-ops#9, nce-git-ops#10, nce-git-ops#11, nce-git-ops#12, nce-git-ops#13, nce-git-ops#14, nce-git-ops#15, nce-git-ops#16"
+    blurb: "A Kubernetes platform built from zero and run by GitOps — Terraform, Ansible, kubeadm, Argo CD, Rancher, Keycloak"
+    bullets:
+      - "nce-git-ops#10 AWS infrastructure as code — Terraform provisions, Ansible configures, kubeadm bootstraps."
+      - "nce-git-ops#12 One-command cluster bring-up and teardown."
+      - "nce-git-ops#13 / #16 Argo CD on the AWS cluster, with the simulator itself deployed via GitOps."
+      - "nce-git-ops#14 Real HTTPS subdomains with automatic certificates (argocd. / rancher. / keycloak. / sim.)."
+      - "nce-git-ops#15 Rancher manages both clusters (#259 platform status assessment)."
+    image: "deck/assets/spotlight-extras/gitops-argocd-applications.png"
+    caption: "Argo CD — platform and simulator applications, all healthy"

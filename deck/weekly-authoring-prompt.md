@@ -1,4 +1,4 @@
-You are authoring the "Latest Work" spotlight slides for this week's NCE Safe Simulator status deck. Work non-interactively and finish by writing one YAML file. Do NOT build the deck, deploy anything, or edit any other file.
+You are authoring this week's NCE Safe Simulator status-deck content: the "Latest Work" spotlight slides, plus proposed capability-area updates when the background matter has drifted. Work non-interactively and finish by writing at most two YAML files (STEP 4 and STEP 5). Do NOT build the deck, deploy anything, or edit any other file — in particular never edit deck/capabilities.yaml itself.
 
 STEP 1 — get this week's candidate issues. Run exactly:
 
@@ -42,4 +42,27 @@ STEP 4 — write the result to deck/dist/latest-work-spotlights.gen.yaml in EXAC
       bullets:
         - "…"
 
-Keep bullets tight (roughly one line each on a slide). Every feature/enhancement in the candidate list must be covered by some spotlight (alone or grouped). When the file is written and valid YAML, reply with a one-line summary of how many spotlight slides you wrote and which issues each covers.
+Keep bullets tight (roughly one line each on a slide). Every feature/enhancement in the candidate list must be covered by some spotlight (alone or grouped).
+
+STEP 5 — propose capability-area updates (the background matter must not drift behind the work). Run:
+
+  python3 deck/build_deck.py --print-coverage-gap
+
+That prints a JSON list of closed issues (both repos) cited in no capability area of deck/capabilities.yaml. If the list is empty, skip this step and do NOT write the file. Otherwise Read deck/capabilities.yaml (area titles, blurbs, existing bullets), decide where each gap issue belongs, and write deck/dist/capabilities-updates.gen.yaml in EXACTLY this schema:
+
+  extend:
+    - title: "Engineering Process & CLI UX"    # EXACT title of an existing area
+      add_issues: "#280, #283"                 # refs joined by ", " — count is bumped automatically
+      add_bullets:                             # optional — flagship-worthy items only
+        - "#280 One-line authored bullet."
+  new_areas:                                   # only when 4+ gap issues form a genuinely new theme;
+    - title: "..."                             # same entry schema as capabilities.yaml
+      count: 4
+      all_issues: "#281, #282, #284, #285"
+      blurb: "..."
+      bullets: ["..."]
+      image: "..."                             # optional; same resolution rules (screenshots dir, then repo-relative)
+
+Rules: every gap issue lands in exactly one area; use the `ref` citation form from STEP 1 (`#N` simulator, `nce-git-ops#N` platform) in add_issues/all_issues — full refs, never ranges; a new area's `count` equals the number of refs in its `all_issues`. These are PROPOSALS: build_deck.py merges them into this week's deck automatically, and they are reviewed later before being folded into capabilities.yaml — so write presentation-ready bullets, phrased for bugs as the problem fixed. Re-run the gap command afterwards: it must print [] once your file is in place.
+
+When the file(s) are written and valid YAML, reply with a one-line summary: how many spotlight slides (and which issues each covers), plus how many capability extensions / new areas you proposed (or "no capability drift").
