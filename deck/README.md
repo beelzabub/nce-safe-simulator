@@ -125,6 +125,12 @@ issues merged into `develop` since the previous weekly run, grouped by type
 for the standout items. It closes with a **"Status Update Complete"** slide. The cover and
 closing slides are stamped with the status date.
 
+Both layouts are overflow-safe: the Latest Work list flows down two columns and, in a
+heavy week, continues onto additional "continued" slides (a group that splits repeats its
+heading as "(cont.)"); bullet lists everywhere step their font down (9 pt floor) when the
+authored text would render taller than its box, so content never bleeds past the slide
+edge.
+
 **Two repos, one deck** (issue #268): alongside this repo the deck also covers the
 **nce-git-ops** platform repo — its issues appear in the Latest Work groups, the issues
 table, the KPI counts, and the spotlight-candidate list. References disambiguate the two
@@ -135,7 +141,10 @@ skipped with a warning rather than failing the build. Simulator completions are 
 from merge commits into `develop`; companion completions from issue close dates (those
 repos aren't checked out on the build box). Recurring **"Work state sync" housekeeping
 issues are excluded** from every deck surface, for both repos. Commit-velocity and SLOC
-metrics remain simulator-only (they come from the local git checkout).
+metrics remain simulator-only (they come from the local git checkout). The platform repo
+also has standing coverage: a "Platform GitOps — nce-git-ops" capability area in
+`capabilities.yaml` and a "Platform GitOps" appendix section rendered from the committed
+screenshots in `deck/assets/spotlight-extras/`.
 
 Which issues get a spotlight is driven by a GitLab **`slides` label**: any issue tagged
 `slides` (in either repo) and closed since the previous weekly run is a spotlight candidate. Spotlight *content*
@@ -178,11 +187,19 @@ The service runs `deck/weekly-status-deck.sh`, which:
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
    and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build
-   falls back to auto-derived spotlights rather than aborting,
-5. builds the deck, uploads the dated `.pptx` to
-   `s3://…/nce-safe-simulator/status/`,
+   falls back to auto-derived spotlights rather than aborting. The same step also **keeps
+   the background matter current**: `build_deck.py --print-coverage-gap` lists every closed
+   issue (both repos) cited in no capability area, and the authoring step proposes homes
+   for them in `deck/dist/capabilities-updates.gen.yaml` (extensions to existing areas
+   and/or new areas — schema in the prompt),
+5. builds the deck — proposed capability updates are merged in-memory
+   (`--capabilities-updates`, default = the gen file) so the Friday deck is current before
+   review, and the build warns about any closed issue still in no capability area —
+   then uploads the dated `.pptx` to `s3://…/nce-safe-simulator/status/`,
 6. **emails** via the SNS topic `nce-status-deck` (us-east-1) — a summary plus a 7-day
-   presigned download link; any failure emails a failure notice instead.
+   presigned download link, noting when capability updates were proposed (review the gen
+   file and fold accepted changes into `deck/capabilities.yaml` on a branch); any failure
+   emails a failure notice instead.
 
 Logs land in `deck/dist/weekly-logs/` and the systemd journal
 (`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the

@@ -163,6 +163,53 @@ def fetch_issues():
     return rows
 
 
+def capabilities_coverage_gap(capabilities, issues):
+    """Closed deck-visible issues (both repos) cited in no capability area —
+    the background-matter drift the weekly authoring step proposes homes for
+    (issue #258). Citation = the row's `ref` appearing in an area's
+    `all_issues`, title, or bullets. Bare `#N` refs match only when not part
+    of a longer ref: `#21` never matches `#210`, and simulator `#7` never
+    matches a `nce-git-ops#7` citation."""
+    text = "\n".join(
+        " ".join([c.get("all_issues") or "", c.get("title") or ""]
+                 + list(c.get("bullets") or []))
+        for c in capabilities)
+    gap = []
+    for row in issues:
+        if row["state"] != "closed":
+            continue
+        pattern = (r"(?<![\w#])" if not row["repo"] else "") + re.escape(row["ref"]) + r"(?!\d)"
+        if not re.search(pattern, text):
+            gap.append(row)
+    return gap
+
+
+def merge_capability_updates(capabilities, updates):
+    """Merge the weekly authoring step's proposed capability deltas
+    (deck/dist/capabilities-updates.gen.yaml — see weekly-authoring-prompt.md
+    for the schema) into the loaded capability list, so the Friday deck stays
+    current before the proposals are reviewed and folded into
+    capabilities.yaml. `extend` entries append refs/bullets to an existing
+    area (matched by exact title; unknown titles warn and are skipped) and
+    bump its count; `new_areas` entries append whole areas."""
+    caps = [dict(c) for c in capabilities]
+    by_title = {c["title"]: c for c in caps}
+    for ext in (updates.get("extend") or []):
+        cap = by_title.get(ext.get("title"))
+        if cap is None:
+            print(f"  warn: capabilities update targets unknown area {ext.get('title')!r} — skipped")
+            continue
+        add_refs = [r.strip() for r in (ext.get("add_issues") or "").split(",") if r.strip()]
+        if add_refs:
+            existing = cap.get("all_issues") or ""
+            cap["all_issues"] = f"{existing}, {', '.join(add_refs)}" if existing else ", ".join(add_refs)
+            cap["count"] = (cap.get("count") or 0) + len(add_refs)
+        if ext.get("add_bullets"):
+            cap["bullets"] = list(cap.get("bullets") or []) + list(ext["add_bullets"])
+    caps.extend(updates.get("new_areas") or [])
+    return caps
+
+
 def _now_pacific():
     """Current time in America/Los_Angeles (the user's timezone). The deck's
     dates are stated in Pacific even though builds run on UTC hosts, so the
@@ -327,9 +374,29 @@ class DeckBuilder:
         r.font.name = FONT
         return tb
 
+    @staticmethod
+    def _fit_bullet_size(w, h, items, size, space_after, floor=9):
+        """Step the font size down (to `floor`) until the estimated rendered
+        height of the bullet list fits the box. python-pptx can't measure text,
+        so this uses an average-character-width wrap estimate; sizes that
+        already fit come back unchanged. Returns (size, space_after) with
+        space_after scaled to the chosen size."""
+        texts = ["".join(seg[0] for seg in ([(it, False)] if isinstance(it, str) else it))
+                 for it in items]
+        w_pt, h_pt = w / 12700, h / 12700
+        for pt in range(int(size), floor, -1):
+            per_line = max(1, int(w_pt / (0.5 * pt)))
+            lines = sum(-(-(len(t) + 3) // per_line) for t in texts)
+            if lines * pt * 1.25 + len(texts) * space_after * pt / size <= h_pt:
+                return pt, space_after * pt / size
+        return floor, space_after * floor / size
+
     def add_bullets(self, slide, x, y, w, h, items, size, color, space_after=8):
         """Each item is a string, or a list of (text, italic) segments for
-        mixed formatting within one bullet (e.g. italicized dates)."""
+        mixed formatting within one bullet (e.g. italicized dates). A list too
+        long for the box steps its font down rather than bleeding past the
+        bottom edge (deck-review fix, 2026-07-24)."""
+        size, space_after = self._fit_bullet_size(w, h, items, size, space_after)
         tb = slide.shapes.add_textbox(x, y, w, h)
         tf = tb.text_frame
         tf.word_wrap = True
@@ -929,13 +996,14 @@ class DeckBuilder:
         ], 11, body_color, space_after=8)
         self.add_rect(s2, right_x, head_y, col_w, Emu(260000), self.C["green"])
         self.add_text(s2, right_x + Emu(80000), head_y, col_w - Emu(160000), Emu(260000),
-                      "Known gaps (candidate roadmap)", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+                      "Known gaps & open work (candidate roadmap)", 12, WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
         self.add_bullets(s2, right_x + Emu(40000), body_y, col_w - Emu(80000), body_h, [
             "No CAC/PIV or federated identity yet — basic is dev-only (AAA methods tracked in #152–#156).",
             "No RBAC — access is authenticated-vs-not; job conflicts use writer/read-only groups, not permissions.",
             "CI runs tests only — no SAST, dependency/container scanning, or SBOM stages; images deploy operator-driven.",
             "No per-user structured audit trail (job/stdout logs to CloudWatch, 1-month retention).",
             "Commercial us-east-1 — a GovCloud / Impact-Level target would need its own accreditation work.",
+            "Open evaluation spikes: S3 for the simulator (#84); backup strategy for GitLab projects/groups (#205).",
         ], 11, body_color, space_after=8)
 
     def _build_deployment_slide(self):
@@ -1575,28 +1643,46 @@ class DeckBuilder:
         col_w = (self.SW - 2 * margin - col_gap) // 2
         top, bottom = Emu(880000), self.SH - Emu(160000)
         col2_x = margin + col_w + col_gap
-        mid = top + int((bottom - top) * 0.52)
         body_color = RGBColor(0x2A, 0x2E, 0x32)
+        HEAD_H, ITEM_H, GROUP_GAP = Emu(330000), Emu(232000), Emu(150000)
 
-        def render_group(x, y, heading, color, bucket):
-            self.add_rect(s, x, y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
-            self.add_text(s, x + Emu(190000), y, col_w - Emu(190000), Emu(280000),
-                          f"{heading}  ({len(bucket)})", 13, color, bold=True)
-            y += Emu(330000)
+        # Flow layout: fill column 1, then column 2, then continue onto a fresh
+        # slide — nothing may render past `bottom`, however many issues land in
+        # a week. A group that splits repeats its heading as "(cont.)".
+        cur_x, cur_y = margin, top
+
+        def next_column():
+            nonlocal s, cur_x, cur_y
+            if cur_x == margin:
+                cur_x, cur_y = col2_x, top
+            else:
+                s = self.new_slide()
+                self.header_band(s, "Latest Work",
+                                 f"Completed since {since_str}  ·  continued")
+                cur_x, cur_y = margin, top
+
+        def add_heading(label, color):
+            nonlocal cur_y
+            self.add_rect(s, cur_x, cur_y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
+            self.add_text(s, cur_x + Emu(190000), cur_y, col_w - Emu(190000), Emu(280000),
+                          label, 13, color, bold=True)
+            cur_y += HEAD_H
+
+        for heading, color, bucket in grouped:
+            if cur_y + HEAD_H + ITEM_H > bottom:  # heading must bring an item with it
+                next_column()
+            add_heading(f"{heading}  ({len(bucket)})", color)
             for it in bucket:
+                if cur_y + ITEM_H > bottom:
+                    next_column()
+                    add_heading(f"{heading}  (cont.)", color)
                 title = it["title"]
                 title = (title[:60] + "…") if len(title) > 61 else title
-                self.add_text(s, x + Emu(60000), y, col_w - Emu(60000), Emu(230000),
+                self.add_text(s, cur_x + Emu(60000), cur_y, col_w - Emu(60000), Emu(230000),
                               f"{it['ref']}   {title}", 9, body_color,
                               anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-                y += Emu(232000)
-            return y + Emu(150000)
-
-        cur_x, cur_y = margin, top
-        for heading, color, bucket in grouped:
-            if cur_x == margin and cur_y > mid:
-                cur_x, cur_y = col2_x, top   # spill into the second column
-            cur_y = render_group(cur_x, cur_y, heading, color, bucket)
+                cur_y += ITEM_H
+            cur_y += GROUP_GAP
 
         self._build_spotlights()
 
@@ -1749,6 +1835,21 @@ class DeckBuilder:
             if os.path.exists(path):
                 self.full_bleed_image_slide(f"{shot['title']} (Light)", path, dark=False)
 
+        # ── Platform group: the nce-git-ops GitOps platform, from the committed
+        # spotlight art (captured from the live AWS cluster — no capture pass here).
+        self._section_divider("Platform GitOps", "nce-git-ops — the live platform services")
+        for fname, title in [
+            ("gitops-rancher-home.png", "Rancher — Home (both clusters)"),
+            ("gitops-rancher-cluster-dashboard.png", "Rancher — Cluster Dashboard"),
+            ("gitops-argocd-applications.png", "Argo CD — Applications"),
+            ("gitops-argocd-simulator-tree.png", "Argo CD — Simulator Resource Tree"),
+            ("gitops-keycloak-admin-console.png", "Keycloak — Admin Console"),
+            ("gitops-simulator-app.png", "Simulator — Deployed via GitOps"),
+        ]:
+            path = os.path.join(REPO_ROOT, "deck", "assets", "spotlight-extras", fname)
+            if os.path.exists(path):
+                self.full_bleed_image_slide(title, path, dark=False)
+
         # ── Quarto group: the published report site gets its own section.
         self._section_divider("Quarto Reports", "The published report site, page by page")
         for shot in self.shots.get("quarto_shots", []):
@@ -1770,6 +1871,14 @@ class DeckBuilder:
         self.metrics["issues_total"] = len(self.issues)
         self.metrics["issues_closed"] = sum(1 for i in self.issues if i["state"] == "closed")
         self.metrics["issues_open"] = self.metrics["issues_total"] - self.metrics["issues_closed"]
+
+        # Self-check (issue #258): background matter must not silently drift
+        # behind the work — every closed issue should live in some capability
+        # area (directly or via the merged weekly updates file).
+        gap = capabilities_coverage_gap(self.capabilities, self.issues)
+        if gap:
+            print(f"  warn: {len(gap)} closed issue(s) in no capability area "
+                  f"(capabilities.yaml drift): {', '.join(r['ref'] for r in gap)}")
 
         self.build_cover()
         self.build_agenda()
@@ -1812,7 +1921,23 @@ def main():
     ap.add_argument("--spotlights", default=os.path.join(HERE, "latest-work-spotlights.yaml"),
                     help="authored Latest-Work spotlight slides (YAML). If absent, spotlights "
                          "are auto-derived from `slides`-labeled issues closed this week.")
+    ap.add_argument("--capabilities-updates",
+                    default=os.path.join(HERE, "dist", "capabilities-updates.gen.yaml"),
+                    help="proposed capability-area deltas from the weekly authoring step; "
+                         "merged into --capabilities at build time when the file exists.")
+    ap.add_argument("--print-coverage-gap", action="store_true",
+                    help="print the closed issues cited in no capability area (JSON) and exit "
+                         "— used by the weekly authoring step to propose updates.")
     args = ap.parse_args()
+
+    if args.print_coverage_gap:
+        with open(args.capabilities) as f:
+            capabilities = yaml.safe_load(f)["capabilities"]
+        if args.capabilities_updates and os.path.exists(args.capabilities_updates):
+            with open(args.capabilities_updates) as f:
+                capabilities = merge_capability_updates(capabilities, yaml.safe_load(f) or {})
+        print(json.dumps(capabilities_coverage_gap(capabilities, fetch_issues()), indent=2))
+        return
 
     if not os.path.exists(args.metrics):
         raise SystemExit(f"{args.metrics} not found — run `python3 deck/fetch_metrics.py` first")
@@ -1834,6 +1959,13 @@ def main():
         metrics = json.load(f)
     with open(args.capabilities) as f:
         capabilities = yaml.safe_load(f)["capabilities"]
+    if args.capabilities_updates and os.path.exists(args.capabilities_updates):
+        with open(args.capabilities_updates) as f:
+            updates = yaml.safe_load(f) or {}
+        capabilities = merge_capability_updates(capabilities, updates)
+        print(f"  capabilities: merged weekly updates from {args.capabilities_updates} "
+              f"({len(updates.get('extend') or [])} extension(s), "
+              f"{len(updates.get('new_areas') or [])} new area(s))")
     with open(args.shots) as f:
         shots = yaml.safe_load(f)
 
