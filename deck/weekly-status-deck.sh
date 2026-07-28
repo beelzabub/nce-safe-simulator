@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Weekly status-deck build + email (issue #213). Invoked by nce-status-deck.service
-# via the nce-status-deck.timer (Fri 14:00 America/Los_Angeles) on the box that
+# via the nce-status-deck.timer (Fri 15:00 America/Los_Angeles) on the box that
 # hosts the app. Pulls develop, rebuilds/redeploys the app container so the
 # screenshots are current, builds the deck (spotlights authored headless from the
 # `slides`-labeled issues closed this week), uploads to S3, and emails via SNS.

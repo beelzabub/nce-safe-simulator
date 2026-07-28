@@ -158,7 +158,7 @@ week.
 Dates are all stated in **Pacific** (the machine runs UTC). Two `build_deck.py` flags tune
 them; both have sensible defaults so a plain `make deck` needs neither:
 
-- `--since YYYY-MM-DD` — the Latest Work window start. Default: **the previous Friday 14:00
+- `--since YYYY-MM-DD` — the Latest Work window start. Default: **the previous Friday 15:00
   Pacific** (the prior weekly run), so a Friday build covers the trailing 7 days *including
   the weekend just past* — Saturday/Sunday work is picked up in the following Friday's deck
   rather than skipped. The completed-work set is derived from merge-commit branch names
@@ -173,7 +173,7 @@ each other. `deck/dist/` is gitignored.
 ## Weekly automation (issue #213)
 
 On the single-box host, a **systemd timer** builds and emails the deck every **Friday
-14:00 America/Los_Angeles** (DST-safe; the box is up 08:00–01:00 PT). Units live in
+15:00 America/Los_Angeles** (DST-safe; the box is up 08:00–01:00 PT). Units live in
 `deck/systemd/`; install with `sudo deck/systemd/install.sh`, then
 `systemctl enable --now nce-status-deck.timer`.
 

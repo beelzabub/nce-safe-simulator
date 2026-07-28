@@ -36,7 +36,7 @@ def main():
         "rankdir": "LR",
         "splines": "spline",
         "labelloc": "t",
-        "label": "Developer workflow — fast local inner loop and full-scale CI outer loop, both in the same image",
+        "label": "Developer workflow — fast local inner loop and full-scale CI outer loop, from the same definition",
     }
     node_attr = {"fontsize": "13"}
 
@@ -59,17 +59,17 @@ def main():
         repo = Gitlab("GitLab repo\nfeature branch → MR")
 
         with Cluster("Outer loop — GitLab CI (every push / merge)"):
-            ci_test  = GitlabCI("full test suite\n+ integration, at scale\n(same image)")
+            ci_test  = GitlabCI("full test suite\n+ integration, at scale\n(dev image — #279)")
             ci_build = GitlabCI("containerize\nrebuild + publish\n(on merge to develop)")
 
-        registry = Docker("GitLab Container Registry\ngolden image")
+        registry = Docker("GitLab Container Registry\ngolden dev + runtime images")
 
         devc     >> Edge(label="git push / open MR") >> repo
         repo     >> ci_test
         ci_test  >> Edge(label="merge to develop") >> ci_build >> registry
         # the image everyone (dev + CI + prod) pulls — closes the big loop
         registry >> Edge(color="darkgreen", style="dashed",
-                         label="docker pull\nsame image everywhere") >> ide
+                         label="docker pull\nsame definition everywhere") >> ide
 
 
 if __name__ == "__main__":
