@@ -1,12 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline router (issue #283)
+#
+# Default (no variable): the baseline pipeline — `test` + `containerize`,
+# exactly as it was before the router (issue #275's ground zero). Every push
+# and merge takes this path; nothing about it changed.
+#
+# RECIPE=<name>: the baseline jobs sit out and the `recipe` trigger job runs
+# ci-recipes/<name>.yml as a child pipeline instead. Start one from
+# CI/CD → Pipelines → Run pipeline (add variable RECIPE), or:
+#
+#   glab ci run -b <branch> --variables RECIPE:smoke
+#
+# Extra variables on the same run are forwarded to the child pipeline
+# (trigger:forward:pipeline_variables), so recipes can take parameters. A
+# pipeline SCHEDULE that defines RECIPE runs that recipe on its cron — e.g.
+# a weekly all-reports. Recipe list + authoring guide: ci-recipes/README.md.
+# ─────────────────────────────────────────────────────────────────────────────
 image: python:latest
 
 stages:
   - build
   - containerize
 
+# The router itself: resolves which recipe file to run only when the trigger
+# job actually starts, so the run-time RECIPE variable works here (top-level
+# `include:` could not do this — it resolves before the pipeline exists).
+recipe:
+  stage: build
+  rules:
+    - if: $RECIPE
+  trigger:
+    include:
+      - local: 'ci-recipes/$RECIPE.yml'
+    # Parent reflects the child's result — a red recipe is a red pipeline.
+    strategy: depend
+    forward:
+      # Hand the Run-pipeline variables through to the child: recipes are
+      # parameterized by extra variables on the same run (e.g. TOOL=...).
+      pipeline_variables: true
+
 test:
   stage: build
   image: python:3.11          # match the runtime image (Dockerfile: python:3.11-slim)
+  rules:
+    # Recipe runs route to the child pipeline only — the baseline sits out.
+    - if: $RECIPE
+      when: never
+    # Pre-router, this job had no rules at all — and rule-less jobs never run
+    # in merge_request_event pipelines. Keep that so an open MR doesn't get a
+    # duplicate MR pipeline alongside the branch pipeline.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    # Otherwise unchanged from the pre-router baseline: run in every pipeline.
+    - when: on_success
   script:
     # WeasyPrint (epic-cards, #249) renders a real PDF in the suite and needs
     # Pango + a font at the system level — pip can't supply these. The .debs
@@ -97,6 +143,11 @@ containerize:
       --destination "$CI_REGISTRY_IMAGE/dev:latest"
       --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
   rules:
+    # Recipe runs route to the child pipeline only — the baseline sits out.
+    # The guard matters here especially: recipe runs arrive as source "web"
+    # or "api", which the opt-in rule below would otherwise match.
+    - if: $RECIPE
+      when: never
     # Default branch, not a hardcoded name: `develop` here, `main` on the
     # lifted enclave repo — the same yaml rebuilds images on both (issue #262).
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
