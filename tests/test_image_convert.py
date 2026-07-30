@@ -11,6 +11,7 @@ from mixins.image_convert import (
     SSH_SG_NAME,
     VMIMPORT_ROLE,
     receipt_key,
+    split_s3_key,
     vmimport_role_policy,
     vmimport_trust_policy,
 )
@@ -242,6 +243,28 @@ def test_config_overrides_defaults():
 
 def test_receipt_key():
     assert receipt_key("staging/x.ova") == "staging/x.ova.import.json"
+
+
+def test_split_s3_key_passthrough_and_uri():
+    assert split_s3_key("staging/x.ova") == (None, "staging/x.ova")
+    assert split_s3_key("staging/x.ova", "b-1") == ("b-1", "staging/x.ova")
+    # the S3 console's "Copy S3 URI" form
+    assert split_s3_key("s3://b-2/staging/x.ova") == ("b-2", "staging/x.ova")
+    # an explicit bucket param wins over the URI's bucket
+    assert split_s3_key("s3://b-2/staging/x.ova", "b-1") == ("b-1", "staging/x.ova")
+    assert split_s3_key(None) == (None, None)
+    with pytest.raises(SystemExit, match="no object"):
+        split_s3_key("s3://just-a-bucket")
+
+
+def test_ova_to_ami_accepts_full_s3_uri():
+    s3 = FakeS3(objects={"staging/x.ova": b"ova-bytes"})
+    ec2 = FakeEC2(import_states=_import_walk(), sg_exists=True)
+    h = Harness(s3=s3, ec2=ec2)
+    h._tool_ova_to_ami(key="s3://my-explicit-bucket/staging/x.ova", launch=False)
+    assert ec2.import_kwargs["DiskContainers"][0]["UserBucket"] == \
+        {"S3Bucket": "my-explicit-bucket", "S3Key": "staging/x.ova"}
+    assert "staging/x.ova.import.json" in s3.objects
 
 
 def test_role_policy_scoped_to_bucket():

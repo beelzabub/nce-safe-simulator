@@ -67,6 +67,26 @@ def receipt_key(source_key):
     return f"{source_key}.import.json"
 
 
+def split_s3_key(key, bucket=None):
+    """Normalise a key param that may be a full ``s3://bucket/key`` URI.
+
+    The S3 console's "Copy S3 URI" button hands users exactly that form, so
+    every key-taking tool accepts it. Returns ``(bucket, key)``: a plain key
+    passes through with *bucket* unchanged; a URI's bucket is used unless an
+    explicit *bucket* param was given (the explicit param wins).
+    """
+    if key and key.startswith("s3://"):
+        rest = key[len("s3://"):]
+        uri_bucket, _, uri_key = rest.partition("/")
+        if not uri_key:
+            raise SystemExit(
+                f"'{key}' names a bucket but no object — expected "
+                "s3://<bucket>/<path>/<file>.ova"
+            )
+        return bucket or uri_bucket, uri_key
+    return bucket, key
+
+
 def vmimport_trust_policy():
     return {
         "Version": "2012-10-17",
@@ -269,6 +289,7 @@ class ImageConvertMixin:
 
     def _tool_ova_fetch(self, url, sha256=None, bucket=None, key=None, dry_run=False):
         """Download *url*, verify its SHA-256 when given, upload to the bucket."""
+        bucket, key = split_s3_key(key, bucket)
         s = self._ic_settings(bucket)
         filename = Path(url.split("?", 1)[0].rstrip("/")).name or "image.ova"
         key = key or f"{s.staging_prefix}{filename}"
@@ -333,6 +354,7 @@ class ImageConvertMixin:
     def _tool_ova_to_ami(self, key, bucket=None, name=None, launch=True,
                          instance_type=None, key_name=None, dry_run=False):
         """Import an OVA from S3 as an AMI, optionally launch it, write a receipt."""
+        bucket, key = split_s3_key(key, bucket)
         s = self._ic_settings(bucket)
         name = name or f"{Path(key).stem}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
         itype = instance_type or s.instance_type
@@ -627,6 +649,7 @@ class ImageConvertMixin:
                 "ova-import-cleanup: nothing to clean — give the source OVA key "
                 "(to read its receipt) or an explicit ami_id / instance_id."
             )
+        bucket, key = split_s3_key(key, bucket)
         s = self._ic_settings(bucket)
         self._ic_run("ova-import-cleanup",
                      lambda: self._ova_import_cleanup(

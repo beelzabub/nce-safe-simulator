@@ -594,7 +594,7 @@ TOOLS = [
         "confirm_text": "This starts a billable AWS VM Import — EBS snapshots + an AMI, plus a running EC2 instance when launch is on. The import typically takes 10–45 minutes. Tear everything down again with ova-import-cleanup.",
         "params": [
             {"name": "key",    "prompt": "S3 key of the staged OVA (from ova-fetch)", "type": str, "optional": False,
-             "help": "e.g. staging/noble-server-cloudimg-amd64.ova. The import reads the OVA directly from the bucket; run ova-fetch first to stage it."},
+             "help": "e.g. staging/noble-server-cloudimg-amd64.ova — or paste a full s3://bucket/key URI (the S3 console's 'Copy S3 URI' button); its bucket is used unless the bucket field below is set. The import reads the OVA directly from the bucket; run ova-fetch first to stage it."},
             {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
             {"name": "name",   "prompt": "AMI name (blank = derived from key + timestamp)", "type": str, "optional": True},
             {"name": "launch", "prompt": "Launch an instance from the imported AMI?", "type": bool, "default": True,
@@ -628,7 +628,7 @@ TOOLS = [
         "confirm_text": "This terminates the imported EC2 instance, deregisters the AMI, and deletes its EBS snapshots. It cannot be undone.",
         "params": [
             {"name": "key",    "prompt": "Source OVA S3 key (blank = use explicit ids below)", "type": str, "optional": True,
-             "help": "When given, targets are read from the receipt JSON ova-to-ami wrote next to the OVA (<key>.import.json); explicit ids below override/augment it."},
+             "help": "When given, targets are read from the receipt JSON ova-to-ami wrote next to the OVA (<key>.import.json); explicit ids below override/augment it. A full s3://bucket/key URI is accepted too."},
             {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
             {"name": "ami_id", "prompt": "AMI id (blank = from receipt)", "type": str, "optional": True},
             {"name": "instance_id", "prompt": "Instance id (blank = from receipt)", "type": str, "optional": True},
