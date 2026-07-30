@@ -380,6 +380,28 @@ def test_launch_creates_ssh_sg_when_missing():
     assert ec2.run_kwargs["SecurityGroupIds"] == ["sg-new"]
 
 
+def test_launch_survives_eventual_consistency_window():
+    """A brand-new instance id can 404 from describe for a few seconds —
+    the poll must retry, not surface InvalidInstanceID.NotFound."""
+    class LaggyEC2(FakeEC2):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.lag = 2
+
+        def describe_instances(self, InstanceIds):
+            if self.lag:
+                self.lag -= 1
+                raise _client_error("InvalidInstanceID.NotFound", "DescribeInstances")
+            return super().describe_instances(InstanceIds)
+
+    s3 = FakeS3(objects={"staging/x.ova": b"ova"})
+    ec2 = LaggyEC2(import_states=_import_walk(), sg_exists=True)
+    Harness(s3=s3, ec2=ec2)._tool_ova_to_ami(key="staging/x.ova")
+    receipt = json.loads(s3.objects["staging/x.ova.import.json"])
+    assert receipt["instance_id"] == "i-0abc"
+    assert receipt["public_ip"] == "203.0.113.7"
+
+
 def test_launch_without_default_vpc_raises():
     s3 = FakeS3(objects={"staging/x.ova": b"ova"})
     ec2 = FakeEC2(import_states=_import_walk(), default_vpc=False)

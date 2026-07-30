@@ -501,6 +501,7 @@ class ImageConvertMixin:
         return sg["GroupId"]
 
     def _launch_instance(self, ec2, ami_id, name, instance_type, key_name):
+        from botocore.exceptions import ClientError
         sg_id = self._ensure_ssh_sg(ec2)
         kwargs = {
             "ImageId": ami_id,
@@ -519,8 +520,18 @@ class ImageConvertMixin:
 
         t0 = time.monotonic()
         while True:
-            inst = ec2.describe_instances(InstanceIds=[instance_id]
-                                          )["Reservations"][0]["Instances"][0]
+            try:
+                inst = ec2.describe_instances(InstanceIds=[instance_id]
+                                              )["Reservations"][0]["Instances"][0]
+            except ClientError as exc:
+                # A just-launched id can be invisible to describe for a few
+                # seconds (EC2 eventual consistency) — retry briefly instead
+                # of failing a launch that actually succeeded.
+                code = exc.response.get("Error", {}).get("Code", "")
+                if code == "InvalidInstanceID.NotFound" and time.monotonic() - t0 < 120:
+                    time.sleep(INSTANCE_POLL_SECONDS)
+                    continue
+                raise
             state = inst["State"]["Name"]
             if state == "running":
                 return instance_id, inst.get("PublicIpAddress")
