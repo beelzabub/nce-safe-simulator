@@ -67,8 +67,8 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "export-links",
         "import-links",
     ],
-    # One conversion at a time: they share the vmimport role, the OVA bucket,
-    # and the receipt objects a concurrent cleanup would race on.
+    # Grouped for the UI, but see CONCURRENT_GROUPS below — these run on AWS,
+    # not GitLab, and VM Import handles many simultaneous tasks by design.
     "image-conversion": [
         "ova-import-setup",
         "ova-fetch",
@@ -77,6 +77,14 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "ova-import-cleanup",
     ],
 }
+
+# Groups whose members never conflict — with each other OR with a second run
+# of the same tool. The conflict framework exists to protect GitLab data from
+# concurrent writers; these tools write to AWS, where per-key resources are
+# independent and concurrent import/export tasks are the service's normal
+# operating mode (default quota: 20 simultaneous imports). The group still
+# exists so the job picker keeps them under one heading.
+CONCURRENT_GROUPS: frozenset[str] = frozenset(["image-conversion"])
 
 READONLY_TOOLS: frozenset[str] = frozenset([
     "audit-hierarchy",
@@ -107,10 +115,15 @@ def check_conflict(running: list[str], new_job: str) -> list[str]:
     if new_job in READONLY_TOOLS:
         return []
 
+    group = _TOOL_GROUP.get(new_job)
+    # Concurrent groups skip every check, including the same-tool duplicate
+    # rule — two ova-to-ami imports of different OVAs is a supported flow.
+    if group in CONCURRENT_GROUPS:
+        return []
+
     if new_job in running:
         return [new_job]
 
-    group = _TOOL_GROUP.get(new_job)
     if group is None:
         return []
 

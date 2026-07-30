@@ -486,10 +486,20 @@ class ImageConvertMixin:
                 "manually from the AMI) and re-run."
             )
         vpc_id = vpcs["Vpcs"][0]["VpcId"]
-        sg = ec2.create_security_group(
-            GroupName=SSH_SG_NAME, VpcId=vpc_id,
-            Description="SSH-only access to OVA-imported instances (nce-safe-simulator)",
-        )
+        try:
+            sg = ec2.create_security_group(
+                GroupName=SSH_SG_NAME, VpcId=vpc_id,
+                Description="SSH-only access to OVA-imported instances (nce-safe-simulator)",
+            )
+        except ClientError as exc:
+            # Two concurrent first-ever launches can race to create the group
+            # (conversions run in parallel by design) — the loser reuses the
+            # winner's.
+            if exc.response.get("Error", {}).get("Code") != "InvalidGroup.Duplicate":
+                raise
+            resp = ec2.describe_security_groups(
+                Filters=[{"Name": "group-name", "Values": [SSH_SG_NAME]}])
+            return resp["SecurityGroups"][0]["GroupId"]
         ec2.authorize_security_group_ingress(
             GroupId=sg["GroupId"],
             IpPermissions=[{

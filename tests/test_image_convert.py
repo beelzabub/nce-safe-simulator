@@ -402,6 +402,20 @@ def test_launch_survives_eventual_consistency_window():
     assert receipt["public_ip"] == "203.0.113.7"
 
 
+def test_launch_sg_create_race_reuses_winner():
+    """Concurrent conversions can race to create the SSH SG — the loser must
+    reuse the winner's group, not die on InvalidGroup.Duplicate."""
+    class RacedEC2(FakeEC2):
+        def create_security_group(self, **kw):
+            self.sg_exists = True    # the "other" job won the race
+            raise _client_error("InvalidGroup.Duplicate", "CreateSecurityGroup")
+
+    s3 = FakeS3(objects={"staging/x.ova": b"ova"})
+    ec2 = RacedEC2(import_states=_import_walk(), sg_exists=False)
+    Harness(s3=s3, ec2=ec2)._tool_ova_to_ami(key="staging/x.ova")
+    assert ec2.run_kwargs["SecurityGroupIds"] == ["sg-existing"]
+
+
 def test_launch_without_default_vpc_raises():
     s3 = FakeS3(objects={"staging/x.ova": b"ova"})
     ec2 = FakeEC2(import_states=_import_walk(), default_vpc=False)
