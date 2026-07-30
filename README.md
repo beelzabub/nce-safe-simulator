@@ -1514,6 +1514,13 @@ and the domain binding are left untouched, so the site at
 TLS churn. Use `make deploy-local` only for a full bring-up or after changing the
 Caddy config (`deploy/Caddyfile`).
 
+To poke around inside the running app container (inspect logs, mounted state,
+the baked-in code):
+
+```bash
+make app-shell           # docker exec -it into the app container (override: APP=<name>)
+```
+
 ---
 
 ## AWS Deployment
