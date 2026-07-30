@@ -140,6 +140,14 @@ ui_shots:
     title: "Image Conversion — OVA Import Cleanup"
     expand: ["IMAGE CONVERSION"]
     select: "OVA Import Cleanup"
+  - out: 21d-image-conversion-setup
+    title: "Image Conversion — OVA Import Setup (account prerequisites)"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA Import Setup"
+  - out: 21e-image-conversion-ami-to-ova
+    title: "Image Conversion — AMI To OVA (export back to S3)"
+    expand: ["IMAGE CONVERSION"]
+    select: "AMI To OVA"
 
 # Diagnose is parameterless and read-only, so it launches immediately with no dialog to
 # screenshot — it belongs in live_run_shots, not ui_shots. Since #249 reclassified it
