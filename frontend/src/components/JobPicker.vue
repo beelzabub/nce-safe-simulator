@@ -242,7 +242,10 @@ function cliFor(tool) {
 const isRunning = key => props.runningJobs.includes(key)
 
 function _blockersFor(tool) {
-  if (!tool || tool.readonly) return []
+  // Concurrent tools (server payload flag) never conflict — their group is a
+  // picker heading, not a mutual-exclusion set (e.g. Image Conversion, where
+  // parallel AWS import tasks are the normal mode).
+  if (!tool || tool.readonly || tool.concurrent) return []
   const group = tool.parallelism_group
   if (!group) return []
   return props.runningJobs.filter(runningKey => {

@@ -646,6 +646,16 @@ def test_confirm_gate_interactive_decline_backs_out(monkeypatch):
     T()._tool_confirm_gate(_TOOL_BY_KEY["ova-import-cleanup"])
 
 
+def test_ui_payload_marks_image_tools_concurrent():
+    """The frontend blocks launches from its own copy of the conflict logic,
+    keyed off this payload flag — without it, concurrent groups stay blocked
+    in the UI even though the server allows them."""
+    from server.app import _tool_payload
+    for key in IMAGE_TOOLS:
+        assert _tool_payload(_TOOL_BY_KEY[key])["concurrent"] is True
+    assert _tool_payload(_TOOL_BY_KEY["import-epics"])["concurrent"] is False
+
+
 def test_server_appends_yes_for_confirm_tools():
     from server.app import _job_argv
     _, _, argv = _job_argv({"tool": "ova-to-ami", "params": {"key": "staging/x.ova"}})

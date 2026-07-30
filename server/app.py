@@ -35,7 +35,8 @@ from server.auth_gate import (
     verify_credentials,
 )
 from server.analysis import portfolio_payload
-from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.constraints import (CONCURRENT_GROUPS, READONLY_TOOLS, _TOOL_GROUP,
+                                check_conflict)
 from server.jobs import manager as job_manager
 from server.version import app_version
 from server.retention import prune_temp_files
@@ -152,6 +153,10 @@ def _tool_payload(tool: dict, gl=None) -> dict:
         "confirm_text":      tool.get("confirm_text"),
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
+        # Members of a concurrent group (see constraints.py) keep their group
+        # for the picker heading but never conflict — the UI must not block
+        # them on running group-mates or a second run of the same tool.
+        "concurrent":        _TOOL_GROUP.get(key) in CONCURRENT_GROUPS,
         "params":            params,
     }
 
