@@ -241,7 +241,7 @@ watch(activeTab, v => { if (v === 'session' && runs.value.length === 0) loadRuns
 watch(() => props.open, v => { if (v && activeTab.value === 'session') loadRuns() })
 
 // ── Formatting ────────────────────────────────────────────────────────────────
-const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'ova', 'ami'])
 function formatKey(key) {
   return key.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)

@@ -143,7 +143,7 @@ onMounted(async () => {
 
 // ── Display helpers ───────────────────────────────────────────────────────
 
-const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'ova', 'ami'])
 
 function formatKey(key) {
   return key.split('-').map(w =>
@@ -159,6 +159,7 @@ const GROUP_LABELS = {
   'risk-writers':          'ROAM Risk',
   'wiki-writers':          'Wiki Management',
   'import-export':         'Import / Export',
+  'image-conversion':      'Image Conversion',
   'setup':                 'Initial Setup',
   'read-only':             'Audit & Validation',
 }

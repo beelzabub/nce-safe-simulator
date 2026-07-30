@@ -149,6 +149,7 @@ def _tool_payload(tool: dict, gl=None) -> dict:
         "key":               key,
         "description":       tool["description"],
         "confirm":           tool.get("confirm", False),
+        "confirm_text":      tool.get("confirm_text"),
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
         "params":            params,
@@ -1340,6 +1341,10 @@ def _job_argv(data: dict) -> tuple:
         if tool is None:
             raise ValueError(f"Unknown tool: {key!r}")
         argv = entry + ["-ut", key] + _tool_argv_tokens(tool, data.get("params") or {})
+        # The UI already showed its confirmation step for confirm tools; the
+        # subprocess runs non-interactively, so satisfy the CLI's confirm gate.
+        if tool.get("confirm"):
+            argv.append("--yes")
         return "tool", key, argv
 
     # Single report and multi-report selections both map to the CLI's `-r`

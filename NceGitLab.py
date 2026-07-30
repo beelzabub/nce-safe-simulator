@@ -14,6 +14,7 @@ from mixins import (
     BootstrapMixin,
     EpicsMixin,
     GroupsMixin,
+    ImageConvertMixin,
     ImportExportMixin,
     IssuesMixin,
     LabelsMixin,
@@ -43,6 +44,7 @@ class NceGitLab(
     ReportsMixin,
     BootstrapMixin,
     ToolsMixin,
+    ImageConvertMixin,
     ImportExportMixin,
     ServeMixin,
     PreflightMixin,
@@ -234,6 +236,11 @@ class NceGitLab(
         # Auth / front-door settings (epic #135) — optional section consumed by
         # server/auth_backgrounds.py; future AAA options land here too.
         self.auth = config.get("auth", {})
+
+        # Image Conversion (OVA → AMI, issue #285) — optional section consumed
+        # by mixins/image_convert.py; the bucket value is a BASE name that gets
+        # the account id appended at run time (see _ic_settings).
+        self.image_conversion = config.get("image_conversion", {})
 
         self.EPIC_TYPE_PLANNED_WEIGHTS = config.get("epic_type_planned_weights", {
             "Feature":    [3, 5, 8, 13],

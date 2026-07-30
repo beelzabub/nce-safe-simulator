@@ -67,6 +67,15 @@ WRITER_GROUPS: dict[str, list[str]] = {
         "export-links",
         "import-links",
     ],
+    # One conversion at a time: they share the vmimport role, the OVA bucket,
+    # and the receipt objects a concurrent cleanup would race on.
+    "image-conversion": [
+        "ova-import-setup",
+        "ova-fetch",
+        "ova-to-ami",
+        "ami-to-ova",
+        "ova-import-cleanup",
+    ],
 }
 
 READONLY_TOOLS: frozenset[str] = frozenset([

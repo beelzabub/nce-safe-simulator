@@ -15,7 +15,7 @@ def test_all_writer_groups_present():
     expected = {
         "label-writers", "weight-writers", "issue-state-writers",
         "epic-structure-writers", "risk-writers", "wiki-writers",
-        "setup", "import-export",
+        "setup", "import-export", "image-conversion",
     }
     assert set(WRITER_GROUPS.keys()) == expected
 
@@ -67,6 +67,8 @@ def test_readonly_against_readonly_is_safe():
     ("setup",                  "scaffold",              "setup-bv-field"),
     ("import-export",          "export-epics",          "import-epics"),
     ("import-export",          "import-issues",         "export-issues"),
+    ("image-conversion",       "ova-to-ami",            "ova-import-cleanup"),
+    ("image-conversion",       "ova-fetch",             "ova-to-ami"),
 ])
 def test_within_group_conflict(group, blocker, new_job):
     result = check_conflict([blocker], new_job)

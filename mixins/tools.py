@@ -555,6 +555,87 @@ TOOLS = [
             {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
         ],
     },
+    {
+        "key":         "ova-import-setup",
+        "description": "Check/create the OVA S3 bucket and the AWS 'vmimport' service role (idempotent)",
+        "method":      "_tool_ova_import_setup",
+        "requires":    ["image-convert"],
+        "confirm":     True,
+        "confirm_text": "This creates AWS account resources: a private S3 bucket for OVAs and the 'vmimport' IAM service role. Re-running converges them; nothing is ever deleted.",
+        "params": [
+            {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True,
+             "help": "Blank composes the bucket from config image_conversion.bucket plus the AWS account id (e.g. nce-safe-sim-ova-881490118830) — the same convention the S3 deploy uses, so identical config works on any account."},
+            {"name": "lifecycle_days", "prompt": "Days before staged OVAs expire (blank = config default)", "type": int, "optional": True,
+             "help": "A lifecycle rule expires objects under the staging/ prefix so forgotten multi-GB OVAs don't accrue storage cost. Exports and receipts are not touched."},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "ova-fetch",
+        "description": "Stage a source OVA: download a URL, verify its SHA-256, upload to the OVA bucket",
+        "method":      "_tool_ova_fetch",
+        "requires":    ["image-convert"],
+        "params": [
+            {"name": "url",    "prompt": "Source OVA URL", "type": str, "optional": False,
+             "help": "A public OVA download, e.g. https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.ova. The file is streamed through this box into the OVA bucket."},
+            {"name": "sha256", "prompt": "Expected SHA-256 (blank = record only, no verification)", "type": str, "optional": True,
+             "help": "From the source site's checksum file (SHA256SUMS). When given, a mismatch aborts before anything is uploaded; blank just records the computed digest in the log."},
+            {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
+            {"name": "key",    "prompt": "Target S3 key (blank = staging/<filename>)", "type": str, "optional": True},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "ova-to-ami",
+        "description": "Convert a staged OVA to an AMI via AWS VM Import, optionally launching an EC2 instance",
+        "method":      "_tool_ova_to_ami",
+        "requires":    ["image-convert"],
+        "confirm":     True,
+        "confirm_text": "This starts a billable AWS VM Import — EBS snapshots + an AMI, plus a running EC2 instance when launch is on. The import typically takes 10–45 minutes. Tear everything down again with ova-import-cleanup.",
+        "params": [
+            {"name": "key",    "prompt": "S3 key of the staged OVA (from ova-fetch)", "type": str, "optional": False,
+             "help": "e.g. staging/noble-server-cloudimg-amd64.ova. The import reads the OVA directly from the bucket; run ova-fetch first to stage it."},
+            {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
+            {"name": "name",   "prompt": "AMI name (blank = derived from key + timestamp)", "type": str, "optional": True},
+            {"name": "launch", "prompt": "Launch an instance from the imported AMI?", "type": bool, "default": True,
+             "help": "Launches into the default VPC with an SSH-only security group the tool creates/reuses. The importer does not inject SSH keys — access depends on the image's own cloud-init finding the EC2 datasource (Ubuntu cloud images and Amazon Linux do; arbitrary appliances may need their console)."},
+            {"name": "instance_type", "prompt": "Instance type (blank = config default, t3.micro)", "type": str, "optional": True},
+            {"name": "key_name", "prompt": "EC2 key pair name (blank = none)", "type": str, "optional": True},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "ami-to-ova",
+        "description": "Export back to S3: an instance (i-…) as a true .ova, or an AMI (ami-…) as a VMDK/VHD/RAW image",
+        "method":      "_tool_ami_to_ova",
+        "requires":    ["image-convert"],
+        "confirm":     True,
+        "confirm_text": "This starts a billable AWS export task and writes a multi-GB image object into the OVA bucket (exports/ prefix). Typically 10–40 minutes.",
+        "params": [
+            {"name": "source", "prompt": "Source — instance id (i-…) or AMI id (ami-…)", "type": str, "optional": False,
+             "help": "AWS only wraps a real .ova container around an INSTANCE export (create-instance-export-task); AMI-level export (export-image) produces a bare disk image in the chosen format. Both land under exports/ in the OVA bucket, via the same vmimport role."},
+            {"name": "fmt", "prompt": "Disk image format (AMI source only)", "type": str, "widget": "select", "options": ["vmdk", "vhd", "raw"], "default": "vmdk"},
+            {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "ova-import-cleanup",
+        "description": "Tear an import down: terminate the instance, deregister the AMI, delete its snapshots",
+        "method":      "_tool_ova_import_cleanup",
+        "requires":    ["image-convert"],
+        "confirm":     True,
+        "confirm_text": "This terminates the imported EC2 instance, deregisters the AMI, and deletes its EBS snapshots. It cannot be undone.",
+        "params": [
+            {"name": "key",    "prompt": "Source OVA S3 key (blank = use explicit ids below)", "type": str, "optional": True,
+             "help": "When given, targets are read from the receipt JSON ova-to-ami wrote next to the OVA (<key>.import.json); explicit ids below override/augment it."},
+            {"name": "bucket", "prompt": "OVA bucket (blank = config base + account id)", "type": str, "optional": True},
+            {"name": "ami_id", "prompt": "AMI id (blank = from receipt)", "type": str, "optional": True},
+            {"name": "instance_id", "prompt": "Instance id (blank = from receipt)", "type": str, "optional": True},
+            {"name": "delete_staged", "prompt": "Also delete the staged OVA and its receipt from S3?", "type": bool, "default": False},
+            {"name": "dry_run", "prompt": "Dry run?", "type": bool, "default": False, "cli_only": True},
+        ],
+    },
 ]
 
 
@@ -615,9 +696,21 @@ TOOL_CATEGORIES = [
                   "export-issues", "import-issues",
                   "export-links", "import-links"],
     },
+    {
+        "name":        "Image Conversion",
+        "description": "Convert OVA appliances to AMIs / EC2 instances, and export back to S3",
+        "tools": ["ova-import-setup", "ova-fetch", "ova-to-ami",
+                  "ami-to-ova", "ova-import-cleanup"],
+    },
 ]
 
 _TOOL_BY_KEY = {t["key"]: t for t in TOOLS}
+
+# Shown at the confirmation step when a confirm tool defines no confirm_text of
+# its own — the historical GitLab-writer wording. Used by the web UI dialog and
+# the CLI gate alike.
+DEFAULT_CONFIRM_TEXT = ("This will create objects in GitLab. Existing content "
+                        "is not removed, and the operation cannot be undone.")
 
 
 def tool_preflight_profile(tool_key: str) -> str:
@@ -773,7 +866,10 @@ class ToolsMixin:
                 for t in TOOLS:
                     print(f"  {t['key']}")
                 sys.exit(1)
-            self._run_tool(tool, prefills=prefills)
+            try:
+                self._run_tool(tool, prefills=prefills)
+            except _BackSignal:
+                print("Cancelled — nothing was run.")
             return
 
         while True:
@@ -947,6 +1043,13 @@ class ToolsMixin:
                 else:
                     kwargs[name] = _prompt_param(param)
 
+            # `confirm` tools gate here on the CLI too (the web UI has its own
+            # confirmation step and launches with --yes). Interactive: y/N
+            # prompt after the params so the user confirms what they entered;
+            # non-interactive: hard error unless --yes was passed, so a
+            # pipeline fails loudly instead of silently mutating things.
+            self._tool_confirm_gate(tool, assume_yes=bool(prefills.get("yes")))
+
             print()
             getattr(self, tool["method"])(**kwargs)
             self._last_tool_key    = tool["key"]
@@ -968,10 +1071,30 @@ class ToolsMixin:
             for param in tool["params"]:
                 val = kwargs.get(param["name"])
                 print(f"  {param['prompt']}: {val}")
+            self._tool_confirm_gate(tool)
             print()
             getattr(self, tool["method"])(**kwargs)
             self._last_tool_key    = tool["key"]
             self._last_tool_kwargs = kwargs.copy()
+
+    def _tool_confirm_gate(self, tool, assume_yes=False):
+        """The CLI side of a tool's `confirm` flag (the web UI shows its own
+        confirmation step and passes --yes). Declining raises _BackSignal so
+        the menu paths report "Cancelled." like any other backed-out prompt."""
+        if not tool.get("confirm") or assume_yes:
+            return
+        warning = tool.get("confirm_text") or DEFAULT_CONFIRM_TEXT
+        refusal = (f"'{tool['key']}' needs confirmation: {warning}\n"
+                   f"Non-interactive run — pass --yes to confirm.")
+        if not sys.stdin.isatty():
+            raise SystemExit(refusal)
+        try:
+            raw = input(f"  ⚠ {warning}\n  Proceed? [y/N]: ").strip().lower()
+        except EOFError:
+            # Pseudo-TTY with unreadable stdin (#253) — same as non-interactive.
+            raise SystemExit(refusal)
+        if raw not in ("y", "yes"):
+            raise _BackSignal
 
     # ------------------------------------------------------------------
     # Tool implementations

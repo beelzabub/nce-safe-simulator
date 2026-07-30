@@ -128,6 +128,8 @@ JOB_PROFILES = {
     "create":             (_CORE, []),
     "scaffold":           (_CORE, []),
     "clean":              (_CORE, []),
+    # OVA → AMI tools (#285): pure boto3, no aws binary or Makefile needed.
+    "image-convert":      (_CORE + ["boto3"], []),
     "deploy-s3":          (["aws", "make", "jq"], []),
     "deploy-ecr":         (["make", "jq", "aws"], ["docker"]),
     "deploy-ecs":         (["make", "jq", "cdk", "node", "aws"], []),

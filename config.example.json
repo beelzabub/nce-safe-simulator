@@ -49,6 +49,14 @@
       "distribution_comment": "NCE SAFe Simulator static site"
     }
   },
+  "image_conversion": {
+    "bucket": "nce-safe-sim-ova",
+    "region": "us-east-1",
+    "instance_type": "t3.micro",
+    "staging_prefix": "staging/",
+    "export_prefix": "exports/",
+    "lifecycle_expire_days": 14
+  },
   "project_labels": [
     "project::DO",
     "project::RTSO",
