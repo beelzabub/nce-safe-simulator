@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: full security sweep (issue #283)
+#
+# Run it:   pipeline with variable RECIPE=security-all
+#           (see ci-recipes/README.md → "How to run one" for the two ways)
+#
+# All five scanners in one child pipeline, running in parallel: SAST, secret
+# detection, dependency scanning, container scanning (the project's runtime
+# image), and IaC scanning. The per-scanner recipes (security-*.yml) exist for
+# learning one surface at a time; this is the one-shot audit — and the recipe
+# to put on a schedule if the scans should track the default branch over time.
+#
+# Prerequisites and notes are documented in each per-scanner recipe; the only
+# hard one is container scanning's (the runtime image must exist in the
+# Container Registry). Findings land in this pipeline's Security tab, the
+# per-scanner gl-*-report.json artifacts, and — after a default-branch run —
+# Secure → Vulnerability report. Wiki index: "Security scanning".
+# ─────────────────────────────────────────────────────────────────────────────
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+  - template: Jobs/SAST-IaC.gitlab-ci.yml
+
+container_scanning:
+  variables:
+    CS_IMAGE: $CI_REGISTRY_IMAGE:latest
