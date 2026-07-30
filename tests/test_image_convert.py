@@ -363,6 +363,34 @@ def test_ova_to_ami_failed_task_raises():
         Harness(s3=s3, ec2=ec2)._tool_ova_to_ami(key="staging/x.ova")
 
 
+def test_cancel_signal_cancels_aws_import_task():
+    """UI Stop sends SIGTERM to the job — mid-poll it must cancel the AWS
+    import task (else the task completes and strands an orphan AMI)."""
+    import signal as _signal
+
+    class CancelEC2(FakeEC2):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.cancelled = None
+
+        def cancel_import_task(self, ImportTaskId, CancelReason=None):
+            self.cancelled = ImportTaskId
+
+        def describe_import_image_tasks(self, ImportTaskIds):
+            # simulate the SIGTERM arriving mid-poll
+            handler = _signal.getsignal(_signal.SIGTERM)
+            handler(_signal.SIGTERM, None)
+
+    s3 = FakeS3(objects={"staging/x.ova": b"ova"})
+    ec2 = CancelEC2()
+    prior = _signal.getsignal(_signal.SIGTERM)
+    with pytest.raises(SystemExit):
+        Harness(s3=s3, ec2=ec2)._tool_ova_to_ami(key="staging/x.ova")
+    assert ec2.cancelled == "import-ami-0123"
+    assert _signal.getsignal(_signal.SIGTERM) is prior   # handler restored
+    assert "staging/x.ova.import.json" not in s3.objects
+
+
 def test_ova_to_ami_dry_run_calls_nothing():
     ec2 = FakeEC2()
     Harness(s3=FakeS3(objects={}), ec2=ec2)._tool_ova_to_ami(

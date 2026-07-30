@@ -18,6 +18,7 @@ created idempotently by ``ova-import-setup`` so the capability is reproducible
 on any account, including after an enclave lift.
 """
 import json
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -395,7 +396,36 @@ class ImageConvertMixin:
         task_id = task["ImportTaskId"]
         print(f"  import task  : {task_id} (typically 10–45 min)")
 
-        ami_id, snapshot_ids = self._poll_import_task(ec2, task_id, t0)
+        # Cancelling the simulator job (UI Stop → SIGTERM) must also cancel
+        # the AWS-side task — otherwise it completes on Amazon's side anyway
+        # and strands an untracked AMI + snapshot (it happened twice on the
+        # first live day). Handlers are restored once the import completes:
+        # past that point there is nothing cancellable, and a receipt will
+        # exist for cleanup. SIGKILL can't be caught; the job runner sends
+        # SIGTERM first and only escalates, so the window is covered.
+        def _on_cancel(signum, frame):
+            print(f"\njob cancelled — cancelling AWS import task {task_id} …", flush=True)
+            try:
+                ec2.cancel_import_task(ImportTaskId=task_id,
+                                       CancelReason="simulator job cancelled")
+                print("import task cancelled — no AMI will be registered")
+            except Exception as exc:  # noqa: BLE001 — dying anyway, report and go
+                print(f"cancel-import-task failed ({exc}) — the task may still "
+                      "complete; check for an orphan AMI")
+            raise SystemExit(128 + signum)
+
+        prev_handlers = {}
+        try:
+            for _sig in (signal.SIGTERM, signal.SIGINT):
+                prev_handlers[_sig] = signal.signal(_sig, _on_cancel)
+        except ValueError:
+            pass  # not the main thread (tests/embedding) — skip the guard
+
+        try:
+            ami_id, snapshot_ids = self._poll_import_task(ec2, task_id, t0)
+        finally:
+            for _sig, _h in prev_handlers.items():
+                signal.signal(_sig, _h)
         ec2.create_tags(Resources=[ami_id], Tags=[{"Key": "Name", "Value": name}])
         print(f"  AMI          : {ami_id} (snapshots: {', '.join(snapshot_ids) or '—'})")
 
