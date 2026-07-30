@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: dependency scanning (issue #283)
+#
+# Run it:   pipeline with variable RECIPE=security-dependency-scanning
+#           (see ci-recipes/README.md → "How to run one" for the two ways)
+#
+# Includes GitLab's maintained Dependency Scanning template: matches the
+# project's dependency files (requirements.txt here, plus frontend/package.json
+# lockfiles) against the GitLab Advisory Database for known-vulnerable
+# versions. License information rides along on the same scan.
+#
+# Where the findings land (Ultimate):
+#   • this pipeline → Security tab
+#   • Secure → Vulnerability report (after a default-branch run)
+#   • Secure → Dependency list — the full SBOM view, each dependency with its
+#     version, source file, and any advisories
+#   • gl-dependency-scanning-report.json + CycloneDX SBOM job artifacts
+# Wiki page "Security scanning/Dependency Scanning" walks the UI.
+# ─────────────────────────────────────────────────────────────────────────────
+include:
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml

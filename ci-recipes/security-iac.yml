@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: IaC scanning (issue #283)
+#
+# Run it:   pipeline with variable RECIPE=security-iac
+#           (see ci-recipes/README.md → "How to run one" for the two ways)
+#
+# Includes GitLab's maintained IaC scanning template (KICS-based): static
+# analysis of infrastructure-as-code for misconfigurations — here that covers
+# the CDK output/config under cdk/, the Helm charts under helm/, and the
+# Dockerfile.
+#
+# Where the findings land (Ultimate):
+#   • this pipeline → Security tab
+#   • Secure → Vulnerability report (after a default-branch run)
+#   • gl-sast-report.json job artifact (IaC scanning reports as SAST)
+# Wiki page "Security scanning/IaC Scanning" walks the UI.
+# ─────────────────────────────────────────────────────────────────────────────
+include:
+  - template: Jobs/SAST-IaC.gitlab-ci.yml

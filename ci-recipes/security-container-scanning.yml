@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: container scanning (issue #283)
+#
+# Run it:   pipeline with variable RECIPE=security-container-scanning
+#           (see ci-recipes/README.md → "How to run one" for the two ways)
+#
+# Includes GitLab's maintained Container Scanning template (Trivy-based) and
+# points it at the project's own runtime image — the one `containerize`
+# publishes on every merge to the default branch. It scans the image's OS
+# packages (Debian, from python:3.11-slim) and language packages for known
+# CVEs — the complement to dependency scanning, which reads the source tree.
+#
+# Prerequisite: the runtime image exists in the Container Registry (any
+# default-branch merge has built it). The template authenticates to the
+# project's own registry with the built-in job credentials — nothing to set.
+# Scan the dev image instead with CS_IMAGE=$CI_REGISTRY_IMAGE/dev:latest, or
+# pin a specific build with its :<short-sha> tag.
+#
+# Where the findings land (Ultimate):
+#   • this pipeline → Security tab
+#   • Secure → Vulnerability report (after a default-branch run)
+#   • gl-container-scanning-report.json job artifact
+# Wiki page "Security scanning/Container Scanning" walks the UI.
+# ─────────────────────────────────────────────────────────────────────────────
+include:
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+
+container_scanning:
+  variables:
+    CS_IMAGE: $CI_REGISTRY_IMAGE:latest

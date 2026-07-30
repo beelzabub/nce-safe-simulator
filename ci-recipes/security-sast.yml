@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: SAST — static application security testing (issue #283)
+#
+# Run it:   pipeline with variable RECIPE=security-sast
+#           (see ci-recipes/README.md → "How to run one" for the two ways)
+#
+# Includes GitLab's maintained SAST template. It auto-detects the languages in
+# the checkout and runs the matching analyzer — here that's Semgrep covering
+# both the Python tooling and the frontend JavaScript/Vue. No token, image, or
+# config needed: the template pins its own analyzer images from
+# registry.gitlab.com and scans the checked-out source tree.
+#
+# Where the findings land (Ultimate):
+#   • this pipeline → Security tab — the raw finding list for the run
+#   • Secure → Vulnerability report — project-wide, once the recipe has run
+#     on the DEFAULT branch (feature-branch runs feed MR widgets instead)
+#   • gl-sast-report.json job artifact — the machine-readable report
+# Wiki page "Security scanning/SAST" walks the UI.
+#
+# Notes:
+#   • Analyzer images pull from registry.gitlab.com — fine on gitlab.com;
+#     on an air-gapped instance they must be mirrored first (the template
+#     honors SECURE_ANALYZERS_PREFIX to point at a local mirror).
+#   • SAST_EXCLUDED_PATHS defaults to spec,test,tests,tmp — our tests/ tree
+#     is already skipped, which keeps deliberately-ugly fixtures out of the
+#     findings.
+# ─────────────────────────────────────────────────────────────────────────────
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
