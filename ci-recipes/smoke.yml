@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: router smoke test
+#
+# The smallest possible recipe — proves the router plumbing end to end:
+# the RECIPE variable selected this file, the trigger job ran it as a child
+# pipeline, and extra Run-pipeline variables were forwarded through
+# (trigger:forward:pipeline_variables in the root .gitlab-ci.yml).
+#
+#   glab ci run -b <branch> --variables RECIPE:smoke --variables TOOL:demo
+#
+# Expected: the parent pipeline shows only the `recipe` trigger job (test and
+# containerize sit out), the child shows this one green job, and the job log
+# echoes RECIPE=smoke and TOOL=demo. Also the recipe to copy as a starting
+# skeleton — every recipe is a self-contained child pipeline: its own stages,
+# its own image, nothing inherited from the parent yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+stages: [smoke]
+
+smoke:
+  stage: smoke
+  image: python:3.11          # pullable wherever the baseline test job runs
+  script:
+    - echo "router smoke test — this job arrived via the recipe router"
+    - 'echo "ref $CI_COMMIT_REF_NAME @ $CI_COMMIT_SHORT_SHA (child pipeline source: $CI_PIPELINE_SOURCE)"'
+    - echo "forwarded variables:"
+    # Whitelist echo, not `env` — never dump the full environment (it holds
+    # CI job tokens and any masked variables) into a job log.
+    - 'echo "  RECIPE=$RECIPE"'
+    - 'test -z "$TOOL" || echo "  TOOL=$TOOL"'

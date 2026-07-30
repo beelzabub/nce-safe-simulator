@@ -1,13 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Recipe: kaniko / runner diagnostic pipeline (issue #276)
 #
-# Like baseline-gitlab-ci.yml, this is a WHOLE-FILE recipe, not a job snippet:
-# temporarily copy it over .gitlab-ci.yml on the instance under investigation,
-# run ONE new pipeline, capture the full job log, then restore ground zero:
+# Run it:   CI/CD → Pipelines → Run pipeline, variable RECIPE=kaniko-runner-diag
+#           (or: glab ci run -b <branch> --variables RECIPE:kaniko-runner-diag)
 #
-#   cp ci-recipes/kaniko-runner-diag.yml .gitlab-ci.yml     # swap in
-#   ... commit, run pipeline, save the job log ...
-#   cp ci-recipes/baseline-gitlab-ci.yml .gitlab-ci.yml     # swap back
+# One click on the instance under investigation, save the job log — no more
+# copying files over .gitlab-ci.yml and restoring afterwards; the router
+# (root .gitlab-ci.yml, issue #283) runs this file as a child pipeline.
 #
 # Purpose: when `containerize` dies unpacking a base image with
 #   "unlinkat //sbin/docker-init: device or resource busy"

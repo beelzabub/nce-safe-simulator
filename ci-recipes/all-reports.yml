@@ -1,10 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Recipe: full report suite as a pipeline artifact
 #
+# Run it:   CI/CD → Pipelines → Run pipeline, variable RECIPE=all-reports
+#           (or: glab ci run -b <branch> --variables RECIPE:all-reports)
+#
 # Runs every report non-interactively (`--report all`) and publishes the
 # rendered site — static Quarto HTML + interactive Marimo pages — as a job
 # artifact under public/. Wiki-format pages publish straight to the group wiki
-# via the API during the run.
+# via the API during the run — a full run REWRITES every wiki report page,
+# which is why this is a deliberate recipe run, not a per-push job. For a
+# recurring run, create a pipeline schedule (Build → Pipeline schedules) that
+# defines RECIPE=all-reports.
 #
 # The job runs inside the project's OWN runtime image from the Container
 # Registry: Quarto (vendored from the package registry, issue #262), Pango,
@@ -23,13 +29,16 @@
 #   • A GitLab token with 'api' scope (reports read the live group and write
 #     wiki pages). Provide it EITHER as a masked CI/CD variable
 #     GITLAB_API_TOKEN (recommended), OR by committing your own config.json
-#     with the token filled in.
+#     with the token filled in. NOTE: a CI/CD variable marked "Protected" is
+#     only injected into pipelines on protected refs — if the branch you run
+#     the recipe on isn't protected the variable arrives empty.
 #   • config.json — url, private_token, parent_group. Seeded from
 #     config.example.json below if your repo doesn't carry one.
 # ─────────────────────────────────────────────────────────────────────────────
+stages: [reports]
 
 all-reports:
-  stage: build                      # ← change to a stage that exists in your pipeline
+  stage: reports
   image:
     name: $CI_REGISTRY_IMAGE:latest
     # The runtime image's ENTRYPOINT is the served app — it would swallow the
@@ -57,16 +66,3 @@ all-reports:
     paths:
       - public/
     expire_in: 30 days
-  rules:
-    # A full run reads the whole group and rewrites every wiki report page —
-    # deliberate, not per-commit. Default: scheduled pipelines (Build →
-    # Pipeline schedules; the schedule targets whatever branch you pick) plus
-    # a manual button on branch pipelines. No branch name is hardcoded, so the
-    # rules work unchanged wherever the repo lives (develop- or main-based).
-    # Loosen to `- if: $CI_COMMIT_BRANCH` if you really want it on every push.
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-    - if: $CI_COMMIT_BRANCH
-      when: manual
-      # Without this, a rules-based manual job leaves every branch pipeline
-      # showing "blocked" until someone presses the button.
-      allow_failure: true

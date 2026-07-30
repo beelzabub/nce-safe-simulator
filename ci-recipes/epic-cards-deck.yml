@@ -1,9 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Recipe: epic-cards deck as a pipeline artifact
 #
-# Renders the filtered epics as a print-ready "Capability Card" PDF and publishes
-# it as a downloadable job artifact. Copy this job into your project's
-# .gitlab-ci.yml and adjust the marked spots (stage, triggers).
+# Run it:   CI/CD → Pipelines → Run pipeline, variable RECIPE=epic-cards-deck
+#           (or: glab ci run -b <branch> --variables RECIPE:epic-cards-deck)
+#
+# Renders the filtered epics as a print-ready "Capability Card" PDF and
+# publishes it as a downloadable job artifact.
 #
 # The job runs inside the project's OWN runtime image from the Container
 # Registry: Pango, fonts, and every pip requirement are already baked in, so
@@ -21,17 +23,16 @@
 #     CI/CD variable GITLAB_API_TOKEN (recommended — keeps it out of git), OR by
 #     committing your own config.json with the token filled in. NOTE: a CI/CD
 #     variable marked "Protected" is only injected into pipelines on protected
-#     refs — if the job's branch isn't protected the variable arrives empty.
+#     refs — if the recipe's branch isn't protected the variable arrives empty.
 #   • config.json          — url, private_token, parent_group. Seeded from
 #                            config.example.json below if your repo doesn't carry one.
 #   • epic-cards-spec.json  — the 'filter' + 'taxonomy' whitelists that define
 #                            which epics render and how their labels are classified.
-#
-# A commit runs this job and produces the PDF artifact.
 # ─────────────────────────────────────────────────────────────────────────────
+stages: [deck]
 
 epic-cards-deck:
-  stage: build                      # ← change to a stage that exists in your pipeline
+  stage: deck
   image:
     name: $CI_REGISTRY_IMAGE:latest
     # The runtime image's ENTRYPOINT is the served app — it would swallow the
@@ -60,11 +61,6 @@ epic-cards-deck:
     paths:
       - capability-cards.pdf
     expire_in: 30 days
-  rules:
-    # Run on every branch commit. To run only when the data/spec actually
-    # changes, replace with a `changes:` rule (shown commented below).
-    - if: $CI_COMMIT_BRANCH
-    # - changes: [config.json, epic-cards-spec.json]
 
 # ── Standalone variant (internet required) ──────────────────────────────────
 # For a space whose registry has no runtime image: start from stock python:3.11
