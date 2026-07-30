@@ -444,6 +444,43 @@ def test_launch_sg_create_race_reuses_winner():
     assert ec2.run_kwargs["SecurityGroupIds"] == ["sg-existing"]
 
 
+def test_launch_sets_delete_on_termination_on_root():
+    """Imported AMIs register DeleteOnTermination=false — without the launch
+    override every terminated instance strands its root volume."""
+    s3 = FakeS3(objects={"staging/x.ova": b"ova"})
+    ec2 = FakeEC2(import_states=_import_walk(), sg_exists=True)
+    ec2.images["ami-0dead"] = {"RootDeviceName": "/dev/xvda"}
+    Harness(s3=s3, ec2=ec2)._tool_ova_to_ami(key="staging/x.ova")
+    bdm = ec2.run_kwargs["BlockDeviceMappings"][0]
+    assert bdm["DeviceName"] == "/dev/xvda"           # from the AMI, not guessed
+    assert bdm["Ebs"]["DeleteOnTermination"] is True
+
+
+def test_cleanup_deletes_surviving_root_volume():
+    """Instances launched before the DeleteOnTermination override leave their
+    root volume 'available' after terminate — cleanup must delete it."""
+    class VolEC2(FakeEC2):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.deleted_volumes = []
+
+        def describe_instances(self, InstanceIds):
+            r = super().describe_instances(InstanceIds)
+            r["Reservations"][0]["Instances"][0]["BlockDeviceMappings"] = [
+                {"Ebs": {"VolumeId": "vol-0aaa"}}]
+            return r
+
+        def describe_volumes(self, VolumeIds):
+            return {"Volumes": [{"VolumeId": VolumeIds[0], "State": "available"}]}
+
+        def delete_volume(self, VolumeId):
+            self.deleted_volumes.append(VolumeId)
+
+    s3, ec2 = _receipt_s3(), VolEC2()
+    Harness(s3=s3, ec2=ec2)._tool_ova_import_cleanup(key="staging/x.ova")
+    assert ec2.deleted_volumes == ["vol-0aaa"]
+
+
 def test_launch_without_default_vpc_raises():
     s3 = FakeS3(objects={"staging/x.ova": b"ova"})
     ec2 = FakeEC2(import_states=_import_walk(), default_vpc=False)

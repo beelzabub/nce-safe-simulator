@@ -543,11 +543,24 @@ class ImageConvertMixin:
     def _launch_instance(self, ec2, ami_id, name, instance_type, key_name):
         from botocore.exceptions import ClientError
         sg_id = self._ensure_ssh_sg(ec2)
+        # Imported AMIs register their root mapping with DeleteOnTermination
+        # false — every terminated instance would strand its root volume
+        # (billed until someone notices). Override it at launch.
+        root_dev = "/dev/sda1"
+        try:
+            images = ec2.describe_images(ImageIds=[ami_id])["Images"]
+            if images and images[0].get("RootDeviceName"):
+                root_dev = images[0]["RootDeviceName"]
+        except ClientError:
+            pass
         kwargs = {
             "ImageId": ami_id,
             "InstanceType": instance_type,
             "MinCount": 1, "MaxCount": 1,
             "SecurityGroupIds": [sg_id],
+            "BlockDeviceMappings": [
+                {"DeviceName": root_dev, "Ebs": {"DeleteOnTermination": True}},
+            ],
             "TagSpecifications": [{
                 "ResourceType": "instance",
                 "Tags": [{"Key": "Name", "Value": name}],
@@ -733,6 +746,18 @@ class ImageConvertMixin:
                 print(f"  would terminate instance {instance_id}")
             else:
                 try:
+                    # Record attached volumes first: instances launched before
+                    # the DeleteOnTermination override (or with it stripped)
+                    # leave their root volume behind on terminate.
+                    attached = []
+                    try:
+                        inst = ec2.describe_instances(InstanceIds=[instance_id]
+                                                      )["Reservations"][0]["Instances"][0]
+                        attached = [b["Ebs"]["VolumeId"]
+                                    for b in inst.get("BlockDeviceMappings", [])
+                                    if b.get("Ebs", {}).get("VolumeId")]
+                    except (ClientError, IndexError):
+                        pass
                     ec2.terminate_instances(InstanceIds=[instance_id])
                     print(f"  terminating {instance_id} …")
                     t0 = time.monotonic()
@@ -743,6 +768,14 @@ class ImageConvertMixin:
                             break
                         time.sleep(INSTANCE_POLL_SECONDS)
                     print(f"  instance {instance_id}: terminated")
+                    for vid in attached:
+                        try:
+                            vol = ec2.describe_volumes(VolumeIds=[vid])["Volumes"][0]
+                            if vol["State"] == "available":
+                                ec2.delete_volume(VolumeId=vid)
+                                print(f"  volume {vid}: survived termination — deleted")
+                        except ClientError:
+                            pass  # deleted with the instance — the normal case
                 except ClientError as exc:
                     print(f"  instance {instance_id}: {exc.response['Error'].get('Code')} "
                           "(already gone?) — continuing")
