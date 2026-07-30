@@ -57,6 +57,19 @@ def _click_steps(page, shot):
         page.wait_for_timeout(600)
 
 
+def _fill_steps(page, shot):
+    """Run a shot's `fill` — a list of {label, value} typed into the dialog's
+    text inputs (matched by the param row containing the label text). Needed
+    for shots of a dialog's CONFIRMATION view: confirm tools disable Launch
+    until required params are filled, and the first Launch click only reveals
+    the confirmation step — it never starts the job (that takes a second click
+    on Confirm & Launch, which capture shots never do)."""
+    for f in shot.get("fill", []):
+        page.fill(f".param-row:has-text('{f['label']}') input.field-input",
+                  str(f["value"]))
+        page.wait_for_timeout(200)
+
+
 def _navigate(page, base_url, shot):
     page.goto(base_url, wait_until="networkidle", timeout=30000)
     page.wait_for_timeout(1200)
@@ -66,6 +79,7 @@ def _navigate(page, base_url, shot):
     if shot.get("select"):
         page.click(f"li.job-item:has-text('{shot['select']}')", timeout=8000)
         page.wait_for_timeout(600)
+    _fill_steps(page, shot)
     _click_steps(page, shot)
 
 
@@ -90,6 +104,7 @@ def capture_ui_shot(browser, base_url, shot, out_dir, viewport):
     if shot.get("select"):
         page.click(f"li.job-item:has-text('{shot['select']}')", timeout=8000)
         page.wait_for_timeout(600)
+    _fill_steps(page, shot)
     _click_steps(page, shot)
     page.screenshot(path=os.path.join(out_dir, f"{out}_light.png"), full_page=True)
     page.close()

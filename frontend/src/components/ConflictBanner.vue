@@ -22,7 +22,7 @@ const props = defineProps({
   group:    { type: String, default: null },
 })
 
-const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'ova', 'ami'])
 const groupLabel = computed(() => {
   if (!props.group) return null
   return props.group.split('-').map(w =>

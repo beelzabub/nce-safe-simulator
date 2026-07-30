@@ -9,6 +9,7 @@ from .milestones import MilestonesMixin
 from .reports import ReportsMixin
 from .bootstrap import BootstrapMixin
 from .tools import ToolsMixin
+from .image_convert import ImageConvertMixin
 from .importexport import ImportExportMixin
 from .serve import ServeMixin
 from .preflight import PreflightMixin
@@ -25,6 +26,7 @@ __all__ = [
     "ReportsMixin",
     "BootstrapMixin",
     "ToolsMixin",
+    "ImageConvertMixin",
     "ImportExportMixin",
     "ServeMixin",
     "PreflightMixin",

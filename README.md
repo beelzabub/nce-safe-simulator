@@ -961,6 +961,7 @@ Missing 1 required dependency(ies) for this job:
   | `--formats interactive` | + marimo |
   | `--formats all` | + quarto + marimo |
   | `-ut epic-cards` (PDF) | core + **WeasyPrint render** (Pango + fonts) |
+  | `-ut ova-to-ami` (and the other Image Conversion tools) | core + **boto3** |
   | `--create` / `--scaffold` / `--clean` | core |
 
 - **Clean output, no stack traces.** Each missing dependency is shown with a `fix:` hint, an air-gap note (provision from your internal mirror), and a `removable:` note saying how the requirement can be avoided (drop a format, or flag it for a code rework that removes the dependency). Optional items (graphviz, the deploy toolchain) warn but never block. The gate exits with code **2** (distinct from a crash's 1).
@@ -1140,6 +1141,24 @@ Existence checks are **batched per container** (#201): each target group/project
 
 The run summary reports counts as `N created | N updated | N skipped | N failed`. Title matching is intentionally simple (no stable-id round-trip), so distinct items sharing a title are treated as the same — keep titles unique if you rely on `skip`/`update`.
 
+### Image Conversion (OVA → AMI → EC2)
+
+The **Image Conversion** category (#285) converts virtual-appliance OVAs into runnable AWS AMIs / EC2 instances — and exports back to S3 — using AWS **VM Import/Export**. Like every other utility, the tools run from the interactive menu, directly by key (`-ut ova-to-ami --key staging/x.ova`), or from the web UI job picker; the multi-step conversions print a status line per poll, so the durable-job log window shows live progress through a 10–45 minute import. All AWS access is boto3 against the default credential provider chain (instance profile, `~/.aws`, or `AWS_*` env vars) — no `aws` CLI or Makefile needed.
+
+| Key | Description |
+|---|---|
+| `ova-import-setup` | Check/create the account prerequisites: the private OVA bucket (with a lifecycle rule expiring `staging/` objects) and the `vmimport` IAM service role (trust `vmie.amazonaws.com`, `sts:ExternalId=vmimport`, S3+EC2 policy scoped to the bucket). Idempotent — re-running converges, never deletes |
+| `ova-fetch` | Stage a source OVA: stream a public URL to the bucket, verifying its SHA-256 on the way when one is supplied (a mismatch aborts before upload) |
+| `ova-to-ami` | The core conversion: `import-image` reads the staged OVA straight from S3, the tool polls the task to completion, tags the AMI, optionally launches an EC2 instance from it (default VPC, SSH-only security group it creates/reuses, `t3.micro` by default), and writes a **receipt JSON** next to the source OVA (`<key>.import.json`: task id, AMI id, snapshot ids, instance id, public IP, timings) |
+| `ami-to-ova` | The file-producing reverse: an **instance id** (`i-…`) exports as a true `.ova` container (`create-instance-export-task`); an **AMI id** (`ami-…`) exports as a VMDK/VHD/RAW disk image (`export-image` — AWS offers no OVA container at AMI level). Either way the artifact lands under `exports/` in the bucket |
+| `ova-import-cleanup` | Tear an import down: terminate the instance, deregister the AMI, delete its EBS snapshots — targets read from the receipt (pass the source OVA key) and/or explicit ids. `delete_staged` also removes the staged OVA + receipt |
+
+Configuration lives in the optional `image_conversion` section of `config.json` (see `config.example.json`): `bucket` is a **base name** that gets the AWS account id appended at run time (`nce-safe-sim-ova` → `nce-safe-sim-ova-881490118830`, the same convention as the S3 deploy), so identical config works on any account — including after an enclave lift. `region`, `instance_type`, the `staging/` / `exports/` prefixes, and the lifecycle expiry days are also settable there; every tool takes an explicit `bucket` override per run.
+
+The proven flow: `ova-import-setup` once per account → `ova-fetch` a source (e.g. the Ubuntu cloud OVA, Amazon Linux's VMware OVA, or a TurnKey appliance) → `ova-to-ami` → log in / demo → `ami-to-ova` if a file artifact is wanted back → `ova-import-cleanup`. Notes: only VM-Import-supported OSes convert; the importer does **not** inject SSH keys (access depends on the image's own cloud-init finding the EC2 datasource — Ubuntu cloud images and Amazon Linux behave; arbitrary appliances may need their console); imports/exports are billable (EBS snapshots, AMI/S3 storage, instance runtime), which is why the billable and destructive tools carry a confirmation step.
+
+**Confirmation gates.** Tools flagged `confirm` in the registry now carry **per-tool warning text** (the web UI's confirmation step shows it instead of the one-size GitLab wording), and the gate is enforced on the **CLI** too: interactive runs get a `y/N` prompt after the parameters; non-interactive runs (CI, scripts) fail loudly unless `--yes` is passed. Web-launched jobs pass `--yes` automatically — the UI already confirmed.
+
 ### Printable Epic Cards (PDF)
 
 The `epic-cards` tool renders filtered epics as a **print-ready PDF** for hard-copy PI planning (#249). Two modes: the default **cut-apart cards** — Letter-size (**portrait by default, or landscape** — #254) with dashed cut borders, **1, 2, or 4 cards per page** — or a **large-format tiled "wall"** (#241) sized for a plotter (see [Large-format plotter wall](#large-format-plotter-wall-241) below). Output is written to `public/exports` and returned as a browser download (`/api/download/<file>.pdf`), same as the CSV/JSON exports. Rendering uses WeasyPrint (HTML/CSS → PDF); no headless browser required.
@@ -1231,7 +1250,7 @@ The top-level `.gitlab-ci.yml` is a **router** (issue #283). With no variable it
 
 ### Non-interactive by default
 
-When stdin isn't a TTY (every CI runner), tools never prompt: each option you don't pass on the command line takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs to completion unattended (group from `config.json`, filter + taxonomy from the spec). A genuinely required value with no default fails the job loudly by name instead of hanging on a prompt.
+When stdin isn't a TTY (every CI runner), tools never prompt: each option you don't pass on the command line takes its default, so `python3 NceGitLab.py -ut epic-cards --output_path deck.pdf` runs to completion unattended (group from `config.json`, filter + taxonomy from the spec). A genuinely required value with no default fails the job loudly by name instead of hanging on a prompt. Tools flagged `confirm` in the registry (the importers, and the billable/destructive Image Conversion tools) additionally require an explicit **`--yes`** on non-interactive runs — the job fails with the tool's own warning text instead of silently mutating things.
 
 ### The preflight gate is the fail-fast
 
@@ -1494,6 +1513,13 @@ and the domain binding are left untouched, so the site at
 `https://nce-safe-sim.com` reflects the new code within about a minute with no
 TLS churn. Use `make deploy-local` only for a full bring-up or after changing the
 Caddy config (`deploy/Caddyfile`).
+
+To poke around inside the running app container (inspect logs, mounted state,
+the baked-in code):
+
+```bash
+make app-shell           # docker exec -it into the app container (override: APP=<name>)
+```
 
 ---
 

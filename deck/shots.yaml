@@ -116,6 +116,38 @@ ui_shots:
   - out: 19-deployments-dialog
     title: "Web UI — Deployments"
     click: "text=Deployments…"
+  - out: 20-image-conversion-category
+    title: "Image Conversion — Job Picker Category (#285)"
+    expand: ["IMAGE CONVERSION"]
+  - out: 21-image-conversion-ova-to-ami
+    title: "Image Conversion — OVA To AMI"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA To AMI"
+  - out: 21a-image-conversion-ova-to-ami-confirm
+    title: "Image Conversion — OVA To AMI (confirmation step, per-tool AWS cost warning)"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA To AMI"
+    fill:
+      - label: "S3 key of the staged OVA"
+        value: "staging/noble-server-cloudimg-amd64.ova"
+    # first Launch click only reveals the confirmation view — never starts the job
+    click: "button.btn-launch"
+  - out: 21b-image-conversion-ova-fetch
+    title: "Image Conversion — OVA Fetch"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA Fetch"
+  - out: 21c-image-conversion-cleanup
+    title: "Image Conversion — OVA Import Cleanup"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA Import Cleanup"
+  - out: 21d-image-conversion-setup
+    title: "Image Conversion — OVA Import Setup (account prerequisites)"
+    expand: ["IMAGE CONVERSION"]
+    select: "OVA Import Setup"
+  - out: 21e-image-conversion-ami-to-ova
+    title: "Image Conversion — AMI To OVA (export back to S3)"
+    expand: ["IMAGE CONVERSION"]
+    select: "AMI To OVA"
 
 # Diagnose is parameterless and read-only, so it launches immediately with no dialog to
 # screenshot — it belongs in live_run_shots, not ui_shots. Since #249 reclassified it

@@ -103,7 +103,7 @@ function startResize(e) {
   window.addEventListener('pointercancel', onUp)
 }
 
-const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'ova', 'ami'])
 function formatKey(key) {
   return key.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)

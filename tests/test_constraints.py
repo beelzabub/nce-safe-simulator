@@ -1,5 +1,6 @@
 import pytest
 from server.constraints import (
+    CONCURRENT_GROUPS,
     READONLY_TOOLS,
     WRITER_GROUPS,
     _TOOL_GROUP,
@@ -15,9 +16,30 @@ def test_all_writer_groups_present():
     expected = {
         "label-writers", "weight-writers", "issue-state-writers",
         "epic-structure-writers", "risk-writers", "wiki-writers",
-        "setup", "import-export",
+        "setup", "import-export", "image-conversion",
     }
     assert set(WRITER_GROUPS.keys()) == expected
+
+
+def test_concurrent_groups_are_real_groups():
+    assert CONCURRENT_GROUPS <= set(WRITER_GROUPS.keys())
+
+
+def test_image_conversion_tools_never_conflict():
+    """AWS-side tools run in parallel by design — with each other AND with a
+    second run of the same tool (VM Import supports concurrent tasks)."""
+    members = WRITER_GROUPS["image-conversion"]
+    everything = members + ["import-epics", "close-percent"]
+    for tool in members:
+        assert check_conflict(everything, tool) == []
+        assert check_conflict([tool], tool) == []      # same-tool duplicate OK
+
+
+def test_image_conversion_does_not_unblock_others():
+    # A running conversion never blocks a GitLab writer, and vice versa —
+    # but GitLab writers still block each other as before.
+    assert check_conflict(["ova-to-ami"], "import-epics") == []
+    assert check_conflict(["import-epics"], "import-epics") == ["import-epics"]
 
 
 def test_no_overlap_between_readonly_and_writer_groups():
@@ -132,7 +154,7 @@ def test_unknown_job_key_does_not_raise():
 @pytest.mark.parametrize("group,tools", [
     (group, tools)
     for group, tools in WRITER_GROUPS.items()
-    if len(tools) > 1
+    if len(tools) > 1 and group not in CONCURRENT_GROUPS
 ])
 def test_all_pairs_within_group_conflict(group, tools):
     for i, blocker in enumerate(tools):

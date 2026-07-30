@@ -200,8 +200,11 @@
             Review the settings below, then confirm to start the job.
           </p>
 
+          <!-- Per-tool wording when the registry defines confirm_text (e.g. the
+               AWS cost warnings of the Image Conversion tools); the historical
+               GitLab-writer wording stays the default. -->
           <div class="confirm-warning">
-            ⚠ This will create objects in GitLab. Existing content is not removed, and the operation cannot be undone.
+            ⚠ {{ tool.confirm_text || 'This will create objects in GitLab. Existing content is not removed, and the operation cannot be undone.' }}
           </div>
 
           <div class="confirm-table">
@@ -362,7 +365,7 @@ function fileAccept(param) {
 }
 
 function formatKey(key) {
-  const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi'])
+  const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'ova', 'ami'])
   return key.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)
   ).join(' ')

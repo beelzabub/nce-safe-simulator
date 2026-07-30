@@ -306,6 +306,7 @@ const CATEGORY_DEFS = [
   { name: 'Reset / Clean',  description: 'Remove seeded data and restore a clean state',           tools: ['clean-roam-risks', 'clean-epic-blocks', 'reset-pi-progress', 'clean-wikis', 'clean-reports', 'clean-logs'] },
   { name: 'Audit',          description: 'Inspect data quality, labels, and hierarchy',            tools: ['audit-hierarchy', 'audit-labels', 'list-wikis'] },
   { name: 'Import / Export',description: 'Move epics and issues in and out of GitLab',             tools: ['export-bundle', 'import-bundle', 'export-epics', 'import-epics', 'export-issues', 'import-issues', 'export-links', 'import-links'] },
+  { name: 'Image Conversion', description: 'Convert OVA appliances to AMIs / EC2 instances, and export back to S3', tools: ['ova-import-setup', 'ova-fetch', 'ova-to-ami', 'ami-to-ova', 'ova-import-cleanup'] },
 ]
 
 const REPORTS = [
@@ -344,7 +345,7 @@ const toolCategories = computed(() => {
   })).filter(cat => cat.tools.length > 0)
 })
 
-const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'art', 'vs'])
+const ACRONYMS = new Set(['roam', 'wsjf', 'bv', 'piid', 'pi', 'art', 'vs', 'ova', 'ami'])
 function formatKey(key) {
   return key.split('-').map(w =>
     ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)

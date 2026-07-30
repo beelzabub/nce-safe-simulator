@@ -35,7 +35,8 @@ from server.auth_gate import (
     verify_credentials,
 )
 from server.analysis import portfolio_payload
-from server.constraints import READONLY_TOOLS, _TOOL_GROUP, check_conflict
+from server.constraints import (CONCURRENT_GROUPS, READONLY_TOOLS, _TOOL_GROUP,
+                                check_conflict)
 from server.jobs import manager as job_manager
 from server.version import app_version
 from server.retention import prune_temp_files
@@ -149,8 +150,13 @@ def _tool_payload(tool: dict, gl=None) -> dict:
         "key":               key,
         "description":       tool["description"],
         "confirm":           tool.get("confirm", False),
+        "confirm_text":      tool.get("confirm_text"),
         "readonly":          key in READONLY_TOOLS,
         "parallelism_group": _TOOL_GROUP.get(key),
+        # Members of a concurrent group (see constraints.py) keep their group
+        # for the picker heading but never conflict — the UI must not block
+        # them on running group-mates or a second run of the same tool.
+        "concurrent":        _TOOL_GROUP.get(key) in CONCURRENT_GROUPS,
         "params":            params,
     }
 
@@ -1340,6 +1346,10 @@ def _job_argv(data: dict) -> tuple:
         if tool is None:
             raise ValueError(f"Unknown tool: {key!r}")
         argv = entry + ["-ut", key] + _tool_argv_tokens(tool, data.get("params") or {})
+        # The UI already showed its confirmation step for confirm tools; the
+        # subprocess runs non-interactively, so satisfy the CLI's confirm gate.
+        if tool.get("confirm"):
+            argv.append("--yes")
         return "tool", key, argv
 
     # Single report and multi-report selections both map to the CLI's `-r`

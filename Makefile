@@ -1,9 +1,12 @@
-.PHONY: help build data interactive static serve deploy-local redeploy redeploy-ops dev-shell registry-push deck-screenshots deck
+.PHONY: help build data interactive static serve deploy-local redeploy redeploy-ops app-shell dev-shell registry-push deck-screenshots deck
 .DEFAULT_GOAL := help
 
 # GitLab Container Registry path for this project (issue #244). Override to push
 # elsewhere, e.g. `make registry-push REGISTRY=registry.gitlab.com/you/proj`.
 REGISTRY ?= registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator
+
+# Name of the running app container (matches scripts/redeploy.sh).
+APP ?= nce-safe-sim
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n"} /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -35,6 +38,9 @@ redeploy: ## Rebuild image and hot-swap the live app container (Caddy untouched)
 # Deploy/Destroy buttons work from inside the container (#231).
 redeploy-ops: ## redeploy, but with the ops image variant (CDK toolchain baked in)
 	bash scripts/redeploy.sh --ops
+
+app-shell: ## Bash shell inside the running app container (APP=nce-safe-sim)
+	docker exec -it $(APP) bash
 
 ##@ Container image / dev
 # Builds the dev/build image and drops into a shell with the working tree mounted
