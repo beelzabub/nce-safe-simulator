@@ -15,6 +15,25 @@ gets copied into `.gitlab-ci.yml` and nothing needs restoring afterwards.
 - **Scheduled:** Build → Pipeline schedules → new schedule that defines
   `RECIPE=<name>` — e.g. a weekly `all-reports` run.
 
+> **If GitLab answers "Insufficient permissions to set pipeline variables":**
+> the project restricts run-time pipeline variables to a role you don't have
+> (`ci_pipeline_variables_minimum_override_role`, Owner by default on newer
+> projects — an Owner can lower it under Settings → CI/CD → Variables). Until
+> then, use a temporary **project** variable, which that setting doesn't gate:
+>
+> ```bash
+> glab variable set RECIPE smoke
+> glab api "projects/:id/pipeline?ref=<branch>" -X POST
+> # wait for the pipeline AND its child to finish, then:
+> glab variable delete RECIPE
+> ```
+>
+> Two cautions: the variable applies to every pipeline started while it's set
+> (don't leave it lying around), and it must survive until the child pipeline
+> has been created — the recipe filename is resolved when the `recipe` trigger
+> job executes, so deleting the variable too early fails the child with
+> "Included file `ci-recipes/.yml` does not have YAML extension".
+
 Extra variables on the same run are forwarded into the child pipeline
 (`trigger:forward:pipeline_variables`), so recipes can take parameters
 (e.g. a future `RECIPE=tool` + `TOOL=export-epics`).
@@ -37,6 +56,12 @@ masked CI/CD variables, never in the file.
 | [`epic-cards-deck.yml`](epic-cards-deck.yml) | Renders the epic-cards "Capability Card" PDF and publishes it as a downloadable pipeline artifact. Runs in the project's own runtime image — Pango/fonts/deps baked in, no external downloads (a standalone python:3.11 variant is included for spaces without the image). |
 | [`all-reports.yml`](all-reports.yml) | Runs the full report suite (`--report all`) inside the project's own runtime image — Quarto/Pango/deps baked in, no external downloads — and publishes the rendered `public/` site as an artifact. A full run rewrites the wiki report pages, so it runs only when selected (or on a schedule you create). |
 | [`kaniko-runner-diag.yml`](kaniko-runner-diag.yml) | **Diagnostic.** Discriminates every known cause of the `containerize` "unlinkat //sbin/docker-init: device or resource busy" failure (issue #276): stale-yaml retries, runner init injection / pinned feature flag, umount privileges, stale kaniko image. Run it, save the log. |
+| [`security-sast.yml`](security-sast.yml) | Static application security testing (Semgrep) over the Python + JS source. Findings: pipeline Security tab, Vulnerability report, `gl-sast-report.json`. |
+| [`security-secret-detection.yml`](security-secret-detection.yml) | Leaked tokens/keys/credentials (Gitleaks). `SECRET_DETECTION_HISTORIC_SCAN=true` sweeps the full git history. |
+| [`security-dependency-scanning.yml`](security-dependency-scanning.yml) | Known-vulnerable dependency versions from requirements.txt + frontend lockfiles, plus the Dependency list SBOM view. |
+| [`security-container-scanning.yml`](security-container-scanning.yml) | CVE scan (Trivy) of the project's own runtime image from the Container Registry (`CS_IMAGE` to scan another). |
+| [`security-iac.yml`](security-iac.yml) | Infrastructure-as-code misconfiguration scan (KICS) over cdk/, helm/, Dockerfile. |
+| [`security-all.yml`](security-all.yml) | All five scanners in one child pipeline — the one-shot audit / the recipe to schedule. |
 
 ## Writing a new recipe
 
