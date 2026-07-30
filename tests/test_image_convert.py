@@ -50,6 +50,15 @@ class FakeS3:
     def put_bucket_lifecycle_configuration(self, Bucket, LifecycleConfiguration):
         self.lifecycle = LifecycleConfiguration
 
+    def put_bucket_ownership_controls(self, Bucket, OwnershipControls):
+        self.ownership = OwnershipControls
+
+    def get_bucket_acl(self, Bucket):
+        return {"Owner": {"ID": "owner-canonical-id"}}
+
+    def put_bucket_acl(self, Bucket, AccessControlPolicy):
+        self.acl = AccessControlPolicy
+
     def head_object(self, Bucket, Key):
         if Key not in self.objects:
             raise _client_error("404", "HeadObject")
@@ -300,6 +309,31 @@ def test_setup_is_idempotent_and_converges_policy():
     assert not s3.created and iam.created_role is None
     assert s3.lifecycle["Rules"][0]["Expiration"]["Days"] == 30
     assert len(iam.put_policies) == 1          # policy still converged
+
+
+def test_setup_grants_vm_export_bucket_acl():
+    """Instance export writes via the AWS service account, not the vmimport
+    role — setup must enable ACLs and grant it WRITE + READ_ACP."""
+    from mixins.image_convert import VMEXPORT_CANONICAL_ID
+    s3 = FakeS3(exists=True)
+    Harness(s3=s3, iam=FakeIAM(role_exists=True))._tool_ova_import_setup()
+    assert s3.ownership["Rules"][0]["ObjectOwnership"] == "ObjectWriter"
+    perms = {(g["Grantee"]["ID"], g["Permission"]) for g in s3.acl["Grants"]}
+    assert (VMEXPORT_CANONICAL_ID, "WRITE") in perms
+    assert (VMEXPORT_CANONICAL_ID, "READ_ACP") in perms
+    assert ("owner-canonical-id", "FULL_CONTROL") in perms
+
+
+def test_export_acl_failure_points_at_setup_tool():
+    class DeniedExportEC2(FakeEC2):
+        def create_instance_export_task(self, **kw):
+            raise _client_error(
+                "AuthFailure", "CreateInstanceExportTask",
+                "Bucket must be owned by the same S3 account and READ_ACL and "
+                "WRITE permissions are required on the destination bucket.")
+
+    with pytest.raises(SystemExit, match="ova-import-setup"):
+        Harness(ec2=DeniedExportEC2())._tool_ami_to_ova(source="i-0abc")
 
 
 def test_setup_dry_run_changes_nothing():

@@ -29,6 +29,13 @@ from types import SimpleNamespace
 # told otherwise, and keeping the default means zero extra knobs in the tools.
 VMIMPORT_ROLE = "vmimport"
 
+# Instance export (create-instance-export-task, the true-.ova path) does NOT
+# write via the vmimport role: the AWS VM Import/Export service account writes
+# the artifact itself and needs WRITE + READ_ACP bucket ACL grants. This is the
+# service's canonical user id for the commercial regions (GovCloud/China use
+# different ids — revisit on an enclave lift into those partitions).
+VMEXPORT_CANONICAL_ID = "c4d8eabf8db69dbe46bfe0e517100c554f01200b104d59cd408e777ba442a322"
+
 # Security group the launch step creates/reuses in the default VPC. SSH-only;
 # imported appliances have no other known-good ports.
 SSH_SG_NAME = "nce-ova-import-ssh"
@@ -186,6 +193,12 @@ class ImageConvertMixin:
                     f"{label}: access denied ({code}) — {msg}\n"
                     "The AWS identity is missing the required S3/EC2/IAM permissions."
                 )
+            if code == "AuthFailure" and "Bucket must be owned" in msg:
+                raise SystemExit(
+                    f"{label}: {msg}\nThe OVA bucket is missing the VM Export "
+                    "ACL grants — re-run the ova-import-setup tool (it now "
+                    "converges them), then retry."
+                )
             if code in ("InvalidParameter", "InvalidParameterValue") and "vmimport" in msg:
                 raise SystemExit(
                     f"{label}: {msg}\nThe '{VMIMPORT_ROLE}' service role is missing or "
@@ -252,6 +265,35 @@ class ImageConvertMixin:
                 }]},
             )
             print(f"  lifecycle: '{s.staging_prefix}*' expires after {days} days")
+
+        # -- VM Export ACL grant ----------------------------------------- #
+        # New buckets disable ACLs outright (BucketOwnerEnforced), which
+        # blocks instance export with "Bucket must be owned by the same S3
+        # account and READ_ACL and WRITE permissions are required". Re-enable
+        # object-writer ownership and grant the service account. The grants
+        # name one specific canonical user — nothing public — so the bucket's
+        # public-access block is unaffected.
+        if dry_run and not bucket_exists:
+            print("  export ACL: would grant WRITE+READ_ACP to the VM Import/Export "
+                  "service account (instance-export write access)")
+        else:
+            s3.put_bucket_ownership_controls(
+                Bucket=s.bucket,
+                OwnershipControls={"Rules": [{"ObjectOwnership": "ObjectWriter"}]},
+            )
+            owner = s3.get_bucket_acl(Bucket=s.bucket)["Owner"]
+            vmie = {"Type": "CanonicalUser", "ID": VMEXPORT_CANONICAL_ID}
+            s3.put_bucket_acl(Bucket=s.bucket, AccessControlPolicy={
+                "Owner": owner,
+                "Grants": [
+                    {"Grantee": {"Type": "CanonicalUser", "ID": owner["ID"]},
+                     "Permission": "FULL_CONTROL"},
+                    {"Grantee": vmie, "Permission": "WRITE"},
+                    {"Grantee": vmie, "Permission": "READ_ACP"},
+                ],
+            })
+            print("  export ACL: VM Import/Export service account granted "
+                  "WRITE+READ_ACP (instance-export write access)")
 
         # -- vmimport role ---------------------------------------------- #
         try:
