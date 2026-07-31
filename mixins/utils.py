@@ -240,6 +240,7 @@ class UtilitiesMixin:
                 "Content-Type": "application/json",
             },
             verify=getattr(self, "ssl_verify", True),
+            timeout=30,
         )
         response.raise_for_status()
         data = response.json()

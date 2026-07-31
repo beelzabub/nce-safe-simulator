@@ -327,6 +327,7 @@ class BootstrapMixin:
                 resp = _req.get(
                     f"{self.url}/api/v4/groups/{epic.group_id}/epics/{epic.iid}",
                     headers={"PRIVATE-TOKEN": self.private_token},
+                    timeout=30,
                 )
                 if resp.ok:
                     wi_id = resp.json().get("work_item_id")

@@ -15,6 +15,44 @@
 
 The 65% drop rate is real signal: 44 of the drops are one Semgrep rule (weak PRNG) firing on synthetic demo-data generation, and 10 more are namespace-policy IaC rules that don't apply to a single Deployment. Of the 14 survivors, **~9 are the same Helm container** — one `securityContext` block resolves them together.
 
+---
+
+## Phase B — actions taken (2026-07-31)
+
+Executed on branch `task/287-fix-all-security-issues-utilizing-graph-engineering`. Decision (with the user): **keep the container on port 80** (going non-root would require an app-wide port migration across EKS/ECS/single-box), harden everything compatible with that, and dismiss the findings that strictly require non-root.
+
+**Disposition of all 80 SAST findings:** 9 fixed in code · 44 suppressed via ruleset · 27 dismissed with reasons.
+
+### Fixed (9) — clear on the next `develop` security scan
+
+| Fix | File | Findings resolved |
+|---|---|---|
+| Pod + container `securityContext`: `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` + `add: [NET_BIND_SERVICE]` (retains port-80 bind as root), and `automountServiceAccountToken: false` | `helm/.../deployment.yaml` | Privilege Escalation, Seccomp, NET_RAW, No-Drop-Capabilities, No-Security-Context, SA-Token-Automount (6) |
+| `timeout=30` on the `requests` calls | `mixins/bootstrap.py:327`, `mixins/utils.py:235` | Allocation of resources without limits (2) |
+| Pin `diagrams==0.25.1` | `Dockerfile:34` | Unpinned pip version (1) |
+
+> The key move: `allowPrivilegeEscalation: false` and dropping all caps except `NET_BIND_SERVICE` are all compatible with a **root** process on port 80 — so the priv-esc/caps/seccomp findings were *fixed*, not dismissed, without touching functionality.
+
+### Suppressed via ruleset (44) — `.gitlab/sast-ruleset.toml`
+
+`[semgrep]` disables `bandit.B311` (weak PRNG, CWE-338). Every flagged `random` call fabricates synthetic demo data — no tokens/passwords/crypto. Clears on the next scan once merged to `develop`.
+
+### Dismissed in the Vulnerability Report (27) — with reason + comment
+
+| Reason | Count | Findings |
+|---|---|---|
+| `false_positive` | 6 | SSRF ×2 (browser-side relative fetch), XXE ×2 (committed template), custom-URL-scheme ×2 (build-time helper) |
+| `not_applicable` | 12 | ResourceQuota/LimitRange ×10 (namespace policy, not a Deployment), AppArmor, Admin-Boundaries |
+| `acceptable_risk` | 8 | Missing-USER, Running-as-Root, Low-UID, ReadOnly-Root-FS (all require non-root / port move), Invalid-Image-Tag, Image-Without-Digest, npm-pin, apt-pin |
+| `mitigating_control` | 1 | Healthcheck-Missing (k8s probes + ALB health check cover it) |
+
+### Verification
+
+- Test suite: **1714 passed**, 77 skipped, 0 new failures (4 pre-existing failures + `test_epic_cards` collection error are local-env missing-deps — WeasyPrint/Quarto — that pass in CI/Docker; confirmed identical on the clean baseline).
+- `helm template` renders the chart with the new `securityContext`/`automountServiceAccountToken`; TOML validated.
+- 27 dismissals confirmed `state: dismissed` via API.
+- **Residual:** the 9 fixed + 44 suppressed findings still read `detected` until a security pipeline runs on `develop` after merge (feature-branch scans don't update the project Vulnerability Report). Merging the MR + a `develop` `security-all` run is the final confirmation step.
+
 ## Confirmed findings — ranked by severity then confidence
 
 Ranked highest-impact first. `action` is the recommended Phase B disposition.

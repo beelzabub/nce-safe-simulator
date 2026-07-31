@@ -63,6 +63,8 @@ masked CI/CD variables, never in the file.
 | [`security-iac.yml`](security-iac.yml) | Infrastructure-as-code misconfiguration scan (KICS) over cdk/, helm/, Dockerfile. |
 | [`security-all.yml`](security-all.yml) | All five scanners in one child pipeline — the one-shot audit / the recipe to schedule. |
 
+**Tuning findings (issue #287):** [`.gitlab/sast-ruleset.toml`](../.gitlab/sast-ruleset.toml) disables whole-class false positives at scan time — the analyzer auto-detects it, no CI change needed. The top-level table is the *analyzer* name (`[semgrep]`, `[kics]`), not `sast`. It only affects the branch it lives on, so it must reach `develop` to clear the Vulnerability Report there. For one-off false positives, dismiss the finding in the Vulnerability Report with a reason + comment instead (dismissals persist across scans). The `#287` agentic triage of the SAST backlog is written up in [`security-fix-via-graph-eng.md`](../security-fix-via-graph-eng.md).
+
 ## Writing a new recipe
 
 A recipe is a **self-contained child pipeline**, not a job snippet — it
