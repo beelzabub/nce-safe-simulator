@@ -43,3 +43,34 @@ spotlights:
       - "Secret detection came back clean over the full history — an independent, tool-verified confirmation that the #111 token-scrub removed every trace."
       - "Findings surface in three places: the pipeline's Security tab (per run, any branch), Secure → Vulnerability report (the standing register with dismiss / confirm / create-issue triage, populated once scans run on develop), and the MR security widget; every job also publishes machine-readable gl-*-report.json artifacts."
       - "Each scanner has its own wiki walk-through (Security-scanning/…) of what to explore and how to triage, and every analyzer honors SECURE_ANALYZERS_PREFIX — the whole suite ports to an air-gapped enclave by mirroring the analyzer images."
+
+  - title: "Image Conversion Tools — OVA to AMI to Running EC2 Instance  (#285)"
+    subtitle: "A new tool category: point at any VM appliance and get a launched, reachable EC2 instance — CLI and web UI"
+    issues: [285]
+    images:
+      - "20-image-conversion-category_light.png"
+      - "21-image-conversion-ova-to-ami_light.png"
+    image_labels:
+      - "The new Image Conversion category in the job picker"
+      - "ova-to-ami — source OVA in S3, launch options, receipt written back beside the source"
+    bullets:
+      - "Five tools cover the whole lifecycle: `ova-import-setup` idempotently creates the OVA bucket and the AWS `vmimport` service role; `ova-fetch` streams an appliance from a URL into S3 with SHA-256 verification; `ova-to-ami` runs AWS VM Import to a registered AMI and optionally launches it; `ami-to-ova` exports back out to a true `.ova`; `ova-import-cleanup` tears everything down from the receipt."
+      - "AWS's import produces an AMI backed by snapshots, not a file — so every conversion writes a receipt JSON next to the source OVA (task id, AMI, snapshots, instance, source hash, timings), and the real file artifact comes from the export companion, landing under `exports/` in the same bucket."
+      - "Conversions are billable and mutating, so the tools are cost-aware by design: per-tool confirmation text in the web dialog spells out the AWS cost surface, the CLI enforces the same confirm gate (`--yes` non-interactively), staged OVAs auto-expire after 14 days, and cleanup is receipt-driven — no orphaned snapshots or instances."
+      - "Live progress the whole way: import status lines stream into the job log (validating → converting → preparing ami → completed), and cancelling the job also cancels the underlying AWS import task."
+
+  - title: "Image Conversion Prove-Out — Three Distros In, One True OVA Back Out  (#285)"
+    subtitle: "Ubuntu 24.04 from URL to running instance in 19½ minutes; AL2 + AL2023 imported concurrently; the round-trip validated"
+    issues: [285]
+    images:
+      - "21e-image-conversion-ami-to-ova_light.png"
+      - "21c-image-conversion-cleanup_light.png"
+    image_labels:
+      - "ami-to-ova — instance export to a true .ova back in the bucket"
+      - "ova-import-cleanup — receipt-driven teardown: terminate, deregister, delete snapshots"
+    bullets:
+      - "Ubuntu 24.04 cloud OVA: 19m33s end-to-end — fetch, SHA-256 verify, import, AMI registration, t3.micro launch — with SSH access on the injected keypair."
+      - "Amazon Linux 2 and Amazon Linux 2023 VMware OVAs imported concurrently (~20 minutes each), each job polling its own AWS task independently — the writer-group model kept the parallel runs from interfering."
+      - "The round-trip closed: the AL2023 instance exported to a true `.ova` (VMware target) — a 670 MiB appliance versus the 554 MB source, produced entirely server-side in about an hour."
+      - "The prove-out hardened the tools: setup now grants the VM Export service account its bucket ACLs (the first export attempt failed AuthFailure without them), launched instances no longer strand their root volumes on termination, and appliance images that ignore key injection are reached via SSM Session Manager — documented as an operational note."
+      - "Everything billable was torn down with the tools' own cleanup — instances, AMIs, snapshots, staged OVAs — leaving only the receipts and logs as evidence."

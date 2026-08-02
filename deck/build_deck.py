@@ -1637,6 +1637,10 @@ class DeckBuilder:
             if bucket:
                 grouped.append((heading, color, bucket))
 
+        # A lone group's heading is pure noise — "Other Work" sitting over the
+        # only list there is — so single-group weeks render as a plain list.
+        lone_group = len(grouped) == 1
+
         s = self.new_slide()
         self.header_band(s, "Latest Work",
                          f"Completed since {since_str}  ·  {len(items)} issues")
@@ -1647,6 +1651,19 @@ class DeckBuilder:
         body_color = RGBColor(0x2A, 0x2E, 0x32)
         HEAD_H, ITEM_H, GROUP_GAP = Emu(330000), Emu(232000), Emu(150000)
 
+        # Scale the list to the week (#289 review): a light week renders as a
+        # single full-width column at a larger font instead of leaving the page
+        # mostly empty; heavy weeks keep the compact two-column flow and its
+        # continuation slides.
+        n_heads = 0 if lone_group else len(grouped)
+        gaps = max(len(grouped) - 1, 0) * GROUP_GAP
+        single, item_size, head_size = False, 9, 13
+        for size, ih in ((16, Emu(560000)), (13, Emu(360000))):
+            if len(items) * ih + n_heads * Emu(430000) + gaps <= bottom - top:
+                single, item_size, head_size = True, size, 15
+                col_w, ITEM_H, HEAD_H = self.SW - 2 * margin, ih, Emu(430000)
+                break
+
         # Flow layout: fill column 1, then column 2, then continue onto a fresh
         # slide — nothing may render past `bottom`, however many issues land in
         # a week. A group that splits repeats its heading as "(cont.)".
@@ -1654,7 +1671,7 @@ class DeckBuilder:
 
         def next_column():
             nonlocal s, cur_x, cur_y
-            if cur_x == margin:
+            if cur_x == margin and not single:
                 cur_x, cur_y = col2_x, top
             else:
                 s = self.new_slide()
@@ -1666,12 +1683,8 @@ class DeckBuilder:
             nonlocal cur_y
             self.add_rect(s, cur_x, cur_y + Emu(20000), Emu(120000), Emu(230000), color)  # accent chip
             self.add_text(s, cur_x + Emu(190000), cur_y, col_w - Emu(190000), Emu(280000),
-                          label, 13, color, bold=True)
+                          label, head_size, color, bold=True)
             cur_y += HEAD_H
-
-        # A lone group's heading is pure noise — "Other Work" sitting over the
-        # only list there is — so single-group weeks render as a plain list.
-        lone_group = len(grouped) == 1
 
         for heading, color, bucket in grouped:
             if not lone_group:
@@ -1683,10 +1696,11 @@ class DeckBuilder:
                     next_column()
                     if not lone_group:
                         add_heading(f"{heading}  (cont.)", color)
+                max_chars = 96 if single else 60
                 title = it["title"]
-                title = (title[:60] + "…") if len(title) > 61 else title
-                self.add_text(s, cur_x + Emu(60000), cur_y, col_w - Emu(60000), Emu(230000),
-                              f"{it['ref']}   {title}", 9, body_color,
+                title = (title[:max_chars] + "…") if len(title) > max_chars + 1 else title
+                self.add_text(s, cur_x + Emu(60000), cur_y, col_w - Emu(60000), ITEM_H,
+                              f"{it['ref']}   {title}", item_size, body_color,
                               anchor=MSO_ANCHOR.MIDDLE, wrap=False)
                 cur_y += ITEM_H
             cur_y += GROUP_GAP
