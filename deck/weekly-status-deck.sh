@@ -67,6 +67,7 @@ python3 deck/capture_diagrams.py     || true
 python3 deck/capture_cli_menu.py     || true
 python3 deck/capture_test_log.py     || true
 python3 deck/capture_git_workflow.py || true
+python3 deck/capture_ci_router.py     || true
 
 echo "--- fetch metrics ---"
 python3 deck/fetch_metrics.py || fail "fetch_metrics"

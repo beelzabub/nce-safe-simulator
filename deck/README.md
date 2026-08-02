@@ -37,6 +37,7 @@ python3 deck/capture_diagrams.py      # -> deck/screenshots/architecture/ (DoD/D
 python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu.png
 python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
 python3 deck/capture_git_workflow.py  # -> deck/screenshots/git-workflow{,-compact,-epic}.png
+python3 deck/capture_ci_router.py     # -> deck/screenshots/{ci-recipe-router,security-scan-findings}.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Status.pptx
 ```
@@ -70,6 +71,15 @@ Tools"; the epic render ("Development Workflow — Epics") shows an epic::epic i
 own integration branch collecting its child-issue branches before merging to develop
 once. Keep it in step with the conventions it depicts if they ever change. Same
 requirements as `capture_cli_menu.py` (Pillow + DejaVu fonts).
+
+`capture_ci_router.py` renders the CI recipe router (issue #283) as two deck
+graphics: the router flow (the unchanged default pipeline vs. `RECIPE=<name>`
+selecting a `ci-recipes/` child pipeline) and a findings panel for the security
+suite's first verified `security-all` sweep. Both are faithful static renders in
+the deck palette — keep its `CATALOG` list in step with `ci-recipes/`, and update
+its `SCANNERS` numbers when a newer sweep becomes the one the deck should cite
+(the current ones match the wiki's Security-scanning page). Same requirements as
+`capture_cli_menu.py` (Pillow + DejaVu fonts).
 
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.

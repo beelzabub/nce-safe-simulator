@@ -19,79 +19,27 @@
 # can be referenced by its repo path (issue #257 items 2-4).
 
 spotlights:
-  - title: "Enclave Lift & Shift — One Artifact, Either Direction  (#263, #264, #273)"
-    subtitle: "The whole project — repo, wiki, packages, images — exports to a single file and imports with one command"
-    issues: [263, 264, 273]
-    bullets:
-      - "enclave-export stages the repo, wiki, every package-registry artifact, and the container images into one checksummed tar; enclave-import rebuilds the complete project on any GitLab instance from just that file."
-      - "Both directions ship as bash and PowerShell, behavior-identical and cross-compatible — a Windows transfer box can import a Linux export and vice versa; every artifact carries both importers so the receiving box bootstraps with whichever shell it has."
-      - "Hardening from real transfer runs: a transient mid-file TLS reset no longer aborts a whole export or import — each download/upload retries with backoff and discards partials (plain `curl --retry` misses mid-stream resets); uploads are idempotent, so resends are safe."
-      - "Found and fixed on the way: package file lists were silently truncated at 100 entries by API pagination, so large packages never fully reached the artifact (#273)."
-
-  - title: "Getting History Past the Destination's Push Rules  (#270)"
-    subtitle: "The first real import had every branch rejected — imports can now rewrite and sign their way through"
-    issues: [270]
-    bullets:
-      - "The destination GitLab enforces a committer-restriction push rule — it only accepts commits whose committer email is verified on the pushing account — so a transferred history, authored entirely by the source org's users, was rejected wholesale at the pre-receive hook."
-      - "Fix: an opt-in authorship rewrite at import time (`--rewrite-committer 'Name <email>'`) — git filter-branch rewrites author and committer on every commit of the repo and wiki mirrors before pushing; chosen because it ships inside git, so nothing extra installs on an enclave box."
-      - "The rewrite is deterministic — re-runs produce identical hashes, keeping imports idempotent; the trade-off (in-repo attribution moves to the importing user) is exactly what makes the rule pass."
-      - "A second rule — reject unsigned commits — is handled in the same pass: `--sign-commits` GPG-signs every rewritten commit. Proven 2026-07-23 with a fully green import into the destination instance."
-
-  - title: "Container Builds With Zero Internet  (#261, #262, #269, #274, #275)"
-    subtitle: "Every build input now resolves from the project's own package registry"
-    issues: [261, 262, 269, 274, 275]
-    bullets:
-      - "Every apt package the images install — the WeasyPrint PDF stack and all — plus the pinned Quarto installer (amd64 and arm64, sha256-verified against upstream) is vendored in the project's generic package registry; image builds touch nothing on the public internet."
-      - "Registry URLs are composed from `$CI_API_V4_URL`/`$CI_PROJECT_ID`, so the identical CI yaml runs unmodified on gitlab.com and on the enclave's instance — no per-environment edits."
-      - "The epic-cards status deck itself now builds as an enclave-clean CI job: dev image, no network at job time (#274)."
-      - "With the debugging experiments done, the shipped default pipeline is restored to its normal test + containerize flow (#275)."
-
-  - title: "Landing `containerize` on the Enclave Runner  (#276)"
-    subtitle: "A three-layer root cause, a reusable diagnostic pipeline, and a one-flag fix"
-    issues: [276]
-    bullets:
-      - "On the destination runner every image build died unpacking its Debian base: `unlinkat /sbin/docker-init: device or resource busy`. The runner's config pins an init process bind-mounted into each job container — exactly where kaniko must replace /sbin with a symlink. The upstream kaniko bug has been open since 2020 and the project is archived, so no fix was coming."
-      - "The first attempted fix was proven a no-op against kaniko's own source — its ignore list already contained the mount, and ignoring a child path cannot protect its parent from removal — and the on-enclave retry failed identically."
-      - "A five-section diagnostic pipeline (`ci-recipes/kaniko-runner-diag.yml`, now a reusable recipe) ran on the enclave itself: it detected the pinned runner flag, established that the mount can't be removed in-job, and passed a minimal repro of the corrected fix before the real pipeline was touched."
-      - "The fix: `--ignore-path=/sbin` makes kaniko skip the conflicting path entirely. Pushed images are unaffected — the base layers ship untouched, verified by pulling and inspecting the result — and enclave containerize now runs green."
-
-  - title: "GitOps Platform — Infrastructure as Code From Zero  (nce-git-ops #1–#2, #7–#12)"
-    subtitle: "Terraform + Ansible + kubeadm: from an empty AWS account to a running Kubernetes cluster with one command"
-    issues: [259, "nce-git-ops#1", "nce-git-ops#2", "nce-git-ops#7", "nce-git-ops#8", "nce-git-ops#9", "nce-git-ops#10", "nce-git-ops#11", "nce-git-ops#12"]
+  - title: "CI Recipe Router — One Pipeline File, Many Missions  (#283)"
+    subtitle: "RECIPE=<name> runs any job set on demand — the everyday pipeline never changes"
+    issues: [283]
     images:
-      - "deck/assets/spotlight-extras/gitops-rancher-cluster-dashboard.png"
-    caption: "The freshly provisioned cluster minutes after `make up` — 3 nodes (v1.35.7), 960 resources, 20 deployments, all control-plane components green"
+      - "ci-recipe-router.png"
+    caption: "The router: no variable → the unchanged baseline; RECIPE=<name> → a self-contained child pipeline from ci-recipes/"
     bullets:
-      - "Terraform declares the entire AWS footprint — VPC, per-role security groups, arm64 EC2 nodes, Route 53 records — with remote state locked in S3; its outputs generate the Ansible inventory directly, so the two tools chain without hand-copied values."
-      - "Idempotent Ansible roles turn fresh instances into a kubeadm cluster — containerd setup, control-plane init, worker join — ending in three Ready nodes; re-running is a safe no-op."
-      - "`make up` goes from nothing to a working, kubeconfig'd cluster in about 30 minutes; `make down` tears it back to zero billable resources. The cluster is deliberately ephemeral — infrastructure-as-code is what makes that daily rhythm affordable."
-      - "It was proven green locally first: the same Argo CD bootstrap and ApplicationSets (ingress-nginx, cert-manager, Rancher, Keycloak) ran on Docker Desktop before any AWS resources existed."
+      - "Before: anything beyond the standard pipeline — a full report run, a runner diagnostic, a security scan — meant editing the CI configuration and remembering to revert it afterwards. GitLab has no per-run \"use this CI file instead\" switch, so experiments kept leaking into the pipeline history."
+      - "Now the top-level `.gitlab-ci.yml` is a router, written once: with no variable, pushes and merges run the baseline `test` + `containerize` exactly as always; with `RECIPE=<name>` the baseline sits out and `ci-recipes/<name>.yml` runs as a child pipeline instead. Nothing is copied in, nothing needs restoring after."
+      - "Ten recipes are on the shelf: a router smoke test, the full report suite, the epic-cards PDF build, the kaniko runner diagnostics from #276, and the six security-scanning recipes — each a self-contained pipeline with its own stages and images."
+      - "Extra variables forward into the child, so recipes take parameters; the child's result rolls up as the run's result; and a pipeline schedule that sets `RECIPE` turns any recipe into a recurring job — e.g. a weekly `security-all` audit."
 
-  - title: "GitOps Live on AWS — Simulator Deployed by Argo CD  (nce-git-ops #3, #13–#16)"
-    subtitle: "One repo drives both clusters, Rancher gives one view of them — and the simulator itself now ships from git"
-    issues: [259, "nce-git-ops#3", "nce-git-ops#13", "nce-git-ops#14", "nce-git-ops#15", "nce-git-ops#16"]
+  - title: "Security Scanning Suite — Five GitLab Ultimate Scanners, On Demand  (#283)"
+    subtitle: "SAST, secrets, dependencies, container CVEs, IaC — enabled, run, verified, and documented with a wiki walk-through each"
+    issues: [283]
     images:
-      - "deck/assets/spotlight-extras/gitops-argocd-applications.png"
-      - "deck/assets/spotlight-extras/gitops-argocd-simulator-tree.png"
-    image_labels:
-      - "Argo CD — all six applications Synced / Healthy from `main`"
-      - "The simulator's resource tree — Deployment, Service, Ingress, Certificate, pod"
+      - "security-scan-findings.png"
+    caption: "The first verified security-all sweep — 297 findings across five scanners, every job green"
     bullets:
-      - "Argo CD bootstrapped onto the AWS cluster with the same script as local; ApplicationSet generators emit per-cluster applications from one repo, with per-cluster values overlays where the environments differ."
-      - "Real HTTPS on real subdomains — argocd. / rancher. / keycloak.nce-safe-sim.com — with cert-manager issuing Let's Encrypt certificates via Route 53 DNS-01, which needs no open port 80 and survives cluster recreation."
-      - "Rancher — itself deployed by Argo — imports both the local and AWS clusters into a single management view; Argo remains the one GitOps engine (Rancher's Fleet deliberately left off)."
-      - "The headline: the simulator's own Helm chart now deploys to AWS through Argo CD, with its EKS-specific pieces swapped for nginx ingress, local-path storage, and instance-profile auth — the application is fully GitOps-managed."
-
-  - title: "The Platform, Live — Real Services on Real URLs  (nce-git-ops #14–#16)"
-    subtitle: "Every platform service answering on its own HTTPS subdomain, minutes after bring-up"
-    issues: ["nce-git-ops#14", "nce-git-ops#15", "nce-git-ops#16"]
-    images:
-      - "deck/assets/spotlight-extras/gitops-rancher-home.png"
-      - "deck/assets/spotlight-extras/gitops-simulator-app.png"
-    image_labels:
-      - "rancher.nce-safe-sim.com — the kubeadm cluster imported and Active"
-      - "sim.nce-safe-sim.com — the simulator served from the cluster, 51 jobs available"
-    bullets:
-      - "rancher.nce-safe-sim.com, argocd.nce-safe-sim.com, keycloak.nce-safe-sim.com, and sim.nce-safe-sim.com all live with valid Let's Encrypt certificates — no self-signed warnings, no port juggling."
-      - "The simulator app runs signed-in from the cluster with its full tool catalog — 51 jobs across scaffolding, import/export, label management, and audit & validation."
-      - "Keycloak's admin console is up on its subdomain; the dedicated realm and single sign-on wiring is the next phase of work (nce-git-ops#18)."
+      - "Five scanners are now enabled as recipes: Semgrep static analysis over the Python and Vue source, Gitleaks secret detection sweeping the entire git history, dependency scanning of requirements + frontend lockfiles (with SBOM), a Trivy CVE scan of our published runtime image, and a KICS misconfiguration scan of cdk/, helm/, and the Dockerfiles. `RECIPE=security-all` runs all five in one child pipeline."
+      - "The first verified sweep (2026-07-30) returned 297 findings: two High SAST findings lead the triage queue, dependency scanning lists a fixed version for every one of its seven, and the 205 container CVEs are dominated by the Debian base image — rebuilds clear the fix-available ones."
+      - "Secret detection came back clean over the full history — an independent, tool-verified confirmation that the #111 token-scrub removed every trace."
+      - "Findings surface in three places: the pipeline's Security tab (per run, any branch), Secure → Vulnerability report (the standing register with dismiss / confirm / create-issue triage, populated once scans run on develop), and the MR security widget; every job also publishes machine-readable gl-*-report.json artifacts."
+      - "Each scanner has its own wiki walk-through (Security-scanning/…) of what to explore and how to triage, and every analyzer honors SECURE_ANALYZERS_PREFIX — the whole suite ports to an air-gapped enclave by mirroring the analyzer images."
