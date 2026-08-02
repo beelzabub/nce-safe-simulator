@@ -993,6 +993,7 @@ class DeckBuilder:
             "Secrets: GitLab PAT in SSM SecureString (cloud) / env var (local) — never committed.",
             "Data at rest: local disk or encrypted EFS; content is synthetic portfolio data (no PII/CUI).",
             "No inbound admin ports — SSM exec only; ALB reachable solely from CloudFront.",
+            "Five-scanner security suite (SAST, secrets, dependency, container, IaC) on demand via CI recipes (#283); full-history secret scan verified clean.",
         ], 11, body_color, space_after=8)
         self.add_rect(s2, right_x, head_y, col_w, Emu(260000), self.C["green"])
         self.add_text(s2, right_x + Emu(80000), head_y, col_w - Emu(160000), Emu(260000),
@@ -1000,7 +1001,7 @@ class DeckBuilder:
         self.add_bullets(s2, right_x + Emu(40000), body_y, col_w - Emu(80000), body_h, [
             "No CAC/PIV or federated identity yet — basic is dev-only (AAA methods tracked in #152–#156).",
             "No RBAC — access is authenticated-vs-not; job conflicts use writer/read-only groups, not permissions.",
-            "CI runs tests only — no SAST, dependency/container scanning, or SBOM stages; images deploy operator-driven.",
+            "Security scans are on-demand recipes, not yet a per-MR gate — no scan blocks a merge; images deploy operator-driven.",
             "No per-user structured audit trail (job/stdout logs to CloudWatch, 1-month retention).",
             "Commercial us-east-1 — a GovCloud / Impact-Level target would need its own accreditation work.",
             "Open evaluation spikes: S3 for the simulator (#84); backup strategy for GitLab projects/groups (#205).",
@@ -1028,7 +1029,7 @@ class DeckBuilder:
             "All three modes share one CDK project (nce_ecs_stack.py / nce_eks_stack.py), one ECR image, and SSM-stored config.",
             "helm/nce-safe-simulator/ — Helm chart for the EKS path (deployment, service, ingress, PV/PVC, service account).",
             "cdk/scripts/deploy-validate-loop.sh — automated teardown → deploy → validate cycles for both AWS stacks.",
-            "CI (.gitlab-ci.yml): full pytest suite on every push; Quarto → GitLab Pages publish gated to the develop branch.",
+            "CI (.gitlab-ci.yml): recipe router (#283) — pytest on every push, Kaniko image publish on develop; RECIPE=<name> swaps in on-demand child pipelines (reports, diagnostics, security scans).",
             "Optional Amazon Managed Grafana (~$9/editor/mo) — off by default, toggled per deployment.",
         ], 12, RGBColor(0x2A, 0x2E, 0x32))
 
@@ -1668,14 +1669,20 @@ class DeckBuilder:
                           label, 13, color, bold=True)
             cur_y += HEAD_H
 
+        # A lone group's heading is pure noise — "Other Work" sitting over the
+        # only list there is — so single-group weeks render as a plain list.
+        lone_group = len(grouped) == 1
+
         for heading, color, bucket in grouped:
-            if cur_y + HEAD_H + ITEM_H > bottom:  # heading must bring an item with it
-                next_column()
-            add_heading(f"{heading}  ({len(bucket)})", color)
+            if not lone_group:
+                if cur_y + HEAD_H + ITEM_H > bottom:  # heading must bring an item with it
+                    next_column()
+                add_heading(f"{heading}  ({len(bucket)})", color)
             for it in bucket:
                 if cur_y + ITEM_H > bottom:
                     next_column()
-                    add_heading(f"{heading}  (cont.)", color)
+                    if not lone_group:
+                        add_heading(f"{heading}  (cont.)", color)
                 title = it["title"]
                 title = (title[:60] + "…") if len(title) > 61 else title
                 self.add_text(s, cur_x + Emu(60000), cur_y, col_w - Emu(60000), Emu(230000),

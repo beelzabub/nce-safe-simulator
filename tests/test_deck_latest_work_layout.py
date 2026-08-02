@@ -85,3 +85,23 @@ def test_small_week_stays_on_one_slide():
     assert len(slides) == 2  # divider + a single list slide
     for sh in slides[1].shapes:
         assert sh.top + sh.height <= db.SH
+
+
+def test_lone_group_renders_as_plain_list_without_heading():
+    """A week where every issue falls into one group (e.g. all untyped → "Other
+    Work") renders as a plain list — a heading over the only list is noise."""
+    db = _builder(6)
+    for row in db.issues:
+        row["type"] = ""  # everything sweeps into the fallback group
+    slides = _build_latest_work(db)
+    texts = [t for s in slides[1:] for t in _texts(s)]
+    assert not any("Other Work" in t for t in texts)
+    assert any("Issue number 1" in t for t in texts)
+
+
+def test_mixed_week_keeps_group_headings():
+    db = _builder(8)  # cycles through all four types + untyped
+    slides = _build_latest_work(db)
+    texts = [t for s in slides[1:] for t in _texts(s)]
+    assert any("Other Work" in t for t in texts)
+    assert any("New Features" in t for t in texts)

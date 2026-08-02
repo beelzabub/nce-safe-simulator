@@ -1,9 +1,10 @@
-"""DevSecOps Pipeline View — build, test, publish, and deploy paths.
+"""DevSecOps Pipeline View — build, test, publish, scan, and deploy paths.
 
 Shows the automated GitLab CI path (test on every push, container image publish
-to the GitLab Container Registry on develop) and the operator-driven deployment
-path (Docker buildx → ECR → CDK/Helm). Rendered at container build time
-alongside the other architecture diagrams.
+to the GitLab Container Registry on develop, on-demand recipe child pipelines
+including the security scanning suite — issue #283) and the operator-driven
+deployment path (Docker buildx → ECR → CDK/Helm). Rendered at container build
+time alongside the other architecture diagrams.
 """
 
 import sys
@@ -28,7 +29,7 @@ def main():
         "rankdir": "LR",
         "splines": "spline",
         "labelloc": "t",
-        "label": "DevSecOps Pipeline — CI tests on every push; cloud deploys are optional and on-demand",
+        "label": "DevSecOps Pipeline — CI tests on every push; security scans and cloud deploys are on-demand",
     }
     node_attr = {"fontsize": "13"}
 
@@ -44,9 +45,10 @@ def main():
         dev  = Users("Developer")
         repo = Gitlab("GitLab repo\n(feature/bugfix branches\n→ MR → develop)")
 
-        with Cluster("GitLab CI (.gitlab-ci.yml)"):
+        with Cluster("GitLab CI (.gitlab-ci.yml — recipe router, #283)"):
             test  = GitlabCI("test — every push\npip install + pytest")
             containerize = GitlabCI("containerize — develop only\nKaniko build + push\n(needs: test)")
+            recipes = GitlabCI("RECIPE=<name> — on demand\nchild pipeline from ci-recipes/\n(reports, diagnostics,\nsecurity: SAST · secrets · deps\n· container CVEs · IaC)")
 
         registry = Docker("GitLab Container Registry\nruntime + dev images\n(:latest + :<sha>)")
 
@@ -63,6 +65,8 @@ def main():
         dev  >> Edge(label="git push / MR") >> repo
         repo >> test
         repo >> Edge(label="merge to develop") >> containerize >> registry
+        dev >> Edge(style="dashed", label="Run pipeline\n+ RECIPE") >> recipes
+        recipes >> Edge(style="dashed", label="container scan\n(Trivy, runtime image)") >> registry
         registry >> Edge(style="dashed", label="docker pull\n(dev + build image)") >> dev
 
         dev >> Edge(label="make ecr-push\n(when releasing)") >> build >> ecr
