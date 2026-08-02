@@ -24,7 +24,20 @@ capabilities:
       - "#52 Fix SSL cert verification failure in CI/CD containers"
       - "#56 Fix CI/CD pipeline for GitLab Pages deployment"
     image: "architecture/devsecops-architecture.png"
-    caption: "DevSecOps pipeline — pytest on every push, Pages on develop"
+    caption: "DevSecOps pipeline — pytest on every push, image publish on develop"
+
+  - title: "CI Recipes & Security Scanning"
+    count: 2
+    all_issues: "#283, nce-git-ops#28"
+    blurb: "On-demand child pipelines, including a five-scanner security suite"
+    bullets:
+      - "#283 The root CI file is a router — RECIPE=<name> runs any ci-recipes/ child pipeline (reports, diagnostics, security) while pushes and merges keep the unchanged baseline"
+      - "nce-git-ops#28 Code-analysis tooling explored on the platform repo"
+      - "Five GitLab Ultimate scanners — SAST, secret detection, dependency, container CVE, IaC — run individually or as one security-all audit"
+      - "First verified sweep: 297 findings across the Security tab / Vulnerability report / MR widget; the full-history secret scan came back clean"
+      - "Every scanner has a wiki walk-through (Security-scanning/…) of the UI surfaces and triage workflow"
+    image: "ci-recipe-router.png"
+    caption: "The recipe router — default pipeline untouched; RECIPE=<name> selects a child pipeline"
 
   - title: "SAFe Bootstrap & Portfolio Scaffolding"
     count: 15
@@ -207,12 +220,12 @@ capabilities:
     caption: "Other — Epic Cards (print-ready PDF)"
 
   - title: "Engineering Process & CLI UX"
-    count: 27
-    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #191, #210, #213, #255, #256, #257"
+    count: 28
+    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #191, #210, #213, #255, #256, #257, #268"
     blurb: "Tooling housekeeping and reliability polish"
     bullets:
       - "#18 CLI navigation, logging, UX polish and reliability improvements"
-      - "#213 Weekly automated status deck — build, publish to S3, notify by email"
+      - "#213 Weekly automated status deck — build, publish to S3, notify by email (#268: covering both repos)"
       - "#103 Evaluate the use of git worktrees"
       - "#255 Self-documenting Makefile help; #256 group lookup accepts URL paths"
       - "#114 Document the issue-block seeding capability"
@@ -220,11 +233,11 @@ capabilities:
     caption: "Audit & Validation — Audit Hierarchy"
 
   - title: "Containerization & Golden Images"
-    count: 5
-    all_issues: "#243, #244, #247, #248, #253"
+    count: 6
+    all_issues: "#243, #244, #247, #248, #253, #266"
     blurb: "The VM-to-container roadmap, with working reference containers"
     bullets:
-      - "#243 Leadership brief: the VM-to-container migration roadmap."
+      - "#243 Leadership brief: the VM-to-container migration roadmap (#266 refreshed with the as-is/to-be SDLC views)."
       - "#244 Containerized dev & deploy workflow for the project itself."
       - "#247 / #248 Java and C/C++ golden-container demos — build-once base images other teams can copy."
       - "#253 CLI tools hardened to run reliably inside containers."
@@ -241,8 +254,8 @@ capabilities:
       - "#276 Container builds fixed on enclave runners — kaniko vs. the runner's pinned /sbin/docker-init."
 
   - title: "Platform GitOps — nce-git-ops"
-    count: 14
-    all_issues: "#259, nce-git-ops#1, nce-git-ops#2, nce-git-ops#3, nce-git-ops#7, nce-git-ops#8, nce-git-ops#9, nce-git-ops#10, nce-git-ops#11, nce-git-ops#12, nce-git-ops#13, nce-git-ops#14, nce-git-ops#15, nce-git-ops#16"
+    count: 15
+    all_issues: "#259, nce-git-ops#1, nce-git-ops#2, nce-git-ops#3, nce-git-ops#7, nce-git-ops#8, nce-git-ops#9, nce-git-ops#10, nce-git-ops#11, nce-git-ops#12, nce-git-ops#13, nce-git-ops#14, nce-git-ops#15, nce-git-ops#16, nce-git-ops#25"
     blurb: "A Kubernetes platform built from zero and run by GitOps — Terraform, Ansible, kubeadm, Argo CD, Rancher, Keycloak"
     bullets:
       - "nce-git-ops#10 AWS infrastructure as code — Terraform provisions, Ansible configures, kubeadm bootstraps."
@@ -250,5 +263,6 @@ capabilities:
       - "nce-git-ops#13 / #16 Argo CD on the AWS cluster, with the simulator itself deployed via GitOps."
       - "nce-git-ops#14 Real HTTPS subdomains with automatic certificates (argocd. / rancher. / keycloak. / sim.)."
       - "nce-git-ops#15 Rancher manages both clusters (#259 platform status assessment)."
+      - "nce-git-ops#25 Developer VM for Team RedWolf, provisioned on AWS."
     image: "deck/assets/spotlight-extras/gitops-argocd-applications.png"
     caption: "Argo CD — platform and simulator applications, all healthy"

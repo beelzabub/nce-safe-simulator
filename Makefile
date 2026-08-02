@@ -76,6 +76,7 @@ deck-screenshots: ## Capture sprint-review deck screenshots (Playwright, ~10-15 
 	python3 deck/capture_cli_menu.py
 	python3 deck/capture_test_log.py
 	python3 deck/capture_git_workflow.py
+	python3 deck/capture_ci_router.py
 
 deck: ## Build the sprint-review .pptx from live metrics + screenshots + template
 	python3 deck/fetch_metrics.py
