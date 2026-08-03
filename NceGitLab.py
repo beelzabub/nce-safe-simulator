@@ -57,7 +57,7 @@ class NceGitLab(
             print('''Please create config.json with the following format:
                     {
                         "url": "https://gitlab.com",
-                        "private_token": "glpat-XXXXXXXXXXXXXXXXXXXX",
+                        "private_token": "glpat-<your-token-here>",
                         "parent_group": "AMW-120",
                         "gitlab_namespace": "gl-demo-ultimate-lmwilliams",
                         "project_labels": ["project::DO", "project::RTSO"],

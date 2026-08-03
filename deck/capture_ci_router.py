@@ -4,15 +4,16 @@ Render the CI recipe router (issue #283) as deck PNGs:
   deck/screenshots/ci-recipe-router.png        the router flow — the unchanged
                                                default pipeline vs. RECIPE=<name>
                                                selecting a child pipeline
-  deck/screenshots/security-scan-findings.png  the security suite's first verified
-                                               sweep (child pipeline 2717082866,
-                                               2026-07-30) as a findings panel
+  deck/screenshots/security-scan-findings.png  the latest verified `security-all`
+                                               run on develop (child pipeline
+                                               2725737651, 2026-08-03) as a
+                                               findings panel
 
 Like capture_git_workflow.py these are faithful static renders, not screenshots:
 the router graphic mirrors .gitlab-ci.yml + ci-recipes/ (keep the CATALOG list in
 step with that directory), and the findings panel shows the numbers recorded on
-the wiki's Security-scanning page for the first verified `security-all` run —
-update SCANNERS when a newer sweep becomes the one the deck should cite.
+the wiki's Security-scanning page for the develop `security-all` run —
+update SCANNERS when a newer run becomes the one the deck should cite.
 
 Requires: Pillow + DejaVu fonts (same as capture_cli_menu.py).
 
@@ -176,23 +177,23 @@ def render_router(out_path):
     img.save(out_path)
 
 
-# The first verified sweep — wiki Security-scanning page, child pipeline
-# 2717082866 on task/283-create-cicd-recipes-to-explorer, 2026-07-30.
+# The develop run after the #287 dispositioning merge — wiki Security-scanning
+# page, child pipeline 2725737651 on develop, 2026-08-03.
 SCANNERS = [
-    ("SAST", "Semgrep — Python + Vue/JS source", 52,
-     [("High", 2), ("Medium", 6), ("Low", 44)],
-     "the two Highs lead the triage queue"),
-    ("Secret Detection", "Gitleaks — code + full git history", 0,
-     [],
-     "clean — verifies the #111 token-scrub end to end"),
-    ("Dependency Scanning", "requirements.txt + frontend lockfiles", 7,
-     [("High", 5), ("Medium", 2)],
+    ("SAST", "Semgrep — Python + Vue/JS source", 6,
+     [("High", 2), ("Medium", 4)],
+     "after #287 dispositioning: 9 findings fixed, 44 suppressed in-code with justifications"),
+    ("Secret Detection", "Gitleaks — commits new to the ref (default scope)", 2,
+     [("Critical", 2)],
+     "both are the docs' own example tokens — made non-matching via #292"),
+    ("Dependency Scanning", "requirements.txt + frontend lockfiles", 6,
+     [("High", 5), ("Medium", 1)],
      "fixed versions listed for every finding"),
     ("Container Scanning", "Trivy — published runtime image", 205,
-     [("Critical", 5), ("High", 31), ("Medium/Low", 169)],
+     [("Critical", 5), ("High", 29), ("Medium/Low", 171)],
      "typical for a slim Debian base; rebuilds clear fix-available CVEs"),
-    ("IaC Scanning", "KICS — cdk/, helm/, Dockerfile", 33,
-     [("Critical", 2), ("Medium", 13), ("Info", 18)],
+    ("IaC Scanning", "KICS — cdk/, helm/, Dockerfile", 26,
+     [("Critical", 1), ("Medium", 9), ("Info", 16)],
      "misconfiguration checks over the deploy code"),
 ]
 
@@ -217,8 +218,8 @@ def render_findings(out_path):
 
     # Header band.
     d.rounded_rectangle([x0, 60, x1, 210], radius=18, fill=CARD, outline=EDGE, width=3)
-    d.text((x0 + 40, 88), "RECIPE=security-all — first verified sweep", font=F_TITLE(34), fill=INK)
-    d.text((x0 + 40, 150), "2026-07-30 · child pipeline 2717082866 · six scanner jobs, all green",
+    d.text((x0 + 40, 88), "RECIPE=security-all — develop, after #287 dispositioning", font=F_TITLE(34), fill=INK)
+    d.text((x0 + 40, 150), "2026-08-03 · child pipeline 2725737651 · six scanner jobs, all green",
            font=F_BODY(24), fill=GRAY)
     total = sum(s[2] for s in SCANNERS)
     tf = F_TITLE(52)

@@ -127,7 +127,7 @@ Set at minimum:
 **The GitLab token is supplied via the `GITLAB_TOKEN` environment variable, not the config file** — `config.json` is git-ignored and ships with a blank `private_token` so the secret never lands in the repo. Export a Personal Access Token with `api` scope:
 
 ```bash
-export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx   # add to ~/.bashrc to persist
+export GITLAB_TOKEN=glpat-<your-token-here>   # add to ~/.bashrc to persist
 ```
 
 Token resolution precedence: `GITLAB_TOKEN` env → `config.json` `private_token` → `ACCESS_TOKEN` (deprecated). All other settings can be edited in-browser via the ⚙ Config button once the server is running.
