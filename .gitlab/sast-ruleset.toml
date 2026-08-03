@@ -1,0 +1,20 @@
+# GitLab SAST ruleset customization (issue #287).
+#
+# The top-level table is the ANALYZER name, not "sast" — GitLab's SAST is a
+# Semgrep-based analyzer, so rules are disabled under [semgrep]. This file is
+# auto-detected by the analyzer on its next run; no .gitlab-ci.yml change is
+# needed. It only affects scans on the branch it lives on, so it must be merged
+# to the default branch to clear findings from the Vulnerability Report there.
+#
+# Disabled below: the "weak PRNG" rule (CWE-338 / bandit B311). This project is
+# a SAFe demo-data generator (NceGitLab) — every flagged `random` call fabricates
+# synthetic lorem issues/epics/estimates, none of which is a security context
+# (no tokens, passwords, or crypto). 44 findings, all false positives in context.
+# Verified in the #287 agentic triage (security-fix-via-graph-eng.md).
+
+[semgrep]
+  [[semgrep.ruleset]]
+    disable = true
+    [semgrep.ruleset.identifier]
+      type = "semgrep_id"
+      value = "bandit.B311"

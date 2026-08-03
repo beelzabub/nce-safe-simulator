@@ -31,7 +31,7 @@ RUN test -n "$PKG_PROJECT" || { \
     python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" \
       graphviz "$(dpkg --print-architecture)" /tmp/debs && \
     apt-get install -y --no-install-recommends /tmp/debs/*.deb && rm -rf /tmp/debs
-RUN pip install --no-cache-dir diagrams
+RUN pip install --no-cache-dir diagrams==0.25.1
 WORKDIR /build
 COPY diagrams/ ./
 RUN mkdir -p /diagrams \
