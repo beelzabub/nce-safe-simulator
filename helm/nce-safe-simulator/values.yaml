@@ -1,6 +1,10 @@
 image:
   repository: ""
-  tag: latest
+  # Immutable tag of the image to run (e.g. 0.1.0-dev-abc1234). Deliberately
+  # empty: the deploy targets resolve and pass it (--set image.tag=...), and
+  # the chart refuses to render without one — a :latest release is not
+  # reproducible and cannot be rolled back (issue #290).
+  tag: ""
   pullPolicy: Always
 
 replicaCount: 1

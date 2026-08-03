@@ -1555,7 +1555,7 @@ Browser → CloudFront (HTTPS) → ALB (HTTP, CloudFront-only SG) → EKS pod
 cd cdk
 make eks-install        # create LB Controller IAM policy (once per AWS account)
 make bootstrap          # bootstrap CDK (once per account+region)
-make ecr-push           # build and push :latest to ECR
+make ecr-push           # build and push :latest + an immutable :<VERSION>-<sha> tag to ECR
 make eks-full-deploy    # end-to-end: CDK + kubeconfig + LB controller + Helm + Grafana (~30-40 min)
 make seed-config        # store config.json in SSM (re-run any time config changes)
 ```
@@ -1566,8 +1566,8 @@ After `eks-full-deploy` finishes, navigate to the CloudFront URL (printed in CDK
 
 | Command | Description |
 |---|---|
-| `make ecr-push` | Build and push a new `:latest` image to ECR |
-| `make eks-redeploy` | Restart the pod to pick up a freshly pushed image |
+| `make ecr-push` | Build and push a new image to ECR, tagged both `:latest` and with an immutable `:<VERSION>-<short-sha>` tag (issue #290) |
+| `make eks-redeploy` | Roll the release to the freshly pushed image — pins its immutable tag via `helm upgrade` (so `helm rollback` returns the previous image), or restarts the pods when the tag is unchanged |
 | `make eks-logs` | Tail live pod logs |
 | `make eks-exec` | Open a shell in the running pod (SSM tunnel, no inbound ports) |
 | `make eks-deploy` | Apply CDK stack changes |
@@ -1593,7 +1593,7 @@ python NceGitLab.py --deploy-eks status     # prints status JSON (state, url, st
 python NceGitLab.py --deploy-eks destroy    # make eks-destroy
 ```
 
-`publish`/`destroy` shell to the same path as `make -C cdk eks-full-deploy` / `eks-destroy`. Per **decision A3** the deploy **reuses the existing ECR image tag** — unlike ECS, `eks-full-deploy` never builds an image (the Helm chart pulls the current tag), so publish fails fast in preflight if the repository is empty; push an image first with `make -C cdk ecr-push` (there is **no CodeBuild**). A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`, `kubectl`, `helm`). Because it drives the local CDK/Helm toolchain, launch these from the **operator's** server (the box running `--serve`), not from inside the deployed container. `status` reports `not_deployed`, `deploying`, `deployed` (with the public URL, falling back to the `eks_cf_url` in `cdk-eks.json`), `destroying`, or `error`, read from the `NceEksStack` CloudFormation stack.
+`publish`/`destroy` shell to the same path as `make -C cdk eks-full-deploy` / `eks-destroy`. Per **decision A3** the deploy **reuses the existing ECR image** — unlike ECS, `eks-full-deploy` never builds an image, so publish fails fast in preflight if the repository is empty; push an image first with `make -C cdk ecr-push` (there is **no CodeBuild**). The Helm release **pins the immutable tag** of whatever `:latest` currently points at (resolved by `cdk/scripts/resolve-image-tag.sh` — issue #290), so `kubectl describe` reports the exact build, pod restarts cannot drift, and `helm rollback` returns the previously deployed image; an ECR image pushed before #290 (no immutable tag alongside `:latest`) fails the deploy with instructions to re-run `ecr-push`. A preflight verifies the toolchain (`make`, `cdk`, `node`, `aws`, `kubectl`, `helm`). Because it drives the local CDK/Helm toolchain, launch these from the **operator's** server (the box running `--serve`), not from inside the deployed container. `status` reports `not_deployed`, `deploying`, `deployed` (with the public URL, falling back to the `eks_cf_url` in `cdk-eks.json`), `destroying`, or `error`, read from the `NceEksStack` CloudFormation stack.
 
 ---
 
@@ -1606,7 +1606,7 @@ The app runs as a single Fargate task on ARM64 behind an ALB with CloudFront in 
 ```bash
 cd cdk
 make bootstrap          # bootstrap CDK (once per account+region)
-make ecr-push           # build and push :latest to ECR
+make ecr-push           # build and push :latest + an immutable :<VERSION>-<sha> tag to ECR
 make ecs-full-deploy    # CDK deploy + Grafana setup end-to-end
 make seed-config        # store config.json in SSM
 ```
@@ -1615,8 +1615,8 @@ make seed-config        # store config.json in SSM
 
 | Command | Description |
 |---|---|
-| `make ecr-push` | Build and push a new `:latest` image to ECR |
-| `make ecs-redeploy` | Force a new ECS deployment to pick up a freshly pushed image |
+| `make ecr-push` | Build and push a new image to ECR, tagged both `:latest` and with an immutable `:<VERSION>-<short-sha>` tag (issue #290) |
+| `make ecs-redeploy` | Force a new ECS deployment to pick up a freshly pushed image (the ECS task still tracks `:latest`; set `image_tag` in `cdk-ecs.json` and run `ecs-deploy` to pin a specific build) |
 | `make ecs-logs` | Tail live container logs |
 | `make ecs-exec` | Open a shell in the running Fargate task (SSM tunnel) |
 | `make ecs-deploy` | Apply CDK stack changes |

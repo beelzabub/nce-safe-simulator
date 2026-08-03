@@ -129,7 +129,7 @@ seed-config: ## Store config.json in SSM as a SecureString, token injected from 
 	  aws ssm put-parameter --name /nce/config --type SecureString --overwrite --value "$$CONFIG_JSON" >/dev/null
 	@echo "Done. Run 'make ecs-deploy' (or 'make ecs-redeploy') to pick up the new config."
 
-ecr-push: ## Build and push :latest to ECR (creates the repo if absent — issue #234)
+ecr-push: ## Build and push :latest plus an immutable :<VERSION>-<sha> tag to ECR (issues #234, #290)
 	@ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
 	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
 	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/nce-safe-simulator" && \
@@ -149,9 +149,12 @@ ecr-push: ## Build and push :latest to ECR (creates the repo if absent — issue
 	  --build-arg NCE_VERSION=$$(git -C .. describe --tags --exact-match 2>/dev/null || true) \
 	  --build-arg PKG_PROJECT=$$(../scripts/pkg-project-url.sh) \
 	  -t nce-safe-simulator ../ && \
+	TAG="$$(cat ../VERSION)-$$(git -C .. rev-parse --short HEAD)" && \
 	docker tag nce-safe-simulator:latest "$$REPO:latest" && \
+	docker tag nce-safe-simulator:latest "$$REPO:$$TAG" && \
 	docker push "$$REPO:latest" && \
-	echo "Pushed $$REPO:latest — run 'make ecs-redeploy' or 'make eks-redeploy' to activate."
+	docker push "$$REPO:$$TAG" && \
+	echo "Pushed $$REPO:latest and $$REPO:$$TAG — run 'make ecs-redeploy' or 'make eks-redeploy' to activate."
 
 ecs-redeploy: ## Force a new ECS deployment (picks up a freshly pushed image)
 	@REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
@@ -342,9 +345,12 @@ eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from
 	AP_INTERACTIVE=$$(_out EfsApInteractive) && \
 	AP_QUARTO=$$(_out EfsApQuartoSite) && \
 	ALB_SG_ID=$$(_out AlbSgId) && \
+	IMAGE_TAG=$$(scripts/resolve-image-tag.sh $$APP_NAME $$REGION) && \
+	echo "==> Pinning image tag $$IMAGE_TAG (immutable tag of the current :latest — issue #290)" && \
 	helm upgrade --install $$APP_NAME ../helm/nce-safe-simulator \
 	  --namespace $$NAMESPACE --create-namespace \
 	  --set image.repository=$$REPO \
+	  --set image.tag=$$IMAGE_TAG \
 	  --set serviceAccount.roleArn=$$SA_ROLE_ARN \
 	  --set efs.fileSystemId=$$EFS_ID \
 	  --set efs.accessPoints.config=$$AP_CONFIG \
@@ -357,7 +363,13 @@ eks-helm-install: ## Install the nce Helm chart (reads ECR repo and EFS IDs from
 eks-helm-upgrade: ## Upgrade the Helm release (new values; use eks-redeploy for image updates)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
 	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
-	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	ACCOUNT=$$(aws sts get-caller-identity --query Account --output text) && \
+	REPO="$$ACCOUNT.dkr.ecr.$$REGION.amazonaws.com/$$APP_NAME" && \
+	IMAGE_TAG=$$(scripts/resolve-image-tag.sh $$APP_NAME $$REGION) && \
+	helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE \
+	  --set image.repository=$$REPO \
+	  --set image.tag=$$IMAGE_TAG
 
 eks-set-alb: ## Wait until the LB Controller has provisioned the ALB (polls up to 15 min)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
@@ -456,10 +468,21 @@ eks-grafana-deploy: ## Install Infinity plugin, configure EKS datasource, and de
 	  --set config.grafanaUrl="$$GRAFANA_URL" && \
 	echo "==> Done. Datasource URL: $$DATA_URL — Open $$GRAFANA_URL"
 
-eks-redeploy: ## Restart pod to pick up a freshly pushed image
+eks-redeploy: ## Roll the release to the freshly pushed image (pins its immutable tag — issue #290)
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \
 	APP_NAME=$$(jq -r '.context.app_name' $(EKS_CTX)) && \
-	kubectl rollout restart deployment/$$APP_NAME -n $$NAMESPACE
+	REGION=$$(aws configure get region 2>/dev/null || aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text) && \
+	IMAGE_TAG=$$(scripts/resolve-image-tag.sh $$APP_NAME $$REGION) && \
+	CURRENT=$$(kubectl get deployment/$$APP_NAME -n $$NAMESPACE \
+	  -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://') && \
+	if [ "$$CURRENT" = "$$IMAGE_TAG" ]; then \
+	  echo "==> Release already pins $$IMAGE_TAG — restarting pods to re-pull it..." && \
+	  kubectl rollout restart deployment/$$APP_NAME -n $$NAMESPACE; \
+	else \
+	  echo "==> Rolling $$APP_NAME from $$CURRENT to $$IMAGE_TAG (helm upgrade, so rollback works)..." && \
+	  helm upgrade $$APP_NAME ../helm/nce-safe-simulator --namespace $$NAMESPACE \
+	    --reuse-values --set image.tag=$$IMAGE_TAG; \
+	fi
 
 eks-logs: ## Tail live pod logs
 	@NAMESPACE=$$(jq -r '.context.eks_namespace' $(EKS_CTX)) && \

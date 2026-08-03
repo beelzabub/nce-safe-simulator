@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: {{ .Release.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required — pass the immutable tag ecr-push printed (issue #290)" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["sh", "/app/scripts/entrypoint-eks.sh"]
           # The container still runs as root to bind privileged port 80 (see
