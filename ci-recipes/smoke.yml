@@ -18,7 +18,11 @@ stages: [smoke]
 
 smoke:
   stage: smoke
-  image: python:3.11          # pullable wherever the baseline test job runs
+  # Stock image on purpose: smoke is the registry-independent diagnostic — it
+  # must still run when the container registry is empty or broken, which is
+  # exactly when you need it (the baseline test job, by contrast, needs the
+  # project's own dev image since issue #279).
+  image: python:3.11
   script:
     - echo "router smoke test — this job arrived via the recipe router"
     - 'echo "ref $CI_COMMIT_REF_NAME @ $CI_COMMIT_SHORT_SHA (child pipeline source: $CI_PIPELINE_SOURCE)"'

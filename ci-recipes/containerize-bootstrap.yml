@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: containerize-bootstrap — first-run image build for an empty registry
+#
+# The baseline `containerize` job is gated on `test` (never publish from a red
+# suite), and `test` runs in the dev image `containerize` publishes (issue
+# #279). On a repo whose container registry is empty — a fresh enclave import
+# without the image phase, or any new space — that is a deadlock: test can't
+# pull an image that doesn't exist, and containerize never runs because test
+# is red. This recipe is the escape hatch: the same kaniko build/push as the
+# baseline `containerize` job, but ungated — recipe runs sit the whole
+# baseline out, so the test gate never applies.
+#
+#   glab ci run -b <default-branch> --variables RECIPE:containerize-bootstrap
+#
+# Run it ONCE after an import (from the default branch, so :latest is the
+# mainline build); every subsequent normal pipeline then finds the dev image
+# and works unaided. Not for routine builds — the baseline containerize keeps
+# the red-suite gate for a reason.
+#
+# The kaniko invocation mirrors .gitlab-ci.yml's `containerize` job exactly —
+# PKG_PROJECT composition (registry-only apt closures, issue #269), the /sbin
+# ignore for init-injecting runners (issue #276), and the :latest + :<sha>
+# dual tags. If you change one, change both (tests/test_ci_config.py pins
+# them together).
+# ─────────────────────────────────────────────────────────────────────────────
+stages: [containerize]
+
+containerize-bootstrap:
+  stage: containerize
+  variables:
+    FF_USE_INIT_WITH_DOCKER_EXECUTOR: "false"
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+  script:
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target runtime
+      --ignore-path=/sbin
+      --build-arg VCS_REF="$CI_COMMIT_SHORT_SHA"
+      --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
+      --destination "$CI_REGISTRY_IMAGE:latest"
+      --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - >-
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --target dev
+      --ignore-path=/sbin
+      --build-arg PKG_PROJECT="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
+      --destination "$CI_REGISTRY_IMAGE/dev:latest"
+      --destination "$CI_REGISTRY_IMAGE/dev:$CI_COMMIT_SHORT_SHA"
