@@ -5,6 +5,9 @@ __pycache__/
 
 # Real config holds the GitLab token — keep it out of git. Commit config.example.json instead.
 /config.json
+# Personal shell config — nothing here is needed to build or run the project, and
+# it is exactly the kind of file that carries exported credentials.
+/.zshrc
 # Local Python virtualenv (README installation step 2).
 /.venv/
 cdk/cdk.out/
