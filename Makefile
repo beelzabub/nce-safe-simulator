@@ -42,6 +42,24 @@ redeploy-ops: ## redeploy, but with the ops image variant (CDK toolchain baked i
 app-shell: ## Bash shell inside the running app container (APP=nce-safe-sim)
 	docker exec -it $(APP) bash
 
+##@ Vendored dependency closures (issues #269/#271/#296)
+# The developer loop for dependency changes: edit the input, run the matching
+# target, commit the lock diff, push. pip/npm registry versions are derived
+# from the lock files' own sha256 (no version to bump); the capture must be
+# published BEFORE the push, or the MR pipeline's image build 404s — which is
+# the drift guard. See scripts/capture-deps.sh for the details.
+capture-deps: ## Refresh pip+npm vendored closures (recompile lock, publish if new) — run BEFORE pushing
+	bash scripts/capture-deps.sh all
+
+capture-pip: ## Recompile requirements.lock + publish its wheel closure if new
+	bash scripts/capture-deps.sh pip
+
+capture-npm: ## Publish the npm cache for frontend/package-lock.json if new
+	bash scripts/capture-deps.sh npm
+
+capture-apt: ## Re-capture the apt-debs closure (dated), print the Dockerfile values to set
+	bash scripts/capture-deps.sh apt
+
 ##@ Container image / dev
 # Builds the dev/build image and drops into a shell with the working tree mounted
 # at /app — full toolchain, nothing installed on the host. Host :4645 maps to the

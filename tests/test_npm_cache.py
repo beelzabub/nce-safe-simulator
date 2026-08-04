@@ -78,9 +78,16 @@ def test_ci_built_stages_have_no_npm_registry_host():
         assert "registry.npmjs.org" not in body, f"stage {name} references registry.npmjs.org"
 
 
-def test_npm_cache_version_is_pinned():
-    assert re.search(r"(?m)^ARG NPM_CACHE_VERSION=\d{4}\.\d{2}\.\d{2}$", DOCKERFILE), \
-        "NPM_CACHE_VERSION must be pinned to a dated version at the top of the Dockerfile"
+def test_npm_cache_version_is_content_derived():
+    """No version variable exists to bump (issue #296): the frontend-builder
+    derives the registry version from package-lock.json's own sha256 (first
+    12 hex), and the capture script publishes under the identical
+    derivation — a lockfile change without its capture 404s the next build."""
+    assert "ARG NPM_CACHE_VERSION" not in DOCKERFILE, \
+        "the npm-cache version must be derived from the lockfile, not pinned"
+    assert "sha256sum package-lock.json | cut -c1-12" in DOCKERFILE
+    assert 'VERSION="$(sha256sum "$FRONTEND_DIR/package-lock.json" | cut -c1-12)"' in CAPTURE, \
+        "capture script must publish under the same derivation the Dockerfile fetches"
 
 
 def test_dockerfile_fetch_matches_capture_package_path():
