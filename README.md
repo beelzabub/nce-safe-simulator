@@ -915,7 +915,7 @@ The same diagnostic output is automatically appended as a collapsible **🔧 Env
 
 | Section | What it checks |
 |---|---|
-| **Software Versions** | Python, python-gitlab, requests, pandas, plotly, marimo, jupyter, nbformat, GitLab server version, and GitLab tier (Free / Premium / Ultimate) |
+| **Software Versions** | Python, python-gitlab, requests, pandas, plotly, marimo, nbformat, GitLab server version, and GitLab tier (Free / Premium / Ultimate) |
 | **Configuration** | Active label sets from `config.json` — Epic Type, PIID, Project, Risk, Lifecycle |
 | **REST API Capabilities** | Live probes of Group Epics, Group Wiki, Labels, Milestones, and Epic Issues endpoints with HTTP error detail on failure |
 | **GraphQL API Capabilities** | Functional probes (not schema introspection) for Epic blocking fields, `Epic.blockedByEpics`, `WorkItemWidgetWeight`, `Namespace.customFields`, `Issue.linkedWorkItems`, and `Group.workItemTypes` |

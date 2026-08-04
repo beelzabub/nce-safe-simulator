@@ -6,7 +6,6 @@ requests
 lorem
 plotly
 marimo
-jupyter
 nbformat
 fastapi
 uvicorn[standard]

@@ -6129,7 +6129,6 @@ class ReportsMixin:
             ("python-dateutil", _pkg("python-dateutil")),
             ("plotly",          _pkg("plotly")),
             ("marimo",          _pkg("marimo")),
-            ("jupyter",         _pkg("jupyter")),
             ("nbformat",        _pkg("nbformat")),
             ("GitLab Server",   gl_version),
             ("GitLab Tier",     gl_tier),
