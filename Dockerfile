@@ -9,12 +9,33 @@
 # project; APT_DEBS_VERSION pins the captured set.
 ARG PKG_PROJECT
 ARG APT_DEBS_VERSION=2026.07.22
+# Python wheel closure (package `pip-wheels`) and npm cache (package
+# `npm-cache`) are vendored in the same generic registry (issue #271), so the
+# runtime/diagram-builder/frontend-builder stages install with no PyPI/npm
+# egress. Captured by scripts/capture-pip-wheels.sh / capture-npm-cache.sh;
+# bump these when requirements.lock / frontend/package-lock.json change.
+ARG PIP_WHEELS_VERSION=2026.08.03
+ARG NPM_CACHE_VERSION=2026.08.03
 
-# Stage 1 — build the Vue frontend
+# Stage 1 — build the Vue frontend. npm packages come from the project's
+# generic package registry (npm-cache, issue #271), not registry.npmjs.org:
+# fetch the vendored, content-addressed cache (node's built-in fetch — the slim
+# image has no curl) and install with `npm ci --offline`. PKG_PROJECT has no
+# default on purpose (see the runtime stage note).
 FROM node:20-slim AS frontend-builder
+ARG PKG_PROJECT
+ARG NPM_CACHE_VERSION
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN test -n "$PKG_PROJECT" || { \
+      echo "ERROR: PKG_PROJECT build-arg is required (no default — issues #262/#269/#271)." >&2; \
+      echo "  Use the make targets / scripts (they derive it from git remote origin)." >&2; \
+      exit 1; } && \
+    U="${PKG_PROJECT}/packages/generic/npm-cache/${NPM_CACHE_VERSION}/npm-cache.tar.gz" && \
+    node -e "const f=require('fs');fetch(process.argv[1]).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer()}).then(b=>f.writeFileSync('/tmp/npm-cache.tar.gz',Buffer.from(b)))" "$U" && \
+    mkdir -p /tmp/npm-cache && tar xzf /tmp/npm-cache.tar.gz -C /tmp/npm-cache && \
+    npm ci --offline --cache /tmp/npm-cache --no-audit --no-fund && \
+    rm -rf /tmp/npm-cache /tmp/npm-cache.tar.gz
 COPY frontend/ ./
 RUN npm run build
 
@@ -31,7 +52,17 @@ RUN test -n "$PKG_PROJECT" || { \
     python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" \
       graphviz "$(dpkg --print-architecture)" /tmp/debs && \
     apt-get install -y --no-install-recommends /tmp/debs/*.deb && rm -rf /tmp/debs
-RUN pip install --no-cache-dir diagrams==0.25.1
+# `diagrams` (and its deps) install from the shared vendored wheelhouse
+# (pip-wheels, issue #271) with --no-index — no pypi.org. Version comes from
+# requirements.lock (diagrams is in the closure), not a second pin here.
+ARG PIP_WHEELS_VERSION
+RUN ARCH=$(dpkg --print-architecture) && \
+    python3 -c 'import sys, urllib.request as u; u.urlretrieve(sys.argv[1], sys.argv[2])' \
+      "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
+      /tmp/wheels.tar.gz && \
+    mkdir -p /tmp/wheels && tar xzf /tmp/wheels.tar.gz -C /tmp/wheels && \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-index --find-links /tmp/wheels diagrams && \
+    rm -rf /tmp/wheels /tmp/wheels.tar.gz
 WORKDIR /build
 COPY diagrams/ ./
 RUN mkdir -p /diagrams \
@@ -88,8 +119,20 @@ RUN python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" 
       weasyprint "$(dpkg --print-architecture)" /tmp/debs && \
     apt-get install -y --no-install-recommends /tmp/debs/*.deb && rm -rf /tmp/debs
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Python deps install from the vendored wheel closure (pip-wheels, issue #271)
+# with --no-index — no pypi.org / files.pythonhosted.org. requirements.lock is
+# the compiled full pin the wheelhouse was captured from; requirements.txt
+# stays the human-edited input. Refresh: re-run scripts/capture-pip-wheels.sh
+# and bump PIP_WHEELS_VERSION.
+COPY requirements.lock .
+ARG PIP_WHEELS_VERSION
+RUN ARCH=$(dpkg --print-architecture) && \
+    python3 -c 'import sys, urllib.request as u; u.urlretrieve(sys.argv[1], sys.argv[2])' \
+      "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
+      /tmp/wheels.tar.gz && \
+    mkdir -p /tmp/wheels && tar xzf /tmp/wheels.tar.gz -C /tmp/wheels && \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-index --find-links /tmp/wheels -r requirements.lock && \
+    rm -rf /tmp/wheels /tmp/wheels.tar.gz
 
 COPY . .
 
