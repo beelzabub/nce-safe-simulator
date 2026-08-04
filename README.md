@@ -857,20 +857,26 @@ The capture script computes each layer's closure against the same image state th
 
 Since issue #271 the image builds vendor their **Python** and **npm** dependency closures too — the last non-base-image internet they touched. Both live in the same generic package registry as `apt-debs`/`quarto`, so `containerize` needs no PyPI or npm registry at all:
 
-- **`pip-wheels`** — the full `requirements.lock` wheel closure, one gzipped wheelhouse per arch (`pip-wheels-amd64.tar.gz`, `pip-wheels-arm64.tar.gz`) plus a sorted `manifest-<arch>.txt`. The runtime and diagram-builder stages fetch the arch tarball and install with `pip install --no-index --find-links … -r requirements.lock` — no `pypi.org`, no `files.pythonhosted.org`. `requirements.txt` stays the human-edited input; `requirements.lock` is the compiled pin, and `PIP_WHEELS_VERSION` in the Dockerfile pins the captured set exactly like `APT_DEBS_VERSION`. The whole tree resolves to wheels (`--only-binary=:all:`), so nothing ever builds from an sdist.
-- **`npm-cache`** — the frontend's content-addressed npm cache (`npm-cache.tar.gz`), captured on both arches into one cache dir (it merges cleanly and picks up the per-arch `@esbuild`/`@rollup` binaries). The frontend-builder stage fetches it and runs `npm ci --offline --cache …` — no `registry.npmjs.org`. `NPM_CACHE_VERSION` pins it.
+- **`pip-wheels`** — the full `requirements.lock` wheel closure, one gzipped wheelhouse per arch (`pip-wheels-amd64.tar.gz`, `pip-wheels-arm64.tar.gz`) plus a sorted `manifest-<arch>.txt`. The runtime and diagram-builder stages fetch the arch tarball and install with `pip install --no-index --find-links … -r requirements.lock` — no `pypi.org`, no `files.pythonhosted.org`. `requirements.txt` stays the human-edited input; `requirements.lock` is the compiled pin. The whole tree resolves to wheels (`--only-binary=:all:`), so nothing ever builds from an sdist.
+- **`npm-cache`** — the frontend's content-addressed npm cache (`npm-cache.tar.gz`), captured on both arches into one cache dir (it merges cleanly and picks up the per-arch `@esbuild`/`@rollup` binaries). The frontend-builder stage fetches it and runs `npm ci --offline --cache …` — no `registry.npmjs.org`.
 
-To refresh (a dependency changed):
+**Versions are content-addressed** (issue #296): the registry version of each closure is the first 12 hex of sha256 over its lock file — `requirements.lock` for `pip-wheels`, `frontend/package-lock.json` for `npm-cache` — derived identically by the capture scripts at publish time and by the Dockerfile at build time. There is no version variable to bump, and drift is structurally impossible: a lock change whose capture wasn't published 404s the very next image build. Each published version carries a `capture-info.txt` (source file, full sha256, capture date), since the registry UI shows only the opaque hash.
+
+**Changing a dependency — the whole workflow** (`make capture-deps`):
 
 ```bash
-# needs docker; for the non-native arch: docker run --privileged --rm tonistiigi/binfmt --install arm64
-pip-compile requirements.txt -o requirements.lock             # recompile the lock in python:3.11
-GITLAB_TOKEN=<api-scope token> scripts/capture-pip-wheels.sh  # both arches → pip-wheels/<today>
-GITLAB_TOKEN=<api-scope token> scripts/capture-npm-cache.sh   # both arches → npm-cache/<today>
-# then set PIP_WHEELS_VERSION / NPM_CACHE_VERSION = <printed version> in the Dockerfile
+# once per box: docker; for the non-native arch: docker run --privileged --rm tonistiigi/binfmt --install <arch>
+vi requirements.txt            # or: cd frontend && npm install <pkg>
+GITLAB_TOKEN=<api-scope token> make capture-deps
+git add -A && git commit       # the lock diff IS the change — no Dockerfile edit exists
+git push                       # push AFTER the capture: the MR pipeline resolves the published closure
 ```
 
-**Connected-dev escape hatch (`OFFLINE=0`):** while dependencies are actively churning, re-capturing the closures on every iteration is needless friction. The Dockerfile's `OFFLINE` build-arg (default `1`) keeps the enclave contract but lets an inner-loop build skip the vendored packages: `make dev-shell OFFLINE=0` (or `--build-arg OFFLINE=0`) installs pip straight from PyPI — still pinned by `requirements.lock` (`-r` in runtime, `-c` in diagram-builder) — and runs a plain lock-pinned `npm ci`. It covers **pip/npm only**; apt and Quarto stay vendored either way. CI never passes the flag, so every CI build takes the offline default — `tests/test_pip_wheels.py` enforces all of this (online installs only inside the `OFFLINE` guard, lock-pinned, `ARG OFFLINE=1`, no `OFFLINE` in any pipeline yaml). Run the capture + version-bump once, before merging.
+`make capture-deps` preflights its needs (docker, qemu binfmt, token), recompiles `requirements.lock` reproducibly (pinned pip-tools in `python:3.11-slim`, seeded with the current lock so untouched requirements reproduce it byte-for-byte and nothing recaptures), and publishes any closure whose hash version isn't in the registry yet — re-running it with nothing changed is a no-op. `make capture-pip` / `make capture-npm` run one side; **capture before push** is the one ordering rule — the MR pipeline's own image build is the drift guard, and it cannot go green without the published capture.
+
+`apt-debs` and `quarto` stay on explicit pins (their inputs aren't single committed files): `make capture-apt` re-captures the apt closure and prints the `APT_DEBS_VERSION` + capture-input stamp values to set in the Dockerfile — the stamp (hash of `scripts/capture-apt-debs.sh`, whose layer lists define the closure) is pinned by `tests/test_apt_debs.py`, so editing the capture script without re-capturing fails CI instead of shipping a stale closure.
+
+**Connected-dev escape hatch (`OFFLINE=0`):** while dependencies are actively churning, re-capturing the closures on every iteration is needless friction. The Dockerfile's `OFFLINE` build-arg (default `1`) keeps the enclave contract but lets an inner-loop build skip the vendored packages: `make dev-shell OFFLINE=0` (or `--build-arg OFFLINE=0`) installs pip straight from PyPI — still pinned by `requirements.lock` (`-r` in runtime, `-c` in diagram-builder) — and runs a plain lock-pinned `npm ci`. It covers **pip/npm only**; apt and Quarto stay vendored either way. CI never passes the flag, so every CI build takes the offline default — `tests/test_pip_wheels.py` enforces all of this (online installs only inside the `OFFLINE` guard, lock-pinned, `ARG OFFLINE=1`, no `OFFLINE` in any pipeline yaml). Run `make capture-deps` once, before pushing.
 
 ### Report Index
 

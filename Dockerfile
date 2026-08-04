@@ -9,13 +9,22 @@
 # project; APT_DEBS_VERSION pins the captured set.
 ARG PKG_PROJECT
 ARG APT_DEBS_VERSION=2026.07.22
+# apt-debs capture-input: ebd4984a6e6c — first 12 hex of
+# sha256(scripts/capture-apt-debs.sh), whose layer package lists DEFINE the
+# apt closure. Unlike pip/npm (content-addressed, issue #296), a stale apt
+# capture cannot 404 on its own — so tests/test_apt_debs.py pins this stamp:
+# editing the capture script forces `make capture-apt`, an APT_DEBS_VERSION
+# bump, and a stamp update here (the make target prints all three).
 # Python wheel closure (package `pip-wheels`) and npm cache (package
 # `npm-cache`) are vendored in the same generic registry (issue #271), so the
 # runtime/diagram-builder/frontend-builder stages install with no PyPI/npm
-# egress. Captured by scripts/capture-pip-wheels.sh / capture-npm-cache.sh;
-# bump these when requirements.lock / frontend/package-lock.json change.
-ARG PIP_WHEELS_VERSION=2026.08.03
-ARG NPM_CACHE_VERSION=2026.08.03
+# egress. Their versions are CONTENT-ADDRESSED (issue #296): each install
+# site derives the version as the first 12 hex of sha256 over its own lock
+# file (requirements.lock / package-lock.json) — the same derivation
+# scripts/capture-pip-wheels.sh / capture-npm-cache.sh publish under, via
+# `make capture-deps`. No version ARG exists to bump, and drift is
+# structurally impossible: a lock change without its capture 404s here on
+# the next build, loudly.
 # OFFLINE=1 (the default) is the enclave contract: pip and npm install only
 # from the vendored registry packages above. OFFLINE=0 is a connected-dev
 # escape hatch for the inner loop while dependencies are churning: pip/npm
@@ -34,7 +43,6 @@ ARG OFFLINE=1
 # only — see the top of the file) runs a plain lock-pinned `npm ci` instead.
 FROM node:20-slim AS frontend-builder
 ARG PKG_PROJECT
-ARG NPM_CACHE_VERSION
 ARG OFFLINE
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -43,6 +51,7 @@ RUN test -n "$PKG_PROJECT" || { \
       echo "  Use the make targets / scripts (they derive it from git remote origin)." >&2; \
       exit 1; } && \
     if [ "$OFFLINE" = "1" ]; then \
+      NPM_CACHE_VERSION=$(sha256sum package-lock.json | cut -c1-12) && \
       U="${PKG_PROJECT}/packages/generic/npm-cache/${NPM_CACHE_VERSION}/npm-cache.tar.gz" && \
       node -e "const f=require('fs');fetch(process.argv[1]).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer()}).then(b=>f.writeFileSync('/tmp/npm-cache.tar.gz',Buffer.from(b)))" "$U" && \
       mkdir -p /tmp/npm-cache && tar xzf /tmp/npm-cache.tar.gz -C /tmp/npm-cache && \
@@ -70,11 +79,11 @@ RUN test -n "$PKG_PROJECT" || { \
 # `diagrams` (and its deps) install from the shared vendored wheelhouse
 # (pip-wheels, issue #271) with --no-index — no pypi.org. Version comes from
 # requirements.lock (diagrams is in the closure), not a second pin here.
-ARG PIP_WHEELS_VERSION
 ARG OFFLINE
 COPY requirements.lock /tmp/requirements.lock
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$OFFLINE" = "1" ]; then \
+      PIP_WHEELS_VERSION=$(sha256sum /tmp/requirements.lock | cut -c1-12) && \
       python3 -c 'import sys, urllib.request as u; u.urlretrieve(sys.argv[1], sys.argv[2])' \
         "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
         /tmp/wheels.tar.gz && \
@@ -143,14 +152,15 @@ RUN python3 /usr/local/bin/fetch-apt-debs.py "$PKG_PROJECT" "$APT_DEBS_VERSION" 
 # Python deps install from the vendored wheel closure (pip-wheels, issue #271)
 # with --no-index — no pypi.org / files.pythonhosted.org. requirements.lock is
 # the compiled full pin the wheelhouse was captured from; requirements.txt
-# stays the human-edited input. Refresh: re-run scripts/capture-pip-wheels.sh
-# and bump PIP_WHEELS_VERSION. OFFLINE=0 (connected dev only — see the top of
-# the file) installs the same lock straight from PyPI instead.
+# stays the human-edited input. Refresh: `make capture-deps` (issue #296) —
+# the version below is derived from the lock's own hash, so there is nothing
+# to bump. OFFLINE=0 (connected dev only — see the top of the file) installs
+# the same lock straight from PyPI instead.
 COPY requirements.lock .
-ARG PIP_WHEELS_VERSION
 ARG OFFLINE
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$OFFLINE" = "1" ]; then \
+      PIP_WHEELS_VERSION=$(sha256sum requirements.lock | cut -c1-12) && \
       python3 -c 'import sys, urllib.request as u; u.urlretrieve(sys.argv[1], sys.argv[2])' \
         "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
         /tmp/wheels.tar.gz && \

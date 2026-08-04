@@ -164,9 +164,19 @@ def test_jupyter_is_not_in_the_closure():
     assert "jupyter" not in REQ_TXT.split()
 
 
-def test_pip_wheels_version_is_pinned():
-    assert re.search(r"(?m)^ARG PIP_WHEELS_VERSION=\d{4}\.\d{2}\.\d{2}$", DOCKERFILE), \
-        "PIP_WHEELS_VERSION must be pinned to a dated version at the top of the Dockerfile"
+def test_pip_wheels_version_is_content_derived():
+    """No version variable exists to bump (issue #296): every install site
+    derives the registry version from the lock file it is about to install —
+    first 12 hex of sha256(requirements.lock) — and the capture script
+    publishes under the identical derivation. A lock change without its
+    capture therefore 404s the next image build instead of silently building
+    against the stale closure."""
+    assert "ARG PIP_WHEELS_VERSION" not in DOCKERFILE, \
+        "the pip-wheels version must be derived from the lock, not pinned"
+    assert "sha256sum requirements.lock | cut -c1-12" in DOCKERFILE      # runtime
+    assert "sha256sum /tmp/requirements.lock | cut -c1-12" in DOCKERFILE  # diagram-builder
+    assert 'VERSION="$(sha256sum "$REPO_DIR/requirements.lock" | cut -c1-12)"' in CAPTURE, \
+        "capture script must publish under the same derivation the Dockerfile fetches"
 
 
 def test_dockerfile_fetch_matches_capture_package_path():

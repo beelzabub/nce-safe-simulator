@@ -111,3 +111,24 @@ def test_fetch_apt_debs_fails_on_missing_manifest(tmp_path):
         capture_output=True,
     )
     assert r.returncode != 0
+
+
+def test_capture_script_matches_dockerfile_stamp():
+    """apt-debs cannot content-address its version (issue #296): its closure
+    is defined by the layer package lists inside the capture script, not a
+    single committed lock file, so a stale capture cannot 404 on its own.
+    The Dockerfile therefore carries a capture-input stamp — the first 12
+    hex of sha256 over scripts/capture-apt-debs.sh. Editing the script
+    without re-capturing fails HERE: run `make capture-apt`, bump
+    APT_DEBS_VERSION, and set the printed stamp."""
+    import hashlib
+    actual = hashlib.sha256(
+        (REPO / "scripts" / "capture-apt-debs.sh").read_bytes()
+    ).hexdigest()[:12]
+    m = re.search(r"apt-debs capture-input: ([0-9a-f]{12})", DOCKERFILE)
+    assert m, "capture-input stamp missing next to APT_DEBS_VERSION"
+    assert m.group(1) == actual, (
+        "scripts/capture-apt-debs.sh changed but the Dockerfile stamp did not "
+        f"— run `make capture-apt`, bump APT_DEBS_VERSION, and set the stamp "
+        f"to {actual}"
+    )
