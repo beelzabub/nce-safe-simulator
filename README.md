@@ -853,6 +853,23 @@ GITLAB_TOKEN=<api-scope token> scripts/capture-apt-debs.sh          # captures b
 
 The capture script computes each layer's closure against the same image state the Dockerfile installs into (the dev layer, for instance, on top of the runtime state), so the manifests always contain exactly what `dpkg -i` needs — see the header of [`scripts/capture-apt-debs.sh`](scripts/capture-apt-debs.sh) for the layer↔stage mapping.
 
+##### Image-build Python + npm packages (`pip-wheels`, `npm-cache`)
+
+Since issue #271 the image builds vendor their **Python** and **npm** dependency closures too — the last non-base-image internet they touched. Both live in the same generic package registry as `apt-debs`/`quarto`, so `containerize` needs no PyPI or npm registry at all:
+
+- **`pip-wheels`** — the full `requirements.lock` wheel closure, one gzipped wheelhouse per arch (`pip-wheels-amd64.tar.gz`, `pip-wheels-arm64.tar.gz`) plus a sorted `manifest-<arch>.txt`. The runtime and diagram-builder stages fetch the arch tarball and install with `pip install --no-index --find-links … -r requirements.lock` — no `pypi.org`, no `files.pythonhosted.org`. `requirements.txt` stays the human-edited input; `requirements.lock` is the compiled pin, and `PIP_WHEELS_VERSION` in the Dockerfile pins the captured set exactly like `APT_DEBS_VERSION`. The whole tree resolves to wheels (`--only-binary=:all:`), so nothing ever builds from an sdist.
+- **`npm-cache`** — the frontend's content-addressed npm cache (`npm-cache.tar.gz`), captured on both arches into one cache dir (it merges cleanly and picks up the per-arch `@esbuild`/`@rollup` binaries). The frontend-builder stage fetches it and runs `npm ci --offline --cache …` — no `registry.npmjs.org`. `NPM_CACHE_VERSION` pins it.
+
+To refresh (a dependency changed):
+
+```bash
+# needs docker; for the non-native arch: docker run --privileged --rm tonistiigi/binfmt --install arm64
+pip-compile requirements.txt -o requirements.lock             # recompile the lock in python:3.11
+GITLAB_TOKEN=<api-scope token> scripts/capture-pip-wheels.sh  # both arches → pip-wheels/<today>
+GITLAB_TOKEN=<api-scope token> scripts/capture-npm-cache.sh   # both arches → npm-cache/<today>
+# then set PIP_WHEELS_VERSION / NPM_CACHE_VERSION = <printed version> in the Dockerfile
+```
+
 ### Report Index
 
 > **Label discovery:** Reports derive label sets (`PIID::`, `project::`, `risk::`, `type::`, `lifecycle::`, `wsjf-*`) from the live data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group.
@@ -1333,7 +1350,7 @@ make registry-push
 
 ## Enclave Transfer (Air-Gapped GitLab)
 
-This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub — or, since issue #269, from any Debian/NodeSource mirror — is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs), [`quarto`](#vendored-quarto-quarto), and [`apt-debs`](#image-build-system-packages-apt-debs)), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
+This project is built to be lifted — **repo included** — into a network with **no GitHub egress**. Everything that would otherwise come from GitHub — or, since issue #269, from any Debian/NodeSource mirror — is vendored in this project's GitLab registries: the generic **package registry** carries the system `.deb`s ([`weasyprint-apt-debs`](#ci-system-packages-weasyprint-apt-debs), [`quarto`](#vendored-quarto-quarto), and [`apt-debs`](#image-build-system-packages-apt-debs)) plus the Python and npm closures ([`pip-wheels` and `npm-cache`](#image-build-python--npm-packages-pip-wheels-npm-cache), issue #271), and the **container registry** carries the built runtime/dev images. The CI yaml composes every registry URL from `${CI_API_V4_URL}` / `${CI_PROJECT_ID}` and triggers on `$CI_DEFAULT_BRANCH`, so the same pipeline runs unmodified against the enclave's own GitLab instance — whatever its host or default branch — once the artifacts are imported.
 
 Two scripts do the whole lift (issue #263); both need only bash, git, curl, and python3 (plus docker for the image phases). **Windows boxes are covered too**: PowerShell ports ([`enclave-export.ps1`](scripts/enclave-export.ps1) / [`enclave-import.ps1`](scripts/enclave-import.ps1), issue #264) mirror the bash pair phase-for-phase and need only PowerShell 5.1+, git, curl, and tar (`curl.exe` and `tar` are built into Windows 10+/Server 2019+) — `Invoke-RestMethod` and `Get-FileHash` replace the python3 and sha256sum dependencies, while package file bodies stream through real curl, since Windows PowerShell 5.1's web cmdlets reliably drop long TLS transfers. Package downloads and uploads retry with backoff on all four scripts, so one transient network reset doesn't abort a transfer. The two families are cross-compatible: checksums are written in `sha256sum -c` format either way, and every artifact carries **both** importers, so a Windows export imports on Linux and vice versa.
 
@@ -1342,7 +1359,7 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 | [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, from any directory inside a clone of this repo | Produces **one file**: `<repo-name>-<YYYY-MM-DD>.txt` — a gzipped tar (the `.txt` extension is the transfer-media naming convention) containing a git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it. The outer file's sha256 is printed for verification on the far side |
 | [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
 
-> **Stated assumption:** PyPI and npm are served by enclave mirrors/proxies (standard practice; making the builds independent of those too is deliberately deferred — issue #269). **Apt is no longer assumed at all**: since issue #269 the image builds install every system package from the [`apt-debs`](#image-build-system-packages-apt-debs) registry package, so `containerize` runs on an enclave with no Debian mirror. Base-image pulls (python/node/kaniko) are runner configuration — cover them with `--with-base-images` below or an enclave image proxy.
+> **No package-mirror assumptions remain.** Since issue #271 the image builds vendor their **PyPI wheel** and **npm** closures in the registry too ([`pip-wheels`](#image-build-python--npm-packages-pip-wheels-npm-cache) and `npm-cache`) — completing what apt (#269), Quarto (#262), and the GitHub-vendored artifacts started — so `containerize` runs on an enclave with **no internet at all**, no Debian/PyPI/npm mirror needed. The only remaining external pulls are the base images (python/node/kaniko), which are runner configuration — cover them with `--with-base-images` below or an enclave image proxy.
 
 > **First pipeline after an import without images:** if the container images were excluded from the transfer (or the import's image phase was skipped), the imported repo's registry is empty and the baseline pipeline deadlocks — `test` runs in the dev image (#279) and `containerize`, which would build it, is gated on `test`. Break the circle once with the [`containerize-bootstrap` recipe](ci-recipes/README.md): run a pipeline on the default branch with `RECIPE=containerize-bootstrap`; it builds and pushes the runtime + dev images ungated (same registry-only closures), after which every normal pipeline works.
 
