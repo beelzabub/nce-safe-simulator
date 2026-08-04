@@ -1,9 +1,12 @@
-"""JQL query language front-end for the simulator (issue #298, epic #297).
+"""JQL query language front-end for the simulator (epic #297).
 
-Pure Python: lexer, recursive-descent parser, AST node dataclasses, and
-date/duration evaluation helpers. Zero I/O and no GitLab dependency — this
-package never imports the client. Execution semantics (field resolution,
-push-down planning, currentUser()) belong to the executor built on top of it.
+Pure Python: lexer, recursive-descent parser, AST node dataclasses,
+date/duration evaluation helpers, and the field registry with its GitLab
+filter mapping. Zero I/O and no GitLab dependency — this package never
+imports the client; transport stays in ``mixins/utils.py``
+(``graphql_query``) and is invoked by the executor mixin, not from here.
+Execution semantics (field resolution, push-down planning, currentUser())
+belong to the executor built on top of it.
 """
 from . import ast
 from .lexer import JqlSyntaxError, Token, tokenize
