@@ -78,6 +78,15 @@ class FieldSpec:
     Capability semantics (all against ``Group.workItems``):
 
     - ``graphql_arg``      — equality filter argument (``None`` = post-filter only).
+    - ``requires_id_resolution`` — the equality argument takes GitLab *ids*
+                             (iteration ids, WorkItemID GIDs), not the titles /
+                             iids users write in queries. The planner must
+                             resolve values to ids before pushing the predicate
+                             down, and MUST keep it in the client-side residual
+                             when it cannot — pushing raw user values would
+                             silently change the result set, not just the cost.
+                             Wildcard (IS [NOT] EMPTY) push-down is unaffected:
+                             the ``wildcard_arg`` enum takes no user value.
     - ``arg_is_list``      — the argument takes a list (so ``IN (a, b)`` pushes
                              down as a same-arg list where ``or_arg`` allows it,
                              and multiple ANDed equalities can share the arg for
@@ -95,12 +104,18 @@ class FieldSpec:
                              ``search:`` (substring ``~`` push-down).
     - ``sort_prefix``      — ``ORDER BY`` push-down: ``<prefix>_ASC/_DESC`` in
                              the sort enum (``None`` = client-side sort only).
+                             The prefix *defines* the field's sort semantics:
+                             a client-side fallback comparator must order by
+                             the same key the enum does (e.g. milestone sorts
+                             by MILESTONE_DUE — due date, not title), so the
+                             ordering never depends on which plan ran.
     """
 
     name:              str
     kind:              str                            # "core" | "label" | "custom"
     value_type:        str                            # "enum" | "string" | "user" | "text" | "date" | "number" | "label"
     graphql_arg:       Optional[str] = None
+    requires_id_resolution: bool = False
     arg_is_list:       bool = False
     date_bound_args:   Optional[Tuple[str, str]] = None
     wildcard_arg:      Optional[str] = None
@@ -218,14 +233,21 @@ CORE_FIELDS = (
         graphql_arg="milestoneTitle", arg_is_list=True,
         wildcard_arg="milestoneWildcardId", supports_not=True,
         sort_prefix="MILESTONE_DUE",
-        description="Milestone title; IS EMPTY via milestoneWildcardId: NONE.",
+        description="Milestone title; IS EMPTY via milestoneWildcardId: NONE. "
+                    "ORDER BY milestone means milestone *due date* order "
+                    "(MILESTONE_DUE — GitLab has no title sort); a client-side "
+                    "comparator must sort by due date too.",
     ),
     FieldSpec(
         name="iteration", kind="core", value_type="string",
-        graphql_arg="iterationId", arg_is_list=True,
+        graphql_arg="iterationId", requires_id_resolution=True,
+        arg_is_list=True,
         wildcard_arg="iterationWildcardId", supports_not=True,
         aliases=("sprint",),
-        description="Iteration id; IS EMPTY via iterationWildcardId: NONE.",
+        description="Iteration. iterationId takes iteration *ids*, but queries "
+                    "say sprint = \"Sprint 3\" — equality pushes down only "
+                    "after title->id resolution (requires_id_resolution); "
+                    "IS EMPTY via iterationWildcardId: NONE needs no ids.",
     ),
     FieldSpec(
         name="weight", kind="core", value_type="number",
@@ -260,9 +282,13 @@ CORE_FIELDS = (
     ),
     FieldSpec(
         name="parent", kind="core", value_type="string",
-        graphql_arg="parentIds", arg_is_list=True,
+        graphql_arg="parentIds", requires_id_resolution=True,
+        arg_is_list=True,
         wildcard_arg="parentWildcardId", supports_not=True,
-        description="Parent work item; IS EMPTY via parentWildcardId: NONE. "
+        description="Parent work item. parentIds takes WorkItemID *GIDs*, but "
+                    "queries say parent = 42 (iid) — equality pushes down only "
+                    "after iid->GID resolution (requires_id_resolution); "
+                    "IS EMPTY via parentWildcardId: NONE needs no ids. "
                     "Project.issues uses epicId/epicWildcardId instead.",
     ),
     FieldSpec(
@@ -329,9 +355,12 @@ def _taxonomy_specs(config, reserved):
 
     Field names derive from the config key ('piid_labels' -> 'piid');
     'wsjf_labels' fans out to 'wsjf_urgency' / 'wsjf_risk'. A derived name
-    that collides with a core field or alias (config 'project_labels' vs the
-    core 'project' field) gets a '_label' suffix instead of shadowing it.
+    that collides with a core field, an alias, 'business_value', or another
+    taxonomy's derived name (config 'project_labels' vs the core 'project'
+    field) gets '_label' suffixes appended until unique instead of shadowing
+    it — registry construction never fails on a user-editable config.
     """
+    used  = set(reserved)
     specs = []
     for key in sorted(config):
         if not key.endswith("_labels"):
@@ -347,8 +376,9 @@ def _taxonomy_specs(config, reserved):
             labels = [l for l in labels if isinstance(l, str) and l]
             if not labels:
                 continue
-            if name in reserved:
+            while name.lower() in used:
                 name = f"{name}_label"
+            used.add(name.lower())
             specs.append(_label_field_spec(name, labels, key))
     return specs
 
@@ -380,6 +410,9 @@ class FieldRegistry:
         config   = config or {}
         reserved = {s.name.lower() for s in CORE_FIELDS}
         reserved.update(a.lower() for a in JIRA_ALIASES)
+        # business_value is appended below — a 'business_value_labels'
+        # taxonomy must rename (-> business_value_label), not collide.
+        reserved.add("business_value")
         specs = list(CORE_FIELDS)
         specs.extend(_taxonomy_specs(config, reserved))
         bv_name = (config.get("business_value_field") or {}).get("name", "Business Value")

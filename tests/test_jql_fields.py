@@ -312,6 +312,35 @@ class TestCapabilitiesAgainstIntrospection:
             if spec.date_bound_args:
                 assert set(spec.date_bound_args) <= args, spec.name
 
+    def test_id_taking_args_declare_id_resolution(self, registry):
+        # iterationId takes iteration ids and parentIds takes WorkItemID GIDs,
+        # while queries carry titles/iids — the planner must see, machine-
+        # readably, that these args need value->id resolution before push-down.
+        assert registry.resolve("iteration").requires_id_resolution
+        assert registry.resolve("parent").requires_id_resolution
+
+    def test_all_other_args_are_pass_through(self, registry):
+        # Every other push-down arg takes the user-written value verbatim
+        # (titles, usernames, label names, enum values, dates, numbers).
+        for spec in registry:
+            if spec.name not in ("iteration", "parent"):
+                assert not spec.requires_id_resolution, spec.name
+
+    def test_id_resolution_fields_keep_wildcard_push_down(self, registry):
+        # IS [NOT] EMPTY needs no ids — the wildcard enum stays pushable.
+        for name in ("iteration", "parent"):
+            spec = registry.resolve(name)
+            assert spec.supports_empty_wildcard, name
+
+    def test_milestone_sort_semantics_is_due_date(self, registry):
+        # ORDER BY milestone pushes down as MILESTONE_DUE (GitLab has no
+        # title sort); the declared semantics is due-date order, so a
+        # client-side comparator mirrors that key and the ordering never
+        # depends on which plan ran.
+        spec = registry.resolve("milestone")
+        assert spec.sort_prefix == "MILESTONE_DUE"
+        assert "due date" in spec.description
+
     def test_weight_is_equality_only(self, registry):
         spec = registry.resolve("weight")
         assert spec.comparisons == "equality"
@@ -339,3 +368,32 @@ class TestConstructionGuards:
                          aliases=("status",))
         with pytest.raises(ValueError, match="Duplicate field alias"):
             FieldRegistry(list(CORE_FIELDS) + [spec])
+
+    def test_business_value_labels_taxonomy_renamed_not_crashing(self):
+        # 'business_value' is appended by from_config *after* the taxonomies —
+        # a business_value_labels key must rename, not blow up construction.
+        registry = FieldRegistry.from_config(
+            {"business_value_labels": ["BV::1", "BV::2"]})
+        spec = registry.resolve("business_value_label")
+        assert spec.kind == "label"
+        assert spec.label_for("1") == "BV::1"
+        assert registry.resolve("business_value").kind == "custom"
+
+    def test_rename_collision_between_taxonomies_suffixes_again(self):
+        # Keys resolve in sorted order: project_label_labels -> project_label
+        # first; then project_labels -> project (core) -> project_label
+        # (taken) -> project_label_label. Both survive, distinctly named.
+        registry = FieldRegistry.from_config({
+            "project_labels":       ["project::DO"],
+            "project_label_labels": ["pl::x", "pl::y"],
+        })
+        assert registry.resolve("project").kind == "core"
+        assert registry.resolve("project_label").label_for("x") == "pl::x"
+        assert registry.resolve("project_label_label").label_for("do") == "project::DO"
+
+    def test_alias_colliding_taxonomy_renamed(self):
+        # A taxonomy deriving to a Jira alias ('sprint') must rename too —
+        # aliases are part of the reserved vocabulary.
+        registry = FieldRegistry.from_config({"sprint_labels": ["sprint::1"]})
+        assert registry.resolve("sprint").name == "iteration"
+        assert registry.resolve("sprint_label").label_for("1") == "sprint::1"
