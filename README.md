@@ -870,6 +870,8 @@ GITLAB_TOKEN=<api-scope token> scripts/capture-npm-cache.sh   # both arches → 
 # then set PIP_WHEELS_VERSION / NPM_CACHE_VERSION = <printed version> in the Dockerfile
 ```
 
+**Connected-dev escape hatch (`OFFLINE=0`):** while dependencies are actively churning, re-capturing the closures on every iteration is needless friction. The Dockerfile's `OFFLINE` build-arg (default `1`) keeps the enclave contract but lets an inner-loop build skip the vendored packages: `make dev-shell OFFLINE=0` (or `--build-arg OFFLINE=0`) installs pip straight from PyPI — still pinned by `requirements.lock` (`-r` in runtime, `-c` in diagram-builder) — and runs a plain lock-pinned `npm ci`. It covers **pip/npm only**; apt and Quarto stay vendored either way. CI never passes the flag, so every CI build takes the offline default — `tests/test_pip_wheels.py` enforces all of this (online installs only inside the `OFFLINE` guard, lock-pinned, `ARG OFFLINE=1`, no `OFFLINE` in any pipeline yaml). Run the capture + version-bump once, before merging.
+
 ### Report Index
 
 > **Label discovery:** Reports derive label sets (`PIID::`, `project::`, `risk::`, `type::`, `lifecycle::`, `wsjf-*`) from the live data snapshot rather than from `config.json`. They reflect whatever labels actually exist in the system, so they work correctly on any live GitLab group.

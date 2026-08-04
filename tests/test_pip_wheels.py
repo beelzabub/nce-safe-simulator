@@ -6,6 +6,11 @@ registry — package ``pip-wheels``, a full wheel closure captured by
 scripts/capture-pip-wheels.sh from requirements.lock — with
 ``pip install --no-index``, never from pypi.org / files.pythonhosted.org. Only
 the ops stage (never built in CI, AWS-deploy tooling) may still reach PyPI.
+
+OFFLINE=0 is the connected-dev escape hatch: a pip install without --no-index
+is legal only as the fallback branch of the ``OFFLINE`` conditional, must
+still pin via requirements.lock, and CI must never pass the flag — the
+OFFLINE=1 default keeps every CI build on the wheelhouse.
 """
 import re
 import subprocess
@@ -27,6 +32,26 @@ def _stages():
     return {name or "_final": body for name, body in zip(parts[1::2], parts[2::2])}
 
 
+def _run_blocks(body):
+    """Each RUN command (backslash continuations joined) as one string."""
+    blocks, cur = [], None
+    for line in body.splitlines():
+        if cur is None:
+            if line.lstrip().startswith("RUN"):
+                cur = [line]
+        else:
+            cur.append(line)
+        if cur is not None and not line.rstrip().endswith("\\"):
+            blocks.append("\n".join(cur))
+            cur = None
+    if cur:
+        blocks.append("\n".join(cur))
+    return blocks
+
+
+OFFLINE_GUARD = 'if [ "$OFFLINE" = "1" ]'
+
+
 def _lock_pins():
     pins = {}
     for line in LOCK.read_text().splitlines():
@@ -37,20 +62,61 @@ def _lock_pins():
     return pins
 
 
-def test_ci_built_stages_pip_install_is_no_index_only():
-    """CI-built stages may only `pip install` from the vendored wheelhouse
-    (--no-index). A bare `pip install pkg` or `-r requirements.txt` would reach
-    PyPI at build time — exactly the egress #271 removes."""
+def test_online_pip_install_only_behind_the_offline_flag():
+    """In CI-built stages, a `pip install` without --no-index (which would
+    reach PyPI at build time — the egress #271 removes) is legal only as the
+    OFFLINE=0 fallback: inside a RUN guarded by the OFFLINE conditional whose
+    offline branch installs --no-index from the wheelhouse."""
     for name, body in _stages().items():
         if name == "ops":  # AWS tooling, out of enclave scope
             continue
+        for block in _run_blocks(body):
+            bare = [
+                l.strip() for l in block.splitlines()
+                if re.search(r"\bpip install\b", l) and "--no-index" not in l
+            ]
+            if not bare:
+                continue
+            assert OFFLINE_GUARD in block and re.search(
+                r"pip install[^\n]*--no-index", block
+            ), (
+                f"stage {name} has a pip install without --no-index outside "
+                f"the OFFLINE guard: {bare!r} — the default build must install "
+                f"from the pip-wheels registry package (issue #271)"
+            )
+
+
+def test_online_pip_fallback_is_lock_pinned():
+    """The OFFLINE=0 branch may reach PyPI but must install exactly what the
+    wheelhouse would have — pinned via requirements.lock (-r or -c)."""
+    for name, body in _stages().items():
+        if name == "ops":
+            continue
         for line in body.splitlines():
-            if re.search(r"\bpip install\b", line):
-                assert "--no-index" in line, (
-                    f"stage {name} has a pip install without --no-index: "
-                    f"{line.strip()!r} — CI-built stages must install from the "
-                    f"pip-wheels registry package (issue #271)"
+            if re.search(r"\bpip install\b", line) and "--no-index" not in line:
+                assert re.search(r"-[rc] (/tmp/)?requirements\.lock", line), (
+                    f"stage {name}: online pip fallback must pin via "
+                    f"requirements.lock: {line.strip()!r}"
                 )
+
+
+def test_offline_is_the_default():
+    """OFFLINE must default to 1 (the enclave contract); stage-level
+    redeclarations must inherit it bare — an `ARG OFFLINE=0` anywhere would
+    silently flip a default build online."""
+    defaults = re.findall(r"(?m)^ARG OFFLINE(?:=(\S+))?\s*$", DOCKERFILE)
+    assert defaults, "Dockerfile must declare ARG OFFLINE"
+    assert all(d in ("", "1") for d in defaults), f"non-offline OFFLINE default: {defaults}"
+    assert "1" in defaults, "top-level ARG OFFLINE=1 default is missing"
+
+
+def test_ci_never_sets_offline():
+    """CI must ride the offline default: no pipeline yaml may pass an OFFLINE
+    build-arg — OFFLINE=0 in CI would rebuild the very egress #271 removed."""
+    ci_files = [REPO / ".gitlab-ci.yml", *sorted((REPO / "ci-recipes").glob("*.yml"))]
+    assert len(ci_files) > 1
+    for f in ci_files:
+        assert "OFFLINE" not in f.read_text(), f"{f.name} references OFFLINE"
 
 
 def test_ci_built_stages_have_no_pypi_hosts():
