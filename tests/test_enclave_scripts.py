@@ -24,11 +24,13 @@ On Windows, no install needed — the built-in `powershell` (5.1) is picked
 up automatically, and validating against 5.1 is exactly the floor these
 scripts declare.
 """
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.parse
 import urllib.request
@@ -432,6 +434,173 @@ def test_importers_accept_txt_or_directory():
     assert 'tar -xf "$ARCHIVE"' in IMPORT_SH.replace("'", '"') or "tar -xf" in IMPORT_SH
     assert "tar -xf" in IMPORT_PS
     assert "-extracted" in IMPORT_SH and "-extracted" in IMPORT_PS
+
+
+# ---------------------------------------------------------------------------
+# Package sync (issue #295) — sha256 convergence, prune-by-default, and the
+# protected-branch force-push preflight
+# ---------------------------------------------------------------------------
+
+def test_import_prune_is_default_with_opt_out_parity():
+    """The archive is a complete snapshot of the source registry, so pruning
+    destination extras is the DEFAULT; both importers expose the same
+    opt-out flag."""
+    assert "--no-prune" in IMPORT_SH
+    assert re.search(r"(?m)^DO_REPO=1 DO_PACKAGES=1 DO_IMAGES=1 PRUNE=1$", IMPORT_SH)
+    assert re.search(r"--no-prune\)\s*PRUNE=0", IMPORT_SH)
+    assert "$NoPrune" in IMPORT_PS
+    assert "[switch]$NoPrune" in IMPORT_PS
+
+
+def test_import_sync_compares_content_not_names():
+    """Skip decisions must be sha256 comparisons (a name-only skip-if-exists
+    would silently keep stale bytes when content changes under an unchanged
+    version — same-day re-capture). Both sides read the destination's
+    file_sha256 and the archive's own SHA256SUMS."""
+    for text in (IMPORT_SH, IMPORT_PS):
+        assert "file_sha256" in text
+        assert "SHA256SUMS" in text
+        assert "package_files" in text
+
+
+def test_import_package_listing_paginates_parity():
+    """Same #273 rule as the exporters, now on the import side: every
+    package listing goes through the pager, never a bare one-shot request."""
+    assert len(re.findall(r"\blist_paged\b", IMPORT_SH)) >= 3
+    assert len(re.findall(r"\bGet-AllPages\b", IMPORT_PS)) >= 3
+    for name, text in (("enclave-import.sh", IMPORT_SH), ("enclave-import.ps1", IMPORT_PS)):
+        for line in _code_lines(text):
+            if "package_files" in line or "package_type=generic" in line:
+                assert "per_page" not in line, f"{name}: unpaginated listing: {line.strip()}"
+
+
+def test_import_uploads_before_deletes_parity():
+    """A replaced file's new bytes must be live before its superseded
+    entries are deleted — no window where the file is unserved."""
+    assert IMPORT_SH.index('upload_with_retry "$DIR/packages/') \
+        < IMPORT_SH.index('api_delete_with_retry "$API/projects/$ENC/packages/')
+    assert IMPORT_PS.index("Invoke-UploadWithRetry (Join-Path $pkgRoot") \
+        < IMPORT_PS.index("Invoke-DeleteWithRetry $d.Uri")
+
+
+def test_import_force_push_preflight_parity():
+    """A pre-created target (classic: UI 'Initialize repository with a
+    README') holds a protected branch whose tip the bundle does not build
+    on; the forced update is rejected and one rejected ref fails the ENTIRE
+    push. Both importers must detect the collision up front — by ancestry
+    (merge-base), not object existence — and name the fix."""
+    for text in (IMPORT_SH, IMPORT_PS):
+        assert "protected_branches" in text
+        assert "allow_force_push" in text
+        assert "merge-base" in text and "--is-ancestor" in text
+        assert "Initialize repository with a README" in text
+
+
+def test_import_sync_summary_parity():
+    """Operators must see at a glance whether an import changed anything."""
+    for text in (IMPORT_SH, IMPORT_PS):
+        assert "Package sync:" in text
+        for token in ("uploaded", "replaced", "skipped identical",
+                      "stale entries removed", "pruned"):
+            assert token in text, token
+
+
+# The bash importer's plan logic is an embedded python heredoc; run the real
+# thing against fixture archive/destination states and check the emitted plan.
+
+def _plan_py():
+    m = re.search(r"<<'PLAN_PY'\n(.*?)\nPLAN_PY", IMPORT_SH, re.S)
+    assert m, "PLAN_PY heredoc not found in enclave-import.sh"
+    return m.group(1)
+
+
+def _run_plan(tmp_path, files, dest_rows, pkg_rows, prune=True):
+    """files: {name/ver/file: bytes}; dest_rows: 7-tuples mirroring dest.tsv
+    (pkg_id, name, version, file_name, file_id, sha256, created_at);
+    pkg_rows: 3-tuples mirroring pkgs.tsv (pkg_id, name, version)."""
+    root = tmp_path / "xfer"
+    (root / "packages").mkdir(parents=True)
+    sums = []
+    for key, data in files.items():
+        p = root / "packages" / key
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+        sums.append(f"{hashlib.sha256(data).hexdigest()}  ./packages/{key}")
+    (root / "SHA256SUMS").write_text("\n".join(sums) + "\n")
+    dest_tsv = tmp_path / "dest.tsv"
+    dest_tsv.write_text("".join("\t".join(map(str, r)) + "\n" for r in dest_rows))
+    pkgs_tsv = tmp_path / "pkgs.tsv"
+    pkgs_tsv.write_text("".join("\t".join(map(str, r)) + "\n" for r in pkg_rows))
+    out = subprocess.run(
+        [sys.executable, "-", str(root), str(dest_tsv), str(pkgs_tsv),
+         "1" if prune else "0"],
+        input=_plan_py(), capture_output=True, text=True, check=True,
+    )
+    return [tuple(line.split("\t")) for line in out.stdout.splitlines()]
+
+
+def test_plan_absent_file_uploads_as_new(tmp_path):
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"x"}, [], [])
+    assert plan == [("UPLOAD", "a/1.0/f.txt", "new")]
+
+
+def test_plan_identical_skips_and_sweeps_duplicates(tmp_path):
+    h = hashlib.sha256(b"x").hexdigest()
+    dest = [
+        (7, "a", "1.0", "f.txt", 11, h, "2026-08-01T00:00:00Z"),
+        (7, "a", "1.0", "f.txt", 12, h, "2026-08-02T00:00:00Z"),  # newest
+    ]
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"x"}, dest, [(7, "a", "1.0")])
+    assert ("SKIP", "a/1.0/f.txt", "identical") in plan
+    assert ("DELETE_FILE", "7", "11", "a/1.0/f.txt", "duplicate") in plan
+    assert not any(p[0] == "UPLOAD" for p in plan)
+    assert not any(p[0] == "DELETE_FILE" and p[2] == "12" for p in plan), \
+        "the newest identical entry must survive the sweep"
+
+
+def test_plan_changed_bytes_replace_and_delete_superseded(tmp_path):
+    dest = [(7, "a", "1.0", "f.txt", 11,
+             hashlib.sha256(b"old").hexdigest(), "2026-08-01T00:00:00Z")]
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"new"}, dest, [(7, "a", "1.0")])
+    assert plan[0] == ("UPLOAD", "a/1.0/f.txt", "changed")
+    assert ("DELETE_FILE", "7", "11", "a/1.0/f.txt", "superseded") in plan
+
+
+def test_plan_prunes_stale_file_and_whole_package(tmp_path):
+    h = hashlib.sha256(b"x").hexdigest()
+    dest = [
+        (7, "a", "1.0", "f.txt", 11, h, "t"),
+        (7, "a", "1.0", "gone.txt", 12, "b" * 64, "t"),   # stale file, kept pkg
+        (9, "old", "0.1", "z.bin", 21, "d" * 64, "t"),     # whole pkg stale
+    ]
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"x"}, dest,
+                     [(7, "a", "1.0"), (9, "old", "0.1")])
+    assert ("DELETE_FILE", "7", "12", "a/1.0/gone.txt", "pruned") in plan
+    assert ("DELETE_PKG", "9", "old/0.1") in plan
+    assert not any(p[0] == "DELETE_PKG" and p[1] == "7" for p in plan), \
+        "a package with surviving files is pruned file-wise, not wholesale"
+
+
+def test_plan_zero_file_stale_package_pruned(tmp_path):
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"x"}, [], [(9, "ghost", "0.0")])
+    assert ("DELETE_PKG", "9", "ghost/0.0") in plan
+
+
+def test_plan_no_prune_keeps_destination_extras(tmp_path):
+    dest = [(9, "old", "0.1", "z.bin", 21, "d" * 64, "t")]
+    plan = _run_plan(tmp_path, {"a/1.0/f.txt": b"x"}, dest,
+                     [(9, "old", "0.1")], prune=False)
+    assert all(p[0] == "UPLOAD" for p in plan)
+
+
+def test_plan_rerun_of_unchanged_archive_is_all_skips(tmp_path):
+    files = {"a/1.0/f.txt": b"x", "b/2.0/g.bin": b"y"}
+    dest = [
+        (1, "a", "1.0", "f.txt", 11, hashlib.sha256(b"x").hexdigest(), "t"),
+        (2, "b", "2.0", "g.bin", 21, hashlib.sha256(b"y").hexdigest(), "t"),
+    ]
+    plan = _run_plan(tmp_path, files, dest, [(1, "a", "1.0"), (2, "b", "2.0")])
+    assert all(p[0] == "SKIP" for p in plan)
 
 
 # ---------------------------------------------------------------------------

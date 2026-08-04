@@ -1359,7 +1359,7 @@ Two scripts do the whole lift (issue #263); both need only bash, git, curl, and 
 | Script | Runs on | What it does |
 |---|---|---|
 | [`scripts/enclave-export.sh`](scripts/enclave-export.sh) | a connected box, from any directory inside a clone of this repo | Produces **one file**: `<repo-name>-<YYYY-MM-DD>.txt` — a gzipped tar (the `.txt` extension is the transfer-media naming convention) containing a git bundle of **every branch + tag**, the **project wiki** (if any), **every generic package** (enumerated live from the API, so new versions are picked up automatically), the **runtime + dev container images**, and a `SHA256SUMS` manifest over all of it. The outer file's sha256 is printed for verification on the far side |
-| [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, uploads all packages, enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure |
+| [`scripts/enclave-import.sh`](scripts/enclave-import.sh) | an enclave box that can reach the target GitLab | Verifies checksums, **creates the project if absent**, pushes all branches/tags + wiki, sets the default branch, **syncs all packages** (see below), enables anonymous package-registry pull, and loads/retags/pushes the images. Idempotent — rerun safely after a partial failure; a rerun with an unchanged artifact uploads nothing |
 
 > **No package-mirror assumptions remain.** Since issue #271 the image builds vendor their **PyPI wheel** and **npm** closures in the registry too ([`pip-wheels`](#image-build-python--npm-packages-pip-wheels-npm-cache) and `npm-cache`) — completing what apt (#269), Quarto (#262), and the GitHub-vendored artifacts started — so `containerize` runs on an enclave with **no internet at all**, no Debian/PyPI/npm mirror needed. The only remaining external pulls are the base images (python/node/kaniko), which are runner configuration — cover them with `--with-base-images` below or an enclave image proxy.
 
@@ -1407,13 +1407,14 @@ export GITLAB_TOKEN=<api-scope token on the TARGET instance>
   -u https://<enclave-gitlab> -p <group>/nce-safe-simulator
 # -d takes the .txt artifact (extracted next to itself) or an already-extracted directory
 # --default-branch main is the default; --skip-repo/--skip-packages/--skip-images for partial runs
+# --no-prune keeps destination packages the archive doesn't carry (pruning is the default)
 ```
 
 **If the target enforces the "committer restriction" push rule** — every branch bounces off the pre-receive hook with `You cannot push commits for '<source email>'. You can only push commits if the committer email is one of your own verified emails` — add `--rewrite-committer 'Full Name <email@domain>'` (PowerShell: `-RewriteCommitter`) with the importing account's verified identity. It rewrites author + committer on every commit of the repo **and wiki** before pushing (via `git filter-branch`, which ships inside git — nothing to install). Trade-offs: every commit hash changes (deterministically, so reruns stay idempotent) and in-repo attribution moves to the importing user. If an admin can instead drop that push rule for the target group, prefer that — it keeps the history untouched.
 
 **If the target also enforces "reject unsigned commits"** (`Commit must be signed with a GPG key` from the pre-receive hook), add `--sign-commits` (PowerShell: `-SignCommits`): the same history pass then GPG-signs every commit with the key matching the (possibly rewritten) committer identity. Requires gpg set up for git on the importing box — `gpg.program`/`user.signingkey` in the global git config, or a secret key whose uid matches the committer email; expect one pinentry passphrase prompt, after which gpg-agent caches it (for multi-hour histories, watch for it re-prompting when the cache expires). Unlike the bare authorship rewrite, signing is not deterministic — each rerun produces new hashes and force-pushes over the previous import.
 
-On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-RewriteCommitter`, `-SignCommits`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`):
+On a **Windows** box, same flow in PowerShell (switches: `-DefaultBranch`, `-RewriteCommitter`, `-SignCommits`, `-SkipRepo`, `-SkipPackages`, `-SkipImages`, `-NoPrune`):
 
 ```powershell
 tar -xf nce-safe-simulator-2026-07-21.txt ./enclave-import.ps1
@@ -1421,6 +1422,10 @@ $env:GITLAB_TOKEN = '<api-scope token on the TARGET instance>'
 ./enclave-import.ps1 -TransferPath nce-safe-simulator-2026-07-21.txt `
   -GitLabUrl https://<enclave-gitlab> -Project <group>/nce-safe-simulator
 ```
+
+**Packages are synced, not blindly uploaded** (issue #295). GitLab's generic registry *appends* on re-publish of an existing name/version/file — downloads resolve to the newest entry, every older copy is kept — so a naive re-import would stack a full duplicate set (~1 GB+) per rerun and never remove files deleted at the source. The importer instead converges the destination to the archive **by content**: each file's sha256 (from the archive's own `SHA256SUMS`) is compared against the newest destination entry — identical files skip, changed/absent files upload *first* and then delete the superseded entries (no window where a file is unserved), older duplicates are swept, and packages/files the archive doesn't carry are **pruned by default** — the archive is a complete snapshot of the source registry, so destination extras are stale by definition. Pass `--no-prune` (PowerShell: `-NoPrune`) for a destination that deliberately hosts additional generic packages. The run ends with a summary (`Package sync: N uploaded (n new, m replaced), S skipped identical, D stale entries removed, …`), and a rerun of an unchanged artifact is all-skips. A name-only skip-if-exists was deliberately rejected: bytes can change under an unchanged version (a same-day re-capture), and a name check would silently keep serving the stale content.
+
+**Pre-created target projects:** if the target project was created by hand *with* "Initialize repository with a README", its `main` holds a stray root commit the bundle doesn't build on — the import's forced update is then rejected by branch protection, and one rejected ref fails the entire push. The importer detects this up front and prints the fix (allow force push on the branch, or let the importer create the project). Cleanest is to pre-create *without* the README checkbox, or not pre-create at all.
 
 The script prints a post-import checklist (runners, the `GITLAB_API_TOKEN` CI variable for the report recipes, `config.json` from the template, branch protection). Notes:
 

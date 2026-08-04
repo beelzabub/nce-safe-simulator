@@ -7,10 +7,12 @@
 
 .DESCRIPTION
   Verifies checksums, creates the project if it does not exist, pushes every
-  branch + tag (and the wiki), uploads all generic packages, enables
-  anonymous package-registry pull (what lets Docker builds fetch Quarto with
-  no token), and loads + pushes the container images. Each phase is
-  idempotent — safe to rerun after a partial failure.
+  branch + tag (and the wiki), syncs all generic packages (sha256-driven —
+  see the packages phase, issue #295), enables anonymous package-registry
+  pull (what lets Docker builds fetch Quarto with no token), and loads +
+  pushes the container images. Each phase is idempotent — safe to rerun
+  after a partial failure, and a rerun with an unchanged artifact uploads
+  nothing.
 
   Bootstrap: the artifact carries a copy of this script at its top level —
   on a box that has ONLY the .txt file (the repo is still inside the bundle):
@@ -54,6 +56,13 @@
   Signing is NOT deterministic — every run yields new hashes, and a rerun
   force-pushes the fresh history over the previous one.
 
+.PARAMETER NoPrune
+  Keep destination generic packages/files that the archive does not carry.
+  By default the packages phase prunes them: the archive is a complete
+  snapshot of the source registry, so anything extra at the destination is
+  stale. Pass -NoPrune for a destination that deliberately hosts additional
+  generic packages outside this pipeline.
+
 .NOTES
   Env: GITLAB_TOKEN — token with api scope on the TARGET instance, required.
 #>
@@ -67,7 +76,8 @@ param(
     [switch]$SignCommits,
     [switch]$SkipRepo,
     [switch]$SkipPackages,
-    [switch]$SkipImages
+    [switch]$SkipImages,
+    [switch]$NoPrune
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,6 +106,39 @@ function Invoke-UploadWithRetry([string]$InFile, [string]$Uri) {
         Log "  transient upload failure - retry $try/$($max - 1) in $(2 * $try)s (curl exit $LASTEXITCODE)"
         Start-Sleep -Seconds (2 * $try)
     }
+}
+function Invoke-DeleteWithRetry([string]$Uri) {
+    # Registry deletes are small JSON API calls (no long TLS stream), so
+    # Invoke-RestMethod is fine here — the $CurlBin rule covers file bodies.
+    $max = 4
+    for ($try = 1; $try -le $max; $try++) {
+        try {
+            Invoke-RestMethod -Headers $Headers -Method Delete -Uri $Uri | Out-Null
+            return
+        } catch {
+            if ($try -eq $max) { throw "delete failed after $max attempts: $Uri" }
+            Log "  transient delete failure - retry $try/$($max - 1) in $(2 * $try)s"
+            Start-Sleep -Seconds (2 * $try)
+        }
+    }
+}
+function Get-AllPages([string]$Uri) {
+    # Same pager as the exporter's: GitLab caps per_page at 100 and a
+    # one-shot request silently truncates larger sets (the 225-file apt-debs
+    # package, #273).
+    $sep = if ($Uri.Contains('?')) { '&' } else { '?' }
+    $all = @(); $page = 1
+    while ($true) {
+        # ForEach-Object forces enumeration: Invoke-RestMethod can emit a JSON
+        # array as ONE object, and @() around that is a 1-element array — the
+        # count check would end the walk on page 1 regardless of page size.
+        $batch = @(Invoke-RestMethod -Headers $Headers -Uri "$Uri${sep}per_page=100&page=$page" |
+            ForEach-Object { $_ })
+        $all += $batch
+        if ($batch.Count -lt 100) { break }
+        $page++
+    }
+    return $all
 }
 function Invoke-HistoryFilter([string]$RepoPath) {
     # Rewrite author+committer and/or GPG-sign every commit of a scratch
@@ -218,6 +261,43 @@ if (-not $SkipRepo) {
         Log "Pushing repo (all branches + tags)..."
         & git clone --quiet --mirror (Join-Path $Dir 'repo/repo.bundle') (Join-Path $tmp 'repo.git'); Assert-Native 'git clone (bundle)'
         if ($RewriteCommitter -or $SignCommits) { Invoke-HistoryFilter (Join-Path $tmp 'repo.git') }
+        # A pre-existing target can hold a protected branch whose tip is not
+        # in the bundle's history — classic cause: the project was
+        # pre-created in the UI with "Initialize repository with a README",
+        # so its main has a stray root commit. The push below force-updates
+        # every branch, protection rejects forced updates unless
+        # allow_force_push is set, and a pre-receive rejection fails the
+        # ENTIRE push — a wall of rejected refs with no hint. Detect the
+        # collision up front (after the history filter, so the check sees
+        # the refs that will actually be pushed) and say how to fix it.
+        if ($projectExists) {
+            $mirror = Join-Path $tmp 'repo.git'
+            foreach ($b in (Get-AllPages "$Api/projects/$Enc/protected_branches")) {
+                if ($b.allow_force_push) { continue }
+                $sha = $null
+                try {
+                    $bEnc = [uri]::EscapeDataString($b.name)
+                    $sha = (Invoke-RestMethod -Headers $Headers -Uri "$Api/projects/$Enc/repository/branches/$bEnc").commit.id
+                } catch {}   # wildcard rule or branch absent — push creates, no force needed
+                if (-not $sha) { continue }
+                & git -C $mirror show-ref --verify --quiet "refs/remotes/origin/$($b.name)"
+                if ($LASTEXITCODE -ne 0) { continue }
+                $diverged = $true
+                & git -C $mirror rev-parse --quiet --verify "$sha^{commit}" | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    & git -C $mirror merge-base --is-ancestor $sha "refs/remotes/origin/$($b.name)"
+                    if ($LASTEXITCODE -eq 0) { $diverged = $false }
+                }
+                if ($diverged) {
+                    throw ("protected branch '$($b.name)' on $Project has history the bundle does not build on, " +
+                        "and its protection disallows force push - GitLab would reject the forced update, and one " +
+                        "rejected ref fails the ENTIRE push. Common cause: the project was pre-created in the UI " +
+                        "with 'Initialize repository with a README'. Fix ONE of these, then rerun: allow force " +
+                        "push on the branch (PATCH $Api/projects/$Enc/protected_branches/$($b.name)?allow_force_push=true), " +
+                        "or delete the pre-created project and let this importer create it.")
+                }
+            }
+        }
         & git -C (Join-Path $tmp 'repo.git') push --quiet $pushUrl '+refs/remotes/origin/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; Assert-Native 'git push'
         # PUT bodies must be explicit JSON: PowerShell form-encodes hashtable
         # bodies only for GET/POST — on PUT it stringifies the hashtable and
@@ -239,19 +319,118 @@ if (-not $SkipRepo) {
 }
 
 # ── 3. Generic packages (layout: packages/<name>/<version>/<file>) ──────────
+# Sync, not blind upload (issue #295). GitLab's generic registry APPENDS on
+# re-publish of an existing name/version/file — downloads resolve to the
+# newest entry, every older copy is kept — so unconditional re-uploads stack
+# a full duplicate set per rerun, and files removed at the source lived on
+# at the destination forever. The archive is a complete snapshot of the
+# source registry, so the destination converges to it BY CONTENT: per file,
+# the sha256 from the archive's own SHA256SUMS (phase 0 verified it against
+# disk) is compared to the newest destination entry — identical skips,
+# different or absent uploads and then deletes the superseded entries
+# (upload FIRST, so there is no window where the file is unserved); older
+# duplicates are swept; anything the archive does not carry is pruned unless
+# -NoPrune. A name-only skip-if-exists would be wrong: bytes can change
+# under an unchanged version (same-day re-capture), and the destination
+# would silently serve stale content forever.
 if (-not $SkipPackages) {
     $pkgRoot = Join-Path $Dir 'packages'
+    # Archive content hashes come from SHA256SUMS (phase 0 verified them
+    # against disk); anything unlisted is hashed directly.
+    $sums = @{}
+    foreach ($line in Get-Content (Join-Path $Dir 'SHA256SUMS')) {
+        if ($line -match '^(?<hash>[0-9a-f]{64})\s+\*?(?<path>.+)$') {
+            $sums[($Matches.path -replace '^\./', '')] = $Matches.hash
+        }
+    }
+    $archive = @{}                 # name/version/file -> sha256
     foreach ($f in Get-ChildItem -Path $pkgRoot -Recurse -File) {
-        $rel = $f.FullName.Substring($pkgRoot.Length + 1).Replace('\', '/')   # name/version/file
-        Log "  package $rel"
-        Invoke-UploadWithRetry $f.FullName "$Api/projects/$Enc/packages/generic/$rel"
+        $key = $f.FullName.Substring($pkgRoot.Length + 1).Replace('\', '/')
+        $rel = $f.FullName.Substring($Dir.Length + 1).Replace('\', '/')
+        $sha = $sums[$rel]
+        if (-not $sha) { $sha = (Get-FileHash -Algorithm SHA256 -Path $f.FullName).Hash.ToLower() }
+        $archive[$key] = $sha
+    }
+    Log "Enumerating destination packages..."
+    $destEntries = @{}             # key -> array of @{Created; Id; Sha; PkgId}, unsorted
+    $pkgKeys = @{}                 # pkgId -> array of keys (zero-file packages included)
+    $pkgLabel = @{}
+    foreach ($p in (Get-AllPages "$Api/projects/$Enc/packages?package_type=generic")) {
+        $pkgId = [long]$p.id
+        if (-not $pkgKeys.ContainsKey($pkgId)) { $pkgKeys[$pkgId] = @() }
+        $pkgLabel[$pkgId] = "$($p.name)/$($p.version)"
+        foreach ($pf in (Get-AllPages "$Api/projects/$Enc/packages/$pkgId/package_files")) {
+            $key = "$($p.name)/$($p.version)/$($pf.file_name)"
+            $sha = ''
+            if ($pf.file_sha256) { $sha = [string]$pf.file_sha256 }
+            if (-not $destEntries.ContainsKey($key)) { $destEntries[$key] = @() }
+            $destEntries[$key] += [pscustomobject]@{
+                Created = [string]$pf.created_at; Id = [long]$pf.id; Sha = $sha; PkgId = $pkgId
+            }
+            $pkgKeys[$pkgId] += $key
+        }
+    }
+    # Uploads first — a replaced file's new bytes must be live before its old
+    # entries are deleted — then every delete (dupes, superseded, prune).
+    $upNew = 0; $upChanged = 0; $skipped = 0; $stale = 0; $prunedFiles = 0; $prunedPkgs = 0
+    $deletes = @()
+    foreach ($key in ($archive.Keys | Sort-Object)) {
+        $entries = @()
+        if ($destEntries.ContainsKey($key)) {
+            $entries = @($destEntries[$key] | Sort-Object -Property Created, Id -Descending)
+        }
+        if ($entries.Count -eq 0) {
+            Log "  upload (new): $key"
+            Invoke-UploadWithRetry (Join-Path $pkgRoot $key) "$Api/projects/$Enc/packages/generic/$key"
+            $upNew++
+        } elseif ($entries[0].Sha -eq $archive[$key]) {
+            $skipped++
+            foreach ($e in ($entries | Select-Object -Skip 1)) {
+                $deletes += @{ Uri = "$Api/projects/$Enc/packages/$($e.PkgId)/package_files/$($e.Id)"; Kind = 'stale'; Label = $key }
+            }
+        } else {
+            Log "  upload (changed): $key"
+            Invoke-UploadWithRetry (Join-Path $pkgRoot $key) "$Api/projects/$Enc/packages/generic/$key"
+            $upChanged++
+            foreach ($e in $entries) {
+                $deletes += @{ Uri = "$Api/projects/$Enc/packages/$($e.PkgId)/package_files/$($e.Id)"; Kind = 'stale'; Label = $key }
+            }
+        }
+    }
+    if (-not $NoPrune) {
+        foreach ($pkgId in $pkgKeys.Keys) {
+            $keys = @($pkgKeys[$pkgId] | Sort-Object -Unique)
+            $staleKeys = @($keys | Where-Object { -not $archive.ContainsKey($_) })
+            if ($keys.Count -gt 0 -and $staleKeys.Count -eq 0) { continue }
+            if ($staleKeys.Count -eq $keys.Count) {            # covers zero-file packages
+                $deletes += @{ Uri = "$Api/projects/$Enc/packages/$pkgId"; Kind = 'prune-pkg'; Label = $pkgLabel[$pkgId] }
+            } else {
+                foreach ($k in $staleKeys) {
+                    foreach ($e in $destEntries[$k]) {
+                        $deletes += @{ Uri = "$Api/projects/$Enc/packages/$($e.PkgId)/package_files/$($e.Id)"; Kind = 'prune-file'; Label = $k }
+                    }
+                }
+            }
+        }
+    }
+    foreach ($d in $deletes) {
+        Log "  delete ($($d.Kind)): $($d.Label)"
+        Invoke-DeleteWithRetry $d.Uri
+        switch ($d.Kind) {
+            'stale'      { $stale++ }
+            'prune-file' { $prunedFiles++ }
+            'prune-pkg'  { $prunedPkgs++ }
+        }
     }
     # Anonymous pull from the package registry (project stays private) — this
     # is what lets Docker builds fetch Quarto with no token in build args.
     # (JSON body: see the default_branch PUT note.)
     Invoke-RestMethod -Headers $Headers -Method Put -Uri "$Api/projects/$Enc" `
         -ContentType 'application/json' -Body (@{ package_registry_access_level = 'public' } | ConvertTo-Json) | Out-Null
-    Log "Packages uploaded; anonymous package-registry pull enabled"
+    $pruneNote = "$prunedFiles files + $prunedPkgs packages pruned"
+    if ($NoPrune) { $pruneNote = 'prune skipped (-NoPrune)' }
+    Log ("Package sync: {0} uploaded ({1} new, {2} replaced), {3} skipped identical, {4} stale entries removed, {5}; anonymous package-registry pull enabled" -f `
+        ($upNew + $upChanged), $upNew, $upChanged, $skipped, $stale, $pruneNote)
 }
 
 # ── 4. Container images ─────────────────────────────────────────────────────
