@@ -66,13 +66,32 @@ class TestEntityScope:
         plan = make_plan("type = epic", registry)
         assert plan.variables["types"] == ["EPIC"]
 
-    def test_type_outside_scope_yields_empty_types(self, registry):
+    def test_type_outside_scope_marks_plan_empty(self, registry):
+        # types: [] must never be sent — the server skips blank list filters
+        # (no filter at all) instead of matching nothing. The plan flags the
+        # provable contradiction so the executor short-circuits.
         plan = make_plan("type = task", registry)
         assert plan.variables["types"] == []
+        assert plan.empty is True
 
     def test_type_in_list_intersects_scope(self, registry):
         plan = make_plan("type IN (epic, issue, task)", registry)
         assert sorted(plan.variables["types"]) == ["EPIC", "ISSUE"]
+        assert plan.empty is False
+
+    def test_in_scope_type_plan_not_empty(self, registry):
+        plan = make_plan("type = epic", registry)
+        assert plan.empty is False
+
+    def test_full_scan_plan_never_empty(self, registry):
+        plan = make_plan("type = task", registry, push_down=False)
+        assert plan.variables == {"types": list(ENTITY_SCOPE_TYPES)}
+        assert plan.empty is False
+
+    def test_contradictory_any_lists_mark_plan_empty(self, registry):
+        plan = make_plan('milestone IN ("M1") AND milestone IN ("M2")', registry)
+        assert plan.variables["milestoneTitle"] == []
+        assert plan.empty is True
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +246,33 @@ class TestDateBounds:
         assert plan.variables["createdBefore"] == datetime(2026, 3, 1)
 
     def test_negated_date_not_pushed_as_bound_flip(self, registry):
-        # NOT created >= X == created < X — pushes the flipped bound.
+        # NOT (a >= x) == a < x only for non-NULL a: a NULL date satisfies
+        # the negation client-side but no pushed bound matches it server-side.
+        # Negated dates therefore never push, on any date field.
         plan = make_plan("NOT created >= 2026-03-01", registry)
-        assert plan.variables["createdBefore"] == datetime(2026, 3, 1)
+        assert "createdBefore" not in plan.variables
         assert "createdAfter" not in plan.variables
+
+    @pytest.mark.parametrize("query,args", [
+        ("NOT due >= 2026-09-01",    ("dueAfter", "dueBefore")),
+        ("NOT due < 2026-09-01",     ("dueAfter", "dueBefore")),
+        ("NOT closed >= 2026-03-01", ("closedAfter", "closedBefore")),
+        ("NOT closed <= 2026-03-01", ("closedAfter", "closedBefore")),
+        ("NOT updated > 2026-03-01", ("updatedAfter", "updatedBefore")),
+        ("NOT created != 2026-03-01", ("createdAfter", "createdBefore")),
+    ])
+    def test_negated_nullable_date_never_pushes(self, registry, query, args):
+        plan = make_plan(query, registry)
+        for arg in args:
+            assert arg not in plan.variables
+
+    def test_demorgan_negated_date_stays_client_side(self, registry):
+        # NOT (due >= X OR weight = 5) distributes to NOT due >= X AND
+        # NOT weight = 5 — the date half must not push a flipped bound.
+        plan = make_plan("NOT (due >= 2026-09-01 OR weight = 5)", registry)
+        assert "dueBefore" not in plan.variables
+        assert "dueAfter" not in plan.variables
+        assert plan.variables["not"] == {"weight": "5"}
 
     def test_date_inequality_stays_client_side(self, registry):
         plan = make_plan("created != 2026-03-01", registry)
@@ -525,6 +567,19 @@ class TestValidation:
     def test_taxonomy_ordering_accepts_numbers_outside_vocab(self, registry):
         plan = make_plan("wsjf_urgency > 2.5", registry)
         assert plan.expr is not None
+
+    def test_taxonomy_substring_accepts_non_vocabulary_rhs(self, registry):
+        # '~' matches substrings of taxonomy values (piid ~ "2026") — the RHS
+        # is a search needle, not a vocabulary member, and stays client-side.
+        plan = make_plan('piid ~ "2026"', registry)
+        assert plan.expr is not None
+        assert "labelName" not in plan.variables
+        assert "search" not in plan.variables
+
+    def test_taxonomy_negated_substring_accepts_non_vocabulary_rhs(self, registry):
+        plan = make_plan('epic_type !~ "cap"', registry)
+        assert plan.expr is not None
+        assert "labelName" not in plan.variables
 
     def test_taxonomy_ordering_rejects_non_numeric_outside_vocab(self, registry):
         with pytest.raises(UnknownFieldValueError):

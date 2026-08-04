@@ -21,6 +21,7 @@ from jql import parse
 from jql.executor import (
     EvalContext,
     JqlExecutionError,
+    _gql_value,
     build_work_items_query,
     evaluate,
     shape_node,
@@ -57,8 +58,12 @@ class QueryMixin:
                        defaults to the current UTC time.
 
         Returns a dict: ``items`` (flat dicts in the documented field
-        schema), ``count``, ``limit``, ``truncated``, plus a ``plan`` block
-        describing what was pushed down and what ran client-side.
+        schema), ``count``, ``limit``, ``truncated`` (True when the limit
+        cut the returned list *or* fetching stopped early with pages still
+        unfetched — more matching items may exist), plus a ``plan`` block
+        describing what was pushed down and what ran client-side. The whole
+        dict is JSON-serializable (pushed date bounds are reported in their
+        ISO-8601 transport form).
 
         Raises jql.JqlSyntaxError / UnknownFieldError / UnknownFieldValueError
         / JqlPlanError for bad queries and JqlExecutionError for transport
@@ -74,64 +79,76 @@ class QueryMixin:
         if effective_limit <= 0:
             raise ValueError("limit must be a positive integer")
 
-        group_path = self._jql_group_path()
-
-        bv_field_id = None
-        if plan.needs_bv:
-            bv_field = self._find_bv_field(group=group_path)
-            if bv_field:
-                bv_field_id = bv_field["id"]
-            else:
-                print("  WARNING: Business Value custom field not found — "
-                      "business_value resolves as EMPTY for every item.")
-
-        query_text, base_vars = build_work_items_query(
-            plan.variables,
-            needs_bv=plan.needs_bv,
-            needs_description=plan.needs_description,
-        )
-        ctx = EvalContext(registry=registry, now=plan.now,
-                          current_user=plan.current_user)
-
-        # Early termination is only sound when the final order is already
-        # settled at fetch time: no ORDER BY at all, or the single sort key
-        # pushed down to the server (post-filtering preserves server order).
-        early_stop = not plan.client_sort
-
         items = []
         scanned = 0
         pages = 0
-        cursor = None
-        while True:
-            request = dict(base_vars)
-            request.update({"fullPath": group_path,
-                            "first": self.JQL_PAGE_SIZE,
-                            "after": cursor})
-            data = self.graphql_query(query_text, variables=request, retries=2)
-            if data is None:
-                raise JqlExecutionError("GraphQL work-items query failed")
-            group = data.get("group")
-            if not group:
-                raise JqlExecutionError(
-                    "Group '%s' not found or not accessible" % group_path)
-            page = group.get("workItems") or {}
-            for node in page.get("nodes") or []:
-                scanned += 1
-                item = shape_node(node, bv_field_id=bv_field_id)
-                if plan.expr is None or evaluate(plan.expr, item, ctx):
-                    items.append(item)
-            pages += 1
-            if early_stop and len(items) >= effective_limit:
-                break
-            info = page.get("pageInfo") or {}
-            if not info.get("hasNextPage"):
-                break
-            cursor = info.get("endCursor")
+        truncated = False
+
+        # A provably-empty plan (e.g. a type constraint entirely outside the
+        # entity scope) never fetches: the server *skips* blank list filters
+        # instead of matching nothing, so the only correct execution of an
+        # empty envelope is no execution at all.
+        if not plan.empty:
+            group_path = self._jql_group_path()
+
+            bv_field_id = None
+            if plan.needs_bv:
+                bv_field = self._find_bv_field(group=group_path)
+                if bv_field:
+                    bv_field_id = bv_field["id"]
+                else:
+                    print("  WARNING: Business Value custom field not found — "
+                          "business_value resolves as EMPTY for every item.")
+
+            query_text, base_vars = build_work_items_query(
+                plan.variables,
+                needs_bv=plan.needs_bv,
+                needs_description=plan.needs_description,
+            )
+            ctx = EvalContext(registry=registry, now=plan.now,
+                              current_user=plan.current_user)
+
+            # Early termination is only sound when the final order is already
+            # settled at fetch time: no ORDER BY at all, or the single sort key
+            # pushed down to the server (post-filtering preserves server order).
+            early_stop = not plan.client_sort
+
+            cursor = None
+            while True:
+                request = dict(base_vars)
+                request.update({"fullPath": group_path,
+                                "first": self.JQL_PAGE_SIZE,
+                                "after": cursor})
+                data = self.graphql_query(query_text, variables=request, retries=2)
+                if data is None:
+                    raise JqlExecutionError("GraphQL work-items query failed")
+                group = data.get("group")
+                if not group:
+                    raise JqlExecutionError(
+                        "Group '%s' not found or not accessible" % group_path)
+                page = group.get("workItems") or {}
+                for node in page.get("nodes") or []:
+                    scanned += 1
+                    item = shape_node(node, bv_field_id=bv_field_id)
+                    if plan.expr is None or evaluate(plan.expr, item, ctx):
+                        items.append(item)
+                pages += 1
+                info = page.get("pageInfo") or {}
+                has_next = bool(info.get("hasNextPage"))
+                if early_stop and len(items) >= effective_limit:
+                    # Stopping with pages unfetched counts as truncation even
+                    # when the count lands exactly on the limit — the pages
+                    # never fetched may hold more matching items.
+                    truncated = len(items) > effective_limit or has_next
+                    break
+                if not has_next:
+                    break
+                cursor = info.get("endCursor")
 
         if plan.client_sort:
             sort_items(items, plan.client_sort, registry)
 
-        truncated = len(items) > effective_limit
+        truncated = truncated or len(items) > effective_limit
         items = items[:effective_limit]
         return {
             "query":     query,
@@ -141,7 +158,7 @@ class QueryMixin:
             "truncated": truncated,
             "plan": {
                 "push_down":     push_down,
-                "variables":     plan.variables,
+                "variables":     _gql_value(plan.variables),
                 "sort":          plan.sort,
                 "client_sort":   ["%s %s" % (k.field, k.direction)
                                   for k in plan.client_sort],

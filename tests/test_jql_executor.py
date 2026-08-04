@@ -316,6 +316,20 @@ class TestEvaluateTaxonomy:
         # the piid taxonomy for IS EMPTY purposes.
         assert not ev("piid IS EMPTY", item(labels=["PIID::2031Q9"]))
 
+    def test_substring_over_taxonomy_values(self):
+        # '~' needles are free text, not vocabulary members — reachable
+        # through run_jql now that plan-time validation allows them.
+        it = item(labels=["PIID::2026Q2"])
+        assert ev('piid ~ "2026"', it)
+        assert ev('piid ~ "q2"', it)                   # case-insensitive
+        assert not ev('piid ~ "2027"', it)
+        assert ev('piid !~ "2027"', it)
+        assert not ev('piid ~ "2026"', item())         # no label -> no match
+        assert ev('piid !~ "2026"', item())
+
+    def test_substring_matches_out_of_vocab_taxonomy_value(self):
+        assert ev('piid ~ "Q9"', item(labels=["PIID::2031Q9"]))
+
 
 class TestEvaluateBoolean:
 

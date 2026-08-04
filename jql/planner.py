@@ -18,6 +18,12 @@ deliberately conservative: anything it cannot prove safe (general OR across
 fields, negated dates, numeric comparisons, id-resolution fields, EMPTY
 values inside IN lists) simply stays client-side.
 
+One exception to "always fetch": when an any-list intersection comes up
+empty (e.g. ``type = task`` against the epic+issue entity scope) the
+conjunction is provably unsatisfiable and ``Plan.empty`` is set — the
+executor returns no results without fetching, because the server *skips*
+blank list filters (applying no filter) rather than matching nothing.
+
 Pure Python, no I/O. ``currentUser()`` is resolved by the caller (the query
 mixin) against the token identity and passed in as ``current_user``; date
 functions and relative durations resolve here against a single fixed ``now``
@@ -43,8 +49,11 @@ _AND_LIST_ARGS = frozenset({"labelName", "assigneeUsernames"})
 
 _DAY_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
 
-#: Negation flips a comparison operator instead of dropping the predicate:
-#: NOT (a >= x)  ==  a < x, which may still push down as a date bound.
+#: Negation flips a comparison operator instead of dropping the predicate
+#: (NOT author != alice pushes as author = alice). Date bounds are exempt:
+#: NOT (a >= x) == a < x only holds for items that *have* the date — a NULL
+#: due/closed satisfies the negation client-side but no pushed Before/After
+#: bound matches it server-side, so negated dates always stay client-side.
 _NEGATED_OP = {"=": "!=", "!=": "=", ">": "<=", ">=": "<",
                "<": ">=", "<=": ">", "~": "!~", "!~": "~"}
 
@@ -73,6 +82,13 @@ class Plan:
     needs_bv:          bool = False
     needs_description: bool = False
     push_down:         bool = True
+    #: The pushed conjunction is provably unsatisfiable (an any-list
+    #: intersection came up empty — e.g. a type constraint entirely outside
+    #: the entity scope). The executor must return an empty result *without
+    #: fetching*: GitLab's Rails finders skip blank list params entirely
+    #: (applying no filter at all), so an empty list can never be sent as a
+    #: "match nothing" filter.
+    empty:             bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +170,7 @@ _ORDER_OPS = ("<", "<=", ">", ">=")
 _TEXT_OPS = ("~", "!~")
 
 
-def _validate_value(spec, node, now, current_user, ordering=False):
+def _validate_value(spec, node, now, current_user, ordering=False, substring=False):
     """Validate one RHS value against its field; raises the field errors."""
     if isinstance(node, ast.Empty):
         return
@@ -163,6 +179,11 @@ def _validate_value(spec, node, now, current_user, ordering=False):
         if str(val).strip().lower() not in spec.values:
             raise UnknownFieldValueError(spec.name, val, spec.values)
     elif spec.kind == "label":
+        if substring:
+            # '~' / '!~' match substrings of the taxonomy *values*
+            # (piid ~ "2026") — any text RHS is meaningful, including ones
+            # outside the vocabulary; the executor evaluates it client-side.
+            return
         try:
             spec.label_for(val)
         except UnknownFieldValueError:
@@ -211,7 +232,8 @@ def _validate_predicate(pred, registry, now, current_user):
             raise JqlPlanError(
                 "Operator '%s' is not supported for field '%s'" % (pred.op, spec.name))
     _validate_value(spec, pred.value, now, current_user,
-                    ordering=pred.op in _ORDER_OPS)
+                    ordering=pred.op in _ORDER_OPS,
+                    substring=pred.op in _TEXT_OPS)
     return spec
 
 
@@ -279,6 +301,10 @@ class _Vars:
         self.top: Dict[str, object] = {}
         self.not_: Dict[str, object] = {}
         self.or_: Dict[str, List[str]] = {}
+        #: An any-list intersection came up empty — every pushed value list
+        #: is a superset envelope of its conjunct's matches, so an empty
+        #: intersection proves no item can satisfy the conjunction.
+        self.contradiction = False
 
     def scalar(self, arg, value):
         """Single-value arg. On conflict keep the first — the conjunction is
@@ -303,6 +329,11 @@ class _Vars:
             self.top[arg] = [v for v in self.top[arg] if v in values]
         else:
             self.top[arg] = values
+        if not self.top[arg]:
+            # Never emit an empty list filter: the server would *skip* the
+            # blank param (no filter at all), not match nothing. Flag the
+            # provable contradiction so the executor short-circuits instead.
+            self.contradiction = True
 
     def not_list(self, arg, values):
         """List inside ``not:`` — excluded values accumulate."""
@@ -538,6 +569,12 @@ def _apply_conjunct(negated, expr, registry, vars_, now, current_user):
             _push_empty(spec, not_empty=not_empty, vars_=vars_)
             return
         if spec.value_type == "date":
+            if negated:
+                # NOT (a >= x) == a < x only for items that *have* the date:
+                # a NULL due/closed satisfies the negation client-side, but
+                # no pushed Before/After bound ever matches a NULL date
+                # server-side. Negated dates always stay client-side.
+                return
             dt = resolve_scalar(expr.value, spec, now, current_user)
             _push_date_bound(spec, op, dt, is_day_granular(expr.value), vars_, now)
             return
@@ -606,4 +643,5 @@ def plan_query(query, registry, now=None, current_user=None, push_down=True):
         needs_bv=needs_bv,
         needs_description=needs_desc,
         push_down=push_down,
+        empty=vars_.contradiction,
     )

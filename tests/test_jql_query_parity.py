@@ -195,6 +195,17 @@ class FakeGitLabBackend:
 
     def _validate(self, args):
         valid = set(GL_ARGS["Group.workItems"]) | _TRANSPORT_ARGS
+        # Rails finders skip blank params: an empty list filter would apply
+        # NO filter at all (not "match nothing"), so the client must never
+        # send one — a provably-empty plan must short-circuit instead.
+        for key, value in args.items():
+            if isinstance(value, list):
+                assert value, "blank list filter would be skipped by Rails: %s" % key
+            elif isinstance(value, dict):
+                for sub, v in value.items():
+                    if isinstance(v, list):
+                        assert v, ("blank list filter would be skipped by "
+                                   "Rails: %s.%s" % (key, sub))
         for key, value in args.items():
             assert key in valid, "invalid Group.workItems argument: %s" % key
             if key == "state":
@@ -384,6 +395,11 @@ GOLDEN_QUERIES = [
     "type = epic",
     'type = epic AND labels = "epic::feature"',
     "type IN (epic, issue)",
+    "type = task",
+    "type IN (task, ticket)",
+    "type IN (task, epic)",
+    "type = task AND weight = 9",
+    'milestone IN ("M1") AND milestone IN ("M2")',
     "weight >= 5",
     "weight = 5",
     "weight != 2",
@@ -403,7 +419,11 @@ GOLDEN_QUERIES = [
     'labels ~ "risk"',
     "piid = 2026Q2",
     "piid IS EMPTY",
+    'piid ~ "2026"',
+    'piid ~ "Q9"',
+    'piid !~ "2026"',
     "epic_type = feature",
+    'epic_type ~ "cap"',
     "epic_type IS NOT EMPTY",
     "wsjf_urgency > 1",
     "wsjf_urgency IN (1, 3)",
@@ -416,6 +436,11 @@ GOLDEN_QUERIES = [
     "due IS EMPTY",
     "due <= 2026-09-01",
     "NOT created >= 2026-03-01",
+    "NOT due >= 2026-09-01",
+    "NOT due < 2026-09-01",
+    "NOT closed >= 2026-03-01",
+    "NOT closed <= 2026-03-01",
+    "NOT (due >= 2026-09-01 OR weight = 5)",
     "closed >= 2026-02-01 AND state = closed",
     'milestone = "M1"',
     'milestone = "M1" OR milestone = "M2"',
@@ -472,6 +497,23 @@ class TestGoldenParity:
         result = harness.run_jql("weight = 9", limit=1000, now=NOW)
         assert ids(result) == []
 
+    def test_out_of_scope_type_short_circuits_without_fetch(self, harness):
+        # types: [] must never reach the server (Rails skips blank list
+        # filters — it would return *all* types, and entity scope lives only
+        # in the pushed variables). The provably-empty plan never fetches.
+        result = harness.run_jql("type = task", limit=1000, now=NOW)
+        assert ids(result) == []
+        assert result["truncated"] is False
+        assert result["plan"]["pages_fetched"] == 0
+        assert result["plan"]["scanned"] == 0
+        assert harness.backend.calls == []
+
+    def test_contradictory_any_lists_short_circuit_without_fetch(self, harness):
+        result = harness.run_jql('milestone IN ("M1") AND milestone IN ("M2")',
+                                 limit=1000, now=NOW)
+        assert ids(result) == []
+        assert harness.backend.calls == []
+
 
 # ---------------------------------------------------------------------------
 # Golden result-set spot checks (fixture ground truth)
@@ -489,6 +531,10 @@ class TestGoldenResults:
          [1, 2, 4, 11, 14, 16]),
         ("piid = 2026Q2", [1, 2]),
         ("piid IS EMPTY", [11, 12, 13, 14, 15, 16]),
+        ('piid ~ "2026"', [1, 2, 3]),
+        ('piid ~ "Q9"', [4]),          # out-of-vocabulary label, substring hit
+        ('piid !~ "2026"', [4, 11, 12, 13, 14, 15, 16]),
+        ('epic_type ~ "cap"', [1]),
         ("wsjf_urgency > 1", [1]),
         ("business_value >= 8", [1, 2, 11]),
         ("created = 2026-03-01", [11]),
@@ -504,6 +550,13 @@ class TestGoldenResults:
         ("state = opened AND state = closed", []),
         ("weight = 0", [16]),
         ("weight IS EMPTY", [4, 14]),
+        # Negated ordering on nullable date fields: items with no date
+        # satisfy the negation and must appear in the result.
+        ("NOT due >= 2026-09-01", [3, 4, 12, 13, 14, 15, 16]),
+        ("NOT closed >= 2026-03-01", [1, 2, 3, 4, 11, 12, 13, 14, 15, 16]),
+        ("NOT (due >= 2026-09-01 OR weight = 5)", [4, 12, 13, 14, 15, 16]),
+        ("type = task", []),
+        ('milestone IN ("M1") AND milestone IN ("M2")', []),
     ])
     def test_expected_result_set(self, harness, query, expected):
         assert ids(harness.run_jql(query, limit=1000, now=NOW)) == expected
@@ -573,6 +626,28 @@ class TestPaginationAndCaps:
         assert result["count"] == 2
         assert result["plan"]["pages_fetched"] == 1
 
+    def test_truncated_true_when_limit_lands_on_page_boundary(self):
+        # Early stop with the count exactly at the limit and more pages
+        # unfetched: 8 more matching items exist — the flag must say so.
+        backend = FakeGitLabBackend(page_size=2)
+        result = QueryHarness(backend).run_jql("", limit=2, now=NOW)
+        assert result["count"] == 2
+        assert result["truncated"] is True
+
+    def test_truncated_true_when_page_size_equals_limit(self):
+        backend = FakeGitLabBackend(page_size=5)
+        result = QueryHarness(backend).run_jql("", limit=5, now=NOW)
+        assert result["count"] == 5
+        assert result["truncated"] is True
+
+    def test_truncated_false_when_early_stop_hits_final_page(self):
+        # The limit lands exactly on the last page and nothing is left.
+        backend = FakeGitLabBackend(page_size=2)
+        result = QueryHarness(backend).run_jql("", limit=10, now=NOW)
+        assert result["count"] == 10
+        assert result["plan"]["pages_fetched"] == 5
+        assert result["truncated"] is False
+
     def test_no_early_stop_with_client_sort(self):
         backend = FakeGitLabBackend(page_size=2)
         harness = QueryHarness(backend)
@@ -591,6 +666,29 @@ class TestPaginationAndCaps:
         result = harness.run_jql("ORDER BY business_value DESC", limit=3, now=NOW)
         assert [i["business_value"] for i in result["items"]] == [13, 8, 8]
         assert result["truncated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Plan reporting
+# ---------------------------------------------------------------------------
+
+class TestPlanReporting:
+
+    def test_result_json_serializable_with_date_bounds(self, harness):
+        # The plan block reports variables in transport form — raw datetimes
+        # would blow up json.dumps in the CLI/API surfaces (#301/#302).
+        result = harness.run_jql(
+            "created >= 2026-01-01 AND due <= 2026-09-01", limit=100, now=NOW)
+        payload = json.loads(json.dumps(result))
+        assert payload["plan"]["variables"]["createdAfter"] == "2026-01-01T00:00:00Z"
+        assert payload["plan"]["variables"]["dueBefore"] == "2026-09-01T00:00:00Z"
+
+    def test_result_json_serializable_with_day_equality_range(self, harness):
+        result = harness.run_jql("created = 2026-03-01", limit=100, now=NOW)
+        json.dumps(result)
+
+    def test_result_json_serializable_for_empty_plan(self, harness):
+        json.dumps(harness.run_jql("type = task", limit=100, now=NOW))
 
 
 # ---------------------------------------------------------------------------
