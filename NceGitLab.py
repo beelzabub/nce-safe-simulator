@@ -21,6 +21,7 @@ from mixins import (
     MilestonesMixin,
     PreflightMixin,
     ProjectsMixin,
+    QueryMixin,
     ReportsMixin,
     ServeMixin,
     ToolsMixin,
@@ -48,6 +49,7 @@ class NceGitLab(
     ImportExportMixin,
     ServeMixin,
     PreflightMixin,
+    QueryMixin,
 ):
     def __init__(self, config_file="config.json", ssl_verify=None):
         self.config_file = Path(config_file)
