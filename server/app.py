@@ -545,8 +545,17 @@ def run_query(request: Request, payload: dict = Body(...)):
             detail={"kind": "request", "message": "'limit' must be a positive integer."},
         )
 
+    offset = payload.get("offset")
+    if offset is not None and (isinstance(offset, bool)
+                               or not isinstance(offset, int) or offset < 0):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request",
+                    "message": "'offset' must be zero or a positive integer."},
+        )
+
     try:
-        return gl.run_jql(jql, limit=limit)
+        return gl.run_jql(jql, limit=limit, offset=offset or 0)
     except JqlSyntaxError as exc:
         raise HTTPException(
             status_code=400,

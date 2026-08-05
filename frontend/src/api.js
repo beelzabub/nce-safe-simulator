@@ -57,11 +57,11 @@ export async function getConfig() {
 // the server's structured `.detail` ({kind, message, and for syntax errors
 // position/found/expected}) so the search view can render parse errors
 // inline, anchored at the reported position.
-export async function postQuery(jql, limit) {
+export async function postQuery(jql, limit, offset) {
   const r = await fetch('/api/query', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ jql, limit }),
+    body:    JSON.stringify({ jql, limit, offset }),
   })
   const body = await r.json().catch(() => ({}))
   if (!r.ok) {
