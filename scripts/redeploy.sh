@@ -93,13 +93,16 @@ if [ "${#BUILD_TARGET[@]}" -gt 0 ] && [ -S /var/run/docker.sock ]; then
   echo "    mounting /var/run/docker.sock for in-app first-time image builds"
 fi
 
+# config.json mounts read-write: the web UI's settings editor saves through
+# PUT /api/config/full, which writes the file in place. The bind mount means
+# UI edits land in the host file too, so they survive redeploys.
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker run -d --name "$APP" --restart unless-stopped \
   --network "$NETWORK" \
   -e GITLAB_TOKEN="${GITLAB_TOKEN:-}" \
   "${AWS_MOUNT[@]}" \
   "${DOCKER_MOUNT[@]}" \
-  -v "$PROJECT_ROOT/config.json:/app/config.json:ro" \
+  -v "$PROJECT_ROOT/config.json:/app/config.json" \
   -v "$PROJECT_ROOT/reports:/app/reports" \
   -v "$PROJECT_ROOT/quarto-site:/app/quarto-site" \
   -v "$PROJECT_ROOT/public/interactive:/app/public/interactive" \
