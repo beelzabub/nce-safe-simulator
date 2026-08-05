@@ -233,6 +233,36 @@ def test_put_config_full_reloads_gl(config_client):
     assert reload_calls, "reload_config was not called"
 
 
+def test_config_carries_target_group_path(monkeypatch):
+    # The search view shows the group slug the engine queries — /api/config
+    # must expose the resolved full_path (and refresh it on a group change,
+    # same cache as wiki_url).
+    class _Group:
+        web_url   = "https://gitlab.com/groups/acme/portfolio"
+        full_path = "acme/portfolio"
+
+    class _MockGl:
+        gitlab_namespace = "Acme"
+        parent_group     = "Portfolio"
+        def get_group_by_name(self, name):
+            return _Group()
+
+    app.state.gl = _MockGl()
+    app.state._wiki_url_group = None            # bust the cached lookup
+    try:
+        body = TestClient(app).get("/api/config").json()
+    finally:
+        app.state.gl = None
+        app.state._wiki_url_group = None
+    assert body["target_group_path"] == "acme/portfolio"
+
+
+def test_config_target_group_path_empty_without_client(monkeypatch):
+    app.state.gl = None
+    body = TestClient(app).get("/api/config").json()
+    assert body["target_group_path"] == ""
+
+
 def test_reload_config_drops_jql_caches(tmp_path, monkeypatch):
     # A config save may repoint parent_group (or swap tokens): run_jql's
     # cached group path / current user must not outlive the reload, or the

@@ -11,7 +11,10 @@
     <header class="search-bar">
       <router-link class="back-link" to="/">← Simulator</router-link>
       <span class="search-title">JQL Search</span>
-      <span class="search-sub">live query against the configured GitLab group</span>
+      <span class="search-sub">live query against
+        <code v-if="groupPath" class="scope-slug">{{ groupPath }}</code>
+        <template v-else>the configured GitLab group</template>
+      </span>
     </header>
 
     <form class="query-form" @submit.prevent="run">
@@ -115,8 +118,8 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { postQuery } from '../api.js'
+import { ref, computed, onMounted } from 'vue'
+import { getConfig, postQuery } from '../api.js'
 
 // Column set per the issue #302 spec: title, type, state, labels, weight,
 // assignees, dates, link. (Wider than the CLI `table` output on purpose —
@@ -142,6 +145,11 @@ const EXAMPLES = [
   'state = opened AND (assignee IS EMPTY OR due < startOfDay())',
   'business_value >= 8 ORDER BY business_value DESC, weight DESC',
 ]
+
+// The exact group slug the engine queries — so the scope is unambiguous
+// (the portfolio group from config.json, not the whole GitLab instance).
+const groupPath = ref('')
+onMounted(async () => { groupPath.value = (await getConfig()).target_group_path || '' })
 
 const query     = ref('')
 const limit     = ref(100)
@@ -257,6 +265,8 @@ function day(iso) {
 .back-link:hover { text-decoration: underline; }
 .search-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
 .search-sub   { font-size: 0.75rem; color: var(--text-3); }
+.scope-slug   { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 0.72rem; color: var(--text-2); }
 
 /* ── Query form ── */
 .query-form {

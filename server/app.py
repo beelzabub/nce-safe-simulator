@@ -199,27 +199,33 @@ def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
     dod_banner = bool(load_auth_config(gl).get("dod_banner_enabled", True))
     if gl is None:
-        return {"target_group": "", "wiki_url": "", "grafana_url": "",
+        return {"target_group": "", "target_group_path": "", "wiki_url": "",
+                "grafana_url": "",
                 "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner,
                 "version": app_version()}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
-    # Resolve the GitLab group web_url for the wiki link.
+    # Resolve the GitLab group for the wiki link and the URL slug path (the
+    # search view shows the slug so the query scope is unambiguous).
     # Cache keyed on parent_group so a config change triggers a fresh lookup.
     if getattr(request.app.state, "_wiki_url_group", None) != grp:
         wiki_url = ""
+        group_path = ""
         try:
             group = gl.get_group_by_name(grp)
             if group:
-                wiki_url = f"{group.web_url}/-/wikis"
+                wiki_url   = f"{group.web_url}/-/wikis"
+                group_path = group.full_path
         except Exception:
             pass
         request.app.state._wiki_url       = wiki_url
+        request.app.state._group_path     = group_path
         request.app.state._wiki_url_group = grp
 
     return {
         "target_group":   f"{ns}/{grp}" if ns else grp,
+        "target_group_path": getattr(request.app.state, "_group_path", ""),
         "wiki_url":       getattr(request.app.state, "_wiki_url", ""),
         "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
         "deployment_type": _deployment_type(),
