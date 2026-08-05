@@ -90,6 +90,7 @@ READONLY_TOOLS: frozenset[str] = frozenset([
     "audit-hierarchy",
     "audit-labels",
     "diagnose",
+    "query",
     "validate-weights",
     "weight-drift-check",
     "clean-reports",

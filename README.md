@@ -1073,6 +1073,44 @@ Missing 1 required dependency(ies) for this job:
 
 > `diagnose` is listed under the **Diagnose** category (first entry in the utilities menu) and via `-D` / `--diagnose` — see [Diagnose](#diagnose) above.
 
+### Query
+
+| Key | Description |
+|---|---|
+| `query` | Run a JQL-style query against the live group's work items (epics + issues, `includeDescendants`) |
+
+A Jira-JQL-style query language over the simulator's data: `AND` / `OR` / `NOT` with parentheses, `= != > >= < <= ~ !~`, `IN` / `NOT IN`, `IS [NOT] EMPTY`, relative durations (`-4w`, `12h`), date functions (`now()`, `startOfDay()`, `endOfMonth(-1)`, …), `currentUser()`, and multi-key `ORDER BY`. The planner pushes the widest conjunctive envelope of the expression down to the GitLab GraphQL filter args and re-evaluates the exact expression client-side over the fetched pages — push-down only reduces the fetch cost, never changes the result set.
+
+**Fields.** Core work-item fields: `type` (`epic` / `issue`), `state` (`opened` / `closed` / `all`), `title`, `text` (title + description), `labels`, `assignee`, `author`, `milestone`, `iteration`, `weight`, `business_value` (native custom field), `created`, `updated`, `due`, `closed`, `parent`, `iid`, `project`. Plus one **virtual field per `*_labels` taxonomy in `config.json`**: `piid`, `epic_type`, `risk`, `work_type`, `lifecycle`, `wsjf_urgency`, `wsjf_risk`, `project_label`, … — `piid = 2026Q3` matches the `PIID::2026Q3` scoped label (bare value or full label, case-insensitive). Jira names alias to the obvious equivalents: `status` → `state`, `issuetype` → `type`, `summary` → `title`, `reporter` → `author`, `sprint` → `iteration`.
+
+**Params:** `--jql` (the query string), `--limit` (result cap, default 100), `--format` (`table` default / `json` / `csv`).
+
+```bash
+# Open items in a PI, heaviest first
+python3 NceGitLab.py -ut query --jql "state = opened AND piid = 2026Q3 ORDER BY weight DESC"
+
+# Feature-tier epics updated in the last four weeks
+python3 NceGitLab.py -ut query --jql "type = epic AND epic_type = Feature AND updated >= -4w"
+
+# Due this year: assigned to the token's user, or unassigned
+python3 NceGitLab.py -ut query --jql "due <= endOfYear() AND (assignee = currentUser() OR assignee IS EMPTY)"
+
+# Substring search plus a numeric comparison, multi-key ordering
+python3 NceGitLab.py -ut query --jql 'text ~ "mission" AND weight >= 5 ORDER BY due ASC, weight DESC'
+
+# JSON envelope (items + count + truncated + the push-down plan) — pipes straight into jq
+python3 NceGitLab.py -ut query --jql "state = opened AND weight >= 5" --format json | jq -r '.items[].title'
+
+# CSV export (header + one row per item; list cells joined with ', ')
+python3 NceGitLab.py -ut query --jql 'labels IN ("PIID::2026Q3", "PIID::2026Q4")' --format csv > pi-items.csv
+```
+
+`json` / `csv` print the payload alone on **stdout** (the runner's banner and the connection diagnostics go to stderr), so shell pipes see clean machine-readable output. The `json` envelope carries `items`, `count`, `limit`, `truncated`, and a `plan` block showing which filters were pushed down server-side and what ran client-side. When a result is cut at the limit, `table`/`csv` print a truncation note (`csv`'s goes to stderr) — raise `--limit` to see more.
+
+Errors exit non-zero with a JQL-style message on stderr: parse errors report the offset, what was found, and what was expected, with a caret marking the position in the query; unknown fields and out-of-vocabulary taxonomy values list the valid vocabulary.
+
+Out of scope (v1): history operators (`WAS` / `CHANGED`), comment/worklog fields, saved filters. Entity scope is epics + issues across the configured portfolio group; tasks, MRs, and boards are excluded.
+
 ### Import / Export
 
 Both CSV and JSON are supported. Format is inferred from the file extension (`.json` → JSON, anything else → CSV). Export filenames are auto-named from the group name when no output path is given. Relative and `~`-prefixed paths are resolved to absolute.

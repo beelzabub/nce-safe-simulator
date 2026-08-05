@@ -124,9 +124,12 @@ class NceGitLab(
             self.gl.auth()
 
             version, _ = self.gl.version()
-            print(f"GitLab server : {self.gl.api_url}  (v{version})")
-            print(f"python-gitlab : v{pkg_version('python-gitlab')}")
-            print(f"Python        : {sys.version}")
+            # Diagnostics go to stderr so tools that emit machine-readable
+            # payloads on stdout (e.g. `-ut query --format json | jq`, #301)
+            # pipe cleanly; server job logs merge both streams (jobs.py).
+            print(f"GitLab server : {self.gl.api_url}  (v{version})", file=sys.stderr)
+            print(f"python-gitlab : v{pkg_version('python-gitlab')}", file=sys.stderr)
+            print(f"Python        : {sys.version}", file=sys.stderr)
         except gitlab.GitlabAuthenticationError:
             print("Authentication failed. Please check your private token.")
             exit(1)
@@ -562,27 +565,16 @@ def _resolve_preflight_profile(args, formats):
     return None, None
 
 
-def main():
-    sys.stdout.reconfigure(line_buffering=True)
-    # ------------------------------------------------------------------ #
-    # Signal handler — installed before NceGitLab() so it covers init too #
-    # ------------------------------------------------------------------ #
-    _phase[0] = "starting"
-    _gl[0]    = None
+def build_arg_parser():
+    """Build the top-level argument parser.
 
-    def _sigint_handler(sig, frame):
-        phase  = _phase[0]
-        gl_ref = _gl[0]
-        detail = getattr(gl_ref, '_current_op', None) if gl_ref else None
-        msg    = f"Interrupted: {phase}"
-        if detail:
-            msg += f" — {detail}"
-        print(f"\n{msg}")
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, _sigint_handler)
-
-    parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling")
+    allow_abbrev=False: tool params ride through parse_known_args as leftover
+    tokens (see _parse_tool_args), so prefix matching must not swallow them —
+    e.g. `-ut query --format json` would otherwise be eaten by --formats (#301).
+    Module-level (not inline in main) so tests can assert that behaviorally.
+    """
+    parser = argparse.ArgumentParser(description="NCE GitLab SAFe tooling",
+                                     allow_abbrev=False)
     parser.add_argument("--usage",                  action="store_true", help="Show this help message and exit")
     parser.add_argument("-c", "--clean",             action="store_true", help="Delete all group data")
     parser.add_argument("-C", "--create",            action="store_true", help="Bootstrap lorem SAFe data")
@@ -641,6 +633,30 @@ def main():
                              "(requires Docker), destroy deletes the repo and its images "
                              "(ECS/EKS cannot pull until republished), status prints "
                              "JSON. Runs as a durable job.")
+    return parser
+
+
+def main():
+    sys.stdout.reconfigure(line_buffering=True)
+    # ------------------------------------------------------------------ #
+    # Signal handler — installed before NceGitLab() so it covers init too #
+    # ------------------------------------------------------------------ #
+    _phase[0] = "starting"
+    _gl[0]    = None
+
+    def _sigint_handler(sig, frame):
+        phase  = _phase[0]
+        gl_ref = _gl[0]
+        detail = getattr(gl_ref, '_current_op', None) if gl_ref else None
+        msg    = f"Interrupted: {phase}"
+        if detail:
+            msg += f" — {detail}"
+        print(f"\n{msg}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
+    parser = build_arg_parser()
     args, extra = parser.parse_known_args()
 
     if args.usage:

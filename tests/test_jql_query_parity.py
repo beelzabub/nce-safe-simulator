@@ -751,7 +751,10 @@ class TestErrorPaths:
         harness._find_bv_field = lambda group=None: None
         result = harness.run_jql("business_value IS EMPTY", limit=100, now=NOW)
         assert ids(result) == ids(harness.run_jql("", limit=100, now=NOW))
-        assert "Business Value" in capsys.readouterr().out
+        # The warning goes to stderr — stdout is the CLI's data channel (#301).
+        captured = capsys.readouterr()
+        assert "Business Value" in captured.err
+        assert captured.out == ""
 
     def test_currentuser_via_graphql_fallback(self):
         harness = QueryHarness()
