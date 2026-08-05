@@ -24,18 +24,27 @@ def client():
 # GET /api/tools
 # ---------------------------------------------------------------------------
 
-def test_tools_returns_all_tools(client):
+def test_tools_returns_all_visible_tools(client):
     resp = client.get("/api/tools")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == len(TOOLS)
+    assert len(data) == len([t for t in TOOLS if not t.get("ui_hidden")])
 
 
 def test_tools_keys_match_registry(client):
     resp = client.get("/api/tools")
     returned_keys = {t["key"] for t in resp.json()}
-    expected_keys = {t["key"] for t in TOOLS}
+    expected_keys = {t["key"] for t in TOOLS if not t.get("ui_hidden")}
     assert returned_keys == expected_keys
+
+
+def test_ui_hidden_tools_stay_out_of_web_picker(client):
+    # `query` is CLI-only: its web home is the Search view, so the raw tool
+    # must not also appear in the job picker.
+    hidden = {t["key"] for t in TOOLS if t.get("ui_hidden")}
+    assert "query" in hidden                     # the flag is actually set
+    returned_keys = {t["key"] for t in client.get("/api/tools").json()}
+    assert not (hidden & returned_keys)
 
 
 def test_import_export_run_menu_order(client):
@@ -222,6 +231,61 @@ def test_put_config_full_reloads_gl(config_client):
     finally:
         app.state.gl = None
     assert reload_calls, "reload_config was not called"
+
+
+def test_config_carries_target_group_path(monkeypatch):
+    # The search view shows the group slug the engine queries — /api/config
+    # must expose the resolved full_path (and refresh it on a group change,
+    # same cache as wiki_url).
+    class _Group:
+        web_url   = "https://gitlab.com/groups/acme/portfolio"
+        full_path = "acme/portfolio"
+
+    class _MockGl:
+        gitlab_namespace = "Acme"
+        parent_group     = "Portfolio"
+        def get_group_by_name(self, name):
+            return _Group()
+
+    app.state.gl = _MockGl()
+    app.state._wiki_url_group = None            # bust the cached lookup
+    try:
+        body = TestClient(app).get("/api/config").json()
+    finally:
+        app.state.gl = None
+        app.state._wiki_url_group = None
+    assert body["target_group_path"] == "acme/portfolio"
+
+
+def test_config_target_group_path_empty_without_client(monkeypatch):
+    app.state.gl = None
+    body = TestClient(app).get("/api/config").json()
+    assert body["target_group_path"] == ""
+
+
+def test_reload_config_drops_jql_caches(tmp_path, monkeypatch):
+    # A config save may repoint parent_group (or swap tokens): run_jql's
+    # cached group path / current user must not outlive the reload, or the
+    # search keeps querying the previous group until the process restarts.
+    import json as _json
+    from NceGitLab import NceGitLab
+
+    monkeypatch.delenv("GROUP_NAME", raising=False)
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(_json.dumps(
+        {**SAMPLE_CONFIG, "parent_group": "repointed-group"}), encoding="utf-8")
+
+    class _Shell:                    # bare instance: reload_config only needs
+        pass                         # config_file (+ optional overrides)
+
+    shell = _Shell()
+    shell.config_file = cfg_file
+    shell._jql_group_path_cache = "old/group/path"
+    shell._jql_current_user_cache = "old-user"
+    NceGitLab.reload_config(shell)
+    assert shell.parent_group == "repointed-group"
+    assert shell._jql_group_path_cache is None
+    assert shell._jql_current_user_cache is None
 
 
 def test_put_config_full_non_dict_returns_400(config_client):

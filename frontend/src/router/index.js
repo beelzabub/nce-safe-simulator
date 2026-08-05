@@ -10,6 +10,11 @@ const routes = [
     path: '/login',
     component: () => import('../views/LoginView.vue'),
   },
+  {
+    // JQL search — the "issue navigator" (epic #297, issue #302)
+    path: '/search',
+    component: () => import('../views/SearchView.vue'),
+  },
 ]
 
 const router = createRouter({

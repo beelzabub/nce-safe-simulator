@@ -10,13 +10,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import gitlab
 import markdown as _md
+import requests
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from jql import JqlEvaluationError, JqlExecutionError, JqlPlanError, JqlSyntaxError
+from jql.fields import UnknownFieldError, UnknownFieldValueError
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.auth_backgrounds import (
@@ -177,7 +181,9 @@ def _report_payload(report: dict) -> dict:
 @app.get("/api/tools")
 def list_tools(request: Request):
     gl = getattr(request.app.state, "gl", None)
-    return [_tool_payload(t, gl) for t in TOOLS]
+    # ui_hidden tools keep their CLI surface but stay out of the web picker
+    # (e.g. `query`, whose web home is the Search view, not a job run).
+    return [_tool_payload(t, gl) for t in TOOLS if not t.get("ui_hidden")]
 
 
 def _deployment_type() -> str:
@@ -193,27 +199,33 @@ def get_config(request: Request):
     gl = getattr(request.app.state, "gl", None)
     dod_banner = bool(load_auth_config(gl).get("dod_banner_enabled", True))
     if gl is None:
-        return {"target_group": "", "wiki_url": "", "grafana_url": "",
+        return {"target_group": "", "target_group_path": "", "wiki_url": "",
+                "grafana_url": "",
                 "deployment_type": _deployment_type(), "dod_banner_enabled": dod_banner,
                 "version": app_version()}
     ns  = getattr(gl, "gitlab_namespace", None)
     grp = getattr(gl, "parent_group", "")
 
-    # Resolve the GitLab group web_url for the wiki link.
+    # Resolve the GitLab group for the wiki link and the URL slug path (the
+    # search view shows the slug so the query scope is unambiguous).
     # Cache keyed on parent_group so a config change triggers a fresh lookup.
     if getattr(request.app.state, "_wiki_url_group", None) != grp:
         wiki_url = ""
+        group_path = ""
         try:
             group = gl.get_group_by_name(grp)
             if group:
-                wiki_url = f"{group.web_url}/-/wikis"
+                wiki_url   = f"{group.web_url}/-/wikis"
+                group_path = group.full_path
         except Exception:
             pass
         request.app.state._wiki_url       = wiki_url
+        request.app.state._group_path     = group_path
         request.app.state._wiki_url_group = grp
 
     return {
         "target_group":   f"{ns}/{grp}" if ns else grp,
+        "target_group_path": getattr(request.app.state, "_group_path", ""),
         "wiki_url":       getattr(request.app.state, "_wiki_url", ""),
         "grafana_url":    os.environ.get("GRAFANA_URL", "") or getattr(gl, "grafana_url", ""),
         "deployment_type": _deployment_type(),
@@ -472,6 +484,111 @@ def analysis_portfolio():
             detail="No complete report snapshot found — run reports first.",
         )
     return portfolio_payload(data_dir)
+
+
+@app.get("/api/query/fields")
+def list_query_fields(request: Request):
+    """The JQL field vocabulary for the search help panel (issue #302).
+
+    One entry per queryable field — name, kind, type, Jira aliases, and the
+    closed value list for taxonomy fields — straight from the same registry
+    run_jql validates against, so the help's examples always reflect the
+    live config (a config reload changes this response too).
+    """
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "unavailable",
+                    "message": "GitLab client not configured."})
+    return {"fields": gl.jql_vocabulary()}
+
+
+@app.post("/api/query")
+def run_query(request: Request, payload: dict = Body(...)):
+    """Run a JQL query against the live GitLab group (epic #297, issue #302).
+
+    Body: ``{"jql": "<query>", "limit": <positive int or "all">, "offset":
+    <optional int>}``. ``"all"`` removes the result cap — the executor
+    fetches every match (the web UI's CSV export uses this). Executes
+    through the same ``run_jql()`` entry point as the CLI query tool, so the
+    two surfaces return identical rows for identical queries. Success mirrors
+    run_jql's envelope: ``items`` / ``count`` / ``limit`` / ``offset`` /
+    ``total`` (exact match count when knowable, else null) / ``truncated`` /
+    ``plan``.
+
+    Bad queries never 500: syntax errors return 400 with a structured detail
+    ``{kind: "syntax", message, position, found, expected}`` the UI anchors
+    inline at the reported position; semantic errors (unknown field/value,
+    invalid operator/field combination) return 400 with ``{kind: "semantic",
+    message}``. Transport failures are 502; a server without a GitLab client
+    is 503.
+    """
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "unavailable",
+                    "message": "GitLab client not configured — start the server "
+                               "with a reachable GitLab connection to run queries."},
+        )
+
+    jql = payload.get("jql")
+    if not isinstance(jql, str):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request", "message": "Body must carry a 'jql' string."},
+        )
+
+    limit = payload.get("limit")
+    if limit is not None and limit != "all" and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request",
+                    "message": "'limit' must be a positive integer or 'all'."},
+        )
+
+    offset = payload.get("offset")
+    if offset is not None and (isinstance(offset, bool)
+                               or not isinstance(offset, int) or offset < 0):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request",
+                    "message": "'offset' must be zero or a positive integer."},
+        )
+
+    try:
+        return gl.run_jql(jql, limit=limit, offset=offset or 0)
+    except JqlSyntaxError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"kind":     "syntax",
+                    "message":  str(exc),
+                    "position": exc.offset,
+                    "found":    exc.found,
+                    "expected": list(exc.expected)},
+        )
+    except (UnknownFieldError, UnknownFieldValueError,
+            JqlPlanError, JqlEvaluationError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "semantic", "message": str(exc)},
+        )
+    except JqlExecutionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "transport", "message": str(exc)},
+        )
+    except (requests.RequestException, gitlab.GitlabError) as exc:
+        # run_jql wraps transport failures as JqlExecutionError itself; this
+        # arm is the backstop so a raw HTTP / python-gitlab error escaping a
+        # future code path still maps to 502, never a 500.
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "transport",
+                    "message": "GitLab transport failure: %s" % exc},
+        )
 
 
 @app.get("/api/runs")

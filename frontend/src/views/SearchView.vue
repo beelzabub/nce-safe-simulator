@@ -1,0 +1,1065 @@
+<!-- JQL Search (epic #297, issue #302) — the "issue navigator" GitLab lacks.
+     A query box over POST /api/query: type a JQL expression, get the live
+     work items back in a sortable table. Parse errors render inline with a
+     caret anchored at the reported position; header clicks re-sort the
+     fetched rows client-side (the query's ORDER BY still defines fetch
+     order), with a "sorted locally" hint when the limit truncated the set so
+     a header sort isn't mistaken for a true top-N by that column. -->
+<template>
+  <div class="search-page">
+
+    <header class="search-bar">
+      <router-link class="back-link" to="/">← Simulator</router-link>
+      <span class="search-title">JQL Search</span>
+      <span class="search-sub">live query against
+        <code v-if="groupPath" class="scope-slug">{{ groupPath }}</code>
+        <template v-else>the configured GitLab group</template>
+      </span>
+    </header>
+
+    <form class="query-form" @submit.prevent="run()">
+      <textarea
+        v-if="expanded"
+        v-model="query"
+        class="query-input query-textarea"
+        rows="4"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder='state = opened AND weight >= 5 ORDER BY due ASC'
+        aria-label="JQL query"
+        @keydown.ctrl.enter.prevent="run()"
+        @keydown.meta.enter.prevent="run()"
+      ></textarea>
+      <input
+        v-else
+        v-model="query"
+        class="query-input"
+        type="text"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder='state = opened AND weight >= 5 ORDER BY due ASC'
+        aria-label="JQL query"
+      />
+      <label class="limit-label">
+        limit
+        <input v-model.number="limit" class="limit-input" type="number" min="1" step="1" />
+      </label>
+      <button class="run-btn" type="submit" :disabled="state === 'loading'">Run</button>
+      <button class="icon-btn expand-btn" type="button"
+              :title="expanded ? 'Collapse query editor' : 'Expand query editor (multi-line)'"
+              :aria-label="expanded ? 'Collapse query editor' : 'Expand query editor'"
+              @click="expanded = !expanded">{{ expanded ? '⤒' : '⤓' }}</button>
+      <button class="icon-btn help-btn" type="button" title="JQL syntax help"
+              aria-label="JQL syntax help" :class="{ active: showHelp }"
+              @click="toggleHelp">?</button>
+    </form>
+
+    <!-- ── Syntax help: reference + examples built from the live vocabulary ── -->
+    <section v-if="showHelp" class="help-panel" aria-label="JQL help">
+      <div class="help-head">
+        <span class="help-title">JQL against GitLab — syntax &amp; examples</span>
+        <span v-if="groupPath" class="help-scope">queries run against <code class="scope-slug">{{ groupPath }}</code></span>
+        <button class="icon-btn help-close" type="button" aria-label="Close help" @click="showHelp = false">✕</button>
+      </div>
+
+      <div class="help-body">
+      <div class="help-grid">
+        <div class="help-block">
+          <h3>Operators</h3>
+          <table class="help-table">
+            <tbody>
+              <tr><td><code>=</code> <code>!=</code></td><td>equality (case-insensitive)</td></tr>
+              <tr><td><code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td><td>numbers and dates</td></tr>
+              <tr><td><code>~</code> <code>!~</code></td><td>substring match (<code>title</code>, <code>text</code>, …)</td></tr>
+              <tr><td><code>IN (a, b)</code> <code>NOT IN</code></td><td>any-of / none-of a value list</td></tr>
+              <tr><td><code>IS EMPTY</code> <code>IS NOT EMPTY</code></td><td>unset / set (<code>assignee</code>, <code>due</code>, …)</td></tr>
+              <tr><td><code>AND</code> <code>OR</code> <code>NOT</code> <code>( )</code></td><td>boolean logic, any nesting</td></tr>
+              <tr><td><code>ORDER BY f ASC, g DESC</code></td><td>multi-key ordering, trailing</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="help-block">
+          <h3>Dates</h3>
+          <table class="help-table">
+            <tbody>
+              <tr><td><code>"2026-08-01"</code></td><td>absolute date</td></tr>
+              <tr><td><code>-4w</code> <code>12h</code> <code>-90d</code></td><td>relative to now (m/h/d/w)</td></tr>
+              <tr><td><code>now()</code> <code>currentUser()</code></td><td>evaluation-time values</td></tr>
+              <tr><td><code>startOfDay()</code> <code>endOfWeek()</code></td><td>also <code>…OfMonth</code>/<code>…OfYear</code></td></tr>
+              <tr><td><code>startOfMonth(-1)</code></td><td>offset in the unit (last month)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="help-block">
+        <h3>Fields</h3>
+        <p class="help-note">Canonical names with Jira aliases in parentheses; taxonomy fields list the exact values valid <em>in this group's config</em>. People fields (<code>assignee</code>, <code>author</code>) match the username <em>or</em> the display name — <code>assignee = beelzabub</code> and <code>assignee = "Jamie Powers"</code> are equivalent.</p>
+        <div class="help-fields-wrap">
+          <table class="help-table help-fields" v-if="fields.length">
+            <thead><tr><th>field</th><th>type</th><th>values</th></tr></thead>
+            <tbody>
+              <tr v-for="f in fields" :key="f.name">
+                <td><code>{{ f.name }}</code><span v-if="f.aliases.length" class="alias"> ({{ f.aliases.join(', ') }})</span></td>
+                <td>{{ f.type }}</td>
+                <td class="cell-values"><template v-if="f.values.length"><code v-for="v in f.values" :key="v" class="value-chip">{{ v }}</code></template><span v-else>—</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="help-note">Loading field vocabulary…</p>
+        </div>
+      </div>
+
+      <div class="help-block">
+        <h3>Examples</h3>
+        <p class="help-note">Built from this group's live configuration — click one to run it, or copy it for the CLI / <code>POST /api/query</code>.</p>
+        <ol class="help-examples">
+          <li v-for="section in exampleSections" :key="section.title">
+            <span class="example-section">{{ section.title }}</span>
+            <ol>
+              <li v-for="ex in section.items" :key="ex">
+                <button class="example-btn" type="button" :title="'Run: ' + ex" @click="query = ex; showHelp = false; run()">{{ ex }}</button>
+                <button class="icon-btn copy-btn" type="button" :aria-label="'Copy: ' + ex" title="Copy" @click="copyText(ex)">⧉</button>
+              </li>
+            </ol>
+          </li>
+        </ol>
+      </div>
+      </div>
+    </section>
+
+    <!-- ── Inline query errors ── -->
+    <div v-if="state === 'error' && syntaxError" class="error-box">
+      <div class="error-lead">Syntax error</div>
+      <pre class="error-query">{{ lastQuery }}
+{{ caretLine }}</pre>
+      <div class="error-msg">{{ error.message }}</div>
+      <div v-if="error.detail.expected && error.detail.expected.length" class="error-expected">
+        expected: <code v-for="e in error.detail.expected" :key="e">{{ e }}</code>
+      </div>
+    </div>
+    <div v-else-if="state === 'error'" class="error-box">
+      <div class="error-lead">{{ errorLead }}</div>
+      <div class="error-msg">{{ error.message }}</div>
+    </div>
+
+    <!-- ── Empty / loading / results ── -->
+    <div v-if="state === 'idle'" class="search-empty">
+      <p class="empty-lead">Query the portfolio with JQL</p>
+      <p>Fields include <code>type</code>, <code>state</code>, <code>labels</code>, <code>assignee</code>, <code>weight</code>, <code>piid</code>, <code>epic_type</code>, <code>business_value</code>, dates… Try one:</p>
+      <ul class="example-list">
+        <li v-for="ex in EXAMPLES" :key="ex">
+          <button class="example-btn" type="button" @click="query = ex; run()">{{ ex }}</button>
+        </li>
+      </ul>
+    </div>
+
+    <div v-else-if="state === 'loading'" class="search-empty">Running query…</div>
+
+    <template v-else-if="state === 'ready'">
+      <div class="results-meta">
+        <span>{{ resultSummary }}</span>
+        <span v-if="result.truncated && result.total == null" class="meta-truncated">capped at limit {{ result.limit }} — total unknown (client-side filter)</span>
+        <span v-if="localSort && result.truncated" class="meta-hint">
+          sorted locally — first {{ result.count }} results only, not a true top-{{ result.count }} by this column
+        </span>
+        <button v-if="localSort" class="meta-reset" type="button" @click="localSort = null">reset to query order</button>
+        <span v-if="offset > 0 || result.truncated" class="pager">
+          <button class="pager-btn" type="button" :disabled="offset === 0 || state === 'loading'"
+                  @click="run(Math.max(0, offset - result.limit))">‹ Prev</button>
+          <span class="pager-range">{{ pagerRange }}</span>
+          <button class="pager-btn" type="button" :disabled="!result.truncated || state === 'loading'"
+                  @click="run(offset + result.limit)">Next ›</button>
+        </span>
+        <span v-if="result.count" class="export-group">
+          <span v-if="exportError" class="meta-truncated">export failed: {{ exportError.message }}</span>
+          <span ref="colsWrap" class="cols-wrap">
+            <button class="export-btn" type="button" :aria-expanded="showCols"
+                    title="Choose which columns the results table shows (persisted in this browser)"
+                    @click="showCols = !showCols">⚙ Columns</button>
+            <div v-if="showCols" class="cols-pop">
+              <div v-for="col in popoverColumns" :key="col.key" class="cols-item-row" :data-key="col.key">
+                <label class="cols-item">
+                  <input type="checkbox"
+                         :checked="isVisible(col.key)"
+                         :disabled="isVisible(col.key) && visibleKeys.length === 1"
+                         @change="toggleColumn(col.key)" />
+                  {{ col.label }}
+                </label>
+                <span v-if="isVisible(col.key)" class="cols-move">
+                  <button class="cols-move-btn" type="button" title="Move left"
+                          :disabled="visibleKeys.indexOf(col.key) === 0"
+                          @click="moveColumn(col.key, -1)">◀</button>
+                  <button class="cols-move-btn" type="button" title="Move right"
+                          :disabled="visibleKeys.indexOf(col.key) === visibleKeys.length - 1"
+                          @click="moveColumn(col.key, 1)">▶</button>
+                </span>
+              </div>
+              <button class="cols-reset" type="button" @click="resetColumns">Reset to defaults</button>
+            </div>
+          </span>
+          <button class="export-btn" type="button" :disabled="exporting"
+                  title="Download every match as CSV (current sort, same columns as the CLI's csv format) — re-runs the query uncapped when the page is result-limited"
+                  @click="exportCsv">{{ exporting ? '… CSV' : '⬇ CSV' }}</button>
+          <button class="export-btn" type="button"
+                  title="Download this page's result envelope (items, count, total, truncated, plan) as JSON — identical to the API response"
+                  @click="exportJson">⬇ JSON</button>
+        </span>
+      </div>
+
+      <div v-if="!result.count" class="search-empty">
+        <p class="empty-lead">No matching work items</p>
+        <p>The query ran fine — nothing in the group matches it.</p>
+      </div>
+
+      <div v-else class="table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th
+                v-for="col in visibleColumns" :key="col.key"
+                :aria-sort="ariaSort(col.key)"
+              >
+                <button class="th-btn" type="button" :title="`Sort by ${col.label}`" @click="toggleSort(col.key)">
+                  {{ col.label }}
+                  <span v-if="localSort && localSort.key === col.key" class="sort-arrow">{{ localSort.dir === 'asc' ? '▲' : '▼' }}</span>
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in displayRows" :key="row.id">
+              <td v-for="col in visibleColumns" :key="col.key" :class="cellClass(col)">
+                <a v-if="col.key === 'title'" :href="row.web_url" target="_blank" rel="noopener" :title="row.title">{{ row.title }}</a>
+                <span v-else-if="col.key === 'state'" class="state-chip" :class="row.state">{{ row.state }}</span>
+                <template v-else-if="col.key === 'labels'">
+                  <span v-for="l in row.labels" :key="l" class="label-chip" :style="chipStyle(l)">{{ l }}</span>
+                </template>
+                <template v-else-if="col.key === 'project'">{{ leaf(row.namespace_path) || '—' }}</template>
+                <template v-else-if="col.kind === 'list'">{{ (row[col.key] || []).length ? row[col.key].join(', ') : '—' }}</template>
+                <template v-else-if="col.kind === 'date'">{{ day(row[col.key]) }}</template>
+                <template v-else>{{ row[col.key] ?? '—' }}</template>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { getConfig, getQueryFields, postQuery } from '../api.js'
+import { loadStored, saveStored } from '../composables/useLocalStorage.js'
+
+// Every flat-schema field a result row carries (minus description — too
+// wide for a table cell — and web_url, which is the title link). Which of
+// these render — and in what order — is the user's Configure Columns
+// choice below; the default set is the issue #302 spec (title, type,
+// state, labels, weight, assignees, dates, link) plus the derived project.
+const ALL_COLUMNS = [
+  { key: 'iid',            label: 'IID',            kind: 'number' },
+  { key: 'title',          label: 'Title',          kind: 'text' },
+  { key: 'type',           label: 'Type',           kind: 'text' },
+  { key: 'state',          label: 'State',          kind: 'text' },
+  { key: 'labels',         label: 'Labels',         kind: 'list' },
+  { key: 'weight',         label: 'Weight',         kind: 'number' },
+  { key: 'assignees',      label: 'Assignees',      kind: 'list' },
+  { key: 'created_at',     label: 'Created',        kind: 'date' },
+  { key: 'updated_at',     label: 'Updated',        kind: 'date' },
+  { key: 'due_date',       label: 'Due',            kind: 'date' },
+  { key: 'author',         label: 'Author',         kind: 'text' },
+  { key: 'milestone',      label: 'Milestone',      kind: 'text' },
+  { key: 'milestone_due',  label: 'Milestone due',  kind: 'date' },
+  { key: 'iteration',      label: 'Iteration',      kind: 'text' },
+  { key: 'business_value', label: 'Business value', kind: 'number' },
+  { key: 'start_date',     label: 'Start',          kind: 'date' },
+  { key: 'closed_at',      label: 'Closed',         kind: 'date' },
+  { key: 'parent_iid',     label: 'Parent IID',     kind: 'number' },
+  // Derived, not a schema field: the leaf segment of namespace_path — the
+  // same value the JQL `project` predicate matches. Namespace keeps the
+  // full path.
+  { key: 'project',        label: 'Project',        kind: 'text' },
+  { key: 'namespace_path', label: 'Namespace',      kind: 'text' },
+]
+const DEFAULT_COLUMNS = ['iid', 'title', 'project', 'type', 'state', 'labels',
+                         'weight', 'assignees', 'created_at', 'updated_at',
+                         'due_date']
+
+const EXAMPLES = [
+  'state = opened AND weight >= 5 ORDER BY due ASC',
+  'type = epic AND labels = "epic::feature"',
+  'assignee = currentUser() AND updated >= -4w',
+  'state = opened AND (assignee IS EMPTY OR due < startOfDay())',
+  'business_value >= 8 ORDER BY business_value DESC, weight DESC',
+]
+
+// The exact group slug the engine queries — so the scope is unambiguous
+// (the portfolio group from config.json, not the whole GitLab instance).
+const groupPath = ref('')
+onMounted(async () => { groupPath.value = (await getConfig()).target_group_path || '' })
+
+// ── Help panel + expandable editor (Jira-search-bar affordances) ──
+const expanded = ref(false)     // single-line input ⇄ multi-line textarea
+const showHelp = ref(false)
+const fields   = ref([])        // live vocabulary from /api/query/fields
+
+async function toggleHelp() {
+  showHelp.value = !showHelp.value
+  if (showHelp.value && !fields.value.length) {
+    fields.value = await getQueryFields()
+  }
+}
+
+function copyText(text) {
+  try { navigator.clipboard.writeText(text) } catch { /* clipboard denied — copy manually */ }
+}
+
+// Examples assembled from the group's real taxonomy values, so pasting one
+// returns real data from the configured scope — not vocabulary that only
+// exists in documentation.
+const quoteVal = v => (/^[A-Za-z0-9_.-]+$/.test(v) ? v : `"${v}"`)
+const exampleSections = computed(() => {
+  const byName = Object.fromEntries(fields.value.map(f => [f.name, f]))
+  const val  = (name, i = 0) => {
+    const f = byName[name]
+    return f && f.values.length > i ? quoteVal(f.values[i]) : null
+  }
+  const sections = []
+  sections.push({ title: 'Basics', items: [
+    'state = opened',
+    'type = epic AND state = opened',
+    'weight >= 8 ORDER BY weight DESC',
+  ]})
+  const tax = []
+  for (const name of ['piid', 'epic_type', 'project_label', 'lifecycle',
+                      'work_type', 'risk', 'wsjf_urgency']) {
+    const v = val(name)
+    if (v) tax.push(`${name} = ${v} AND state = opened`)
+  }
+  const p0 = val('piid'), p1 = val('piid', 1)
+  if (p0 && p1) tax.push(`piid IN (${p0}, ${p1}) ORDER BY weight DESC`)
+  if (tax.length) sections.push({ title: 'SAFe taxonomy (this group’s values)', items: tax })
+  sections.push({ title: 'Dates and functions', items: [
+    'updated >= -4w',
+    'due <= endOfYear() AND state = opened',
+    'created >= startOfMonth(-1) AND created < startOfMonth()',
+  ]})
+  sections.push({ title: 'People and empties', items: [
+    'assignee = currentUser() AND state = opened',
+    'assignee IS EMPTY AND due < startOfDay()',
+  ]})
+  sections.push({ title: 'Text and Jira aliases', items: [
+    'text ~ "readiness" ORDER BY updated DESC',
+    'status = opened AND issuetype = epic',      // Jira names alias to GitLab fields
+  ]})
+  if (byName.business_value) sections.push({ title: 'Business value', items: [
+    'business_value >= 8 ORDER BY business_value DESC, weight DESC',
+  ]})
+  return sections
+})
+
+const query     = ref('')
+const limit     = ref(100)
+const offset    = ref(0)        // pagination window start (run() resets to 0)
+const state     = ref('idle')   // idle | loading | ready | error
+const result    = ref(null)
+const error     = ref(null)
+const lastQuery = ref('')       // the exact string the error position anchors to
+const localSort = ref(null)     // { key, dir } — client-side re-sort of fetched rows
+const exporting   = ref(false)  // a CSV export's uncapped re-fetch is in flight
+const exportError = ref(null)
+
+// ── Configure Columns — persisted like the other dialog state (#80) ──
+const COLUMNS_KEY = 'nce-search-columns'
+const validKeys = new Set(ALL_COLUMNS.map(c => c.key))
+const sanitize  = keys => (Array.isArray(keys) ? keys.filter(k => validKeys.has(k)) : [])
+const stored    = sanitize(loadStored(COLUMNS_KEY, DEFAULT_COLUMNS))
+const visibleKeys = ref(stored.length ? stored : [...DEFAULT_COLUMNS])
+const showCols  = ref(false)
+
+// The stored sequence IS the column order — ◀ ▶ in the popover reorder it;
+// newly ticked columns append at the end.
+const byKey = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]))
+const visibleColumns = computed(() => visibleKeys.value.map(k => byKey[k]).filter(Boolean))
+// Popover listing: visible columns first, in table order, then the rest.
+const popoverColumns = computed(() =>
+  [...visibleColumns.value, ...ALL_COLUMNS.filter(c => !visibleKeys.value.includes(c.key))])
+const isVisible = key => visibleKeys.value.includes(key)
+
+function toggleColumn(key) {
+  const cur = visibleKeys.value
+  if (cur.includes(key)) {
+    if (cur.length === 1) return                    // never zero columns
+    visibleKeys.value = cur.filter(k => k !== key)
+    if (localSort.value && localSort.value.key === key) localSort.value = null
+  } else {
+    visibleKeys.value = [...cur, key]
+  }
+  saveStored(COLUMNS_KEY, visibleKeys.value)
+}
+
+function moveColumn(key, delta) {
+  const cur = [...visibleKeys.value]
+  const i = cur.indexOf(key)
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= cur.length) return
+  ;[cur[i], cur[j]] = [cur[j], cur[i]]
+  visibleKeys.value = cur
+  saveStored(COLUMNS_KEY, cur)
+}
+
+function resetColumns() {
+  visibleKeys.value = [...DEFAULT_COLUMNS]
+  if (localSort.value && !DEFAULT_COLUMNS.includes(localSort.value.key)) localSort.value = null
+  saveStored(COLUMNS_KEY, visibleKeys.value)
+}
+
+// Dismiss the popover on any pointer-down outside it (the click still lands
+// on whatever was pressed) and on Escape.
+const colsWrap = ref(null)
+function dismissCols(e) {
+  if (!showCols.value) return
+  if (e.type === 'keydown' ? e.key === 'Escape'
+                           : !(colsWrap.value && colsWrap.value.contains(e.target))) {
+    showCols.value = false
+  }
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', dismissCols)
+  document.addEventListener('keydown', dismissCols)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', dismissCols)
+  document.removeEventListener('keydown', dismissCols)
+})
+
+// "100 of 342 results" when the exact total is known and exceeds the page;
+// plain "N results" otherwise (total unknown, or the page is the whole set).
+const resultSummary = computed(() => {
+  const r = result.value
+  const noun = `result${r.count === 1 ? '' : 's'}`
+  if (r.total != null && r.total !== r.count) return `${r.count} of ${r.total} ${noun}`
+  return `${r.count} ${noun}`
+})
+
+const pagerRange = computed(() => {
+  const r = result.value
+  if (!r.count) return `nothing past ${offset.value}`
+  const range = `${offset.value + 1}–${offset.value + r.count}`
+  return r.total != null ? `${range} of ${r.total}` : range
+})
+
+const syntaxError = computed(() =>
+  error.value && error.value.detail && error.value.detail.kind === 'syntax'
+  && Number.isInteger(error.value.detail.position))
+
+const caretLine = computed(() =>
+  syntaxError.value ? ' '.repeat(error.value.detail.position) + '^' : '')
+
+const errorLead = computed(() => {
+  const kind = error.value && error.value.detail && error.value.detail.kind
+  if (kind === 'semantic')    return 'Query error'
+  if (kind === 'transport')   return 'GitLab unreachable'
+  if (kind === 'unavailable') return 'Server has no GitLab connection'
+  return 'Query failed'
+})
+
+async function run(fromOffset = 0) {
+  state.value     = 'loading'
+  error.value     = null
+  exportError.value = null
+  showCols.value  = false
+  localSort.value = null        // a fresh fetch renders in query order
+  lastQuery.value = query.value
+  offset.value    = fromOffset
+  try {
+    const lim = Number.isInteger(limit.value) && limit.value > 0 ? limit.value : undefined
+    result.value = await postQuery(query.value, lim, fromOffset || undefined)
+    state.value  = 'ready'
+  } catch (e) {
+    error.value = e
+    state.value = 'error'
+  }
+}
+
+// ── Export ──
+//    CSV is the data-extract path: it covers EVERY match, not just the page —
+//    a result-limited page re-runs the query with limit "all" first (no page
+//    window), then serializes. Columns mirror the CLI's csv format (the flat
+//    item schema, list cells joined with ', '); an active header sort is
+//    applied to the full set. JSON stays the untouched result envelope,
+//    byte-for-byte what POST /api/query returned for the current page.
+
+function download(name, mime, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }))
+  const a = Object.assign(document.createElement('a'), { href: url, download: name })
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')
+
+function csvCell(v) {
+  if (v == null) return ''
+  const s = Array.isArray(v) ? v.join(', ') : String(v)
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+}
+
+async function exportCsv() {
+  if (exporting.value) return
+  exportError.value = null
+  let rows
+  if (result.value.truncated || offset.value > 0) {
+    exporting.value = true
+    try {
+      rows = sortRows((await postQuery(result.value.query, 'all')).items)
+    } catch (e) {
+      exportError.value = e
+      return
+    } finally {
+      exporting.value = false
+    }
+  } else {
+    rows = displayRows.value                // the page IS the whole set
+  }
+  const cols = Object.keys(rows[0])         // server key order = the schema
+  const lines = [cols.join(',')]
+  for (const row of rows) lines.push(cols.map(c => csvCell(row[c])).join(','))
+  download(`jql-results-${stamp()}.csv`, 'text/csv', lines.join('\r\n') + '\r\n')
+}
+
+function exportJson() {
+  download(`jql-results-${stamp()}.json`, 'application/json',
+           JSON.stringify(result.value, null, 2) + '\n')
+}
+
+// ── Client-side header sorting — a re-sort of the fetched rows only; the
+//    query's ORDER BY still defines the fetch order. No new API call. ──
+function toggleSort(key) {
+  if (localSort.value && localSort.value.key === key) {
+    localSort.value = { key, dir: localSort.value.dir === 'asc' ? 'desc' : 'asc' }
+  } else {
+    localSort.value = { key, dir: 'asc' }
+  }
+}
+
+function ariaSort(key) {
+  if (!localSort.value || localSort.value.key !== key) return 'none'
+  return localSort.value.dir === 'asc' ? 'ascending' : 'descending'
+}
+
+// Leaf segment of a namespace path — what the JQL `project` predicate calls
+// the project name ('portfolio/team-a/payments' -> 'payments').
+function leaf(path) {
+  return path ? String(path).split('/').pop() : null
+}
+
+function sortValue(row, col) {
+  const v = col.key === 'project' ? leaf(row.namespace_path) : row[col.key]
+  if (v == null) return null
+  if (col.kind === 'list')   return v.length ? v.join(', ').toLowerCase() : null
+  if (col.kind === 'number') return typeof v === 'number' ? v : Number(v)
+  if (col.kind === 'date')   return v            // ISO-8601 sorts lexicographically
+  return String(v).toLowerCase()
+}
+
+// Apply the active header sort (if any) to a copy of `rows` — shared by the
+// on-screen table and the CSV export, so both agree on order.
+function sortRows(rows) {
+  const sort = localSort.value
+  const copy = [...rows]
+  if (!sort) return copy
+  const col = ALL_COLUMNS.find(c => c.key === sort.key)
+  const dirMul = sort.dir === 'asc' ? 1 : -1
+  // Stable sort, empties last in either direction.
+  return copy.sort((a, b) => {
+    const va = sortValue(a, col)
+    const vb = sortValue(b, col)
+    if (va == null && vb == null) return 0
+    if (va == null) return 1
+    if (vb == null) return -1
+    if (va < vb) return -1 * dirMul
+    if (va > vb) return  1 * dirMul
+    return 0
+  })
+}
+
+const displayRows = computed(() => sortRows(result.value ? result.value.items : []))
+
+function day(iso) {
+  return iso ? String(iso).slice(0, 10) : '—'
+}
+
+const CELL_CLASS = { number: 'cell-num', date: 'cell-date', list: 'cell-people' }
+function cellClass(col) {
+  if (col.key === 'title')  return 'cell-title'
+  if (col.key === 'labels') return 'cell-labels'
+  return CELL_CLASS[col.kind] || 'cell-type'
+}
+
+// ── GitLab-true label chips ──
+//    The envelope's label_colors maps title -> {color, text_color} straight
+//    from GitLab's label definitions. GitLab's own text_color wins; the YIQ
+//    rule (same one epic-cards uses) is the fallback ink. Labels the map
+//    doesn't know keep the default chip style.
+function textOn(bg) {
+  const r = parseInt(bg.slice(1, 3), 16)
+  const g = parseInt(bg.slice(3, 5), 16)
+  const b = parseInt(bg.slice(5, 7), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? '#1a1a1a' : '#ffffff'
+}
+
+function chipStyle(name) {
+  const c = result.value && result.value.label_colors && result.value.label_colors[name]
+  if (!c || !/^#[0-9a-fA-F]{6}$/.test(c.color || '')) return null
+  return { background: c.color, color: c.text_color || textOn(c.color), border: 'none' }
+}
+</script>
+
+<style scoped>
+.search-page {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* ── Top bar ── */
+.search-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 2px solid rgba(252, 109, 38, 0.25);
+  background: var(--surface);
+}
+.back-link {
+  color: var(--action);
+  text-decoration: none;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.back-link:hover { text-decoration: underline; }
+.search-title { font-size: 0.95rem; font-weight: 600; color: var(--text-1); }
+.search-sub   { font-size: 0.75rem; color: var(--text-3); }
+.scope-slug   { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 0.72rem; color: var(--text-2); }
+
+/* ── Query form ── */
+.query-form {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.query-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.7rem;
+}
+.query-input:focus { outline: none; border-color: var(--action); }
+.limit-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.limit-input {
+  width: 5.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 0.82rem;
+  padding: 0.45rem 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.run-btn {
+  background: var(--action);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+}
+.run-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Search-bar affordances: expand editor + help (Jira-style, far right) ── */
+.icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.5rem 0.6rem;
+}
+.icon-btn:hover, .icon-btn.active { border-color: var(--action); color: var(--action); }
+.query-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+/* ── Help panel ── */
+.help-panel {
+  flex-shrink: 0;
+  margin: 0.75rem 1.25rem 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-y: auto;
+  max-height: 60vh;
+  font-size: 0.8rem;
+}
+.help-head {
+  /* Pinned while the panel body scrolls — the ✕ must stay reachable. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  padding: 0.9rem 1.1rem 0.55rem;
+}
+.help-body { padding: 0.35rem 1.1rem 0.9rem; }
+.help-title { font-weight: 600; color: var(--text-1); }
+.help-scope { font-size: 0.75rem; color: var(--text-3); }
+.help-close { margin-left: auto; padding: 0.25rem 0.5rem; }
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.5rem 1.5rem;
+}
+.help-block h3 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: 0.7rem 0 0.3rem;
+}
+.help-note { color: var(--text-3); margin: 0.1rem 0 0.4rem; }
+.help-table { border-collapse: collapse; }
+.help-table td, .help-table th {
+  padding: 0.15rem 0.9rem 0.15rem 0;
+  text-align: left;
+  vertical-align: top;
+  color: var(--text-2);
+}
+.help-table th { font-size: 0.7rem; color: var(--text-3); font-weight: 600; }
+.help-table code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--text-1);
+}
+.help-fields-wrap { overflow-x: auto; }
+.help-fields .alias { color: var(--text-3); font-size: 0.72rem; }
+.cell-values { max-width: 34rem; }
+.value-chip {
+  display: inline-block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  margin: 0.08rem 0.25rem 0.08rem 0;
+}
+.help-examples { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+.help-examples > li { margin-bottom: 0.5rem; }
+.help-examples ol { list-style: decimal; padding-left: 1.3rem; margin: 0.2rem 0; }
+.help-examples ol li { margin: 0.22rem 0; }
+.example-section { font-weight: 600; color: var(--text-2); }
+.copy-btn { font-size: 0.72rem; padding: 0.18rem 0.4rem; margin-left: 0.4rem; }
+
+/* ── Inline errors ── */
+.error-box {
+  flex-shrink: 0;
+  margin: 0.85rem 1.25rem 0;
+  border: 1px solid rgba(248, 81, 73, 0.5);
+  border-radius: 6px;
+  background: rgba(248, 81, 73, 0.07);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+.error-lead {
+  font-weight: 700;
+  color: #f85149;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
+.error-query {
+  margin: 0 0 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--text-1);
+  white-space: pre;
+  overflow-x: auto;
+}
+.error-msg { line-height: 1.45; }
+.error-expected { margin-top: 0.35rem; color: var(--text-3); }
+.error-expected code {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  margin-right: 0.3rem;
+  font-size: 0.76rem;
+  color: var(--text-2);
+}
+
+/* ── Empty / loading states ── */
+.search-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.empty-lead { font-size: 1rem; font-weight: 600; color: var(--text-2); margin: 0 0 0.3rem; }
+.search-empty code {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.78rem;
+}
+.example-list {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+}
+.example-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--action);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+}
+.example-btn:hover { border-color: var(--action); }
+
+/* ── Results ── */
+.results-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 1.25rem;
+  font-size: 0.76rem;
+  color: var(--text-2);
+}
+.meta-truncated { color: #d29922; }
+.meta-hint {
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  border-radius: 4px;
+  padding: 0.05rem 0.5rem;
+}
+.meta-reset {
+  background: none;
+  border: none;
+  color: var(--action);
+  cursor: pointer;
+  font-size: 0.76rem;
+  padding: 0;
+}
+.meta-reset:hover { text-decoration: underline; }
+.pager { display: inline-flex; align-items: center; gap: 0.45rem; margin-left: 0.6rem; }
+.pager-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.55rem;
+}
+.pager-btn:hover:enabled { border-color: var(--action); color: var(--action); }
+.pager-btn:disabled { opacity: 0.45; cursor: default; }
+.pager-range { font-size: 0.75rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.export-group { margin-left: auto; display: inline-flex; gap: 0.4rem; }
+.export-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.55rem;
+}
+.export-btn:hover { border-color: var(--action); color: var(--action); }
+.export-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Configure Columns popover ── */
+.cols-wrap { position: relative; display: inline-flex; }
+.cols-pop {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 13rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.cols-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.cols-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cols-move { display: inline-flex; gap: 0.2rem; }
+.cols-move-btn {
+  padding: 0 0.3rem;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cols-move-btn:hover:not(:disabled) { border-color: var(--action); color: var(--action); }
+.cols-move-btn:disabled { opacity: 0.35; cursor: default; }
+.cols-reset {
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cols-reset:hover { border-color: var(--action); color: var(--action); }
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1.25rem 1.25rem;
+}
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.results-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  padding: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+.th-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+}
+.th-btn:hover { color: var(--text-1); }
+.sort-arrow { color: var(--action); font-size: 0.65rem; }
+.results-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  color: var(--text-2);
+}
+.cell-num  { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cell-date { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-3); }
+.cell-type { white-space: nowrap; }
+.cell-title { min-width: 16rem; }
+.cell-title a { color: var(--text-1); text-decoration: none; font-weight: 600; }
+.cell-title a:hover { color: var(--action); text-decoration: underline; }
+.cell-people { white-space: nowrap; }
+.state-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.06rem 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.state-chip.opened { background: rgba(63, 185, 80, 0.14); color: #3fb950; }
+.state-chip.closed { background: var(--surface-alt); color: var(--text-3); }
+.cell-labels { max-width: 18rem; }
+.label-chip {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 0.03rem 0.45rem;
+  margin: 0.08rem 0.25rem 0.08rem 0;
+  white-space: nowrap;
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .search-bar, .query-form, .results-meta { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .search-sub { display: none; }
+  .query-form { flex-wrap: wrap; }
+  .query-input { flex-basis: 100%; }
+  .table-wrap { padding: 0 0.75rem 0.75rem; }
+}
+</style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="overlay" @click.self="$emit('close')">
+  <div class="overlay" @mousedown.self="overlayDown = true" @mouseup="overlayUp">
     <div class="dialog">
 
       <div class="dialog-header">
@@ -63,7 +63,15 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 const props = defineProps({
   deploymentType: { type: String, default: '' },
 })
-defineEmits(['close'])
+const emit = defineEmits(['close'])
+// Backdrop dismiss only on a full click that starts AND ends on the overlay —
+// a text-selection drag that escapes the panel fires click.self too (the
+// click lands on the elements' common ancestor), and must not close it.
+const overlayDown = ref(false)
+function overlayUp(e) {
+  if (overlayDown.value && e.target === e.currentTarget) emit('close')
+  overlayDown.value = false
+}
 
 const ALL_TABS = [
   { key: 'eks', label: 'EKS' },

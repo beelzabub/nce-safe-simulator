@@ -13,6 +13,7 @@ from .image_convert import ImageConvertMixin
 from .importexport import ImportExportMixin
 from .serve import ServeMixin
 from .preflight import PreflightMixin
+from .query import QueryMixin
 
 __all__ = [
     "UtilitiesMixin",
@@ -30,4 +31,5 @@ __all__ = [
     "ImportExportMixin",
     "ServeMixin",
     "PreflightMixin",
+    "QueryMixin",
 ]
