@@ -114,10 +114,16 @@ def _format_jql_table(result):
             lines.append("  " + "  ".join(
                 cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
     lines.append("")
-    lines.append("  %d item(s)" % result["count"])
+    offset = result.get("offset") or 0
+    if offset:
+        lines.append("  %d item(s)  (results %d–%d)"
+                     % (result["count"], offset + 1, offset + result["count"]))
+    else:
+        lines.append("  %d item(s)" % result["count"])
     if result["truncated"]:
         lines.append("  Truncated at limit %d — more matches may exist; "
-                     "raise --limit to see them." % result["limit"])
+                     "raise --limit or use --offset %d for the next page."
+                     % (result["limit"], offset + result["limit"]))
     return "\n".join(lines)
 
 
@@ -323,7 +329,7 @@ class QueryMixin:
                     raise SystemExit(2)
         return raw, None
 
-    def _tool_query(self, jql, limit=None, format="table"):
+    def _tool_query(self, jql, limit=None, offset=None, format="table"):
         """`query` utility tool: run a JQL query and print the results.
 
         ``jql`` is either the query text or a path to a file containing the
@@ -347,7 +353,7 @@ class QueryMixin:
                   % (format, ", ".join(JQL_FORMATS)), file=sys.stderr)
             raise SystemExit(2)
         try:
-            result = self.run_jql(jql, limit=limit)
+            result = self.run_jql(jql, limit=limit, offset=offset or 0)
         except JqlSyntaxError as exc:
             print(_jql_syntax_error_text(jql, exc), file=sys.stderr)
             raise SystemExit(2)
@@ -357,7 +363,7 @@ class QueryMixin:
         except JqlExecutionError as exc:
             print("Query execution failed: %s" % exc, file=sys.stderr)
             raise SystemExit(1)
-        except ValueError as exc:   # bad limit from run_jql
+        except ValueError as exc:   # bad limit/offset from run_jql
             print("Query error: %s" % exc, file=sys.stderr)
             raise SystemExit(2)
 
@@ -367,7 +373,9 @@ class QueryMixin:
             _write_jql_csv(result, sys.stdout)
             if result["truncated"]:
                 print("Truncated at limit %d — more matches may exist; "
-                      "raise --limit to see them." % result["limit"],
+                      "raise --limit or use --offset %d for the next page."
+                      % (result["limit"],
+                         (result.get("offset") or 0) + result["limit"]),
                       file=sys.stderr)
         else:
             print(_format_jql_table(result))

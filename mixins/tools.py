@@ -309,6 +309,7 @@ TOOLS = [
             {"name": "jql",    "prompt": "JQL query (or path to a file containing one)", "type": str,
              "help": "e.g. state = opened AND piid = 2026Q3 ORDER BY weight DESC — or a path to a file holding the query. Grammar and field vocabulary in the README (## Utility Tools → Analysis)."},
             {"name": "limit",  "prompt": "Max results (blank = 100)", "type": int, "optional": True},
+            {"name": "offset", "prompt": "Skip this many results (pagination)", "type": int, "optional": True},
             {"name": "format", "prompt": "Output format", "type": str, "widget": "select",
              "options": ["table", "json", "csv"], "default": "table"},
         ],
