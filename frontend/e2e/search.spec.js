@@ -279,6 +279,16 @@ test.describe('JQL search Configure Columns (#302)', () => {
     await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(0)
   })
 
+  test('the derived Project column shows the namespace leaf', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await page.locator('.cols-item', { hasText: /^\s*Project\s*$/ }).click()
+    await expect(page.locator('.th-btn', { hasText: 'Project' })).toHaveCount(1)
+    // ROW namespace_path is 'portfolio/team-a' — the leaf renders, 11th col
+    await expect(columnCells(page, 11).first()).toHaveText('team-a')
+  })
+
   test('the last remaining column cannot be unchecked', async ({ page }) => {
     await openSearch(page, { json: envelope(ITEMS) })
     await run(page, 'state = opened')

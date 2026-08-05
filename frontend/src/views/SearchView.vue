@@ -225,6 +225,7 @@
                 <template v-else-if="col.key === 'labels'">
                   <span v-for="l in row.labels" :key="l" class="label-chip" :style="chipStyle(l)">{{ l }}</span>
                 </template>
+                <template v-else-if="col.key === 'project'">{{ leaf(row.namespace_path) || '—' }}</template>
                 <template v-else-if="col.kind === 'list'">{{ (row[col.key] || []).length ? row[col.key].join(', ') : '—' }}</template>
                 <template v-else-if="col.kind === 'date'">{{ day(row[col.key]) }}</template>
                 <template v-else>{{ row[col.key] ?? '—' }}</template>
@@ -269,6 +270,10 @@ const ALL_COLUMNS = [
   { key: 'start_date',     label: 'Start',          kind: 'date' },
   { key: 'closed_at',      label: 'Closed',         kind: 'date' },
   { key: 'parent_iid',     label: 'Parent IID',     kind: 'number' },
+  // Derived, not a schema field: the leaf segment of namespace_path — the
+  // same value the JQL `project` predicate matches. Namespace keeps the
+  // full path.
+  { key: 'project',        label: 'Project',        kind: 'text' },
   { key: 'namespace_path', label: 'Namespace',      kind: 'text' },
 ]
 const DEFAULT_COLUMNS = ['iid', 'title', 'type', 'state', 'labels', 'weight',
@@ -503,8 +508,14 @@ function ariaSort(key) {
   return localSort.value.dir === 'asc' ? 'ascending' : 'descending'
 }
 
+// Leaf segment of a namespace path — what the JQL `project` predicate calls
+// the project name ('portfolio/team-a/payments' -> 'payments').
+function leaf(path) {
+  return path ? String(path).split('/').pop() : null
+}
+
 function sortValue(row, col) {
-  const v = row[col.key]
+  const v = col.key === 'project' ? leaf(row.namespace_path) : row[col.key]
   if (v == null) return null
   if (col.kind === 'list')   return v.length ? v.join(', ').toLowerCase() : null
   if (col.kind === 'number') return typeof v === 'number' ? v : Number(v)
