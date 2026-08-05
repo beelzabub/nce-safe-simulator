@@ -94,7 +94,7 @@
 
       <div class="help-block">
         <h3>Fields</h3>
-        <p class="help-note">Canonical names with Jira aliases in parentheses; taxonomy fields list the exact values valid <em>in this group's config</em>.</p>
+        <p class="help-note">Canonical names with Jira aliases in parentheses; taxonomy fields list the exact values valid <em>in this group's config</em>. People fields (<code>assignee</code>, <code>author</code>) match the username <em>or</em> the display name — <code>assignee = beelzabub</code> and <code>assignee = "Jamie Powers"</code> are equivalent.</p>
         <div class="help-fields-wrap">
           <table class="help-table help-fields" v-if="fields.length">
             <thead><tr><th>field</th><th>type</th><th>values</th></tr></thead>
@@ -164,6 +164,14 @@
           sorted locally — first {{ result.count }} results only, not a true top-{{ result.count }} by this column
         </span>
         <button v-if="localSort" class="meta-reset" type="button" @click="localSort = null">reset to query order</button>
+        <span v-if="result.count" class="export-group">
+          <button class="export-btn" type="button"
+                  title="Download the displayed rows (current sort) as CSV — same columns as the CLI's csv format"
+                  @click="exportCsv">⬇ CSV</button>
+          <button class="export-btn" type="button"
+                  title="Download the full result envelope (items, count, truncated, plan) as JSON — identical to the API response"
+                  @click="exportJson">⬇ JSON</button>
+        </span>
       </div>
 
       <div v-if="!result.count" class="search-empty">
@@ -341,6 +349,40 @@ async function run() {
     error.value = e
     state.value = 'error'
   }
+}
+
+// ── Export the current results — no new fetch, exactly what was queried ──
+//    CSV mirrors the CLI's csv format (columns = the flat item schema, list
+//    cells joined with ', ') and follows the displayed order, local sort
+//    included. JSON is the untouched result envelope, byte-for-byte what
+//    POST /api/query returned (fetch order — a header sort is display-only).
+
+function download(name, mime, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }))
+  const a = Object.assign(document.createElement('a'), { href: url, download: name })
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')
+
+function csvCell(v) {
+  if (v == null) return ''
+  const s = Array.isArray(v) ? v.join(', ') : String(v)
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+}
+
+function exportCsv() {
+  const rows = displayRows.value
+  const cols = Object.keys(rows[0])         // server key order = the schema
+  const lines = [cols.join(',')]
+  for (const row of rows) lines.push(cols.map(c => csvCell(row[c])).join(','))
+  download(`jql-results-${stamp()}.csv`, 'text/csv', lines.join('\r\n') + '\r\n')
+}
+
+function exportJson() {
+  download(`jql-results-${stamp()}.json`, 'application/json',
+           JSON.stringify(result.value, null, 2) + '\n')
 }
 
 // ── Client-side header sorting — a re-sort of the fetched rows only; the
@@ -668,6 +710,17 @@ function day(iso) {
   padding: 0;
 }
 .meta-reset:hover { text-decoration: underline; }
+.export-group { margin-left: auto; display: inline-flex; gap: 0.4rem; }
+.export-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.55rem;
+}
+.export-btn:hover { border-color: var(--action); color: var(--action); }
 
 .table-wrap {
   flex: 1;
