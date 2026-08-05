@@ -23,6 +23,12 @@ from .utils import _clear, _pause, _tee_to_log
 #   optional    – True means blank input → None (only meaningful for int/str)
 #   cli_only     – True hides the param from the web UI tool payload; the CLI
 #                  still prompts for / accepts it (e.g. server-side output_path)
+#
+# tool-level flags (beside key/description/method/params):
+#   stdout_is_data – the tool emits machine-readable payloads (JSON/CSV) on
+#                  stdout, so the runner's banner and param echo go to stderr
+#                  and a shell pipe (`… --format json | jq`) sees only the
+#                  payload. The tee'd log still captures the payload itself.
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -289,6 +295,19 @@ TOOLS = [
             {"name": "count",   "prompt": "Number of issues to orphan (blank to use percent instead)", "type": int,   "optional": True},
             {"name": "percent", "prompt": "Percent of issues to orphan (used when count is blank)",    "type": float, "default": 10.0},
             {"name": "dry_run", "prompt": "Dry run?",                                                   "type": bool,  "default": False, "cli_only": True},
+        ],
+    },
+    {
+        "key":         "query",
+        "description": "Run a JQL-style query against the live group's work items (AND/OR/NOT, comparisons, ORDER BY; table/json/csv output)",
+        "method":      "_tool_query",
+        "stdout_is_data": True,
+        "params": [
+            {"name": "jql",    "prompt": "JQL query", "type": str,
+             "help": "e.g. state = opened AND piid = 2026Q3 ORDER BY weight DESC — grammar and field vocabulary in the README (## Utility Tools → Query)."},
+            {"name": "limit",  "prompt": "Max results (blank = 100)", "type": int, "optional": True},
+            {"name": "format", "prompt": "Output format", "type": str, "widget": "select",
+             "options": ["table", "json", "csv"], "default": "table"},
         ],
     },
     {
@@ -689,6 +708,11 @@ TOOL_CATEGORIES = [
         "tools": ["audit-hierarchy", "audit-labels", "list-wikis"],
     },
     {
+        "name":        "Query",
+        "description": "Search work items with JQL-style queries",
+        "tools": ["query"],
+    },
+    {
         "name":        "Import / Export",
         "description": "Move epics and issues in and out of GitLab",
         "tools": ["export-bundle", "import-bundle",
@@ -737,6 +761,18 @@ def _tool_log_stem(tool_key: str) -> str:
     """Return a descriptive log filename stem for a tool, e.g. 'seed-data-close-percent'."""
     cat = _TOOL_CAT_SLUG.get(tool_key, "misc")
     return f"{cat}-{tool_key}"
+
+
+def _chrome_printer(tool):
+    """print() for the runner's chrome (banner, param echo) around one tool.
+
+    Tools flagged stdout_is_data emit machine-readable payloads on stdout, so
+    their chrome goes to stderr — a shell pipe then sees only the payload.
+    sys.stderr is resolved at call time so capture/redirection keeps working.
+    """
+    if not tool.get("stdout_is_data"):
+        return print
+    return lambda *args, **kwargs: print(*args, file=sys.stderr, **kwargs)
 
 
 class _BackSignal(Exception):
@@ -1016,12 +1052,13 @@ class ToolsMixin:
             / f"{now.strftime('%H-%M-%S')}_{_tool_log_stem(tool['key'])}.log"
         )
 
+        echo = _chrome_printer(tool)
         with _tee_to_log(log_path):
-            print()
-            print(f"  {tool['key']} — {tool['description']}")
-            print(f"  (enter 'b' at any prompt to cancel and go back)")
-            print(f"  log → {log_path}")
-            print()
+            echo()
+            echo(f"  {tool['key']} — {tool['description']}")
+            echo(f"  (enter 'b' at any prompt to cancel and go back)")
+            echo(f"  log → {log_path}")
+            echo()
 
             prefills = prefills or {}
             kwargs = {}
@@ -1038,7 +1075,7 @@ class ToolsMixin:
                         val = float(raw)
                     else:
                         val = raw
-                    print(f"  {param['prompt']}: {val}  (from CLI)")
+                    echo(f"  {param['prompt']}: {val}  (from CLI)")
                     kwargs[name] = val
                 else:
                     kwargs[name] = _prompt_param(param)
@@ -1050,7 +1087,7 @@ class ToolsMixin:
             # pipeline fails loudly instead of silently mutating things.
             self._tool_confirm_gate(tool, assume_yes=bool(prefills.get("yes")))
 
-            print()
+            echo()
             getattr(self, tool["method"])(**kwargs)
             self._last_tool_key    = tool["key"]
             self._last_tool_kwargs = kwargs.copy()
@@ -1063,16 +1100,17 @@ class ToolsMixin:
             / now.strftime("%Y-%m-%d")
             / f"{now.strftime('%H-%M-%S')}_{_tool_log_stem(tool['key'])}.log"
         )
+        echo = _chrome_printer(tool)
         with _tee_to_log(log_path):
-            print()
-            print(f"  {tool['key']} — {tool['description']}  [re-run]")
-            print(f"  log → {log_path}")
-            print()
+            echo()
+            echo(f"  {tool['key']} — {tool['description']}  [re-run]")
+            echo(f"  log → {log_path}")
+            echo()
             for param in tool["params"]:
                 val = kwargs.get(param["name"])
-                print(f"  {param['prompt']}: {val}")
+                echo(f"  {param['prompt']}: {val}")
             self._tool_confirm_gate(tool)
-            print()
+            echo()
             getattr(self, tool["method"])(**kwargs)
             self._last_tool_key    = tool["key"]
             self._last_tool_kwargs = kwargs.copy()

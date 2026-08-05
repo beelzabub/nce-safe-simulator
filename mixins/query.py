@@ -13,11 +13,21 @@ this mixin only wires it to the live connection:
   planner's push-down variables only narrow the fetch, never the result set,
 - resolves Business Value through the existing custom-field plumbing
   (``_find_bv_field``) when a query references ``business_value``.
+
+The CLI surface (issue #301) lives here too: ``_tool_query`` backs the
+``query`` entry in the ``TOOLS`` registry (mixins/tools.py) — a thin
+wrapper over ``run_jql`` with table/json/csv formatters. Machine formats
+print the payload alone on stdout (the runner's chrome goes to stderr via
+the registry's ``stdout_is_data`` flag); every error path prints to stderr
+and exits non-zero.
 """
+import csv
 import json
+import sys
 from pathlib import Path
 
-from jql import parse
+from jql import JqlSyntaxError, parse
+from jql.dates import JqlEvaluationError
 from jql.executor import (
     EvalContext,
     JqlExecutionError,
@@ -27,8 +37,92 @@ from jql.executor import (
     shape_node,
     sort_items,
 )
-from jql.fields import FieldRegistry
-from jql.planner import plan_query, query_mentions_current_user
+from jql.fields import FieldRegistry, UnknownFieldError, UnknownFieldValueError
+from jql.planner import JqlPlanError, plan_query, query_mentions_current_user
+
+
+#: Output formats the `query` CLI tool accepts.
+JQL_FORMATS = ("table", "json", "csv")
+
+#: CSV column order — exactly the flat schema shape_node produces
+#: (tests assert the two never drift).
+JQL_OUTPUT_FIELDS = [
+    "id", "iid", "type", "title", "state", "labels", "assignees", "author",
+    "milestone", "milestone_due", "iteration", "weight", "business_value",
+    "start_date", "due_date", "created_at", "updated_at", "closed_at",
+    "parent_iid", "namespace_path", "web_url", "description",
+]
+
+#: Columns of the human-readable table (title last: variable width).
+JQL_TABLE_COLUMNS = ["iid", "type", "state", "weight", "assignees",
+                     "due_date", "title"]
+
+#: Widest a table title cell may grow before truncation.
+_JQL_TITLE_WIDTH = 60
+
+#: Query-shaped errors beyond bad syntax: unknown vocabulary, an unplannable
+#: query, or bad date arithmetic. All carry a user-facing message (unknown
+#: fields/values list the valid vocabulary) — the CLI prints it and exits 2.
+_JQL_QUERY_ERRORS = (UnknownFieldError, UnknownFieldValueError,
+                     JqlPlanError, JqlEvaluationError)
+
+
+def _jql_cell(value):
+    """One flat-schema value as display/CSV text: lists join with ', ',
+    None becomes ''."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def _jql_syntax_error_text(query, exc):
+    """JQL-style parse-error display: the position/expected-token message
+    plus a caret line marking the offset in the query text."""
+    offset = getattr(exc, "offset", 0) or 0
+    offset = max(0, min(int(offset), len(query)))
+    return "Parse error: %s\n  %s\n  %s^" % (exc, query, " " * offset)
+
+
+def _format_jql_table(result):
+    """The default human-readable rendering of a run_jql result dict."""
+    items = result["items"]
+    lines = []
+    if not items:
+        lines.append("  No matching work items.")
+    else:
+        rows = []
+        for item in items:
+            row = []
+            for col in JQL_TABLE_COLUMNS:
+                text = _jql_cell(item.get(col))
+                if col == "title" and len(text) > _JQL_TITLE_WIDTH:
+                    text = text[:_JQL_TITLE_WIDTH - 1] + "…"
+                row.append(text)
+            rows.append(row)
+        widths = [max(len(col), *(len(r[i]) for r in rows))
+                  for i, col in enumerate(JQL_TABLE_COLUMNS)]
+        lines.append("  " + "  ".join(
+            col.ljust(widths[i]) for i, col in enumerate(JQL_TABLE_COLUMNS)).rstrip())
+        lines.append("  " + "  ".join("-" * w for w in widths))
+        for row in rows:
+            lines.append("  " + "  ".join(
+                cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
+    lines.append("")
+    lines.append("  %d item(s)" % result["count"])
+    if result["truncated"]:
+        lines.append("  Truncated at limit %d — more matches may exist; "
+                     "raise --limit to see them." % result["limit"])
+    return "\n".join(lines)
+
+
+def _write_jql_csv(result, stream):
+    """Write the result's items as CSV (header + one row per item)."""
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(JQL_OUTPUT_FIELDS)
+    for item in result["items"]:
+        writer.writerow([_jql_cell(item.get(field)) for field in JQL_OUTPUT_FIELDS])
 
 
 class QueryMixin:
@@ -166,6 +260,54 @@ class QueryMixin:
                 "scanned":       scanned,
             },
         }
+
+    # ------------------------------------------------------------------
+    # CLI tool surface (issue #301)
+    # ------------------------------------------------------------------
+
+    def _tool_query(self, jql, limit=None, format="table"):
+        """`query` utility tool: run a JQL query and print the results.
+
+        format: ``table`` (human-readable, default), ``json`` (the full
+        run_jql envelope — items, count, truncated, plan), or ``csv``
+        (header + one row per item, list cells joined with ', ').
+
+        Machine formats land on stdout untouched so they pipe straight into
+        ``jq`` / a CSV reader — the runner's chrome is on stderr (the
+        registry's ``stdout_is_data`` flag). Errors print to stderr and exit
+        non-zero: 2 for a bad query, format, or limit; 1 for a transport
+        failure.
+        """
+        fmt = str(format or "table").strip().lower()
+        if fmt not in JQL_FORMATS:
+            print("Unknown format '%s'. Valid formats: %s"
+                  % (format, ", ".join(JQL_FORMATS)), file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            result = self.run_jql(jql, limit=limit)
+        except JqlSyntaxError as exc:
+            print(_jql_syntax_error_text(jql, exc), file=sys.stderr)
+            raise SystemExit(2)
+        except _JQL_QUERY_ERRORS as exc:
+            print("Query error: %s" % exc, file=sys.stderr)
+            raise SystemExit(2)
+        except JqlExecutionError as exc:
+            print("Query execution failed: %s" % exc, file=sys.stderr)
+            raise SystemExit(1)
+        except ValueError as exc:   # bad limit from run_jql
+            print("Query error: %s" % exc, file=sys.stderr)
+            raise SystemExit(2)
+
+        if fmt == "json":
+            print(json.dumps(result, indent=2))
+        elif fmt == "csv":
+            _write_jql_csv(result, sys.stdout)
+            if result["truncated"]:
+                print("Truncated at limit %d — more matches may exist; "
+                      "raise --limit to see them." % result["limit"],
+                      file=sys.stderr)
+        else:
+            print(_format_jql_table(result))
 
     # ------------------------------------------------------------------
     # Wiring helpers
