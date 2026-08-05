@@ -1,7 +1,8 @@
 # Caddy config for the single-box deployment of nce-safe-sim.com.
 # Caddy terminates TLS (auto-provisioned + auto-renewed from Let's Encrypt)
 # on ports 80/443 and reverse-proxies to the internal `nce-safe-sim` app
-# container on the shared `nce-net` Docker network.
+# container (non-root, listening on 8080 — #304) on the shared `nce-net`
+# Docker network.
 #
 # Brought up by scripts/deploy-local.sh; the app container is swapped in
 # place by scripts/redeploy.sh without touching Caddy.
@@ -12,5 +13,5 @@
 
 nce-safe-sim.com, www.nce-safe-sim.com {
 	encode gzip
-	reverse_proxy nce-safe-sim:80
+	reverse_proxy nce-safe-sim:8080
 }

@@ -294,7 +294,7 @@ class NceGitLab(
         self.default_roam_risk_relations_max   = _rr.get("max", 3)
 
         _sd = config.get("defaults", {}).get("serve", {})
-        self.serve_port = _sd.get("port", 80)
+        self.serve_port = _sd.get("port", 8080)
 
         # Preflight dependency gate (mixins/preflight.py). Config default is the
         # lowest tier; --skip-preflight flag and PREFLIGHT_SKIP env override it.

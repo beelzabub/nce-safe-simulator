@@ -144,10 +144,10 @@ Windows:
 python NceGitLab.py --serve
 ```
 
-The server starts on `http://localhost` (port **80**). Open `http://localhost/app/` in your browser.
+The server starts on port **8080**. Open `http://localhost:8080/app/` in your browser.
 Run the same command again to stop it.
 
-> **Port override:** the default port is `80`. To use a different port, set `defaults.serve.port` in `config.json`. The Docker image publishes the container's port 80 as host port 4645 (`-p 4645:80`), so a containerized run is reached at `http://localhost:4645/app/`.
+> **Port override:** the default port is `8080` (unprivileged — the container runs as a non-root user). To use a different port, set `defaults.serve.port` in `config.json`. The Docker image publishes the container's port 8080 as host port 4645 (`-p 4645:8080`), so a containerized run is reached at `http://localhost:4645/app/`.
 
 ---
 
@@ -436,15 +436,15 @@ A Vue 3 browser interface provides an alternative to the CLI for running utility
 
 ```bash
 cd frontend && npm run build && cd ..
-python3 NceGitLab.py --serve          # serves on http://localhost (port 80)
+python3 NceGitLab.py --serve          # serves on http://localhost:8080
 ```
 
-Navigate to `http://localhost/app/`.
+Navigate to `http://localhost:8080/app/`.
 
 **Development (hot-reload, edit frontend without rebuilding):**
 
 ```bash
-python3 NceGitLab.py --serve          # backend on port 80
+python3 NceGitLab.py --serve          # backend on port 8080
 cd frontend && npm run dev            # Vite dev server on http://localhost:5173
 ```
 
@@ -1394,7 +1394,7 @@ To pull the published dev image instead of building it locally:
 
 ```bash
 docker login registry.gitlab.com
-docker run --rm -it -v "$PWD":/app -w /app -p 4645:80 \
+docker run --rm -it -v "$PWD":/app -w /app -p 4645:8080 \
   registry.gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/dev:latest
 ```
 
@@ -1530,7 +1530,7 @@ nce-safe-sim.com / www  ──Route 53 A──▶  Elastic IP
    EC2 instance ── host :80/:443 ──▶  caddy container
                                           │  reverse_proxy over the nce-net network
                                           ▼
-                                     nce-safe-sim container :80 (uvicorn / FastAPI)
+                                     nce-safe-sim container :8080 (uvicorn / FastAPI, non-root)
 ```
 
 [Caddy](https://caddyserver.com/) terminates TLS, automatically provisioning and

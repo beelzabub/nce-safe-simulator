@@ -254,10 +254,11 @@ class NceEksStack(Stack):
             ec2.Port.tcp(80),
         )
         # When a custom SG is set on the ALB the LBC stops auto-managing node SG
-        # rules, so we add the return path explicitly: ALB -> pod on port 80.
+        # rules, so we add the return path explicitly: ALB -> pod on 8080 (the
+        # non-root app port, #304; the ALB listener itself stays on 80).
         cluster.cluster_security_group.add_ingress_rule(
             alb_sg,
-            ec2.Port.tcp(80),
+            ec2.Port.tcp(8080),
         )
 
         # ── CloudFront distribution ───────────────────────────────────────────

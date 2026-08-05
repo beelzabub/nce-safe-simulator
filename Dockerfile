@@ -191,7 +191,22 @@ COPY --from=diagram-builder /diagrams/ ./public/architecture/
 #   -v /path/to/config.json:/app/config.json:ro
 #   -v /efs/nce-reports:/app/reports
 
-EXPOSE 80
+# Drop root (#304, KICS "Missing User Instruction"; supersedes the #287
+# accept-risk that kept root for the port-80 bind — the app now listens on
+# unprivileged 8080, so no capability is needed). Code stays root-owned
+# (read-only to the app); only the runtime-writable dirs are app's. /app
+# itself is app-owned so entrypoint-eks.sh can symlink config.json into it
+# and the settings editor can write config.json when it isn't bind-mounted.
+# Bind mounts over these paths must be writable by uid 1000 (redeploy.sh
+# chowns them on the single-box host; EFS access points enforce their own
+# posix user server-side, so ECS/EKS are unaffected).
+RUN useradd --create-home --uid 1000 --user-group app && \
+    mkdir -p reports logs quarto-site public/interactive public/exports uploads && \
+    chown app:app /app && \
+    chown -R app:app reports logs quarto-site public/interactive public/exports uploads
+
+EXPOSE 8080
+USER app
 
 ENTRYPOINT ["python", "NceGitLab.py", "--serve"]
 
@@ -204,6 +219,11 @@ ENTRYPOINT ["python", "NceGitLab.py", "--serve"]
 # .../nce-safe-simulator/dev on merges to develop. Built explicitly:
 #   docker build --target dev -t nce-safe-simulator:dev .
 FROM runtime AS dev
+
+# The runtime stage ends USER app (#304); this stage installs packages and is
+# an operator-run toolchain (bind-mounted working tree, interactive shell),
+# not an internet-facing service — root here matches its pre-#304 behavior.
+USER root
 
 # The runtime base already carries Python 3.11 + requirements.txt (incl. pytest,
 # diagrams) and the pinned Quarto CLI. The dev image adds the rest of the build
@@ -239,6 +259,12 @@ CMD ["bash"]
 # `--target dev` build executed these internet-reaching layers — which would
 # be fatal on the enclave (caught auditing the #269 containerize log).
 FROM runtime AS ops
+
+# Deliberately root (#304 accept-risk, recorded in the vulnerability register):
+# the ops variant drives deploys via the host docker socket and the operator's
+# mounted AWS credentials — both root-owned on the host. It is operator-run on
+# demand, never the internet-facing image, and never pushed to ECR.
+USER root
 
 # make + jq (cdk Makefile), Node 22 LTS (nodesource; bookworm's node is too
 # old for the cdk CLI, and Node 20 is EOL — jsii spams a deprecation banner

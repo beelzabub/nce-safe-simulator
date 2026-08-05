@@ -49,7 +49,7 @@ def main():
         with Cluster("NCE Safe Simulator — System Boundary"):
             spa = Vue("Vue 3 SPA\n(public/app)")
 
-            with Cluster("FastAPI Server (uvicorn :80)"):
+            with Cluster("FastAPI Server (uvicorn :8080)"):
                 gate   = FastAPI("Auth Gate\n(DoD banner, sessions,\nmethod: none|basic)")
                 api    = FastAPI("REST API\n(/api/*)")
                 ws     = FastAPI("Jobs WebSocket\n(/ws/run)")

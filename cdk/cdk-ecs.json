@@ -8,7 +8,7 @@
     "log_group": "/ecs/nce-safe-simulator",
     "config_param": "/nce/config",
     "container_name": "nce",
-    "container_port": 80,
+    "container_port": 8080,
     "image_tag": "latest",
     "task_cpu": 2048,
     "task_memory_mib": 4096,

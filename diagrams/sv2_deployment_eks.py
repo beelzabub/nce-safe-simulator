@@ -78,7 +78,7 @@ def main():
 
                     with Cluster(f"EKS {cluster_name} (v1.31) — namespace nce"):
                         node = EC2("Managed node group\nt4g.small ARM64\n(min 1 / max 3)")
-                        pod  = EKS("App pod :80\nFastAPI + Vue\nServiceAccount nce-app")
+                        pod  = EKS("App pod :8080\nFastAPI + Vue\nServiceAccount nce-app")
                         node - Edge(style="dotted") - pod
 
                 efs = EFS("EFS (encrypted)\naccess points: /config /reports\n/interactive /quarto-site\nSG: tcp/2049 from cluster")
