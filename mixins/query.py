@@ -365,6 +365,25 @@ class QueryMixin:
     # Wiring helpers
     # ------------------------------------------------------------------
 
+    def jql_vocabulary(self):
+        """Serializable JQL field vocabulary for help surfaces (#302).
+
+        One entry per queryable field: canonical name, kind (core / label /
+        custom), value type, Jira aliases, and — for taxonomy/enum fields —
+        the closed value list from the live config, so help examples can be
+        built from values that actually match data in the target group.
+        """
+        return [
+            {
+                "name":    spec.name,
+                "kind":    spec.kind,
+                "type":    spec.value_type,
+                "aliases": list(spec.aliases),
+                "values":  list(spec.values),
+            }
+            for spec in self._jql_registry()
+        ]
+
     def _jql_registry(self):
         """Build the field registry from the loaded configuration.
 
