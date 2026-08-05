@@ -120,17 +120,19 @@ class TestEqualityPushdown:
         plan = make_plan("epic_type = FEATURE", registry)
         assert plan.variables["labelName"] == ["epic::feature"]
 
-    def test_assignee_equalities_accumulate(self, registry):
+    def test_assignee_equality_stays_client_side(self, registry):
+        # assignee matches username OR display name; assigneeUsernames
+        # push-down would drop display-name matches, so none is emitted.
         plan = make_plan("assignee = alice AND assignee = bob", registry)
-        assert plan.variables["assigneeUsernames"] == ["alice", "bob"]
+        assert "assigneeUsernames" not in plan.variables
 
-    def test_author_scalar(self, registry):
+    def test_author_stays_client_side(self, registry):
         plan = make_plan("author = alice", registry)
-        assert plan.variables["authorUsername"] == "alice"
+        assert "authorUsername" not in plan.variables
 
-    def test_reporter_alias(self, registry):
+    def test_reporter_alias_stays_client_side(self, registry):
         plan = make_plan("reporter = alice", registry)
-        assert plan.variables["authorUsername"] == "alice"
+        assert "authorUsername" not in plan.variables
 
     def test_milestone_title(self, registry):
         plan = make_plan('milestone = "PI-3"', registry)
@@ -168,9 +170,9 @@ class TestEqualityPushdown:
         plan = make_plan("project = team-a", registry)
         assert plan.variables == {"types": list(ENTITY_SCOPE_TYPES)}
 
-    def test_currentuser_resolved_into_variables(self, registry):
+    def test_currentuser_stays_client_side_like_any_person(self, registry):
         plan = make_plan("assignee = currentUser()", registry, current_user="jamie")
-        assert plan.variables["assigneeUsernames"] == ["jamie"]
+        assert "assigneeUsernames" not in plan.variables
 
     def test_business_value_never_pushes(self, registry):
         plan = make_plan("business_value = 8", registry)
@@ -326,13 +328,13 @@ class TestNotPushdown:
         plan = make_plan('NOT labels = "type::defect"', registry)
         assert plan.variables["not"] == {"labelName": ["type::defect"]}
 
-    def test_not_author_is_list_inside_not(self, registry):
+    def test_not_author_stays_client_side(self, registry):
         plan = make_plan("author != alice", registry)
-        assert plan.variables["not"] == {"authorUsername": ["alice"]}
+        assert "not" not in plan.variables
 
-    def test_not_assignee(self, registry):
+    def test_not_assignee_stays_client_side(self, registry):
         plan = make_plan("assignee != alice", registry)
-        assert plan.variables["not"] == {"assigneeUsernames": ["alice"]}
+        assert "not" not in plan.variables
 
     def test_not_type(self, registry):
         plan = make_plan("type != epic", registry)
@@ -347,12 +349,13 @@ class TestNotPushdown:
         assert plan.variables["not"] == {"labelName": ["risk::high"]}
 
     def test_not_in_pushes_not_list(self, registry):
-        plan = make_plan("assignee NOT IN (alice, bob)", registry)
-        assert plan.variables["not"] == {"assigneeUsernames": ["alice", "bob"]}
+        # People NOT IN stays client-side (see above); labels keep the not: form.
+        plan = make_plan('labels NOT IN ("risk::high", "risk::low")', registry)
+        assert plan.variables["not"] == {"labelName": ["risk::high", "risk::low"]}
 
     def test_double_negation_pushes_positive(self, registry):
-        plan = make_plan("NOT author != alice", registry)
-        assert plan.variables["authorUsername"] == "alice"
+        plan = make_plan("NOT weight != 3", registry)
+        assert plan.variables["weight"] == "3"
         assert "not" not in plan.variables
 
     def test_state_never_negated_server_side(self, registry):
@@ -366,9 +369,9 @@ class TestNotPushdown:
         assert "not" not in plan.variables
 
     def test_demorgan_not_or_distributes(self, registry):
-        plan = make_plan("NOT (assignee = alice OR author = bob)", registry)
+        plan = make_plan('NOT (risk = high OR milestone = "PI-3")', registry)
         assert plan.variables["not"] == {
-            "assigneeUsernames": ["alice"], "authorUsername": ["bob"]}
+            "labelName": ["risk::high"], "milestoneTitle": ["PI-3"]}
 
     def test_negated_and_contributes_nothing(self, registry):
         plan = make_plan("NOT (assignee = alice AND author = bob)", registry)

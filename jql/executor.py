@@ -91,12 +91,12 @@ _CORE_NODE_FIELDS = """
             updatedAt
             closedAt
             workItemType { name }
-            author { username }
+            author { username name }
             namespace { fullPath }"""
 
 _CORE_WIDGETS = """
               ... on WorkItemWidgetLabels { labels { nodes { title } } }
-              ... on WorkItemWidgetAssignees { assignees { nodes { username } } }
+              ... on WorkItemWidgetAssignees { assignees { nodes { username name } } }
               ... on WorkItemWidgetMilestone { milestone { title dueDate } }
               ... on WorkItemWidgetIteration { iteration { id title } }
               ... on WorkItemWidgetWeight { weight }
@@ -250,7 +250,10 @@ def shape_node(node, bv_field_id=None):
         "state":          state,
         "labels":         [n["title"] for n in ((w.get("labels") or {}).get("nodes") or [])],
         "assignees":      [n["username"] for n in ((w.get("assignees") or {}).get("nodes") or [])],
+        "assignee_names": [n["name"] for n in ((w.get("assignees") or {}).get("nodes") or [])
+                           if n.get("name")],
         "author":         (node.get("author") or {}).get("username"),
+        "author_name":    (node.get("author") or {}).get("name"),
         "milestone":      milestone.get("title"),
         "milestone_due":  milestone.get("dueDate"),
         "iteration":      iteration.get("title") or iteration.get("id"),
@@ -449,6 +452,13 @@ def _eval_comparison(field, op, node, item, ctx):
         return op == "="
 
     ivalue = _item_value(spec, item)
+    # People match by username OR display name ('beelzabub' or "Jamie
+    # Powers"). The extra candidates join only string comparison — IS EMPTY
+    # (handled above) and sorting still see the plain username value(s).
+    if spec.name == "assignee":
+        ivalue = list(ivalue) + list(item.get("assignee_names") or [])
+    elif spec.name == "author":
+        ivalue = [v for v in (ivalue, item.get("author_name")) if v]
     if isinstance(ivalue, (list, tuple)):
         folded = [_fold(v) for v in ivalue]
         if op == "=":
