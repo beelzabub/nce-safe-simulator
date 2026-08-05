@@ -4,6 +4,7 @@
 // limit truncated the result set; parse errors render inline with the caret
 // anchored at the reported position.
 import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { mockApi, seedAuthedSession } from './support.js'
 
 const ROW = (iid, title, weight, due) => ({
@@ -191,5 +192,43 @@ test.describe('JQL search help panel (#302)', () => {
     await page.locator('.expand-btn').click()
     await expect(page.locator('textarea.query-textarea')).toHaveValue(
       'state = opened\nAND weight >= 5\nORDER BY due ASC')
+  })
+})
+
+// Export buttons (issue #302 follow-up): CSV mirrors the CLI csv format and
+// the displayed order (local sort included); JSON is the untouched envelope.
+test.describe('JQL search export (#302)', () => {
+
+  test('CSV export downloads the displayed rows, local sort included', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened ORDER BY due ASC')
+    // Sort by weight so the export order provably follows the display
+    await page.locator('.th-btn', { hasText: 'Weight' }).click()
+    const [ download ] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('.export-btn', { hasText: 'CSV' }).click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/^jql-results-.*\.csv$/)
+    const text = readFileSync(await download.path(), 'utf-8')
+    const lines = text.trim().split('\r\n')
+    expect(lines[0].split(',').slice(0, 3)).toEqual(['id', 'iid', 'type'])
+    // Weight-ascending display order: iids 12 (2), 11 (5), 14 (9)
+    const iids = lines.slice(1).map(l => l.split(',')[1])
+    expect(iids).toEqual(['12', '11', '14'])
+    expect(lines[1]).toContain('type::feature')
+  })
+
+  test('JSON export downloads the exact result envelope', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    const [ download ] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('.export-btn', { hasText: 'JSON' }).click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/^jql-results-.*\.json$/)
+    const body = JSON.parse(readFileSync(await download.path(), 'utf-8'))
+    expect(body.count).toBe(3)
+    expect(body.items.map(i => i.iid)).toEqual([12, 11, 14])  // fetch order, not display
+    expect(body.plan).toBeTruthy()
   })
 })
