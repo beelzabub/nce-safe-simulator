@@ -24,18 +24,27 @@ def client():
 # GET /api/tools
 # ---------------------------------------------------------------------------
 
-def test_tools_returns_all_tools(client):
+def test_tools_returns_all_visible_tools(client):
     resp = client.get("/api/tools")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == len(TOOLS)
+    assert len(data) == len([t for t in TOOLS if not t.get("ui_hidden")])
 
 
 def test_tools_keys_match_registry(client):
     resp = client.get("/api/tools")
     returned_keys = {t["key"] for t in resp.json()}
-    expected_keys = {t["key"] for t in TOOLS}
+    expected_keys = {t["key"] for t in TOOLS if not t.get("ui_hidden")}
     assert returned_keys == expected_keys
+
+
+def test_ui_hidden_tools_stay_out_of_web_picker(client):
+    # `query` is CLI-only: its web home is the Search view, so the raw tool
+    # must not also appear in the job picker.
+    hidden = {t["key"] for t in TOOLS if t.get("ui_hidden")}
+    assert "query" in hidden                     # the flag is actually set
+    returned_keys = {t["key"] for t in client.get("/api/tools").json()}
+    assert not (hidden & returned_keys)
 
 
 def test_import_export_run_menu_order(client):

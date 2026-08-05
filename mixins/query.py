@@ -286,12 +286,40 @@ class QueryMixin:
     # CLI tool surface (issue #301)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_jql_source(jql):
+        """Resolve the ``jql`` param, which accepts query text OR a path to a
+        file containing the query. A value naming an existing file is read
+        (UTF-8, stripped — the lexer treats newlines as whitespace, so
+        multi-line files work); anything else is the query itself. The
+        existing-file check is decisive: real queries contain operators and
+        spaces no file path has. Returns ``(query_text, source_path_or_None)``.
+        """
+        raw = "" if jql is None else str(jql)
+        candidate = raw.strip()
+        if candidate and "\n" not in candidate:
+            path = Path(candidate).expanduser()
+            try:
+                is_file = path.is_file()
+            except OSError:       # path longer than NAME_MAX etc. — a query
+                is_file = False
+            if is_file:
+                try:
+                    return path.read_text(encoding="utf-8").strip(), str(path)
+                except OSError as exc:
+                    print("Cannot read query file '%s': %s" % (path, exc),
+                          file=sys.stderr)
+                    raise SystemExit(2)
+        return raw, None
+
     def _tool_query(self, jql, limit=None, format="table"):
         """`query` utility tool: run a JQL query and print the results.
 
-        format: ``table`` (human-readable, default), ``json`` (the full
-        run_jql envelope — items, count, truncated, plan), or ``csv``
-        (header + one row per item, list cells joined with ', ').
+        ``jql`` is either the query text or a path to a file containing the
+        query (see ``_resolve_jql_source``). format: ``table``
+        (human-readable, default), ``json`` (the full run_jql envelope —
+        items, count, truncated, plan), or ``csv`` (header + one row per
+        item, list cells joined with ', ').
 
         Machine formats land on stdout untouched so they pipe straight into
         ``jq`` / a CSV reader — the runner's chrome is on stderr (the
@@ -299,6 +327,9 @@ class QueryMixin:
         non-zero: 2 for a bad query, format, or limit; 1 for a transport
         failure.
         """
+        jql, jql_source = self._resolve_jql_source(jql)
+        if jql_source:
+            print("Query read from %s" % jql_source, file=sys.stderr)
         fmt = str(format or "table").strip().lower()
         if fmt not in JQL_FORMATS:
             print("Unknown format '%s'. Valid formats: %s"

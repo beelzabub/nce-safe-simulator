@@ -181,7 +181,9 @@ def _report_payload(report: dict) -> dict:
 @app.get("/api/tools")
 def list_tools(request: Request):
     gl = getattr(request.app.state, "gl", None)
-    return [_tool_payload(t, gl) for t in TOOLS]
+    # ui_hidden tools keep their CLI surface but stay out of the web picker
+    # (e.g. `query`, whose web home is the Search view, not a job run).
+    return [_tool_payload(t, gl) for t in TOOLS if not t.get("ui_hidden")]
 
 
 def _deployment_type() -> str:

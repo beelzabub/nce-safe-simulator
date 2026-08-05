@@ -1073,17 +1073,19 @@ Missing 1 required dependency(ies) for this job:
 
 > `diagnose` is listed under the **Diagnose** category (first entry in the utilities menu) and via `-D` / `--diagnose` — see [Diagnose](#diagnose) above.
 
-### Query
+### Analysis
 
 | Key | Description |
 |---|---|
 | `query` | Run a JQL-style query against the live group's work items (epics + issues, `includeDescendants`) |
 
+CLI-only: in the web UI the query engine lives in the **Search** view (see [Web UI](#web-ui)), so the raw tool is hidden from the web job picker.
+
 A Jira-JQL-style query language over the simulator's data: `AND` / `OR` / `NOT` with parentheses, `= != > >= < <= ~ !~`, `IN` / `NOT IN`, `IS [NOT] EMPTY`, relative durations (`-4w`, `12h`), date functions (`now()`, `startOfDay()`, `endOfMonth(-1)`, …), `currentUser()`, and multi-key `ORDER BY`. The planner pushes the widest conjunctive envelope of the expression down to the GitLab GraphQL filter args and re-evaluates the exact expression client-side over the fetched pages — push-down only reduces the fetch cost, never changes the result set.
 
 **Fields.** Core work-item fields: `type` (`epic` / `issue`), `state` (`opened` / `closed` / `all`), `title`, `text` (title + description), `labels`, `assignee`, `author`, `milestone`, `iteration`, `weight`, `business_value` (native custom field), `created`, `updated`, `due`, `closed`, `parent`, `iid`, `project`. Plus one **virtual field per `*_labels` taxonomy in `config.json`**: `piid`, `epic_type`, `risk`, `work_type`, `lifecycle`, `wsjf_urgency`, `wsjf_risk`, `project_label`, … — `piid = 2026Q3` matches the `PIID::2026Q3` scoped label (bare value or full label, case-insensitive). Jira names alias to the obvious equivalents: `status` → `state`, `issuetype` → `type`, `summary` → `title`, `reporter` → `author`, `sprint` → `iteration`.
 
-**Params:** `--jql` (the query string), `--limit` (result cap, default 100), `--format` (`table` default / `json` / `csv`).
+**Params:** `--jql` (the query text, **or a path to a file containing it** — a value naming an existing file is read UTF-8, multi-line queries welcome; a "Query read from <path>" note goes to stderr), `--limit` (result cap, default 100), `--format` (`table` default / `json` / `csv`).
 
 ```bash
 # Open items in a PI, heaviest first
@@ -1103,6 +1105,9 @@ python3 NceGitLab.py -ut query --jql "state = opened AND weight >= 5" --format j
 
 # CSV export (header + one row per item; list cells joined with ', ')
 python3 NceGitLab.py -ut query --jql 'labels IN ("PIID::2026Q3", "PIID::2026Q4")' --format csv > pi-items.csv
+
+# Query from a file — same as passing the text inline; newlines are fine
+python3 NceGitLab.py -ut query --jql saved-queries/open-heavy.jql
 ```
 
 `json` / `csv` print the payload alone on **stdout** (the runner's banner and the connection diagnostics go to stderr), so shell pipes see clean machine-readable output. The `json` envelope carries `items`, `count`, `limit`, `truncated`, and a `plan` block showing which filters were pushed down server-side and what ran client-side. When a result is cut at the limit, `table`/`csv` print a truncation note (`csv`'s goes to stderr) — raise `--limit` to see more.
