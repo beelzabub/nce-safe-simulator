@@ -556,10 +556,11 @@ def _try_or_collapse(expr, registry, vars_, now, current_user):
 #: Core fields whose pushed =/IN filters select exactly what the evaluator
 #: keeps (semantics validated by the golden parity suite's GitLab-modelled
 #: backend) — the basis for Plan.exact. Off-list pushes are superset
-#: envelopes only: search (word-match vs substring), date bounds (server
-#: inclusivity unverified against every op), weight ranges, custom fields,
-#: and user fields (post_filter_only: equality also matches display names,
-#: which no username push can express).
+#: envelopes only: search (word-match vs substring), strict date ops (> / <
+#: push to the inclusive bound), weight ranges, custom fields, and user
+#: fields (post_filter_only: equality also matches display names, which no
+#: username push can express). Inclusive date bounds (>= / <= and
+#: day-granular =) are handled per-op in _conjunct_exact.
 _EXACT_EQUALITY_FIELDS = {"state", "type", "labels", "milestone", "iid",
                           "weight"}
 _EXACT_IN_FIELDS = {"type", "milestone", "iid", "labels"}
@@ -592,12 +593,26 @@ def _conjunct_exact(negated, expr, registry):
         spec = registry.resolve(expr.field)
         if isinstance(expr.value, ast.Empty):
             return spec.wildcard_arg is not None
-        if expr.op != "=" or spec.requires_id_resolution or spec.post_filter_only:
+        if spec.requires_id_resolution or spec.post_filter_only:
+            return False
+        if spec.value_type == "date":
+            # After/Before bounds are inclusive (>= / <=) per the registry's
+            # GitLab model, so those ops push to the very same comparison; a
+            # day-granular equality's whole-day window is likewise exact.
+            # > and < push to the inclusive bound — a superset — and an
+            # instant equality can straddle sub-second storage, so both stay
+            # envelope-only.
+            if spec.date_bound_args is None:
+                return False
+            if expr.op in (">=", "<="):
+                return True
+            return expr.op == "=" and is_day_granular(expr.value)
+        if expr.op != "=":
             return False
         if spec.kind == "label":
             return True
-        if (spec.value_type == "date" or spec.kind == "custom"
-                or spec.graphql_arg is None or spec.search_in):
+        if (spec.kind == "custom" or spec.graphql_arg is None
+                or spec.search_in):
             return False
         return spec.name in _EXACT_EQUALITY_FIELDS
     return False

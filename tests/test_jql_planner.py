@@ -660,6 +660,11 @@ class TestExactPushdown:
         'labels IN ("a", "b")',
         "iid IN (1, 2, 3)",
         "state = opened AND type = epic AND piid = 2026Q3",
+        "created >= -4w",                         # inclusive bound == the op
+        "due <= endOfYear()",
+        "created = 2026-08-01",                   # whole-day window is exact
+        "updated >= startOfMonth() AND updated <= endOfMonth()",
+        "state = opened AND updated >= -4w",
     ])
     def test_exact_queries(self, registry, query):
         assert make_plan(query, registry).exact is True, query
@@ -668,8 +673,9 @@ class TestExactPushdown:
         "weight >= 5",                            # ranges never push
         "weight != 5",                            # negations stay client-side
         "state != opened",
-        "created >= -4w",                         # date bound inclusivity
-        "created = 2026-08-01",                   # day-range push
+        "created > -4w",                          # strict op vs inclusive bound
+        "due < startOfDay()",
+        'created = "2026-08-01 10:00"',           # instant equality straddles
         'title = "exact title"',                  # search is word-match
         'text ~ "mission"',
         "business_value = 8",                     # custom field
