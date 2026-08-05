@@ -279,6 +279,20 @@ test.describe('JQL search Configure Columns (#302)', () => {
     await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(0)
   })
 
+  test('the popover closes on outside click and on Escape', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await expect(page.locator('.cols-pop')).toBeVisible()
+    await page.locator('.results-meta').click({ position: { x: 5, y: 5 } })
+    await expect(page.locator('.cols-pop')).toHaveCount(0)
+
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await expect(page.locator('.cols-pop')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.cols-pop')).toHaveCount(0)
+  })
+
   test('the derived Project column shows the namespace leaf', async ({ page }) => {
     await openSearch(page, { json: envelope(ITEMS) })
     await run(page, 'state = opened')

@@ -173,7 +173,7 @@
         </span>
         <span v-if="result.count" class="export-group">
           <span v-if="exportError" class="meta-truncated">export failed: {{ exportError.message }}</span>
-          <span class="cols-wrap">
+          <span ref="colsWrap" class="cols-wrap">
             <button class="export-btn" type="button" :aria-expanded="showCols"
                     title="Choose which columns the results table shows (persisted in this browser)"
                     @click="showCols = !showCols">⚙ Columns</button>
@@ -240,7 +240,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { getConfig, getQueryFields, postQuery } from '../api.js'
 import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
@@ -392,6 +392,25 @@ function resetColumns() {
   if (localSort.value && !DEFAULT_COLUMNS.includes(localSort.value.key)) localSort.value = null
   saveStored(COLUMNS_KEY, visibleKeys.value)
 }
+
+// Dismiss the popover on any pointer-down outside it (the click still lands
+// on whatever was pressed) and on Escape.
+const colsWrap = ref(null)
+function dismissCols(e) {
+  if (!showCols.value) return
+  if (e.type === 'keydown' ? e.key === 'Escape'
+                           : !(colsWrap.value && colsWrap.value.contains(e.target))) {
+    showCols.value = false
+  }
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', dismissCols)
+  document.addEventListener('keydown', dismissCols)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', dismissCols)
+  document.removeEventListener('keydown', dismissCols)
+})
 
 // "100 of 342 results" when the exact total is known and exceeds the page;
 // plain "N results" otherwise (total unknown, or the page is the whole set).
