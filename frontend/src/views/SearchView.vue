@@ -17,7 +17,7 @@
       </span>
     </header>
 
-    <form class="query-form" @submit.prevent="run">
+    <form class="query-form" @submit.prevent="run()">
       <textarea
         v-if="expanded"
         v-model="query"
@@ -27,8 +27,8 @@
         autocomplete="off"
         placeholder='state = opened AND weight >= 5 ORDER BY due ASC'
         aria-label="JQL query"
-        @keydown.ctrl.enter.prevent="run"
-        @keydown.meta.enter.prevent="run"
+        @keydown.ctrl.enter.prevent="run()"
+        @keydown.meta.enter.prevent="run()"
       ></textarea>
       <input
         v-else
@@ -164,6 +164,13 @@
           sorted locally — first {{ result.count }} results only, not a true top-{{ result.count }} by this column
         </span>
         <button v-if="localSort" class="meta-reset" type="button" @click="localSort = null">reset to query order</button>
+        <span v-if="offset > 0 || result.truncated" class="pager">
+          <button class="pager-btn" type="button" :disabled="offset === 0 || state === 'loading'"
+                  @click="run(Math.max(0, offset - result.limit))">‹ Prev</button>
+          <span class="pager-range">{{ result.count ? `${offset + 1}–${offset + result.count}` : `nothing past ${offset}` }}</span>
+          <button class="pager-btn" type="button" :disabled="!result.truncated || state === 'loading'"
+                  @click="run(offset + result.limit)">Next ›</button>
+        </span>
         <span v-if="result.count" class="export-group">
           <button class="export-btn" type="button"
                   title="Download the displayed rows (current sort) as CSV — same columns as the CLI's csv format"
@@ -315,6 +322,7 @@ const exampleSections = computed(() => {
 
 const query     = ref('')
 const limit     = ref(100)
+const offset    = ref(0)        // pagination window start (run() resets to 0)
 const state     = ref('idle')   // idle | loading | ready | error
 const result    = ref(null)
 const error     = ref(null)
@@ -336,14 +344,15 @@ const errorLead = computed(() => {
   return 'Query failed'
 })
 
-async function run() {
+async function run(fromOffset = 0) {
   state.value     = 'loading'
   error.value     = null
   localSort.value = null        // a fresh fetch renders in query order
   lastQuery.value = query.value
+  offset.value    = fromOffset
   try {
     const lim = Number.isInteger(limit.value) && limit.value > 0 ? limit.value : undefined
-    result.value = await postQuery(query.value, lim)
+    result.value = await postQuery(query.value, lim, fromOffset || undefined)
     state.value  = 'ready'
   } catch (e) {
     error.value = e
@@ -710,6 +719,19 @@ function day(iso) {
   padding: 0;
 }
 .meta-reset:hover { text-decoration: underline; }
+.pager { display: inline-flex; align-items: center; gap: 0.45rem; margin-left: 0.6rem; }
+.pager-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.55rem;
+}
+.pager-btn:hover:enabled { border-color: var(--action); color: var(--action); }
+.pager-btn:disabled { opacity: 0.45; cursor: default; }
+.pager-range { font-size: 0.75rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .export-group { margin-left: auto; display: inline-flex; gap: 0.4rem; }
 .export-btn {
   background: var(--surface);

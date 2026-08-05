@@ -32,9 +32,9 @@ class FixedNowHarness(QueryHarness):
     relative-date queries (``updated >= -4w``) stay deterministic no matter
     when the suite runs."""
 
-    def run_jql(self, query, limit=None, push_down=True, now=None):
-        return super().run_jql(query, limit=limit, push_down=push_down,
-                               now=now or NOW)
+    def run_jql(self, query, limit=None, offset=0, push_down=True, now=None):
+        return super().run_jql(query, limit=limit, offset=offset,
+                               push_down=push_down, now=now or NOW)
 
 
 @pytest.fixture()
@@ -251,7 +251,7 @@ class TestAvailability:
             resp = TestClient(app).post(
                 "/api/query", json={"jql": "state = opened", "limit": 7})
             assert resp.status_code == 200
-            gl.run_jql.assert_called_once_with("state = opened", limit=7)
+            gl.run_jql.assert_called_once_with("state = opened", limit=7, offset=0)
         finally:
             app.state.gl = None
 
@@ -264,7 +264,7 @@ class TestAvailability:
             resp = TestClient(app).post(
                 "/api/query", json={"jql": "state = opened"})
             assert resp.status_code == 200
-            gl.run_jql.assert_called_once_with("state = opened", limit=None)
+            gl.run_jql.assert_called_once_with("state = opened", limit=None, offset=0)
         finally:
             app.state.gl = None
 
@@ -295,3 +295,33 @@ class TestQueryFieldsEndpoint:
         app.state.gl = None
         resp = TestClient(app).get("/api/query/fields")
         assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Pagination (offset in the request body)
+# ---------------------------------------------------------------------------
+
+class TestOffsetPagination:
+
+    def test_offset_pages_match_run_jql_window(self, client):
+        full = FixedNowHarness().run_jql("state = opened ORDER BY iid ASC", limit=1000)
+        resp = post(client, {"jql": "state = opened ORDER BY iid ASC",
+                             "limit": 3, "offset": 2})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["offset"] == 2
+        assert body["items"] == full["items"][2:5]
+
+    def test_negative_offset_is_a_request_error(self, client):
+        resp = post(client, {"jql": "state = opened", "offset": -1})
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["kind"] == "request"
+
+    def test_non_int_offset_is_a_request_error(self, client):
+        resp = post(client, {"jql": "state = opened", "offset": "two"})
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["kind"] == "request"
+
+    def test_absent_offset_defaults_to_zero(self, client):
+        resp = post(client, {"jql": "state = opened", "limit": 2})
+        assert resp.json()["offset"] == 0

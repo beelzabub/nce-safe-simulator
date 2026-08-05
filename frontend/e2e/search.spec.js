@@ -232,3 +232,69 @@ test.describe('JQL search export (#302)', () => {
     expect(body.plan).toBeTruthy()
   })
 })
+
+// Pagination (issue #302 follow-up): offset/limit page through one stable
+// result sequence; Prev/Next re-run the query with a shifted window.
+test.describe('JQL search pagination (#302)', () => {
+
+  const FIVE = [
+    ROW(21, 'Item twenty-one', 1, '2026-08-10'),
+    ROW(22, 'Item twenty-two', 2, '2026-08-11'),
+    ROW(23, 'Item twenty-three', 3, '2026-08-12'),
+    ROW(24, 'Item twenty-four', 4, '2026-08-13'),
+    ROW(25, 'Item twenty-five', 5, '2026-08-14'),
+  ]
+
+  async function openPaged(page) {
+    await seedAuthedSession(page)
+    await mockApi(page)
+    page.queryCalls = 0
+    await page.route('**/api/query', (route) => {
+      page.queryCalls++
+      const body = route.request().postDataJSON()
+      const off = body.offset || 0
+      const lim = body.limit || 100
+      const slice = FIVE.slice(off, off + lim)
+      return route.fulfill({ json: {
+        query: '', items: slice, count: slice.length, limit: lim, offset: off,
+        truncated: off + lim < FIVE.length,
+        plan: { push_down: true, variables: {}, sort: null, client_sort: [],
+                pages_fetched: 1, scanned: FIVE.length },
+      } })
+    })
+    await page.goto('/app/search')
+    await expect(page.locator('.search-page')).toBeVisible()
+    await page.locator('.limit-input').fill('2')
+  }
+
+  test('next/prev page through windows and disable at the edges', async ({ page }) => {
+    await openPaged(page)
+    await run(page, 'state = opened ORDER BY iid ASC')
+    await expect(columnCells(page, 1)).toHaveText(['21', '22'])
+    await expect(page.locator('.pager-range')).toHaveText('1–2')
+    await expect(page.locator('.pager-btn', { hasText: 'Prev' })).toBeDisabled()
+
+    await page.locator('.pager-btn', { hasText: 'Next' }).click()
+    await expect(columnCells(page, 1)).toHaveText(['23', '24'])
+    await expect(page.locator('.pager-range')).toHaveText('3–4')
+
+    await page.locator('.pager-btn', { hasText: 'Next' }).click()
+    await expect(columnCells(page, 1)).toHaveText(['25'])
+    await expect(page.locator('.pager-range')).toHaveText('5–5')
+    await expect(page.locator('.pager-btn', { hasText: 'Next' })).toBeDisabled()
+
+    await page.locator('.pager-btn', { hasText: 'Prev' }).click()
+    await expect(columnCells(page, 1)).toHaveText(['23', '24'])
+    expect(page.queryCalls).toBe(4)
+  })
+
+  test('a new Run resets to the first window', async ({ page }) => {
+    await openPaged(page)
+    await run(page, 'state = opened ORDER BY iid ASC')
+    await page.locator('.pager-btn', { hasText: 'Next' }).click()
+    await expect(page.locator('.pager-range')).toHaveText('3–4')
+    await page.locator('.run-btn').click()
+    await expect(page.locator('.pager-range')).toHaveText('1–2')
+    await expect(columnCells(page, 1)).toHaveText(['21', '22'])
+  })
+})
