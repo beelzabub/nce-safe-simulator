@@ -10,7 +10,9 @@ are 502, and a server without a GitLab client is 503.
 """
 from unittest.mock import MagicMock
 
+import gitlab
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from jql import JqlExecutionError
@@ -175,6 +177,70 @@ class TestAvailability:
             assert "GraphQL" in detail["message"]
         finally:
             app.state.gl = None
+
+    # -- real transport failure modes, exercised through the actual run_jql
+    #    code path (no mocked run_jql): the harness's graphql_query / group
+    #    lookup raise exactly what the production ones raise. Previously
+    #    these leaked out as 500s because only JqlExecutionError was caught.
+
+    def _post_with(self, harness):
+        app.state.gl = harness
+        try:
+            return TestClient(app, raise_server_exceptions=False).post(
+                "/api/query", json={"jql": "state = opened"})
+        finally:
+            app.state.gl = None
+
+    def test_gitlab_unreachable_is_502(self):
+        class Unreachable(FixedNowHarness):
+            def graphql_query(self, *a, **k):
+                raise requests.exceptions.ConnectionError("connection refused")
+
+        resp = self._post_with(Unreachable())
+        assert resp.status_code == 502
+        assert resp.json()["detail"]["kind"] == "transport"
+
+    def test_expired_token_http_error_is_502(self):
+        # raise_for_status() on a 401 — the most common real failure mode.
+        class Unauthorized(FixedNowHarness):
+            def graphql_query(self, *a, **k):
+                raise requests.exceptions.HTTPError(
+                    "401 Client Error: Unauthorized for url")
+
+        resp = self._post_with(Unauthorized())
+        assert resp.status_code == 502
+        detail = resp.json()["detail"]
+        assert detail["kind"] == "transport"
+        assert "401" in detail["message"]
+
+    def test_timeout_is_502(self):
+        class Slow(FixedNowHarness):
+            def graphql_query(self, *a, **k):
+                raise requests.exceptions.Timeout("read timed out")
+
+        resp = self._post_with(Slow())
+        assert resp.status_code == 502
+        assert resp.json()["detail"]["kind"] == "transport"
+
+    def test_gitlab_error_from_group_lookup_is_502(self):
+        class Denied(FixedNowHarness):
+            def get_group_by_name(self, name):
+                raise gitlab.GitlabError("403: insufficient permissions")
+
+        resp = self._post_with(Denied())
+        assert resp.status_code == 502
+        assert resp.json()["detail"]["kind"] == "transport"
+
+    def test_endpoint_backstop_catches_raw_transport_exceptions(self):
+        # Even if a future code path lets a raw requests/gitlab exception
+        # escape run_jql unwrapped, the endpoint itself must map it to 502.
+        for raw in (requests.exceptions.ConnectionError("refused"),
+                    gitlab.GitlabError("401: token expired")):
+            gl = MagicMock()
+            gl.run_jql.side_effect = raw
+            resp = self._post_with(gl)
+            assert resp.status_code == 502
+            assert resp.json()["detail"]["kind"] == "transport"
 
     def test_limit_passes_through_to_run_jql(self):
         gl = MagicMock()

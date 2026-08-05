@@ -26,6 +26,9 @@ import json
 import sys
 from pathlib import Path
 
+import gitlab
+import requests
+
 from jql import JqlSyntaxError, parse
 from jql.dates import JqlEvaluationError
 from jql.executor import (
@@ -161,8 +164,22 @@ class QueryMixin:
 
         Raises jql.JqlSyntaxError / UnknownFieldError / UnknownFieldValueError
         / JqlPlanError for bad queries and JqlExecutionError for transport
-        failures — callers surface these as user-facing errors.
+        failures — callers surface these as user-facing errors. *Every*
+        transport failure surfaces as JqlExecutionError: raw HTTP errors from
+        the GraphQL POST (connection refused, timeouts, 401/5xx via
+        raise_for_status) and python-gitlab REST errors from the group /
+        custom-field lookups are wrapped here, so callers never see
+        requests.RequestException or gitlab.GitlabError leak through.
         """
+        try:
+            return self._run_jql(query, limit=limit,
+                                 push_down=push_down, now=now)
+        except (requests.RequestException, gitlab.GitlabError) as exc:
+            raise JqlExecutionError(
+                "GitLab transport failure: %s" % exc) from exc
+
+    def _run_jql(self, query, limit=None, push_down=True, now=None):
+        """run_jql body — see run_jql for the contract."""
         parsed = parse(query)
         registry = self._jql_registry()
         current_user = self._jql_current_user() if query_mentions_current_user(parsed) else None

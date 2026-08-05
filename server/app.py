@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import gitlab
 import markdown as _md
+import requests
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -538,6 +540,15 @@ def run_query(request: Request, payload: dict = Body(...)):
         raise HTTPException(
             status_code=502,
             detail={"kind": "transport", "message": str(exc)},
+        )
+    except (requests.RequestException, gitlab.GitlabError) as exc:
+        # run_jql wraps transport failures as JqlExecutionError itself; this
+        # arm is the backstop so a raw HTTP / python-gitlab error escaping a
+        # future code path still maps to 502, never a 500.
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "transport",
+                    "message": "GitLab transport failure: %s" % exc},
         )
 
 
