@@ -75,15 +75,15 @@ test.describe('JQL search view (#302)', () => {
     await run(page, 'state = opened ORDER BY due ASC')
     await expect(page.locator('.results-table tbody tr')).toHaveCount(3)
 
-    // Sort by Weight (6th column): asc → 2, 5, 9
+    // Sort by Weight (7th column): asc → 2, 5, 9
     await page.getByRole('button', { name: /^Weight/ }).click()
-    await expect(columnCells(page, 6)).toHaveText(['2', '5', '9'])
+    await expect(columnCells(page, 7)).toHaveText(['2', '5', '9'])
     // Toggle → desc
     await page.getByRole('button', { name: /^Weight/ }).click()
-    await expect(columnCells(page, 6)).toHaveText(['9', '5', '2'])
+    await expect(columnCells(page, 7)).toHaveText(['9', '5', '2'])
     // Due sort keeps the empty due date last even ascending
     await page.getByRole('button', { name: /^Due/ }).click()
-    await expect(columnCells(page, 10)).toHaveText(['2026-08-20', '2026-09-01', '—'])
+    await expect(columnCells(page, 11)).toHaveText(['2026-08-20', '2026-09-01', '—'])
 
     // Re-sorting is a client-side re-sort of the fetched set only
     expect(page.queryCalls).toBe(1)
@@ -253,15 +253,15 @@ test.describe('JQL search Configure Columns (#302)', () => {
   test('toggling columns updates the table, persists across reload, resets to defaults', async ({ page }) => {
     await openSearch(page, { json: envelope(ITEMS) })
     await run(page, 'state = opened')
-    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+    await expect(page.locator('.results-table thead th')).toHaveCount(11)
 
     await page.locator('.export-btn', { hasText: 'Columns' }).click()
     await page.locator('.cols-item', { hasText: 'Weight' }).click()
-    await expect(page.locator('.results-table thead th')).toHaveCount(9)
+    await expect(page.locator('.results-table thead th')).toHaveCount(10)
     await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(0)
 
     await page.locator('.cols-item', { hasText: 'Milestone due' }).click()
-    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+    await expect(page.locator('.results-table thead th')).toHaveCount(11)
     await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(1)
 
     // The choice survives a reload (localStorage)
@@ -271,12 +271,37 @@ test.describe('JQL search Configure Columns (#302)', () => {
     await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(0)
     await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(1)
 
-    // Reset restores the #302 default set
+    // Reset restores the default set
     await page.locator('.export-btn', { hasText: 'Columns' }).click()
     await page.locator('.cols-reset').click()
-    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+    await expect(page.locator('.results-table thead th')).toHaveCount(11)
     await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(1)
     await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(0)
+  })
+
+  test('columns reorder with the popover arrows and the order persists', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    await expect(page.locator('.results-table thead th').nth(0)).toHaveText(/IID/)
+
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    const iidRow = page.locator('.cols-item-row[data-key="iid"]')
+    await expect(iidRow.locator('button[title="Move left"]')).toBeDisabled()  // already first
+    await iidRow.locator('button[title="Move right"]').click()
+    await expect(page.locator('.results-table thead th').nth(0)).toHaveText(/Title/)
+    await expect(page.locator('.results-table thead th').nth(1)).toHaveText(/IID/)
+
+    // The order survives a reload (localStorage)
+    await page.reload()
+    await expect(page.locator('.search-page')).toBeVisible()
+    await run(page, 'state = opened')
+    await expect(page.locator('.results-table thead th').nth(0)).toHaveText(/Title/)
+    await expect(page.locator('.results-table thead th').nth(1)).toHaveText(/IID/)
+
+    // Reset restores the default order too
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await page.locator('.cols-reset').click()
+    await expect(page.locator('.results-table thead th').nth(0)).toHaveText(/IID/)
   })
 
   test('the popover closes on outside click and on Escape', async ({ page }) => {
@@ -293,21 +318,19 @@ test.describe('JQL search Configure Columns (#302)', () => {
     await expect(page.locator('.cols-pop')).toHaveCount(0)
   })
 
-  test('the derived Project column shows the namespace leaf', async ({ page }) => {
+  test('the derived Project column is a default and shows the namespace leaf', async ({ page }) => {
     await openSearch(page, { json: envelope(ITEMS) })
     await run(page, 'state = opened')
-    await page.locator('.export-btn', { hasText: 'Columns' }).click()
-    await page.locator('.cols-item', { hasText: /^\s*Project\s*$/ }).click()
-    await expect(page.locator('.th-btn', { hasText: 'Project' })).toHaveCount(1)
-    // ROW namespace_path is 'portfolio/team-a' — the leaf renders, 11th col
-    await expect(columnCells(page, 11).first()).toHaveText('team-a')
+    // ROW namespace_path is 'portfolio/team-a' — the leaf renders, 3rd col
+    await expect(page.locator('.results-table thead th').nth(2)).toHaveText(/Project/)
+    await expect(columnCells(page, 3).first()).toHaveText('team-a')
   })
 
   test('the last remaining column cannot be unchecked', async ({ page }) => {
     await openSearch(page, { json: envelope(ITEMS) })
     await run(page, 'state = opened')
     await page.locator('.export-btn', { hasText: 'Columns' }).click()
-    for (const label of ['IID', 'Type', 'State', 'Labels', 'Weight', 'Assignees', 'Created', 'Updated', 'Due']) {
+    for (const label of ['IID', 'Project', 'Type', 'State', 'Labels', 'Weight', 'Assignees', 'Created', 'Updated', 'Due']) {
       await page.locator('.cols-item', { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click()
     }
     await expect(page.locator('.results-table thead th')).toHaveCount(1)

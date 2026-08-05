@@ -178,13 +178,23 @@
                     title="Choose which columns the results table shows (persisted in this browser)"
                     @click="showCols = !showCols">⚙ Columns</button>
             <div v-if="showCols" class="cols-pop">
-              <label v-for="col in ALL_COLUMNS" :key="col.key" class="cols-item">
-                <input type="checkbox"
-                       :checked="visibleKeys.includes(col.key)"
-                       :disabled="visibleKeys.includes(col.key) && visibleKeys.length === 1"
-                       @change="toggleColumn(col.key)" />
-                {{ col.label }}
-              </label>
+              <div v-for="col in popoverColumns" :key="col.key" class="cols-item-row" :data-key="col.key">
+                <label class="cols-item">
+                  <input type="checkbox"
+                         :checked="isVisible(col.key)"
+                         :disabled="isVisible(col.key) && visibleKeys.length === 1"
+                         @change="toggleColumn(col.key)" />
+                  {{ col.label }}
+                </label>
+                <span v-if="isVisible(col.key)" class="cols-move">
+                  <button class="cols-move-btn" type="button" title="Move left"
+                          :disabled="visibleKeys.indexOf(col.key) === 0"
+                          @click="moveColumn(col.key, -1)">◀</button>
+                  <button class="cols-move-btn" type="button" title="Move right"
+                          :disabled="visibleKeys.indexOf(col.key) === visibleKeys.length - 1"
+                          @click="moveColumn(col.key, 1)">▶</button>
+                </span>
+              </div>
               <button class="cols-reset" type="button" @click="resetColumns">Reset to defaults</button>
             </div>
           </span>
@@ -246,11 +256,10 @@ import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
 // Every flat-schema field a result row carries (minus description — too
 // wide for a table cell — and web_url, which is the title link). Which of
-// these actually render is the user's Configure Columns choice below; the
-// default set is the issue #302 spec: title, type, state, labels, weight,
-// assignees, dates, link.
+// these render — and in what order — is the user's Configure Columns
+// choice below; the default set is the issue #302 spec (title, type,
+// state, labels, weight, assignees, dates, link) plus the derived project.
 const ALL_COLUMNS = [
-  // The #302 default ten first, in their established on-screen order…
   { key: 'iid',            label: 'IID',            kind: 'number' },
   { key: 'title',          label: 'Title',          kind: 'text' },
   { key: 'type',           label: 'Type',           kind: 'text' },
@@ -261,7 +270,6 @@ const ALL_COLUMNS = [
   { key: 'created_at',     label: 'Created',        kind: 'date' },
   { key: 'updated_at',     label: 'Updated',        kind: 'date' },
   { key: 'due_date',       label: 'Due',            kind: 'date' },
-  // …then the rest of the flat schema, opt-in via Configure Columns.
   { key: 'author',         label: 'Author',         kind: 'text' },
   { key: 'milestone',      label: 'Milestone',      kind: 'text' },
   { key: 'milestone_due',  label: 'Milestone due',  kind: 'date' },
@@ -276,8 +284,9 @@ const ALL_COLUMNS = [
   { key: 'project',        label: 'Project',        kind: 'text' },
   { key: 'namespace_path', label: 'Namespace',      kind: 'text' },
 ]
-const DEFAULT_COLUMNS = ['iid', 'title', 'type', 'state', 'labels', 'weight',
-                         'assignees', 'created_at', 'updated_at', 'due_date']
+const DEFAULT_COLUMNS = ['iid', 'title', 'project', 'type', 'state', 'labels',
+                         'weight', 'assignees', 'created_at', 'updated_at',
+                         'due_date']
 
 const EXAMPLES = [
   'state = opened AND weight >= 5 ORDER BY due ASC',
@@ -371,9 +380,14 @@ const stored    = sanitize(loadStored(COLUMNS_KEY, DEFAULT_COLUMNS))
 const visibleKeys = ref(stored.length ? stored : [...DEFAULT_COLUMNS])
 const showCols  = ref(false)
 
-// Schema order, not click order — the table reads the same regardless of
-// the sequence boxes were ticked in.
-const visibleColumns = computed(() => ALL_COLUMNS.filter(c => visibleKeys.value.includes(c.key)))
+// The stored sequence IS the column order — ◀ ▶ in the popover reorder it;
+// newly ticked columns append at the end.
+const byKey = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]))
+const visibleColumns = computed(() => visibleKeys.value.map(k => byKey[k]).filter(Boolean))
+// Popover listing: visible columns first, in table order, then the rest.
+const popoverColumns = computed(() =>
+  [...visibleColumns.value, ...ALL_COLUMNS.filter(c => !visibleKeys.value.includes(c.key))])
+const isVisible = key => visibleKeys.value.includes(key)
 
 function toggleColumn(key) {
   const cur = visibleKeys.value
@@ -385,6 +399,16 @@ function toggleColumn(key) {
     visibleKeys.value = [...cur, key]
   }
   saveStored(COLUMNS_KEY, visibleKeys.value)
+}
+
+function moveColumn(key, delta) {
+  const cur = [...visibleKeys.value]
+  const i = cur.indexOf(key)
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= cur.length) return
+  ;[cur[i], cur[j]] = [cur[j], cur[i]]
+  visibleKeys.value = cur
+  saveStored(COLUMNS_KEY, cur)
 }
 
 function resetColumns() {
@@ -905,14 +929,23 @@ function chipStyle(name) {
   top: calc(100% + 0.35rem);
   right: 0;
   z-index: 30;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(9rem, 1fr));
-  gap: 0.15rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 13rem;
+  max-height: 70vh;
+  overflow-y: auto;
   padding: 0.6rem 0.75rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.cols-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 .cols-item {
   display: flex;
@@ -923,8 +956,20 @@ function chipStyle(name) {
   white-space: nowrap;
   cursor: pointer;
 }
+.cols-move { display: inline-flex; gap: 0.2rem; }
+.cols-move-btn {
+  padding: 0 0.3rem;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cols-move-btn:hover:not(:disabled) { border-color: var(--action); color: var(--action); }
+.cols-move-btn:disabled { opacity: 0.35; cursor: default; }
 .cols-reset {
-  grid-column: 1 / -1;
   margin-top: 0.4rem;
   padding: 0.2rem 0.5rem;
   font-size: 0.75rem;
@@ -935,9 +980,6 @@ function chipStyle(name) {
   cursor: pointer;
 }
 .cols-reset:hover { border-color: var(--action); color: var(--action); }
-@media (max-width: 480px) {
-  .cols-pop { grid-template-columns: 1fr; max-height: 60vh; overflow-y: auto; }
-}
 
 .table-wrap {
   flex: 1;
