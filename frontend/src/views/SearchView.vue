@@ -62,6 +62,7 @@
         <button class="icon-btn help-close" type="button" aria-label="Close help" @click="showHelp = false">✕</button>
       </div>
 
+      <div class="help-body">
       <div class="help-grid">
         <div class="help-block">
           <h3>Operators</h3>
@@ -123,6 +124,7 @@
             </ol>
           </li>
         </ol>
+      </div>
       </div>
     </section>
 
@@ -493,7 +495,7 @@ function day(iso) {
 .help-panel {
   flex-shrink: 0;
   margin: 0.75rem 1.25rem 0;
-  padding: 0.9rem 1.1rem;
+  padding: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -502,11 +504,18 @@ function day(iso) {
   font-size: 0.8rem;
 }
 .help-head {
+  /* Pinned while the panel body scrolls — the ✕ must stay reachable. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: baseline;
   gap: 0.8rem;
-  margin-bottom: 0.6rem;
+  padding: 0.9rem 1.1rem 0.55rem;
 }
+.help-body { padding: 0.35rem 1.1rem 0.9rem; }
 .help-title { font-weight: 600; color: var(--text-1); }
 .help-scope { font-size: 0.75rem; color: var(--text-3); }
 .help-close { margin-left: auto; padding: 0.25rem 0.5rem; }
