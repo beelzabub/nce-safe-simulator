@@ -149,7 +149,13 @@ export async function mockApi(page) {
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
     const json = (body) => route.fulfill({ json: body })
-    if (path === '/api/config')           return json({ dod_banner_enabled: true, wiki_url: '', grafana_url: '', deployment_type: '', version: 'nce-abc1234' })
+    if (path === '/api/config')           return json({ dod_banner_enabled: true, wiki_url: '', grafana_url: '', deployment_type: '', version: 'nce-abc1234', target_group_path: 'portfolio/test-group' })
+    if (path === '/api/query/fields')     return json({ fields: [
+      { name: 'state', kind: 'core', type: 'enum', aliases: ['status'], values: ['opened', 'closed', 'all'] },
+      { name: 'piid', kind: 'label', type: 'string', aliases: [], values: ['2026Q3', '2026Q4'] },
+      { name: 'epic_type', kind: 'label', type: 'string', aliases: [], values: ['epic', 'capability', 'feature'] },
+      { name: 'business_value', kind: 'custom', type: 'number', aliases: [], values: [] },
+    ] })
     // auth.method "none": the gate falls back to its client-side session
     // flag, which seedAuthedSession pre-sets for the home-view tests
     if (path === '/api/auth/session')     return json({ method: 'none', authenticated: false })

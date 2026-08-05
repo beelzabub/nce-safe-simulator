@@ -77,6 +77,19 @@ export async function postQuery(jql, limit) {
   return body
 }
 
+// The JQL field vocabulary behind the search help panel — names, aliases,
+// and the taxonomy value lists from the live config. Degrades to [] so the
+// help still renders its static syntax reference without a server.
+export async function getQueryFields() {
+  try {
+    const r = await fetch('/api/query/fields')
+    if (!r.ok) return []
+    return (await r.json()).fields || []
+  } catch {
+    return []
+  }
+}
+
 // ── Auth session (epic #135, issue #157) ────────────────────────────────────
 // All three degrade to safe shapes on network failure: session degrades to
 // method "none" (cosmetic front door, app shell still reachable — matching

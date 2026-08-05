@@ -140,3 +140,56 @@ test.describe('JQL search view (#302)', () => {
     await expect(page.locator('.search-empty .empty-lead')).toHaveText('No matching work items')
   })
 })
+
+// Help panel + expandable editor (issue #302 follow-up): the search bar's
+// far-right icons mirror Jira's — expand for larger query editing, and a
+// help panel whose examples are built from the live /api/query/fields
+// vocabulary so they copy-paste against real data in the configured group.
+test.describe('JQL search help panel (#302)', () => {
+
+  test('header shows the queried group slug from /api/config', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await expect(page.locator('.search-sub .scope-slug')).toHaveText('portfolio/test-group')
+  })
+
+  test('help opens with the field vocabulary and scope-aware examples', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await page.locator('.help-btn').click()
+    await expect(page.locator('.help-panel')).toBeVisible()
+    // Field table renders the taxonomy values fetched from the server
+    await expect(page.locator('.help-fields')).toContainText('piid')
+    await expect(page.locator('.help-fields .value-chip').filter({ hasText: '2026Q3' })).toBeVisible()
+    // Examples are assembled from those same values — real data, not doc lore
+    await expect(page.locator('.help-examples .example-btn')
+      .filter({ hasText: 'piid = 2026Q3 AND state = opened' })).toBeVisible()
+    await expect(page.locator('.help-examples .example-btn')
+      .filter({ hasText: 'piid IN (2026Q3, 2026Q4) ORDER BY weight DESC' })).toBeVisible()
+  })
+
+  test('clicking a help example fills the box, closes help, and runs', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await page.locator('.help-btn').click()
+    await page.locator('.help-examples .example-btn')
+      .filter({ hasText: 'piid = 2026Q3 AND state = opened' }).click()
+    await expect(page.locator('.help-panel')).toHaveCount(0)
+    await expect(page.locator('.query-input')).toHaveValue('piid = 2026Q3 AND state = opened')
+    await expect(page.locator('.results-table tbody tr')).toHaveCount(3)
+    expect(page.queryCalls).toBe(1)
+  })
+
+  test('expand toggle swaps to a multi-line editor and keeps the query', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await page.locator('.query-input').fill('state = opened')
+    await page.locator('.expand-btn').click()
+    const area = page.locator('textarea.query-textarea')
+    await expect(area).toBeVisible()
+    await expect(area).toHaveValue('state = opened')      // same model, no loss
+    await area.fill('state = opened\nAND weight >= 5\nORDER BY due ASC')
+    // Collapse and re-expand: the model keeps the multi-line text (a
+    // single-line <input> can't display newlines, but must not eat them).
+    await page.locator('.expand-btn').click()
+    await page.locator('.expand-btn').click()
+    await expect(page.locator('textarea.query-textarea')).toHaveValue(
+      'state = opened\nAND weight >= 5\nORDER BY due ASC')
+  })
+})

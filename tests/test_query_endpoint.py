@@ -267,3 +267,31 @@ class TestAvailability:
             gl.run_jql.assert_called_once_with("state = opened", limit=None)
         finally:
             app.state.gl = None
+
+
+# ---------------------------------------------------------------------------
+# GET /api/query/fields — the vocabulary behind the search help panel
+# ---------------------------------------------------------------------------
+
+class TestQueryFieldsEndpoint:
+
+    def test_returns_live_vocabulary(self, client):
+        resp = client.get("/api/query/fields")
+        assert resp.status_code == 200
+        fields = {f["name"]: f for f in resp.json()["fields"]}
+        # Core field with its Jira alias
+        assert "status" in fields["state"]["aliases"]
+        # Taxonomy fields carry the closed value lists from the config —
+        # this is what makes help examples copy-paste real data.
+        assert fields["piid"]["values"] == ["2026Q2", "2026Q3", "2026Q4"]
+        assert fields["epic_type"]["kind"] == "label"
+        assert fields["business_value"]["kind"] == "custom"
+
+    def test_matches_jql_vocabulary_method(self, client):
+        assert (client.get("/api/query/fields").json()["fields"]
+                == FixedNowHarness().jql_vocabulary())
+
+    def test_503_without_client(self):
+        app.state.gl = None
+        resp = TestClient(app).get("/api/query/fields")
+        assert resp.status_code == 503

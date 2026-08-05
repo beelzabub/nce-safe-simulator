@@ -486,6 +486,24 @@ def analysis_portfolio():
     return portfolio_payload(data_dir)
 
 
+@app.get("/api/query/fields")
+def list_query_fields(request: Request):
+    """The JQL field vocabulary for the search help panel (issue #302).
+
+    One entry per queryable field — name, kind, type, Jira aliases, and the
+    closed value list for taxonomy fields — straight from the same registry
+    run_jql validates against, so the help's examples always reflect the
+    live config (a config reload changes this response too).
+    """
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "unavailable",
+                    "message": "GitLab client not configured."})
+    return {"fields": gl.jql_vocabulary()}
+
+
 @app.post("/api/query")
 def run_query(request: Request, payload: dict = Body(...)):
     """Run a JQL query against the live GitLab group (epic #297, issue #302).

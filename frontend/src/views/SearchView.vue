@@ -18,7 +18,20 @@
     </header>
 
     <form class="query-form" @submit.prevent="run">
+      <textarea
+        v-if="expanded"
+        v-model="query"
+        class="query-input query-textarea"
+        rows="4"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder='state = opened AND weight >= 5 ORDER BY due ASC'
+        aria-label="JQL query"
+        @keydown.ctrl.enter.prevent="run"
+        @keydown.meta.enter.prevent="run"
+      ></textarea>
       <input
+        v-else
         v-model="query"
         class="query-input"
         type="text"
@@ -32,7 +45,86 @@
         <input v-model.number="limit" class="limit-input" type="number" min="1" step="1" />
       </label>
       <button class="run-btn" type="submit" :disabled="state === 'loading'">Run</button>
+      <button class="icon-btn expand-btn" type="button"
+              :title="expanded ? 'Collapse query editor' : 'Expand query editor (multi-line)'"
+              :aria-label="expanded ? 'Collapse query editor' : 'Expand query editor'"
+              @click="expanded = !expanded">{{ expanded ? '⤒' : '⤓' }}</button>
+      <button class="icon-btn help-btn" type="button" title="JQL syntax help"
+              aria-label="JQL syntax help" :class="{ active: showHelp }"
+              @click="toggleHelp">?</button>
     </form>
+
+    <!-- ── Syntax help: reference + examples built from the live vocabulary ── -->
+    <section v-if="showHelp" class="help-panel" aria-label="JQL help">
+      <div class="help-head">
+        <span class="help-title">JQL against GitLab — syntax &amp; examples</span>
+        <span v-if="groupPath" class="help-scope">queries run against <code class="scope-slug">{{ groupPath }}</code></span>
+        <button class="icon-btn help-close" type="button" aria-label="Close help" @click="showHelp = false">✕</button>
+      </div>
+
+      <div class="help-grid">
+        <div class="help-block">
+          <h3>Operators</h3>
+          <table class="help-table">
+            <tbody>
+              <tr><td><code>=</code> <code>!=</code></td><td>equality (case-insensitive)</td></tr>
+              <tr><td><code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td><td>numbers and dates</td></tr>
+              <tr><td><code>~</code> <code>!~</code></td><td>substring match (<code>title</code>, <code>text</code>, …)</td></tr>
+              <tr><td><code>IN (a, b)</code> <code>NOT IN</code></td><td>any-of / none-of a value list</td></tr>
+              <tr><td><code>IS EMPTY</code> <code>IS NOT EMPTY</code></td><td>unset / set (<code>assignee</code>, <code>due</code>, …)</td></tr>
+              <tr><td><code>AND</code> <code>OR</code> <code>NOT</code> <code>( )</code></td><td>boolean logic, any nesting</td></tr>
+              <tr><td><code>ORDER BY f ASC, g DESC</code></td><td>multi-key ordering, trailing</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="help-block">
+          <h3>Dates</h3>
+          <table class="help-table">
+            <tbody>
+              <tr><td><code>"2026-08-01"</code></td><td>absolute date</td></tr>
+              <tr><td><code>-4w</code> <code>12h</code> <code>-90d</code></td><td>relative to now (m/h/d/w)</td></tr>
+              <tr><td><code>now()</code> <code>currentUser()</code></td><td>evaluation-time values</td></tr>
+              <tr><td><code>startOfDay()</code> <code>endOfWeek()</code></td><td>also <code>…OfMonth</code>/<code>…OfYear</code></td></tr>
+              <tr><td><code>startOfMonth(-1)</code></td><td>offset in the unit (last month)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="help-block">
+        <h3>Fields</h3>
+        <p class="help-note">Canonical names with Jira aliases in parentheses; taxonomy fields list the exact values valid <em>in this group's config</em>.</p>
+        <div class="help-fields-wrap">
+          <table class="help-table help-fields" v-if="fields.length">
+            <thead><tr><th>field</th><th>type</th><th>values</th></tr></thead>
+            <tbody>
+              <tr v-for="f in fields" :key="f.name">
+                <td><code>{{ f.name }}</code><span v-if="f.aliases.length" class="alias"> ({{ f.aliases.join(', ') }})</span></td>
+                <td>{{ f.type }}</td>
+                <td class="cell-values"><template v-if="f.values.length"><code v-for="v in f.values" :key="v" class="value-chip">{{ v }}</code></template><span v-else>—</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="help-note">Loading field vocabulary…</p>
+        </div>
+      </div>
+
+      <div class="help-block">
+        <h3>Examples</h3>
+        <p class="help-note">Built from this group's live configuration — click one to run it, or copy it for the CLI / <code>POST /api/query</code>.</p>
+        <ol class="help-examples">
+          <li v-for="section in exampleSections" :key="section.title">
+            <span class="example-section">{{ section.title }}</span>
+            <ol>
+              <li v-for="ex in section.items" :key="ex">
+                <button class="example-btn" type="button" :title="'Run: ' + ex" @click="query = ex; showHelp = false; run()">{{ ex }}</button>
+                <button class="icon-btn copy-btn" type="button" :aria-label="'Copy: ' + ex" title="Copy" @click="copyText(ex)">⧉</button>
+              </li>
+            </ol>
+          </li>
+        </ol>
+      </div>
+    </section>
 
     <!-- ── Inline query errors ── -->
     <div v-if="state === 'error' && syntaxError" class="error-box">
@@ -119,7 +211,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getConfig, postQuery } from '../api.js'
+import { getConfig, getQueryFields, postQuery } from '../api.js'
 
 // Column set per the issue #302 spec: title, type, state, labels, weight,
 // assignees, dates, link. (Wider than the CLI `table` output on purpose —
@@ -150,6 +242,66 @@ const EXAMPLES = [
 // (the portfolio group from config.json, not the whole GitLab instance).
 const groupPath = ref('')
 onMounted(async () => { groupPath.value = (await getConfig()).target_group_path || '' })
+
+// ── Help panel + expandable editor (Jira-search-bar affordances) ──
+const expanded = ref(false)     // single-line input ⇄ multi-line textarea
+const showHelp = ref(false)
+const fields   = ref([])        // live vocabulary from /api/query/fields
+
+async function toggleHelp() {
+  showHelp.value = !showHelp.value
+  if (showHelp.value && !fields.value.length) {
+    fields.value = await getQueryFields()
+  }
+}
+
+function copyText(text) {
+  try { navigator.clipboard.writeText(text) } catch { /* clipboard denied — copy manually */ }
+}
+
+// Examples assembled from the group's real taxonomy values, so pasting one
+// returns real data from the configured scope — not vocabulary that only
+// exists in documentation.
+const quoteVal = v => (/^[A-Za-z0-9_.-]+$/.test(v) ? v : `"${v}"`)
+const exampleSections = computed(() => {
+  const byName = Object.fromEntries(fields.value.map(f => [f.name, f]))
+  const val  = (name, i = 0) => {
+    const f = byName[name]
+    return f && f.values.length > i ? quoteVal(f.values[i]) : null
+  }
+  const sections = []
+  sections.push({ title: 'Basics', items: [
+    'state = opened',
+    'type = epic AND state = opened',
+    'weight >= 8 ORDER BY weight DESC',
+  ]})
+  const tax = []
+  for (const name of ['piid', 'epic_type', 'project_label', 'lifecycle',
+                      'work_type', 'risk', 'wsjf_urgency']) {
+    const v = val(name)
+    if (v) tax.push(`${name} = ${v} AND state = opened`)
+  }
+  const p0 = val('piid'), p1 = val('piid', 1)
+  if (p0 && p1) tax.push(`piid IN (${p0}, ${p1}) ORDER BY weight DESC`)
+  if (tax.length) sections.push({ title: 'SAFe taxonomy (this group’s values)', items: tax })
+  sections.push({ title: 'Dates and functions', items: [
+    'updated >= -4w',
+    'due <= endOfYear() AND state = opened',
+    'created >= startOfMonth(-1) AND created < startOfMonth()',
+  ]})
+  sections.push({ title: 'People and empties', items: [
+    'assignee = currentUser() AND state = opened',
+    'assignee IS EMPTY AND due < startOfDay()',
+  ]})
+  sections.push({ title: 'Text and Jira aliases', items: [
+    'text ~ "readiness" ORDER BY updated DESC',
+    'status = opened AND issuetype = epic',      // Jira names alias to GitLab fields
+  ]})
+  if (byName.business_value) sections.push({ title: 'Business value', items: [
+    'business_value >= 8 ORDER BY business_value DESC, weight DESC',
+  ]})
+  return sections
+})
 
 const query     = ref('')
 const limit     = ref(100)
@@ -318,6 +470,89 @@ function day(iso) {
   cursor: pointer;
 }
 .run-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Search-bar affordances: expand editor + help (Jira-style, far right) ── */
+.icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.5rem 0.6rem;
+}
+.icon-btn:hover, .icon-btn.active { border-color: var(--action); color: var(--action); }
+.query-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+/* ── Help panel ── */
+.help-panel {
+  flex-shrink: 0;
+  margin: 0.75rem 1.25rem 0;
+  padding: 0.9rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-y: auto;
+  max-height: 60vh;
+  font-size: 0.8rem;
+}
+.help-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.help-title { font-weight: 600; color: var(--text-1); }
+.help-scope { font-size: 0.75rem; color: var(--text-3); }
+.help-close { margin-left: auto; padding: 0.25rem 0.5rem; }
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.5rem 1.5rem;
+}
+.help-block h3 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: 0.7rem 0 0.3rem;
+}
+.help-note { color: var(--text-3); margin: 0.1rem 0 0.4rem; }
+.help-table { border-collapse: collapse; }
+.help-table td, .help-table th {
+  padding: 0.15rem 0.9rem 0.15rem 0;
+  text-align: left;
+  vertical-align: top;
+  color: var(--text-2);
+}
+.help-table th { font-size: 0.7rem; color: var(--text-3); font-weight: 600; }
+.help-table code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--text-1);
+}
+.help-fields-wrap { overflow-x: auto; }
+.help-fields .alias { color: var(--text-3); font-size: 0.72rem; }
+.cell-values { max-width: 34rem; }
+.value-chip {
+  display: inline-block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  margin: 0.08rem 0.25rem 0.08rem 0;
+}
+.help-examples { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+.help-examples > li { margin-bottom: 0.5rem; }
+.help-examples ol { list-style: decimal; padding-left: 1.3rem; margin: 0.2rem 0; }
+.help-examples ol li { margin: 0.22rem 0; }
+.example-section { font-weight: 600; color: var(--text-2); }
+.copy-btn { font-size: 0.72rem; padding: 0.18rem 0.4rem; margin-left: 0.4rem; }
 
 /* ── Inline errors ── */
 .error-box {
