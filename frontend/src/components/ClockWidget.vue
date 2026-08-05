@@ -10,7 +10,7 @@
   </div>
 
   <Teleport to="body">
-    <div v-if="open" class="clock-overlay" @click.self="open = false">
+    <div v-if="open" class="clock-overlay" @mousedown.self="overlayDown = true" @mouseup="overlayUp">
       <div class="clock-dialog" :style="dialogStyle">
         <div class="clock-dialog-header">
           <span>Clock settings</span>
@@ -51,6 +51,14 @@ import { useClock } from '../composables/useClock.js'
 
 const { utcTime, tz2Time, tz2, tz2On, setTz2, toggleTz2 } = useClock()
 const open        = ref(false)
+// Backdrop dismiss only on a full click that starts AND ends on the overlay —
+// a text-selection drag that escapes the panel fires click.self too (the
+// click lands on the elements' common ancestor), and must not close it.
+const overlayDown = ref(false)
+function overlayUp(e) {
+  if (overlayDown.value && e.target === e.currentTarget) open.value = false
+  overlayDown.value = false
+}
 const widgetEl    = ref(null)
 const dialogStyle = ref({})
 const tzSearch    = ref('')

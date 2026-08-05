@@ -1,5 +1,5 @@
 <template>
-  <div class="overlay" @click.self="$emit('cancel')">
+  <div class="overlay" @mousedown.self="overlayDown = true" @mouseup="overlayUp">
     <div class="dialog">
 
       <div class="dialog-header">
@@ -73,7 +73,15 @@ const props = defineProps({
   target: { type: String, required: true },       // 's3' | 'ecs' | 'eks'
   action: { type: String, default: 'deploy' },     // 'deploy' | 'destroy'
 })
-defineEmits(['confirm', 'cancel'])
+const emit = defineEmits(['confirm', 'cancel'])
+// Backdrop dismiss only on a full click that starts AND ends on the overlay —
+// a text-selection drag that escapes the panel fires click.self too (the
+// click lands on the elements' common ancestor), and must not close it.
+const overlayDown = ref(false)
+function overlayUp(e) {
+  if (overlayDown.value && e.target === e.currentTarget) emit('cancel')
+  overlayDown.value = false
+}
 
 const acknowledged   = ref(false)
 const showArchitecture = ref(false)
