@@ -303,6 +303,12 @@ class NceGitLab(
 
         self.grafana_url = os.getenv("GRAFANA_URL") or config.get("grafana_url", "")
 
+        # The reload may have repointed parent_group or swapped the token —
+        # drop the JQL caches derived from them, or run_jql keeps querying
+        # the previous group until the process restarts.
+        self._jql_group_path_cache   = None
+        self._jql_current_user_cache = None
+
 
 def _confirm_create(gl):
     """Show a summary of what Create will do and ask for confirmation."""
