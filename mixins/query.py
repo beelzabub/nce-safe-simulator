@@ -141,13 +141,17 @@ class QueryMixin:
     # Entry point
     # ------------------------------------------------------------------
 
-    def run_jql(self, query, limit=None, push_down=True, now=None):
+    def run_jql(self, query, limit=None, offset=0, push_down=True, now=None):
         """Run a JQL query against the live portfolio group.
 
         Args:
             query:     the JQL string (e.g. ``state = opened AND weight >= 5
                        ORDER BY due ASC``).
             limit:     max results to return; None applies JQL_DEFAULT_LIMIT.
+            offset:    number of matching items to skip before the returned
+                       window — offset/limit page through one stable result
+                       sequence (the query's order). Each page re-executes
+                       the query; deep offsets re-scan the skipped matches.
             push_down: False forces a full scan (entity scope only, every
                        predicate client-side). Results are identical by
                        contract — the flag exists for parity verification
@@ -156,9 +160,10 @@ class QueryMixin:
                        defaults to the current UTC time.
 
         Returns a dict: ``items`` (flat dicts in the documented field
-        schema), ``count``, ``limit``, ``truncated`` (True when the limit
-        cut the returned list *or* fetching stopped early with pages still
-        unfetched — more matching items may exist), plus a ``plan`` block
+        schema), ``count``, ``limit``, ``offset``, ``truncated`` (True when
+        the limit cut the returned list *or* fetching stopped early with
+        pages still unfetched — more matching items may exist beyond the
+        returned window), plus a ``plan`` block
         describing what was pushed down and what ran client-side. The whole
         dict is JSON-serializable (pushed date bounds are reported in their
         ISO-8601 transport form).
@@ -173,13 +178,13 @@ class QueryMixin:
         requests.RequestException or gitlab.GitlabError leak through.
         """
         try:
-            return self._run_jql(query, limit=limit,
+            return self._run_jql(query, limit=limit, offset=offset,
                                  push_down=push_down, now=now)
         except (requests.RequestException, gitlab.GitlabError) as exc:
             raise JqlExecutionError(
                 "GitLab transport failure: %s" % exc) from exc
 
-    def _run_jql(self, query, limit=None, push_down=True, now=None):
+    def _run_jql(self, query, limit=None, offset=0, push_down=True, now=None):
         """run_jql body — see run_jql for the contract."""
         parsed = parse(query)
         registry = self._jql_registry()
@@ -190,6 +195,10 @@ class QueryMixin:
         effective_limit = self.JQL_DEFAULT_LIMIT if limit is None else int(limit)
         if effective_limit <= 0:
             raise ValueError("limit must be a positive integer")
+        offset = int(offset or 0)
+        if offset < 0:
+            raise ValueError("offset must be zero or a positive integer")
+        window_end = offset + effective_limit
 
         items = []
         scanned = 0
@@ -251,11 +260,11 @@ class QueryMixin:
                 pages += 1
                 info = page.get("pageInfo") or {}
                 has_next = bool(info.get("hasNextPage"))
-                if early_stop and len(items) >= effective_limit:
+                if early_stop and len(items) >= window_end:
                     # Stopping with pages unfetched counts as truncation even
-                    # when the count lands exactly on the limit — the pages
+                    # when the count lands exactly on the window — the pages
                     # never fetched may hold more matching items.
-                    truncated = len(items) > effective_limit or has_next
+                    truncated = len(items) > window_end or has_next
                     break
                 if not has_next:
                     break
@@ -264,13 +273,14 @@ class QueryMixin:
         if plan.client_sort:
             sort_items(items, plan.client_sort, registry)
 
-        truncated = truncated or len(items) > effective_limit
-        items = items[:effective_limit]
+        truncated = truncated or len(items) > window_end
+        items = items[offset:window_end]
         return {
             "query":     query,
             "items":     items,
             "count":     len(items),
             "limit":     effective_limit,
+            "offset":    offset,
             "truncated": truncated,
             "plan": {
                 "push_down":     push_down,
