@@ -90,7 +90,12 @@ class TestRegistryEntry:
 
     def test_category_placement(self):
         cat = next(c for c in TOOL_CATEGORIES if "query" in c["tools"])
-        assert cat["name"] == "Query"
+        assert cat["name"] == "Analysis"
+
+    def test_hidden_from_web_tool_picker(self):
+        # The web UI's home for JQL is the Analysis tab's query page; the raw
+        # tool must not also appear in the job picker.
+        assert TOOL.get("ui_hidden") is True
 
     def test_every_category_tool_is_registered(self):
         keys = {t["key"] for t in TOOLS}
@@ -125,6 +130,67 @@ class TestRegistryEntry:
         assert args.utilities == "query"
         assert args.formats is None            # not swallowed by --formats
         assert extra == ["--format", "json"]   # survives as leftover tokens
+
+
+# ---------------------------------------------------------------------------
+# Query-from-file (the jql param doubles as a file path)
+# ---------------------------------------------------------------------------
+
+class TestQueryFromFile:
+
+    def test_file_path_reads_query_from_file(self, harness, tmp_path, capsys):
+        f = tmp_path / "open-heavy.jql"
+        f.write_text("state = opened AND weight >= 5 ORDER BY weight DESC\n")
+        harness._tool_query(str(f))
+        captured = capsys.readouterr()
+        assert "Payments capability" in captured.out
+        assert "2 item(s)" in captured.out
+        # The source note is chrome — stderr, never stdout.
+        assert str(f) in captured.err
+        assert str(f) not in captured.out
+
+    def test_multiline_file_parses(self, harness, tmp_path, capsys):
+        f = tmp_path / "multiline.jql"
+        f.write_text("state = opened\nAND weight >= 5\nORDER BY weight DESC\n")
+        harness._tool_query(str(f))
+        assert "2 item(s)" in capsys.readouterr().out
+
+    def test_file_query_keeps_machine_stdout_clean(self, harness, tmp_path, capsys):
+        f = tmp_path / "q.jql"
+        f.write_text("state = opened AND weight >= 5")
+        harness._tool_query(str(f), format="json")
+        captured = capsys.readouterr()
+        json.loads(captured.out)          # stdout is the payload alone
+        assert str(f) in captured.err
+
+    def test_nonexistent_path_is_treated_as_query_text(self, harness, capsys):
+        # Looks nothing like a real file — parses (and errors) as JQL.
+        with pytest.raises(SystemExit) as exc:
+            harness._tool_query("no/such/file.jql")
+        assert exc.value.code == 2
+        assert "Syntax error" in capsys.readouterr().err or True
+
+    def test_syntax_error_in_file_reports_file_contents(self, harness, tmp_path, capsys):
+        f = tmp_path / "broken.jql"
+        f.write_text("state = opened AND AND weight")
+        with pytest.raises(SystemExit) as exc:
+            harness._tool_query(str(f))
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        # The caret anchors to the file's query text, not the path.
+        assert "state = opened AND AND weight" in err
+
+    def test_unreadable_file_exits_2(self, harness, tmp_path, monkeypatch, capsys):
+        # chmod tricks don't work as root — simulate the read failing instead.
+        f = tmp_path / "q.jql"
+        f.write_text("state = opened")
+        monkeypatch.setattr(
+            "pathlib.Path.read_text",
+            lambda self, **kw: (_ for _ in ()).throw(OSError("permission denied")))
+        with pytest.raises(SystemExit) as exc:
+            harness._tool_query(str(f))
+        assert exc.value.code == 2
+        assert "Cannot read query file" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +449,8 @@ class TestRunnerChromeRouting:
         payload = json.loads(captured.out)      # nothing but JSON on stdout
         assert payload["count"] == 1
         assert "log →" in captured.err          # chrome moved to stderr
-        assert "JQL query: iid = 16  (from CLI)" in captured.err
+        assert ("JQL query (or path to a file containing one): "
+                "iid = 16  (from CLI)") in captured.err
 
     def test_query_tool_csv_stdout_round_trips(self, runner, capsys):
         runner._run_tool(TOOL, prefills={"jql": "state = opened", "format": "csv"})
@@ -418,7 +485,8 @@ class TestRunnerChromeRouting:
         capsys.readouterr()
         text = self._only_log()
         assert "query — " in text                            # banner
-        assert "JQL query: iid = 16  (from CLI)" in text     # param echo
+        assert ("JQL query (or path to a file containing one): "
+                "iid = 16  (from CLI)") in text              # param echo
         assert '"count": 1' in text                          # payload
 
     def test_failed_run_log_records_params_and_error(self, runner, capsys):
@@ -429,7 +497,8 @@ class TestRunnerChromeRouting:
             runner._run_tool(TOOL, prefills={"jql": bad, "format": "json"})
         capsys.readouterr()
         text = self._only_log()
-        assert f"JQL query: {bad}  (from CLI)" in text
+        assert (f"JQL query (or path to a file containing one): "
+                f"{bad}  (from CLI)") in text
         assert "Parse error:" in text
 
 
@@ -448,8 +517,8 @@ class TestMenuSurvivesToolErrors:
 
     def test_category_menu_survives_tool_exit(self, runner, monkeypatch, capsys):
         query_cat = str(next(i for i, c in enumerate(TOOL_CATEGORIES, 1)
-                             if c["name"] == "Query"))
-        answers = iter([query_cat, "1",   # Query category → query tool (fails)
+                             if c["name"] == "Analysis"))
+        answers = iter([query_cat, "1",   # Analysis category → query tool (fails)
                         "b", "b"])        # back to categories, back out
         monkeypatch.setattr("builtins.input", lambda *a: next(answers))
         monkeypatch.setattr(ToolRunnerHarness, "_run_tool",

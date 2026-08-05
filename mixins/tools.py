@@ -302,9 +302,12 @@ TOOLS = [
         "description": "Run a JQL-style query against the live group's work items (AND/OR/NOT, comparisons, ORDER BY; table/json/csv output)",
         "method":      "_tool_query",
         "stdout_is_data": True,
+        # The web UI's home for JQL is the Analysis tab's query page, not the
+        # tool picker — hide the raw tool there; the CLI surface stays.
+        "ui_hidden":   True,
         "params": [
-            {"name": "jql",    "prompt": "JQL query", "type": str,
-             "help": "e.g. state = opened AND piid = 2026Q3 ORDER BY weight DESC — grammar and field vocabulary in the README (## Utility Tools → Query)."},
+            {"name": "jql",    "prompt": "JQL query (or path to a file containing one)", "type": str,
+             "help": "e.g. state = opened AND piid = 2026Q3 ORDER BY weight DESC — or a path to a file holding the query. Grammar and field vocabulary in the README (## Utility Tools → Analysis)."},
             {"name": "limit",  "prompt": "Max results (blank = 100)", "type": int, "optional": True},
             {"name": "format", "prompt": "Output format", "type": str, "widget": "select",
              "options": ["table", "json", "csv"], "default": "table"},
@@ -708,8 +711,8 @@ TOOL_CATEGORIES = [
         "tools": ["audit-hierarchy", "audit-labels", "list-wikis"],
     },
     {
-        "name":        "Query",
-        "description": "Search work items with JQL-style queries",
+        "name":        "Analysis",
+        "description": "Search and analyse work items with JQL-style queries",
         "tools": ["query"],
     },
     {
