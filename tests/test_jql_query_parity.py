@@ -20,7 +20,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import gitlab
 import pytest
+import requests
 
 from jql.executor import JqlExecutionError, parse_ts
 from mixins.query import QueryMixin
@@ -758,3 +760,63 @@ class TestErrorPaths:
         harness.gl = SimpleNamespace(user=None)
         result = harness.run_jql("assignee = currentUser()", limit=100, now=NOW)
         assert ids(result) == [15, 16]
+
+    # -- transport-exception wrapping: run_jql's contract says callers only
+    #    ever see JqlExecutionError for transport failures, yet the real
+    #    graphql_query (mixins/utils.py) does a bare requests.post +
+    #    raise_for_status and the group lookup goes through python-gitlab.
+    #    These pin the wrapper that turns those raw exceptions into
+    #    JqlExecutionError.
+
+    def test_connection_error_wrapped_as_execution_error(self):
+        harness = QueryHarness()
+
+        def unreachable(*a, **k):
+            raise requests.exceptions.ConnectionError("connection refused")
+
+        harness.graphql_query = unreachable
+        with pytest.raises(JqlExecutionError) as excinfo:
+            harness.run_jql("state = opened", now=NOW)
+        assert isinstance(excinfo.value.__cause__,
+                          requests.exceptions.ConnectionError)
+
+    def test_http_error_wrapped_as_execution_error(self):
+        # What an expired/revoked token produces: raise_for_status() -> 401.
+        harness = QueryHarness()
+
+        def unauthorized(*a, **k):
+            raise requests.exceptions.HTTPError(
+                "401 Client Error: Unauthorized for url")
+
+        harness.graphql_query = unauthorized
+        with pytest.raises(JqlExecutionError) as excinfo:
+            harness.run_jql("state = opened", now=NOW)
+        assert "401" in str(excinfo.value)
+
+    def test_timeout_wrapped_as_execution_error(self):
+        harness = QueryHarness()
+
+        def slow(*a, **k):
+            raise requests.exceptions.Timeout("read timed out")
+
+        harness.graphql_query = slow
+        with pytest.raises(JqlExecutionError):
+            harness.run_jql("state = opened", now=NOW)
+
+    def test_gitlab_error_from_group_lookup_wrapped(self):
+        harness = QueryHarness()
+
+        def denied(name):
+            raise gitlab.GitlabError("403: insufficient permissions")
+
+        harness.get_group_by_name = denied
+        with pytest.raises(JqlExecutionError) as excinfo:
+            harness.run_jql("state = opened", now=NOW)
+        assert isinstance(excinfo.value.__cause__, gitlab.GitlabError)
+
+    def test_syntax_errors_still_surface_unwrapped(self):
+        # The wrapper must not swallow query errors into transport errors.
+        from jql import JqlSyntaxError
+        harness = QueryHarness()
+        with pytest.raises(JqlSyntaxError):
+            harness.run_jql("state =", now=NOW)

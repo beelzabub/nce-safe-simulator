@@ -118,7 +118,10 @@
 import { ref, computed } from 'vue'
 import { postQuery } from '../api.js'
 
-// Column set mirrors the CLI `table` output (issue #302).
+// Column set per the issue #302 spec: title, type, state, labels, weight,
+// assignees, dates, link. (Wider than the CLI `table` output on purpose —
+// both surfaces fetch identical rows through run_jql; only the columns
+// rendered differ.)
 const COLUMNS = [
   { key: 'iid',        label: 'IID',       kind: 'number' },
   { key: 'title',      label: 'Title',     kind: 'text' },
