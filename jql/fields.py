@@ -210,17 +210,18 @@ CORE_FIELDS = (
     ),
     FieldSpec(
         name="assignee", kind="core", value_type="user",
-        graphql_arg="assigneeUsernames", arg_is_list=True,
-        wildcard_arg="assigneeWildcardId", supports_not=True,
-        or_arg="assigneeUsernames",
-        description="Assignee username(s); IS EMPTY via assigneeWildcardId: NONE.",
+        wildcard_arg="assigneeWildcardId",
+        description="Assignee — matches username OR display name, so equality "
+                    "post-filters (assigneeUsernames push-down would drop "
+                    "display-name matches); IS EMPTY still pushes down via "
+                    "assigneeWildcardId: NONE.",
     ),
     FieldSpec(
         name="author", kind="core", value_type="user",
-        graphql_arg="authorUsername", supports_not=True,
-        or_arg="authorUsernames",
         aliases=("reporter",),
-        description="Author username. or: takes the plural authorUsernames list.",
+        description="Author — matches username OR display name; post-filter "
+                    "only (authorUsername push-down would drop display-name "
+                    "matches).",
     ),
     FieldSpec(
         name="labels", kind="core", value_type="label",

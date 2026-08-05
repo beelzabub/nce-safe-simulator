@@ -48,6 +48,16 @@ _TRANSPORT_ARGS = {"fullPath"}
 # Work-item fixture builder (GraphQL node shape + plain meta for the fake)
 # ---------------------------------------------------------------------------
 
+#: username -> display name, as GitLab's user objects carry both.
+USER_NAMES = {
+    "alice": "Alice Anderson",
+    "bob":   "Bob Barker",
+    "carol": "Carol Chen",
+    "dave":  "Dave Diaz",
+    "jamie": "Jamie Powers",
+}
+
+
 def wi(iid, type="Issue", title="", state="OPEN", labels=(), assignees=(),
        author="alice", milestone=None, milestone_due=None, iteration=None,
        weight=None, created="2026-01-10T00:00:00Z",
@@ -63,11 +73,12 @@ def wi(iid, type="Issue", title="", state="OPEN", labels=(), assignees=(),
         "updatedAt": updated,
         "closedAt": closed,
         "workItemType": {"name": type},
-        "author": {"username": author},
+        "author": {"username": author, "name": USER_NAMES.get(author)},
         "namespace": {"fullPath": path},
         "widgets": [
             {"labels": {"nodes": [{"title": l} for l in labels]}},
-            {"assignees": {"nodes": [{"username": u} for u in assignees]}},
+            {"assignees": {"nodes": [{"username": u, "name": USER_NAMES.get(u)}
+                                     for u in assignees]}},
             {"milestone": {"title": milestone, "dueDate": milestone_due}
              if milestone else None},
             {"iteration": {"id": "gid://gitlab/Iteration/%d" % iid,
@@ -408,6 +419,12 @@ GOLDEN_QUERIES = [
     "weight IS EMPTY",
     "weight IS NOT EMPTY",
     "state = opened AND (assignee = alice OR assignee IS EMPTY)",
+    'assignee = "Alice Anderson"',
+    'author = "Bob Barker"',
+    'reporter = "Alice Anderson"',
+    "assignee ~ anderson",
+    'assignee != "Alice Anderson" AND state = opened',
+    'assignee = "alice anderson"',
     "assignee = currentUser()",
     "assignee IN (alice, bob)",
     "assignee IN (alice, EMPTY)",
@@ -529,6 +546,14 @@ class TestGoldenResults:
         ('type = epic AND labels = "epic::feature"', [2]),
         ("weight >= 5", [1, 3, 11, 13]),
         ("assignee = currentUser()", [15, 16]),
+        # People match by display name as well as username (folded), and a
+        # name equality behaves exactly like the username form everywhere.
+        ('assignee = "Alice Anderson"', [11, 16]),
+        ('assignee = "alice anderson"', [11, 16]),
+        ('author = "Bob Barker"', [11, 16]),
+        ('reporter = "Alice Anderson"', [1, 2, 3, 4, 12]),
+        ("assignee ~ anderson", [11, 16]),
+        ('assignee != "Alice Anderson" AND state = opened', [1, 2, 4, 12, 14, 15]),
         ("state = opened AND (assignee = alice OR assignee IS EMPTY)",
          [1, 2, 4, 11, 14, 16]),
         ("piid = 2026Q2", [1, 2]),
@@ -568,7 +593,8 @@ class TestGoldenResults:
         (item,) = result["items"]
         assert set(item) == {
             "id", "iid", "type", "title", "state", "labels", "assignees",
-            "author", "milestone", "milestone_due", "iteration", "weight",
+            "assignee_names", "author", "author_name", "milestone",
+            "milestone_due", "iteration", "weight",
             "business_value", "start_date", "due_date", "created_at",
             "updated_at", "closed_at", "parent_iid", "namespace_path",
             "web_url", "description",
@@ -576,6 +602,7 @@ class TestGoldenResults:
         assert item["iid"] == 11
         assert item["type"] == "issue"
         assert item["assignees"] == ["alice"]
+        assert item["assignee_names"] == ["Alice Anderson"]
         assert item["milestone"] == "M1"
         assert item["weight"] == 5
 

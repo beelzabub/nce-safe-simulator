@@ -50,7 +50,8 @@ JQL_FORMATS = ("table", "json", "csv")
 #: CSV column order — exactly the flat schema shape_node produces
 #: (tests assert the two never drift).
 JQL_OUTPUT_FIELDS = [
-    "id", "iid", "type", "title", "state", "labels", "assignees", "author",
+    "id", "iid", "type", "title", "state", "labels", "assignees",
+    "assignee_names", "author", "author_name",
     "milestone", "milestone_due", "iteration", "weight", "business_value",
     "start_date", "due_date", "created_at", "updated_at", "closed_at",
     "parent_iid", "namespace_path", "web_url", "description",
