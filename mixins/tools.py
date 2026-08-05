@@ -779,6 +779,21 @@ class _BackSignal(Exception):
     """Raised when the user types 'b' at a parameter prompt to cancel and go back."""
 
 
+def _report_tool_exit(exc):
+    """Menu-path rendering of a tool's SystemExit: show the reason, stay alive.
+
+    Tools exit non-zero on errors (e.g. the query tool's exit-2 for a bad
+    query) — correct for a direct `-ut <tool>` invocation, but from the
+    interactive utilities menu the session must survive a typo'd query, so
+    the menu loops catch the SystemExit and route it here.
+    """
+    if isinstance(exc.code, str):
+        print(f"  {exc.code}")
+        print("  Tool failed — returning to the menu.")
+    else:
+        print(f"  Tool failed (exit {exc.code}) — returning to the menu.")
+
+
 def _check_back(raw):
     if raw.strip().lower() == "b":
         raise _BackSignal
@@ -978,6 +993,12 @@ class ToolsMixin:
                 except _BackSignal:
                     print("  Cancelled.")
                     continue  # → tool list
+                except SystemExit as exc:
+                    # A tool error (bad query, refused confirm, …) must not
+                    # kill the interactive session — report and stay in menu.
+                    _report_tool_exit(exc)
+                    _pause()
+                    continue  # → tool list
                 _pause()
                 break  # tool completed → back to category menu
 
@@ -997,6 +1018,8 @@ class ToolsMixin:
             self._run_tool_direct(tool, last_kwargs)
         except _BackSignal:
             print("  Cancelled.")
+        except SystemExit as exc:
+            _report_tool_exit(exc)
         _pause()
 
     def _run_tool_search(self, query):
@@ -1042,6 +1065,8 @@ class ToolsMixin:
             self._run_tool(matches[idx])
         except _BackSignal:
             print("  Cancelled.")
+        except SystemExit as exc:
+            _report_tool_exit(exc)
         _pause()
 
     def _run_tool(self, tool, prefills=None):

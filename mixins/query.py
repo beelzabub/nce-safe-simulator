@@ -191,8 +191,12 @@ class QueryMixin:
                 if bv_field:
                     bv_field_id = bv_field["id"]
                 else:
+                    # stderr: run_jql feeds the CLI's json/csv formats, whose
+                    # stdout is a pure data channel — a warning line there
+                    # corrupts the payload for jq / CSV readers.
                     print("  WARNING: Business Value custom field not found — "
-                          "business_value resolves as EMPTY for every item.")
+                          "business_value resolves as EMPTY for every item.",
+                          file=sys.stderr)
 
             query_text, base_vars = build_work_items_query(
                 plan.variables,

@@ -116,18 +116,25 @@ class _Tee:
 
 @contextmanager
 def _tee_to_log(log_path):
-    """Tee sys.stdout to log_path for the duration of the with-block."""
+    """Tee sys.stdout AND sys.stderr to log_path for the with-block.
+
+    Both streams feed the same log file: stdout_is_data tools route their
+    runner chrome, param echo, and error messages to stderr (so a shell pipe
+    sees only the payload), and the per-run audit log must still record them —
+    including the failure reason when a run dies with a non-zero exit.
+    """
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # buffering=1 → line-buffered: each newline flushes to disk immediately,
     # so a mid-run crash leaves a readable partial log rather than an empty file.
     with open(log_path, "w", encoding="utf-8", buffering=1) as f:
-        old = sys.stdout
-        sys.stdout = _Tee(old, f)
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = _Tee(old_out, f)
+        sys.stderr = _Tee(old_err, f)
         try:
             yield log_path
         finally:
-            sys.stdout = old
+            sys.stdout, sys.stderr = old_out, old_err
 
 
 class UtilitiesMixin:
@@ -248,8 +255,10 @@ class UtilitiesMixin:
             if retries > 0:
                 time.sleep(1.5)
                 return self.graphql_query(query, variables=variables, retries=retries - 1)
+            # stderr: callers with machine-readable stdout (the query tool's
+            # json/csv formats) must never see diagnostics on the data channel.
             for err in data["errors"]:
-                print(f"GraphQL error: {err['message']}")
+                print(f"GraphQL error: {err['message']}", file=sys.stderr)
             return None
         return data["data"]
 

@@ -117,11 +117,14 @@ class TestRegistryEntry:
         # `-ut query --format json` rides through parse_known_args to
         # _parse_tool_args as a leftover token. With argparse's default
         # prefix matching, --format would be swallowed by the --formats
-        # report flag and never reach the tool — the parser must be built
-        # with allow_abbrev=False.
-        source = (Path(__file__).parent.parent / "NceGitLab.py").read_text(
-            encoding="utf-8")
-        assert "allow_abbrev=False" in source
+        # report flag and never reach the tool — the real parser must leave
+        # it untouched (behavioral guard, not a source-string grep).
+        from NceGitLab import build_arg_parser
+        args, extra = build_arg_parser().parse_known_args(
+            ["-ut", "query", "--format", "json"])
+        assert args.utilities == "query"
+        assert args.formats is None            # not swallowed by --formats
+        assert extra == ["--format", "json"]   # survives as leftover tokens
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +201,25 @@ class TestJsonOutput:
         harness._tool_query("iid = 16", format="json")
         payload = json.loads(capsys.readouterr().out)
         assert list(payload["items"][0].keys()) == JQL_OUTPUT_FIELDS
+
+    def test_missing_bv_field_warning_stays_off_stdout(self, harness, capsys):
+        # A group without the Business Value custom field warns — on stderr.
+        # stdout must remain pure JSON on this exit-0 run or piped consumers
+        # (jq, csv readers) silently choke on the corrupt payload.
+        harness._find_bv_field = lambda group=None: None
+        harness._tool_query("business_value IS EMPTY", format="json")
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)      # stdout parses cleanly
+        assert payload["count"] > 0
+        assert "Business Value custom field not found" in captured.err
+
+    def test_missing_bv_field_warning_stays_off_csv_stdout(self, harness, capsys):
+        harness._find_bv_field = lambda group=None: None
+        harness._tool_query("business_value IS EMPTY", format="csv")
+        captured = capsys.readouterr()
+        rows = list(csv.reader(io.StringIO(captured.out)))
+        assert rows[0] == JQL_OUTPUT_FIELDS     # header is line 1 — no stray row
+        assert "Business Value custom field not found" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +323,33 @@ class TestErrors:
         harness._tool_query("iid = 16", format="JSON")
         json.loads(capsys.readouterr().out)
 
+    def test_graphql_error_diagnostic_goes_to_stderr(self, monkeypatch, capsys):
+        # The real graphql_query prints per-error diagnostics before returning
+        # None; they must land on stderr so machine stdout stays clean.
+        from types import SimpleNamespace
+        from mixins import utils as utils_mod
+
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"errors": [{"message": "field does not exist"}]},
+        )
+        monkeypatch.setattr(utils_mod, "requests",
+                            SimpleNamespace(post=lambda *a, **k: response))
+        monkeypatch.setattr("time.sleep", lambda s: None)   # retry backoff
+
+        class GqlHarness(utils_mod.UtilitiesMixin, QueryHarness):
+            url = "https://gitlab.example"
+            private_token = "token"
+            graphql_query = utils_mod.UtilitiesMixin.graphql_query
+
+        with pytest.raises(SystemExit) as excinfo:
+            GqlHarness()._tool_query("state = opened", format="json")
+        assert excinfo.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""                            # data channel clean
+        assert "GraphQL error: field does not exist" in captured.err
+        assert "Query execution failed" in captured.err
+
 
 # ---------------------------------------------------------------------------
 # Runner integration — chrome on stderr for stdout_is_data tools
@@ -355,3 +404,82 @@ class TestRunnerChromeRouting:
         captured = capsys.readouterr()
         json.loads(captured.out)
         assert "log →" in captured.err
+
+    @staticmethod
+    def _only_log():
+        logs = list(Path("logs").rglob("*.log"))
+        assert len(logs) == 1
+        return logs[0].read_text(encoding="utf-8")
+
+    def test_log_records_chrome_params_and_payload(self, runner, capsys):
+        # stderr is teed too: the chrome/param echo a stdout_is_data tool
+        # routes to stderr must still reach the per-run audit log.
+        runner._run_tool(TOOL, prefills={"jql": "iid = 16", "format": "json"})
+        capsys.readouterr()
+        text = self._only_log()
+        assert "query — " in text                            # banner
+        assert "JQL query: iid = 16  (from CLI)" in text     # param echo
+        assert '"count": 1' in text                          # payload
+
+    def test_failed_run_log_records_params_and_error(self, runner, capsys):
+        # A failed query run must not leave an empty log: the audit trail
+        # records the parameters and the failure reason.
+        bad = "state = opened AND AND weight > 3"
+        with pytest.raises(SystemExit):
+            runner._run_tool(TOOL, prefills={"jql": bad, "format": "json"})
+        capsys.readouterr()
+        text = self._only_log()
+        assert f"JQL query: {bad}  (from CLI)" in text
+        assert "Parse error:" in text
+
+
+# ---------------------------------------------------------------------------
+# Menu resilience — a tool's SystemExit must not kill the interactive session
+# ---------------------------------------------------------------------------
+
+class TestMenuSurvivesToolErrors:
+
+    @pytest.fixture()
+    def runner(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("mixins.tools._pause", lambda: None)
+        monkeypatch.setattr("mixins.tools._clear", lambda: None)
+        return ToolRunnerHarness()
+
+    def test_category_menu_survives_tool_exit(self, runner, monkeypatch, capsys):
+        query_cat = str(next(i for i, c in enumerate(TOOL_CATEGORIES, 1)
+                             if c["name"] == "Query"))
+        answers = iter([query_cat, "1",   # Query category → query tool (fails)
+                        "b", "b"])        # back to categories, back out
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        monkeypatch.setattr(ToolRunnerHarness, "_run_tool",
+                            lambda self, tool, prefills=None:
+                            (_ for _ in ()).throw(SystemExit(2)))
+        runner.run_tools_menu()           # must return, not exit
+        assert "Tool failed (exit 2)" in capsys.readouterr().out
+
+    def test_rerun_survives_query_error(self, runner, capsys):
+        runner._last_tool_key = "query"
+        runner._last_tool_kwargs = {"jql": "state = opened AND AND x",
+                                    "limit": None, "format": "table"}
+        runner._rerun_last_tool()         # must return, not exit
+        captured = capsys.readouterr()
+        assert "Tool failed (exit 2)" in captured.out
+        assert "Parse error:" in captured.err
+
+    def test_search_path_survives_query_error(self, runner, monkeypatch, capsys):
+        answers = iter(["1"])             # pick the single 'query' match
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        monkeypatch.setattr(ToolRunnerHarness, "_run_tool",
+                            lambda self, tool, prefills=None:
+                            (_ for _ in ()).throw(SystemExit(2)))
+        runner._run_tool_search("jql-style")
+        assert "Tool failed (exit 2)" in capsys.readouterr().out
+
+    def test_direct_invocation_still_exits_nonzero(self, runner, capsys):
+        # The CLI path (-ut query …) must keep propagating the exit code.
+        with pytest.raises(SystemExit) as excinfo:
+            runner.run_tools_menu(tool_key="query",
+                                  prefills={"jql": "state = opened AND AND x",
+                                            "format": "table"})
+        assert excinfo.value.code == 2
