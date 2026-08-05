@@ -67,7 +67,7 @@ class TestRegistryEntry:
 
     def test_params(self):
         params = {p["name"]: p for p in TOOL["params"]}
-        assert list(params) == ["jql", "limit", "format"]
+        assert list(params) == ["jql", "limit", "offset", "format"]
 
         jql = params["jql"]
         assert jql["type"] is str
@@ -552,3 +552,36 @@ class TestMenuSurvivesToolErrors:
                                   prefills={"jql": "state = opened AND AND x",
                                             "format": "table"})
         assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# Pagination (--offset)
+# ---------------------------------------------------------------------------
+
+class TestOffsetParam:
+
+    def test_offset_windows_the_table(self, harness, capsys):
+        full = harness.run_jql("state = opened ORDER BY iid ASC", limit=100)
+        harness._tool_query("state = opened ORDER BY iid ASC", limit=2, offset=2)
+        out = capsys.readouterr().out
+        expect = [i["iid"] for i in full["items"][2:4]]
+        for iid in expect:
+            assert (" %d " % iid) in out or out.count(str(iid))
+        assert "results 3–4" in out
+
+    def test_offset_json_envelope_echoes_offset(self, harness, capsys):
+        harness._tool_query("state = opened", limit=2, offset=1, format="json")
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["offset"] == 1
+        assert payload["count"] <= 2
+
+    def test_truncation_note_names_the_next_offset(self, harness, capsys):
+        harness._tool_query("state = opened ORDER BY iid ASC", limit=2)
+        out = capsys.readouterr().out
+        assert "--offset 2" in out
+
+    def test_negative_offset_exits_2(self, harness, capsys):
+        with pytest.raises(SystemExit) as exc:
+            harness._tool_query("state = opened", limit=2, offset=-3)
+        assert exc.value.code == 2
+        assert "offset" in capsys.readouterr().err
