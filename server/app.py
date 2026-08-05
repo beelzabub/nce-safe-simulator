@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from jql import JqlEvaluationError, JqlExecutionError, JqlPlanError, JqlSyntaxError
+from jql.fields import UnknownFieldError, UnknownFieldValueError
 from mixins.reports import REPORTS
 from mixins.tools import TOOLS
 from server.auth_backgrounds import (
@@ -472,6 +474,71 @@ def analysis_portfolio():
             detail="No complete report snapshot found — run reports first.",
         )
     return portfolio_payload(data_dir)
+
+
+@app.post("/api/query")
+def run_query(request: Request, payload: dict = Body(...)):
+    """Run a JQL query against the live GitLab group (epic #297, issue #302).
+
+    Body: ``{"jql": "<query>", "limit": <optional positive int>}``. Executes
+    through the same ``run_jql()`` entry point as the CLI query tool, so the
+    two surfaces return identical rows for identical queries. Success mirrors
+    run_jql's envelope: ``items`` / ``count`` / ``limit`` / ``truncated`` /
+    ``plan``.
+
+    Bad queries never 500: syntax errors return 400 with a structured detail
+    ``{kind: "syntax", message, position, found, expected}`` the UI anchors
+    inline at the reported position; semantic errors (unknown field/value,
+    invalid operator/field combination) return 400 with ``{kind: "semantic",
+    message}``. Transport failures are 502; a server without a GitLab client
+    is 503.
+    """
+    gl = getattr(request.app.state, "gl", None)
+    if gl is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "unavailable",
+                    "message": "GitLab client not configured — start the server "
+                               "with a reachable GitLab connection to run queries."},
+        )
+
+    jql = payload.get("jql")
+    if not isinstance(jql, str):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request", "message": "Body must carry a 'jql' string."},
+        )
+
+    limit = payload.get("limit")
+    if limit is not None and (isinstance(limit, bool)
+                              or not isinstance(limit, int) or limit < 1):
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "request", "message": "'limit' must be a positive integer."},
+        )
+
+    try:
+        return gl.run_jql(jql, limit=limit)
+    except JqlSyntaxError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"kind":     "syntax",
+                    "message":  str(exc),
+                    "position": exc.offset,
+                    "found":    exc.found,
+                    "expected": list(exc.expected)},
+        )
+    except (UnknownFieldError, UnknownFieldValueError,
+            JqlPlanError, JqlEvaluationError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"kind": "semantic", "message": str(exc)},
+        )
+    except JqlExecutionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "transport", "message": str(exc)},
+        )
 
 
 @app.get("/api/runs")
