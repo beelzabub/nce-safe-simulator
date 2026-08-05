@@ -233,6 +233,31 @@ def test_put_config_full_reloads_gl(config_client):
     assert reload_calls, "reload_config was not called"
 
 
+def test_reload_config_drops_jql_caches(tmp_path, monkeypatch):
+    # A config save may repoint parent_group (or swap tokens): run_jql's
+    # cached group path / current user must not outlive the reload, or the
+    # search keeps querying the previous group until the process restarts.
+    import json as _json
+    from NceGitLab import NceGitLab
+
+    monkeypatch.delenv("GROUP_NAME", raising=False)
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(_json.dumps(
+        {**SAMPLE_CONFIG, "parent_group": "repointed-group"}), encoding="utf-8")
+
+    class _Shell:                    # bare instance: reload_config only needs
+        pass                         # config_file (+ optional overrides)
+
+    shell = _Shell()
+    shell.config_file = cfg_file
+    shell._jql_group_path_cache = "old/group/path"
+    shell._jql_current_user_cache = "old-user"
+    NceGitLab.reload_config(shell)
+    assert shell.parent_group == "repointed-group"
+    assert shell._jql_group_path_cache is None
+    assert shell._jql_current_user_cache is None
+
+
 def test_put_config_full_non_dict_returns_400(config_client):
     client, _ = config_client
     resp = client.put(
