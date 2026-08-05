@@ -508,10 +508,13 @@ def list_query_fields(request: Request):
 def run_query(request: Request, payload: dict = Body(...)):
     """Run a JQL query against the live GitLab group (epic #297, issue #302).
 
-    Body: ``{"jql": "<query>", "limit": <optional positive int>}``. Executes
+    Body: ``{"jql": "<query>", "limit": <positive int or "all">, "offset":
+    <optional int>}``. ``"all"`` removes the result cap — the executor
+    fetches every match (the web UI's CSV export uses this). Executes
     through the same ``run_jql()`` entry point as the CLI query tool, so the
     two surfaces return identical rows for identical queries. Success mirrors
-    run_jql's envelope: ``items`` / ``count`` / ``limit`` / ``truncated`` /
+    run_jql's envelope: ``items`` / ``count`` / ``limit`` / ``offset`` /
+    ``total`` (exact match count when knowable, else null) / ``truncated`` /
     ``plan``.
 
     Bad queries never 500: syntax errors return 400 with a structured detail
@@ -538,11 +541,12 @@ def run_query(request: Request, payload: dict = Body(...)):
         )
 
     limit = payload.get("limit")
-    if limit is not None and (isinstance(limit, bool)
-                              or not isinstance(limit, int) or limit < 1):
+    if limit is not None and limit != "all" and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
         raise HTTPException(
             status_code=400,
-            detail={"kind": "request", "message": "'limit' must be a positive integer."},
+            detail={"kind": "request",
+                    "message": "'limit' must be a positive integer or 'all'."},
         )
 
     offset = payload.get("offset")

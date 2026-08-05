@@ -158,8 +158,8 @@
 
     <template v-else-if="state === 'ready'">
       <div class="results-meta">
-        <span>{{ result.count }} result{{ result.count === 1 ? '' : 's' }}</span>
-        <span v-if="result.truncated" class="meta-truncated">capped at limit {{ result.limit }} — more may match</span>
+        <span>{{ resultSummary }}</span>
+        <span v-if="result.truncated && result.total == null" class="meta-truncated">capped at limit {{ result.limit }} — total unknown (client-side filter)</span>
         <span v-if="localSort && result.truncated" class="meta-hint">
           sorted locally — first {{ result.count }} results only, not a true top-{{ result.count }} by this column
         </span>
@@ -167,16 +167,17 @@
         <span v-if="offset > 0 || result.truncated" class="pager">
           <button class="pager-btn" type="button" :disabled="offset === 0 || state === 'loading'"
                   @click="run(Math.max(0, offset - result.limit))">‹ Prev</button>
-          <span class="pager-range">{{ result.count ? `${offset + 1}–${offset + result.count}` : `nothing past ${offset}` }}</span>
+          <span class="pager-range">{{ pagerRange }}</span>
           <button class="pager-btn" type="button" :disabled="!result.truncated || state === 'loading'"
                   @click="run(offset + result.limit)">Next ›</button>
         </span>
         <span v-if="result.count" class="export-group">
+          <span v-if="exportError" class="meta-truncated">export failed: {{ exportError.message }}</span>
+          <button class="export-btn" type="button" :disabled="exporting"
+                  title="Download every match as CSV (current sort, same columns as the CLI's csv format) — re-runs the query uncapped when the page is result-limited"
+                  @click="exportCsv">{{ exporting ? '… CSV' : '⬇ CSV' }}</button>
           <button class="export-btn" type="button"
-                  title="Download the displayed rows (current sort) as CSV — same columns as the CLI's csv format"
-                  @click="exportCsv">⬇ CSV</button>
-          <button class="export-btn" type="button"
-                  title="Download the full result envelope (items, count, truncated, plan) as JSON — identical to the API response"
+                  title="Download this page's result envelope (items, count, total, truncated, plan) as JSON — identical to the API response"
                   @click="exportJson">⬇ JSON</button>
         </span>
       </div>
@@ -328,6 +329,24 @@ const result    = ref(null)
 const error     = ref(null)
 const lastQuery = ref('')       // the exact string the error position anchors to
 const localSort = ref(null)     // { key, dir } — client-side re-sort of fetched rows
+const exporting   = ref(false)  // a CSV export's uncapped re-fetch is in flight
+const exportError = ref(null)
+
+// "100 of 342 results" when the exact total is known and exceeds the page;
+// plain "N results" otherwise (total unknown, or the page is the whole set).
+const resultSummary = computed(() => {
+  const r = result.value
+  const noun = `result${r.count === 1 ? '' : 's'}`
+  if (r.total != null && r.total !== r.count) return `${r.count} of ${r.total} ${noun}`
+  return `${r.count} ${noun}`
+})
+
+const pagerRange = computed(() => {
+  const r = result.value
+  if (!r.count) return `nothing past ${offset.value}`
+  const range = `${offset.value + 1}–${offset.value + r.count}`
+  return r.total != null ? `${range} of ${r.total}` : range
+})
 
 const syntaxError = computed(() =>
   error.value && error.value.detail && error.value.detail.kind === 'syntax'
@@ -347,6 +366,7 @@ const errorLead = computed(() => {
 async function run(fromOffset = 0) {
   state.value     = 'loading'
   error.value     = null
+  exportError.value = null
   localSort.value = null        // a fresh fetch renders in query order
   lastQuery.value = query.value
   offset.value    = fromOffset
@@ -360,11 +380,13 @@ async function run(fromOffset = 0) {
   }
 }
 
-// ── Export the current results — no new fetch, exactly what was queried ──
-//    CSV mirrors the CLI's csv format (columns = the flat item schema, list
-//    cells joined with ', ') and follows the displayed order, local sort
-//    included. JSON is the untouched result envelope, byte-for-byte what
-//    POST /api/query returned (fetch order — a header sort is display-only).
+// ── Export ──
+//    CSV is the data-extract path: it covers EVERY match, not just the page —
+//    a result-limited page re-runs the query with limit "all" first (no page
+//    window), then serializes. Columns mirror the CLI's csv format (the flat
+//    item schema, list cells joined with ', '); an active header sort is
+//    applied to the full set. JSON stays the untouched result envelope,
+//    byte-for-byte what POST /api/query returned for the current page.
 
 function download(name, mime, text) {
   const url = URL.createObjectURL(new Blob([text], { type: mime }))
@@ -381,8 +403,23 @@ function csvCell(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
 
-function exportCsv() {
-  const rows = displayRows.value
+async function exportCsv() {
+  if (exporting.value) return
+  exportError.value = null
+  let rows
+  if (result.value.truncated || offset.value > 0) {
+    exporting.value = true
+    try {
+      rows = sortRows((await postQuery(result.value.query, 'all')).items)
+    } catch (e) {
+      exportError.value = e
+      return
+    } finally {
+      exporting.value = false
+    }
+  } else {
+    rows = displayRows.value                // the page IS the whole set
+  }
   const cols = Object.keys(rows[0])         // server key order = the schema
   const lines = [cols.join(',')]
   for (const row of rows) lines.push(cols.map(c => csvCell(row[c])).join(','))
@@ -418,14 +455,16 @@ function sortValue(row, col) {
   return String(v).toLowerCase()
 }
 
-const displayRows = computed(() => {
-  const rows = result.value ? [...result.value.items] : []
+// Apply the active header sort (if any) to a copy of `rows` — shared by the
+// on-screen table and the CSV export, so both agree on order.
+function sortRows(rows) {
   const sort = localSort.value
-  if (!sort) return rows
+  const copy = [...rows]
+  if (!sort) return copy
   const col = COLUMNS.find(c => c.key === sort.key)
   const dirMul = sort.dir === 'asc' ? 1 : -1
   // Stable sort, empties last in either direction.
-  return rows.sort((a, b) => {
+  return copy.sort((a, b) => {
     const va = sortValue(a, col)
     const vb = sortValue(b, col)
     if (va == null && vb == null) return 0
@@ -435,7 +474,9 @@ const displayRows = computed(() => {
     if (va > vb) return  1 * dirMul
     return 0
   })
-})
+}
+
+const displayRows = computed(() => sortRows(result.value ? result.value.items : []))
 
 function day(iso) {
   return iso ? String(iso).slice(0, 10) : '—'
@@ -743,6 +784,7 @@ function day(iso) {
   padding: 0.2rem 0.55rem;
 }
 .export-btn:hover { border-color: var(--action); color: var(--action); }
+.export-btn:disabled { opacity: 0.5; cursor: default; }
 
 .table-wrap {
   flex: 1;

@@ -115,16 +115,33 @@ def _format_jql_table(result):
                 cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
     lines.append("")
     offset = result.get("offset") or 0
+    total = result.get("total")
     if offset:
-        lines.append("  %d item(s)  (results %d–%d)"
-                     % (result["count"], offset + 1, offset + result["count"]))
+        window = "results %d–%d" % (offset + 1, offset + result["count"])
+        if total is not None:
+            window += " of %d" % total
+        lines.append("  %d item(s)  (%s)" % (result["count"], window))
+    elif total is not None and total != result["count"]:
+        lines.append("  %d item(s) of %d total matches"
+                     % (result["count"], total))
     else:
         lines.append("  %d item(s)" % result["count"])
     if result["truncated"]:
-        lines.append("  Truncated at limit %d — more matches may exist; "
-                     "raise --limit or use --offset %d for the next page."
-                     % (result["limit"], offset + result["limit"]))
+        lines.append("  " + _jql_truncation_note(result))
     return "\n".join(lines)
+
+
+def _jql_truncation_note(result):
+    """The one-line pagination hint shown when a result was truncated."""
+    offset = result.get("offset") or 0
+    total = result.get("total")
+    if total is not None:
+        return ("Truncated at limit %d of %d total matches — use --offset %d "
+                "for the next page, or --limit all for everything."
+                % (result["limit"], total, offset + result["limit"]))
+    return ("Truncated at limit %d — more matches may exist; raise --limit, "
+            "use --offset %d for the next page, or --limit all for everything."
+            % (result["limit"], offset + result["limit"]))
 
 
 def _write_jql_csv(result, stream):
@@ -153,7 +170,9 @@ class QueryMixin:
         Args:
             query:     the JQL string (e.g. ``state = opened AND weight >= 5
                        ORDER BY due ASC``).
-            limit:     max results to return; None applies JQL_DEFAULT_LIMIT.
+            limit:     max results to return; None applies JQL_DEFAULT_LIMIT;
+                       the string ``"all"`` removes the cap and fetches every
+                       match (the scan then always reaches the last page).
             offset:    number of matching items to skip before the returned
                        window — offset/limit page through one stable result
                        sequence (the query's order). Each page re-executes
@@ -166,10 +185,19 @@ class QueryMixin:
                        defaults to the current UTC time.
 
         Returns a dict: ``items`` (flat dicts in the documented field
-        schema), ``count``, ``limit``, ``offset``, ``truncated`` (True when
+        schema), ``count``, ``limit`` (the effective cap, or ``"all"``),
+        ``offset``, ``truncated`` (True when
         the limit cut the returned list *or* fetching stopped early with
         pages still unfetched — more matching items may exist beyond the
-        returned window), plus a ``plan`` block
+        returned window), ``total`` — the exact number of matches across the
+        whole result set, known whenever the scan reached the last page (any
+        untruncated query, ``limit="all"``, or a client-side sort, which
+        always fetches everything) or the plan is *exactly* pushed down
+        (every predicate's server-side filter equals the query — Plan.exact —
+        so the GraphQL connection's own count is the true total); ``None``
+        only when an early-stopped scan left envelope-only filters with
+        client-side rejections unevaluated on unfetched pages — plus a
+        ``plan`` block
         describing what was pushed down and what ran client-side. The whole
         dict is JSON-serializable (pushed date bounds are reported in their
         ISO-8601 transport form).
@@ -198,18 +226,25 @@ class QueryMixin:
         plan = plan_query(parsed, registry, now=now,
                           current_user=current_user, push_down=push_down)
 
-        effective_limit = self.JQL_DEFAULT_LIMIT if limit is None else int(limit)
-        if effective_limit <= 0:
-            raise ValueError("limit must be a positive integer")
+        unbounded = isinstance(limit, str) and limit.strip().lower() == "all"
+        if unbounded:
+            effective_limit = None
+        else:
+            effective_limit = (self.JQL_DEFAULT_LIMIT if limit is None
+                               else int(limit))
+            if effective_limit <= 0:
+                raise ValueError("limit must be a positive integer or 'all'")
         offset = int(offset or 0)
         if offset < 0:
             raise ValueError("offset must be zero or a positive integer")
-        window_end = offset + effective_limit
+        window_end = None if unbounded else offset + effective_limit
 
         items = []
         scanned = 0
         pages = 0
         truncated = False
+        server_total = None   # the connection's count — total after pushed-down filters
+        exhausted = True      # False only when early termination left pages unfetched
 
         # A provably-empty plan (e.g. a type constraint entirely outside the
         # entity scope) never fetches: the server *skips* blank list filters
@@ -258,6 +293,8 @@ class QueryMixin:
                     raise JqlExecutionError(
                         "Group '%s' not found or not accessible" % group_path)
                 page = group.get("workItems") or {}
+                if server_total is None and isinstance(page.get("count"), int):
+                    server_total = page["count"]
                 for node in page.get("nodes") or []:
                     scanned += 1
                     item = shape_node(node, bv_field_id=bv_field_id)
@@ -266,11 +303,13 @@ class QueryMixin:
                 pages += 1
                 info = page.get("pageInfo") or {}
                 has_next = bool(info.get("hasNextPage"))
-                if early_stop and len(items) >= window_end:
+                if (early_stop and window_end is not None
+                        and len(items) >= window_end):
                     # Stopping with pages unfetched counts as truncation even
                     # when the count lands exactly on the window — the pages
                     # never fetched may hold more matching items.
                     truncated = len(items) > window_end or has_next
+                    exhausted = not has_next
                     break
                 if not has_next:
                     break
@@ -279,17 +318,33 @@ class QueryMixin:
         if plan.client_sort:
             sort_items(items, plan.client_sort, registry)
 
-        truncated = truncated or len(items) > window_end
-        items = items[offset:window_end]
+        # The exact match count, when it is knowable without further fetching:
+        # a scan that reached the last page counted every match itself, and an
+        # exactly-pushed query (Plan.exact — server filters equal the query,
+        # not a superset envelope) inherits the connection's count. Early-
+        # stopped with envelope-only filters is the one honest None — the
+        # unfetched pages hold an unknown number of client-side rejections.
+        if exhausted:
+            total = len(items)
+        elif plan.exact:
+            total = server_total
+        else:
+            total = None
+
+        truncated = truncated or (window_end is not None
+                                  and len(items) > window_end)
+        items = items[offset:window_end] if window_end is not None else items[offset:]
         return {
             "query":     query,
             "items":     items,
             "count":     len(items),
-            "limit":     effective_limit,
+            "limit":     "all" if unbounded else effective_limit,
             "offset":    offset,
+            "total":     total,
             "truncated": truncated,
             "plan": {
                 "push_down":     push_down,
+                "exact_push":    plan.exact,
                 "variables":     _gql_value(plan.variables),
                 "sort":          plan.sort,
                 "client_sort":   ["%s %s" % (k.field, k.direction)
@@ -347,6 +402,16 @@ class QueryMixin:
         jql, jql_source = self._resolve_jql_source(jql)
         if jql_source:
             print("Query read from %s" % jql_source, file=sys.stderr)
+        if isinstance(limit, str):
+            text = limit.strip().lower()
+            if text in ("", "all"):
+                limit = text or None
+            elif text.isdigit():
+                limit = int(text)
+            else:
+                print("Bad limit '%s' — a positive integer or 'all'." % limit,
+                      file=sys.stderr)
+                raise SystemExit(2)
         fmt = str(format or "table").strip().lower()
         if fmt not in JQL_FORMATS:
             print("Unknown format '%s'. Valid formats: %s"
@@ -372,11 +437,7 @@ class QueryMixin:
         elif fmt == "csv":
             _write_jql_csv(result, sys.stdout)
             if result["truncated"]:
-                print("Truncated at limit %d — more matches may exist; "
-                      "raise --limit or use --offset %d for the next page."
-                      % (result["limit"],
-                         (result.get("offset") or 0) + result["limit"]),
-                      file=sys.stderr)
+                print(_jql_truncation_note(result), file=sys.stderr)
         else:
             print(_format_jql_table(result))
 

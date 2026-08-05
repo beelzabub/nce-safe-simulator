@@ -75,7 +75,7 @@ class TestRegistryEntry:
         assert "default" not in jql          # required — no silent fallback
 
         limit = params["limit"]
-        assert limit["type"] is int
+        assert limit["type"] is str     # str so 'all' survives CLI coercion
         assert limit["optional"] is True
 
         fmt = params["format"]
@@ -222,10 +222,38 @@ class TestTableOutput:
         assert "2 item(s)" in out
         assert "Truncated at limit 2" in out
 
+    def test_truncation_note_carries_exact_total_when_known(self, harness, capsys):
+        # Fully pushed down: the connection count makes the total exact even
+        # on a truncated first page — the note must say it, not "may exist".
+        harness._tool_query("state = all", limit=2)
+        out = capsys.readouterr().out
+        assert "of 10 total matches" in out
+        assert "--limit all" in out
+        assert "may exist" not in out
+
     def test_no_truncation_note_when_all_fit(self, harness, capsys):
         harness._tool_query("iid = 16")
         out = capsys.readouterr().out
         assert "Truncated" not in out
+
+    def test_limit_all_lifts_the_cap(self, harness, capsys):
+        harness.JQL_DEFAULT_LIMIT = 2
+        harness._tool_query("state = all", limit="all")
+        out = capsys.readouterr().out
+        assert "10 item(s)" in out
+        assert "Truncated" not in out
+
+    def test_limit_digit_string_from_cli_prefill(self, harness, capsys):
+        harness._tool_query("state = all", limit="2")
+        out = capsys.readouterr().out
+        assert "2 item(s)" in out
+        assert "Truncated at limit 2" in out
+
+    def test_limit_gibberish_exits_2(self, harness, capsys):
+        with pytest.raises(SystemExit) as exc:
+            harness._tool_query("state = all", limit="banana")
+        assert exc.value.code == 2
+        assert "positive integer or 'all'" in capsys.readouterr().err
 
     def test_long_titles_are_truncated(self, capsys):
         backend = FakeGitLabBackend()

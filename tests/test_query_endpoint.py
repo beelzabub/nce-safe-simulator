@@ -67,8 +67,8 @@ class TestEndpointParity:
 
     def test_envelope_shape(self, client):
         body = post(client, {"jql": "state = opened"}).json()
-        assert set(body) >= {"query", "items", "count", "limit",
-                             "truncated", "plan"}
+        assert set(body) >= {"query", "items", "count", "limit", "offset",
+                             "total", "truncated", "plan"}
         assert body["query"] == "state = opened"
         assert body["limit"] == 100                   # run_jql default applies
         for item in body["items"]:
@@ -85,6 +85,16 @@ class TestEndpointParity:
         assert capped["limit"] == 2
         assert capped["truncated"] is True
         assert capped["items"] == full["items"][:2]
+        # Fully pushed down: even the capped page knows the exact total.
+        assert capped["total"] == full["count"]
+
+    def test_limit_all_returns_every_match(self, client):
+        full = post(client, {"jql": "state = opened", "limit": 1000}).json()
+        body = post(client, {"jql": "state = opened", "limit": "all"}).json()
+        assert body["limit"] == "all"
+        assert body["truncated"] is False
+        assert body["total"] == body["count"] == full["count"]
+        assert body["items"] == full["items"]
 
 
 # ---------------------------------------------------------------------------

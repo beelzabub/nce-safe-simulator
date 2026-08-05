@@ -26,8 +26,9 @@ const ITEMS = [
   ROW(14, 'Unassigned backlog item', 9, null),
 ]
 
-function envelope(items, { limit = 100, truncated = false } = {}) {
-  return { query: '', items, count: items.length, limit, truncated,
+function envelope(items, { limit = 100, truncated = false, total = null } = {}) {
+  return { query: '', items, count: items.length, limit, offset: 0, total,
+           truncated,
            plan: { push_down: true, variables: {}, sort: null,
                    client_sort: [], pages_fetched: 1, scanned: items.length } }
 }
@@ -195,8 +196,9 @@ test.describe('JQL search help panel (#302)', () => {
   })
 })
 
-// Export buttons (issue #302 follow-up): CSV mirrors the CLI csv format and
-// the displayed order (local sort included); JSON is the untouched envelope.
+// Export buttons (issue #302 follow-up): CSV covers EVERY match — a
+// result-limited page re-fetches with limit "all" first — in the displayed
+// order (local sort included); JSON is the untouched page envelope.
 test.describe('JQL search export (#302)', () => {
 
   test('CSV export downloads the displayed rows, local sort included', async ({ page }) => {
@@ -253,10 +255,12 @@ test.describe('JQL search pagination (#302)', () => {
       page.queryCalls++
       const body = route.request().postDataJSON()
       const off = body.offset || 0
-      const lim = body.limit || 100
+      const lim = body.limit === 'all' ? FIVE.length : (body.limit || 100)
       const slice = FIVE.slice(off, off + lim)
       return route.fulfill({ json: {
-        query: '', items: slice, count: slice.length, limit: lim, offset: off,
+        query: body.jql, items: slice, count: slice.length,
+        limit: body.limit === 'all' ? 'all' : lim, offset: off,
+        total: FIVE.length,            // fully pushed down — always exact
         truncated: off + lim < FIVE.length,
         plan: { push_down: true, variables: {}, sort: null, client_sort: [],
                 pages_fetched: 1, scanned: FIVE.length },
@@ -271,16 +275,16 @@ test.describe('JQL search pagination (#302)', () => {
     await openPaged(page)
     await run(page, 'state = opened ORDER BY iid ASC')
     await expect(columnCells(page, 1)).toHaveText(['21', '22'])
-    await expect(page.locator('.pager-range')).toHaveText('1–2')
+    await expect(page.locator('.pager-range')).toHaveText('1–2 of 5')
     await expect(page.locator('.pager-btn', { hasText: 'Prev' })).toBeDisabled()
 
     await page.locator('.pager-btn', { hasText: 'Next' }).click()
     await expect(columnCells(page, 1)).toHaveText(['23', '24'])
-    await expect(page.locator('.pager-range')).toHaveText('3–4')
+    await expect(page.locator('.pager-range')).toHaveText('3–4 of 5')
 
     await page.locator('.pager-btn', { hasText: 'Next' }).click()
     await expect(columnCells(page, 1)).toHaveText(['25'])
-    await expect(page.locator('.pager-range')).toHaveText('5–5')
+    await expect(page.locator('.pager-range')).toHaveText('5–5 of 5')
     await expect(page.locator('.pager-btn', { hasText: 'Next' })).toBeDisabled()
 
     await page.locator('.pager-btn', { hasText: 'Prev' }).click()
@@ -292,9 +296,45 @@ test.describe('JQL search pagination (#302)', () => {
     await openPaged(page)
     await run(page, 'state = opened ORDER BY iid ASC')
     await page.locator('.pager-btn', { hasText: 'Next' }).click()
-    await expect(page.locator('.pager-range')).toHaveText('3–4')
+    await expect(page.locator('.pager-range')).toHaveText('3–4 of 5')
     await page.locator('.run-btn').click()
-    await expect(page.locator('.pager-range')).toHaveText('1–2')
+    await expect(page.locator('.pager-range')).toHaveText('1–2 of 5')
     await expect(columnCells(page, 1)).toHaveText(['21', '22'])
+  })
+
+  test('result summary shows the exact total on a capped page', async ({ page }) => {
+    await openPaged(page)
+    await run(page, 'state = opened ORDER BY iid ASC')
+    await expect(page.locator('.results-meta > span').first()).toHaveText('2 of 5 results')
+    // Exact total known — the vague "capped … more may match" note is gone
+    await expect(page.locator('.meta-truncated')).toHaveCount(0)
+  })
+
+  test('CSV export on a capped page re-fetches uncapped and covers every match', async ({ page }) => {
+    await openPaged(page)
+    await run(page, 'state = opened ORDER BY iid ASC')
+    await expect(columnCells(page, 1)).toHaveText(['21', '22'])
+
+    const [ download ] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('.export-btn', { hasText: 'CSV' }).click(),
+    ])
+    expect(page.queryCalls).toBe(2)           // the uncapped re-fetch
+    const lines = readFileSync(await download.path(), 'utf-8').trim().split('\r\n')
+    const iids = lines.slice(1).map(l => l.split(',')[1])
+    expect(iids).toEqual(['21', '22', '23', '24', '25'])
+  })
+
+  test('JSON export stays the current page envelope', async ({ page }) => {
+    await openPaged(page)
+    await run(page, 'state = opened ORDER BY iid ASC')
+    const [ download ] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('.export-btn', { hasText: 'JSON' }).click(),
+    ])
+    expect(page.queryCalls).toBe(1)           // no re-fetch
+    const body = JSON.parse(readFileSync(await download.path(), 'utf-8'))
+    expect(body.items.map(i => i.iid)).toEqual([21, 22])
+    expect(body.total).toBe(5)
   })
 })

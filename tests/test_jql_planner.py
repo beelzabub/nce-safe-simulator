@@ -632,3 +632,75 @@ class TestHelpers:
     def test_needs_bv_flag_from_predicate(self, registry):
         assert make_plan("business_value >= 8", registry).needs_bv is True
         assert make_plan("weight >= 8", registry).needs_bv is False
+
+
+# ---------------------------------------------------------------------------
+# Exact push-down (Plan.exact — the basis for exact result totals)
+# ---------------------------------------------------------------------------
+
+class TestExactPushdown:
+    """Plan.exact must be True only when the pushed filters provably select
+    the query's match set exactly — a wrong True yields a wrong reported
+    total, a wrong False merely downgrades it to "unknown"."""
+
+    @pytest.mark.parametrize("query", [
+        "",                                       # scope filter IS the query
+        "state = opened",
+        "state = all",
+        "type = epic",
+        'labels = "customer-committed"',
+        "piid = 2026Q3",                          # label taxonomy equality
+        'milestone = "August drop"',
+        "iid = 42",
+        "weight = 5",                             # equality (not a range)
+        "assignee IS EMPTY",
+        "assignee IS NOT EMPTY",
+        "milestone IS EMPTY",
+        "type IN (epic, issue)",
+        'labels IN ("a", "b")',
+        "iid IN (1, 2, 3)",
+        "state = opened AND type = epic AND piid = 2026Q3",
+    ])
+    def test_exact_queries(self, registry, query):
+        assert make_plan(query, registry).exact is True, query
+
+    @pytest.mark.parametrize("query", [
+        "weight >= 5",                            # ranges never push
+        "weight != 5",                            # negations stay client-side
+        "state != opened",
+        "created >= -4w",                         # date bound inclusivity
+        "created = 2026-08-01",                   # day-range push
+        'title = "exact title"',                  # search is word-match
+        'text ~ "mission"',
+        "business_value = 8",                     # custom field
+        "sprint = s1",                            # requires id resolution
+        "assignee = alice",                       # matches display names too
+        "author = bob",                           # post_filter_only user field
+        "assignee IN (alice, bob)",
+        "state = opened AND weight >= 5",         # one inexact conjunct
+        "state = opened OR type = epic",          # cross-field OR
+        "NOT assignee = alice",
+        'labels NOT IN ("a", "b")',
+        "state IN (opened, closed)",              # multi-state not pushed
+        "author = alice AND author = bob",        # lossy scalar merge
+        "assignee IN (alice) AND assignee IN (bob)",  # lossy or-list merge
+    ])
+    def test_inexact_queries(self, registry, query):
+        assert make_plan(query, registry).exact is False, query
+
+    def test_full_scan_is_never_exact(self, registry):
+        assert make_plan("state = opened", registry,
+                         push_down=False).exact is False
+
+    def test_full_scan_without_predicates_is_exact(self, registry):
+        # No predicates to skip pushing — the scope fetch is the query.
+        assert make_plan("", registry, push_down=False).exact is True
+
+    def test_exact_survives_pushed_order_by(self, registry):
+        assert make_plan("state = opened ORDER BY created ASC",
+                         registry).exact is True
+
+    def test_exact_survives_client_order_by(self, registry):
+        # Sorting never changes the match set — only how it is fetched.
+        assert make_plan("state = opened ORDER BY business_value DESC",
+                         registry).exact is True

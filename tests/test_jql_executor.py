@@ -448,6 +448,12 @@ class TestBuildQuery:
         assert "after: $after" in query
         assert "pageInfo { hasNextPage endCursor }" in query
 
+    def test_requests_connection_count(self):
+        # The connection's count is the exact server-side match total — the
+        # executor's `total` for fully-pushed-down queries rides on it.
+        query, _ = build_work_items_query({})
+        assert "count" in query.split("pageInfo")[0]
+
     def test_reserved_arg_names_get_variable_aliases(self):
         query, request = build_work_items_query({
             "search": "x", "in": ["TITLE"],

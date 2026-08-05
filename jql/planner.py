@@ -89,6 +89,13 @@ class Plan:
     #: (applying no filter at all), so an empty list can never be sent as a
     #: "match nothing" filter.
     empty:             bool = False
+    #: The pushed variables select *exactly* the query's match set — every
+    #: conjunct's server-side filter equals its client-side predicate, not a
+    #: superset envelope, and no merge widened anything. When True, the
+    #: GraphQL connection's ``count`` is the exact whole-set match total even
+    #: on a truncated fetch. Deliberately conservative: only field/operator
+    #: pushes whose server semantics provably equal the evaluator's qualify.
+    exact:             bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -305,11 +312,17 @@ class _Vars:
         #: is a superset envelope of its conjunct's matches, so an empty
         #: intersection proves no item can satisfy the conjunction.
         self.contradiction = False
+        #: A merge kept only one of two conflicting constraints (scalar /
+        #: or-list first-wins): the surviving filter is wider than the
+        #: conjunction, so the pushed set can no longer be exact.
+        self.lossy = False
 
     def scalar(self, arg, value):
         """Single-value arg. On conflict keep the first — the conjunction is
         a contradiction, and any one conjunct's filter is a superset of the
         (empty) result set."""
+        if arg in self.top and self.top[arg] != value:
+            self.lossy = True
         self.top.setdefault(arg, value)
 
     def and_list(self, arg, values):
@@ -349,7 +362,10 @@ class _Vars:
         """Same-field value list inside ``or:``. Only one list per arg —
         merging two IN conjuncts by union would *widen* one of them, which
         is superset-safe, so first-wins keeps it simply correct."""
-        self.or_.setdefault(arg, list(dict.fromkeys(values)))
+        values = list(dict.fromkeys(values))
+        if arg in self.or_ and self.or_[arg] != values:
+            self.lossy = True
+        self.or_.setdefault(arg, values)
 
     def date_after(self, arg, dt):
         cur = self.top.get(arg)
@@ -537,6 +553,56 @@ def _try_or_collapse(expr, registry, vars_, now, current_user):
     _push_in_list(registry.resolve(field_name), values, vars_)
 
 
+#: Core fields whose pushed =/IN filters select exactly what the evaluator
+#: keeps (semantics validated by the golden parity suite's GitLab-modelled
+#: backend) — the basis for Plan.exact. Off-list pushes are superset
+#: envelopes only: search (word-match vs substring), date bounds (server
+#: inclusivity unverified against every op), weight ranges, custom fields,
+#: and user fields (post_filter_only: equality also matches display names,
+#: which no username push can express).
+_EXACT_EQUALITY_FIELDS = {"state", "type", "labels", "milestone", "iid",
+                          "weight"}
+_EXACT_IN_FIELDS = {"type", "milestone", "iid", "labels"}
+
+
+def _conjunct_exact(negated, expr, registry):
+    """True when this conjunct's pushed filter matches *exactly* the items
+    its client-side evaluation keeps — the conservative whitelist behind
+    Plan.exact. Anything not provably exact answers False, which downgrades
+    the reported total to "unknown", never to a wrong number."""
+    if isinstance(expr, ast.IsEmpty):
+        # _push_empty handles both polarities exactly via the wildcard enum.
+        return registry.resolve(expr.field).wildcard_arg is not None
+    if negated:
+        return False
+    if isinstance(expr, (ast.Or, ast.And)):
+        return False
+    if isinstance(expr, ast.InList):
+        if expr.negated or any(isinstance(v, ast.Empty) for v in expr.values):
+            return False
+        spec = registry.resolve(expr.field)
+        if spec.requires_id_resolution or spec.post_filter_only:
+            return False
+        if spec.kind == "label":
+            return True
+        if spec.name == "state":
+            return len(expr.values) == 1   # multi-value state is not pushed
+        return spec.name in _EXACT_IN_FIELDS
+    if isinstance(expr, ast.Comparison):
+        spec = registry.resolve(expr.field)
+        if isinstance(expr.value, ast.Empty):
+            return spec.wildcard_arg is not None
+        if expr.op != "=" or spec.requires_id_resolution or spec.post_filter_only:
+            return False
+        if spec.kind == "label":
+            return True
+        if (spec.value_type == "date" or spec.kind == "custom"
+                or spec.graphql_arg is None or spec.search_in):
+            return False
+        return spec.name in _EXACT_EQUALITY_FIELDS
+    return False
+
+
 def _apply_conjunct(negated, expr, registry, vars_, now, current_user):
     if isinstance(expr, ast.Or):
         if not negated:
@@ -621,8 +687,9 @@ def plan_query(query, registry, now=None, current_user=None, push_down=True):
     needs_bv, needs_desc = _validate(query, registry, now, current_user)
 
     vars_ = _Vars()
+    conjuncts = _conjuncts(query.where) if query.where is not None else []
     if push_down and query.where is not None:
-        for negated, expr in _conjuncts(query.where):
+        for negated, expr in conjuncts:
             _apply_conjunct(negated, expr, registry, vars_, now, current_user)
 
     # Entity scope v1 (epics + issues) — applied to every plan; an envelope
@@ -632,6 +699,14 @@ def plan_query(query, registry, now=None, current_user=None, push_down=True):
     sort, client_sort = _plan_sort(query.order_by, registry, push_down)
     if sort:
         vars_.scalar("sort", sort)
+
+    # A predicate-free query is exact by construction (the scope filter IS
+    # the query); with predicates, exactness needs push-down on, no lossy
+    # merges, and every conjunct on the provably-exact whitelist.
+    exact = (not vars_.lossy
+             and (query.where is None
+                  or (push_down and all(_conjunct_exact(n, e, registry)
+                                        for n, e in conjuncts))))
 
     return Plan(
         expr=query.where,
@@ -644,4 +719,5 @@ def plan_query(query, registry, now=None, current_user=None, push_down=True):
         needs_description=needs_desc,
         push_down=push_down,
         empty=vars_.contradiction,
+        exact=exact,
     )

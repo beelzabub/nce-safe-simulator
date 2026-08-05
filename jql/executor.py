@@ -157,6 +157,7 @@ def build_work_items_query(variables, needs_bv=False, needs_description=False):
     query = """    query JqlWorkItems(%s) {
       group(fullPath: $fullPath) {
         workItems(%s) {
+          count
           pageInfo { hasNextPage endCursor }
           nodes {%s
             widgets {%s

@@ -197,6 +197,7 @@ class FakeGitLabBackend:
         size = min(self.page_size, args.get("first") or 100)
         page = matched[start:start + size]
         return {"group": {"workItems": {
+            "count": len(matched),
             "pageInfo": {
                 "hasNextPage": start + size < len(matched),
                 "endCursor": str(start + size),
@@ -695,6 +696,94 @@ class TestPaginationAndCaps:
         result = harness.run_jql("ORDER BY business_value DESC", limit=3, now=NOW)
         assert [i["business_value"] for i in result["items"]] == [13, 8, 8]
         assert result["truncated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Exact totals and the uncapped limit
+# ---------------------------------------------------------------------------
+
+class TestTotalAndUnboundedLimit:
+
+    ALL = len(ITEMS) - 1     # the task is out of the entity scope
+
+    def test_total_exact_when_scan_reaches_last_page(self, harness):
+        result = harness.run_jql("", limit=1000, now=NOW)
+        assert result["total"] == self.ALL
+        assert result["truncated"] is False
+
+    def test_total_from_server_count_on_early_stop(self):
+        # Exactly pushed down: the truncated first page already knows the
+        # whole set's size via the connection count.
+        backend = FakeGitLabBackend(page_size=2)
+        result = QueryHarness(backend).run_jql("", limit=2, now=NOW)
+        assert result["truncated"] is True
+        assert result["plan"]["pages_fetched"] == 1
+        assert result["total"] == self.ALL
+
+    def test_total_exact_for_pushed_state_filter_on_early_stop(self):
+        # 'state = opened' pushes exactly (Plan.exact) — the connection count
+        # is the true total even though only one page was fetched.
+        backend = FakeGitLabBackend(page_size=2)
+        harness = QueryHarness(backend)
+        full = harness.run_jql("state = opened", limit=1000, now=NOW)
+        capped = harness.run_jql("state = opened", limit=2, now=NOW)
+        assert capped["truncated"] is True
+        assert capped["plan"]["exact_push"] is True
+        assert capped["total"] == full["count"]
+
+    def test_total_none_for_envelope_only_push_on_early_stop(self):
+        # 'weight >= 5' is a superset envelope (weight ranges never push):
+        # the server count would overcount, so total must stay None.
+        backend = FakeGitLabBackend(page_size=1)
+        result = QueryHarness(backend).run_jql(
+            "weight >= 1", limit=1, now=NOW)
+        assert result["truncated"] is True
+        assert result["plan"]["exact_push"] is False
+        assert result["total"] is None
+
+    def test_total_exact_when_client_sort_forces_full_fetch(self, harness):
+        result = harness.run_jql("ORDER BY business_value DESC", limit=3, now=NOW)
+        assert result["truncated"] is True
+        assert result["total"] == self.ALL
+
+    def test_total_none_when_client_filter_left_unevaluated(self):
+        # Early stop with a residual client-side predicate: the unfetched
+        # pages were never evaluated, so no honest total exists.
+        backend = FakeGitLabBackend(page_size=1)
+        result = QueryHarness(backend).run_jql(
+            "business_value >= 8", limit=1, now=NOW)
+        assert result["truncated"] is True
+        assert result["total"] is None
+
+    def test_total_zero_for_provably_empty_plan(self, harness):
+        result = harness.run_jql("type = task", now=NOW)
+        assert result["total"] == 0
+        assert result["truncated"] is False
+
+    def test_limit_all_fetches_every_match(self):
+        backend = FakeGitLabBackend(page_size=2)
+        harness = QueryHarness(backend)
+        harness.JQL_DEFAULT_LIMIT = 4          # must not apply
+        result = harness.run_jql("", limit="all", now=NOW)
+        assert result["count"] == self.ALL
+        assert result["limit"] == "all"
+        assert result["total"] == self.ALL
+        assert result["truncated"] is False
+        assert result["plan"]["pages_fetched"] == 5
+
+    def test_limit_all_with_offset_returns_the_tail(self, harness):
+        result = harness.run_jql("", limit="all", offset=4, now=NOW)
+        assert result["count"] == self.ALL - 4
+        assert result["offset"] == 4
+        assert result["total"] == self.ALL
+
+    def test_limit_all_ignores_early_stop_even_without_sort(self):
+        backend = FakeGitLabBackend(page_size=2)
+        result = QueryHarness(backend).run_jql(
+            "business_value >= 8", limit="all", now=NOW)
+        assert result["truncated"] is False
+        assert result["total"] == result["count"]
+        assert result["plan"]["pages_fetched"] == 5
 
 
 # ---------------------------------------------------------------------------
