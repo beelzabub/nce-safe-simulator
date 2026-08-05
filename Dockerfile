@@ -308,3 +308,7 @@ RUN pip install --no-cache-dir -r cdk/requirements.txt
 # existing call sites: cdk/Makefile ecr-push/ecs-deploy, redeploy scripts)
 # still produces the slim image. BuildKit skips the unreferenced ops/dev stages.
 FROM runtime
+# runtime already ends USER app, and this stage inherits it — but static
+# scanners (KICS) don't resolve USER across FROM, so restate it here or the
+# image keeps scanning as root (#304).
+USER app
