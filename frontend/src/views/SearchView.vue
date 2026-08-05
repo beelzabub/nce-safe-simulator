@@ -173,6 +173,21 @@
         </span>
         <span v-if="result.count" class="export-group">
           <span v-if="exportError" class="meta-truncated">export failed: {{ exportError.message }}</span>
+          <span class="cols-wrap">
+            <button class="export-btn" type="button" :aria-expanded="showCols"
+                    title="Choose which columns the results table shows (persisted in this browser)"
+                    @click="showCols = !showCols">⚙ Columns</button>
+            <div v-if="showCols" class="cols-pop">
+              <label v-for="col in ALL_COLUMNS" :key="col.key" class="cols-item">
+                <input type="checkbox"
+                       :checked="visibleKeys.includes(col.key)"
+                       :disabled="visibleKeys.includes(col.key) && visibleKeys.length === 1"
+                       @change="toggleColumn(col.key)" />
+                {{ col.label }}
+              </label>
+              <button class="cols-reset" type="button" @click="resetColumns">Reset to defaults</button>
+            </div>
+          </span>
           <button class="export-btn" type="button" :disabled="exporting"
                   title="Download every match as CSV (current sort, same columns as the CLI's csv format) — re-runs the query uncapped when the page is result-limited"
                   @click="exportCsv">{{ exporting ? '… CSV' : '⬇ CSV' }}</button>
@@ -192,7 +207,7 @@
           <thead>
             <tr>
               <th
-                v-for="col in COLUMNS" :key="col.key"
+                v-for="col in visibleColumns" :key="col.key"
                 :aria-sort="ariaSort(col.key)"
               >
                 <button class="th-btn" type="button" :title="`Sort by ${col.label}`" @click="toggleSort(col.key)">
@@ -204,20 +219,16 @@
           </thead>
           <tbody>
             <tr v-for="row in displayRows" :key="row.id">
-              <td class="cell-num">{{ row.iid }}</td>
-              <td class="cell-title">
-                <a :href="row.web_url" target="_blank" rel="noopener" :title="row.title">{{ row.title }}</a>
+              <td v-for="col in visibleColumns" :key="col.key" :class="cellClass(col)">
+                <a v-if="col.key === 'title'" :href="row.web_url" target="_blank" rel="noopener" :title="row.title">{{ row.title }}</a>
+                <span v-else-if="col.key === 'state'" class="state-chip" :class="row.state">{{ row.state }}</span>
+                <template v-else-if="col.key === 'labels'">
+                  <span v-for="l in row.labels" :key="l" class="label-chip" :style="chipStyle(l)">{{ l }}</span>
+                </template>
+                <template v-else-if="col.kind === 'list'">{{ (row[col.key] || []).length ? row[col.key].join(', ') : '—' }}</template>
+                <template v-else-if="col.kind === 'date'">{{ day(row[col.key]) }}</template>
+                <template v-else>{{ row[col.key] ?? '—' }}</template>
               </td>
-              <td class="cell-type">{{ row.type }}</td>
-              <td><span class="state-chip" :class="row.state">{{ row.state }}</span></td>
-              <td class="cell-labels">
-                <span v-for="l in row.labels" :key="l" class="label-chip" :style="chipStyle(l)">{{ l }}</span>
-              </td>
-              <td class="cell-num">{{ row.weight ?? '—' }}</td>
-              <td class="cell-people">{{ row.assignees.length ? row.assignees.join(', ') : '—' }}</td>
-              <td class="cell-date">{{ day(row.created_at) }}</td>
-              <td class="cell-date">{{ day(row.updated_at) }}</td>
-              <td class="cell-date">{{ day(row.due_date) }}</td>
             </tr>
           </tbody>
         </table>
@@ -230,23 +241,38 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getConfig, getQueryFields, postQuery } from '../api.js'
+import { loadStored, saveStored } from '../composables/useLocalStorage.js'
 
-// Column set per the issue #302 spec: title, type, state, labels, weight,
-// assignees, dates, link. (Wider than the CLI `table` output on purpose —
-// both surfaces fetch identical rows through run_jql; only the columns
-// rendered differ.)
-const COLUMNS = [
-  { key: 'iid',        label: 'IID',       kind: 'number' },
-  { key: 'title',      label: 'Title',     kind: 'text' },
-  { key: 'type',       label: 'Type',      kind: 'text' },
-  { key: 'state',      label: 'State',     kind: 'text' },
-  { key: 'labels',     label: 'Labels',    kind: 'list' },
-  { key: 'weight',     label: 'Weight',    kind: 'number' },
-  { key: 'assignees',  label: 'Assignees', kind: 'list' },
-  { key: 'created_at', label: 'Created',   kind: 'date' },
-  { key: 'updated_at', label: 'Updated',   kind: 'date' },
-  { key: 'due_date',   label: 'Due',       kind: 'date' },
+// Every flat-schema field a result row carries (minus description — too
+// wide for a table cell — and web_url, which is the title link). Which of
+// these actually render is the user's Configure Columns choice below; the
+// default set is the issue #302 spec: title, type, state, labels, weight,
+// assignees, dates, link.
+const ALL_COLUMNS = [
+  // The #302 default ten first, in their established on-screen order…
+  { key: 'iid',            label: 'IID',            kind: 'number' },
+  { key: 'title',          label: 'Title',          kind: 'text' },
+  { key: 'type',           label: 'Type',           kind: 'text' },
+  { key: 'state',          label: 'State',          kind: 'text' },
+  { key: 'labels',         label: 'Labels',         kind: 'list' },
+  { key: 'weight',         label: 'Weight',         kind: 'number' },
+  { key: 'assignees',      label: 'Assignees',      kind: 'list' },
+  { key: 'created_at',     label: 'Created',        kind: 'date' },
+  { key: 'updated_at',     label: 'Updated',        kind: 'date' },
+  { key: 'due_date',       label: 'Due',            kind: 'date' },
+  // …then the rest of the flat schema, opt-in via Configure Columns.
+  { key: 'author',         label: 'Author',         kind: 'text' },
+  { key: 'milestone',      label: 'Milestone',      kind: 'text' },
+  { key: 'milestone_due',  label: 'Milestone due',  kind: 'date' },
+  { key: 'iteration',      label: 'Iteration',      kind: 'text' },
+  { key: 'business_value', label: 'Business value', kind: 'number' },
+  { key: 'start_date',     label: 'Start',          kind: 'date' },
+  { key: 'closed_at',      label: 'Closed',         kind: 'date' },
+  { key: 'parent_iid',     label: 'Parent IID',     kind: 'number' },
+  { key: 'namespace_path', label: 'Namespace',      kind: 'text' },
 ]
+const DEFAULT_COLUMNS = ['iid', 'title', 'type', 'state', 'labels', 'weight',
+                         'assignees', 'created_at', 'updated_at', 'due_date']
 
 const EXAMPLES = [
   'state = opened AND weight >= 5 ORDER BY due ASC',
@@ -332,6 +358,36 @@ const localSort = ref(null)     // { key, dir } — client-side re-sort of fetch
 const exporting   = ref(false)  // a CSV export's uncapped re-fetch is in flight
 const exportError = ref(null)
 
+// ── Configure Columns — persisted like the other dialog state (#80) ──
+const COLUMNS_KEY = 'nce-search-columns'
+const validKeys = new Set(ALL_COLUMNS.map(c => c.key))
+const sanitize  = keys => (Array.isArray(keys) ? keys.filter(k => validKeys.has(k)) : [])
+const stored    = sanitize(loadStored(COLUMNS_KEY, DEFAULT_COLUMNS))
+const visibleKeys = ref(stored.length ? stored : [...DEFAULT_COLUMNS])
+const showCols  = ref(false)
+
+// Schema order, not click order — the table reads the same regardless of
+// the sequence boxes were ticked in.
+const visibleColumns = computed(() => ALL_COLUMNS.filter(c => visibleKeys.value.includes(c.key)))
+
+function toggleColumn(key) {
+  const cur = visibleKeys.value
+  if (cur.includes(key)) {
+    if (cur.length === 1) return                    // never zero columns
+    visibleKeys.value = cur.filter(k => k !== key)
+    if (localSort.value && localSort.value.key === key) localSort.value = null
+  } else {
+    visibleKeys.value = [...cur, key]
+  }
+  saveStored(COLUMNS_KEY, visibleKeys.value)
+}
+
+function resetColumns() {
+  visibleKeys.value = [...DEFAULT_COLUMNS]
+  if (localSort.value && !DEFAULT_COLUMNS.includes(localSort.value.key)) localSort.value = null
+  saveStored(COLUMNS_KEY, visibleKeys.value)
+}
+
 // "100 of 342 results" when the exact total is known and exceeds the page;
 // plain "N results" otherwise (total unknown, or the page is the whole set).
 const resultSummary = computed(() => {
@@ -367,6 +423,7 @@ async function run(fromOffset = 0) {
   state.value     = 'loading'
   error.value     = null
   exportError.value = null
+  showCols.value  = false
   localSort.value = null        // a fresh fetch renders in query order
   lastQuery.value = query.value
   offset.value    = fromOffset
@@ -461,7 +518,7 @@ function sortRows(rows) {
   const sort = localSort.value
   const copy = [...rows]
   if (!sort) return copy
-  const col = COLUMNS.find(c => c.key === sort.key)
+  const col = ALL_COLUMNS.find(c => c.key === sort.key)
   const dirMul = sort.dir === 'asc' ? 1 : -1
   // Stable sort, empties last in either direction.
   return copy.sort((a, b) => {
@@ -480,6 +537,13 @@ const displayRows = computed(() => sortRows(result.value ? result.value.items : 
 
 function day(iso) {
   return iso ? String(iso).slice(0, 10) : '—'
+}
+
+const CELL_CLASS = { number: 'cell-num', date: 'cell-date', list: 'cell-people' }
+function cellClass(col) {
+  if (col.key === 'title')  return 'cell-title'
+  if (col.key === 'labels') return 'cell-labels'
+  return CELL_CLASS[col.kind] || 'cell-type'
 }
 
 // ── GitLab-true label chips ──
@@ -803,6 +867,47 @@ function chipStyle(name) {
 }
 .export-btn:hover { border-color: var(--action); color: var(--action); }
 .export-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Configure Columns popover ── */
+.cols-wrap { position: relative; display: inline-flex; }
+.cols-pop {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(9rem, 1fr));
+  gap: 0.15rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.cols-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cols-reset {
+  grid-column: 1 / -1;
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cols-reset:hover { border-color: var(--action); color: var(--action); }
+@media (max-width: 480px) {
+  .cols-pop { grid-template-columns: 1fr; max-height: 60vh; overflow-y: auto; }
+}
 
 .table-wrap {
   flex: 1;

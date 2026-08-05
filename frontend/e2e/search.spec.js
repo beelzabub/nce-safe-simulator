@@ -246,6 +246,51 @@ test.describe('JQL search export (#302)', () => {
   })
 })
 
+// Configure Columns (issue #302 follow-up): the ⚙ popover toggles which
+// flat-schema fields render; the choice persists in localStorage.
+test.describe('JQL search Configure Columns (#302)', () => {
+
+  test('toggling columns updates the table, persists across reload, resets to defaults', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await page.locator('.cols-item', { hasText: 'Weight' }).click()
+    await expect(page.locator('.results-table thead th')).toHaveCount(9)
+    await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(0)
+
+    await page.locator('.cols-item', { hasText: 'Milestone due' }).click()
+    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+    await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(1)
+
+    // The choice survives a reload (localStorage)
+    await page.reload()
+    await expect(page.locator('.search-page')).toBeVisible()
+    await run(page, 'state = opened')
+    await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(0)
+    await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(1)
+
+    // Reset restores the #302 default set
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    await page.locator('.cols-reset').click()
+    await expect(page.locator('.results-table thead th')).toHaveCount(10)
+    await expect(page.locator('.th-btn', { hasText: 'Weight' })).toHaveCount(1)
+    await expect(page.locator('.th-btn', { hasText: 'Milestone due' })).toHaveCount(0)
+  })
+
+  test('the last remaining column cannot be unchecked', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened')
+    await page.locator('.export-btn', { hasText: 'Columns' }).click()
+    for (const label of ['IID', 'Type', 'State', 'Labels', 'Weight', 'Assignees', 'Created', 'Updated', 'Due']) {
+      await page.locator('.cols-item', { hasText: new RegExp(`^\\s*${label}\\s*$`) }).click()
+    }
+    await expect(page.locator('.results-table thead th')).toHaveCount(1)
+    await expect(page.locator('.cols-item', { hasText: 'Title' }).locator('input')).toBeDisabled()
+  })
+})
+
 // Pagination (issue #302 follow-up): offset/limit page through one stable
 // result sequence; Prev/Next re-run the query with a shifted window.
 test.describe('JQL search pagination (#302)', () => {
