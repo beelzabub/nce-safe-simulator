@@ -14,6 +14,7 @@
          set on the component itself would be dropped as a fallthrough attr -->
     <div class="nav-clock"><ClockWidget /></div>
     <div class="nav-actions">
+      <button class="search-btn" title="JQL search" @click="router.push('/search')">⌕<span class="btn-label"> Search</span></button>
       <button class="status-btn" :class="{ active: runningCount > 0 }" @click="$emit('toggle-status')">
         <span v-if="runningCount > 0" class="status-dot" />
         {{ runningCount > 0 ? `${runningCount} running` : 'Status' }}
@@ -135,6 +136,19 @@ async function signOut() {
 }
 .config-btn:hover { background: var(--border); color: var(--text-1); }
 
+.search-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.search-btn:hover { background: var(--border); color: var(--text-1); }
+
 .help-btn {
   background: transparent;
   border: 1px solid var(--border);
@@ -226,7 +240,7 @@ async function signOut() {
   .jobs-btn { display: block; }
   .nav-clock, .brand-tag, .brand-divider, .brand-name { display: none; }
   .btn-label { display: none; }
-  .help-btn, .theme-btn, .signout-btn { padding: 4px 8px; }
+  .search-btn, .help-btn, .theme-btn, .signout-btn { padding: 4px 8px; }
 }
 
 /* Narrowest phones (320px): shave the leftovers so the bar can't overflow.
@@ -242,7 +256,7 @@ async function signOut() {
 
 /* Comfortable tap targets without disturbing the 52px bar */
 @media (pointer: coarse) {
-  .jobs-btn, .status-btn, .config-btn, .help-btn, .theme-btn, .signout-btn {
+  .jobs-btn, .search-btn, .status-btn, .config-btn, .help-btn, .theme-btn, .signout-btn {
     min-height: 40px;
     min-width: 40px;
     justify-content: center;

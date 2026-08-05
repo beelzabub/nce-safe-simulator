@@ -50,6 +50,33 @@ export async function getConfig() {
   }
 }
 
+// ── JQL search (epic #297, issue #302) ──────────────────────────────────────
+// Run a JQL query live against GitLab through the same run_jql() entry point
+// as the CLI tool. Success resolves to run_jql's envelope (items / count /
+// limit / truncated / plan). Failures throw an Error carrying `.status` and
+// the server's structured `.detail` ({kind, message, and for syntax errors
+// position/found/expected}) so the search view can render parse errors
+// inline, anchored at the reported position.
+export async function postQuery(jql, limit) {
+  const r = await fetch('/api/query', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ jql, limit }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const detail = body.detail && typeof body.detail === 'object' ? body.detail : null
+    const err = new Error(
+      (detail && detail.message) ||
+      (typeof body.detail === 'string' ? body.detail : `POST /api/query: ${r.status}`),
+    )
+    err.status = r.status
+    err.detail = detail
+    throw err
+  }
+  return body
+}
+
 // ── Auth session (epic #135, issue #157) ────────────────────────────────────
 // All three degrade to safe shapes on network failure: session degrades to
 // method "none" (cosmetic front door, app shell still reachable — matching

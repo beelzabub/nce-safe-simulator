@@ -1,0 +1,142 @@
+// JQL search view (epic #297, issue #302). Verification points from the
+// issue: header-click sorting re-orders the displayed rows (asc/desc toggle)
+// WITHOUT issuing a new API call; the "sorted locally" hint appears when the
+// limit truncated the result set; parse errors render inline with the caret
+// anchored at the reported position.
+import { test, expect } from '@playwright/test'
+import { mockApi, seedAuthedSession } from './support.js'
+
+const ROW = (iid, title, weight, due) => ({
+  id: String(1000 + iid), iid, type: 'issue', title, state: 'opened',
+  labels: ['type::feature'], assignees: ['alice'], author: 'bob',
+  milestone: null, milestone_due: null, iteration: null,
+  weight, business_value: null, start_date: null, due_date: due,
+  created_at: '2026-03-01T10:00:00Z', updated_at: '2026-07-25T00:00:00Z',
+  closed_at: null, parent_iid: null, namespace_path: 'portfolio/team-a',
+  web_url: `https://gitlab.example/team-a/-/work_items/${iid}`,
+  description: null,
+})
+
+// Fetch order (the query's ORDER BY due ASC): 12, 11, 14 — deliberately not
+// sorted by weight, so a weight header sort visibly re-orders.
+const ITEMS = [
+  ROW(12, 'Fix gateway timeout defect', 2, '2026-08-20'),
+  ROW(11, 'Implement payment gateway API', 5, '2026-09-01'),
+  ROW(14, 'Unassigned backlog item', 9, null),
+]
+
+function envelope(items, { limit = 100, truncated = false } = {}) {
+  return { query: '', items, count: items.length, limit, truncated,
+           plan: { push_down: true, variables: {}, sort: null,
+                   client_sort: [], pages_fetched: 1, scanned: items.length } }
+}
+
+async function openSearch(page, queryResponse) {
+  await seedAuthedSession(page)
+  await mockApi(page)                       // /api/config etc. for the shell
+  page.queryCalls = 0
+  await page.route('**/api/query', (route) => {
+    page.queryCalls++
+    return route.fulfill(queryResponse)
+  })
+  await page.goto('/app/search')
+  await expect(page.locator('.search-page')).toBeVisible()
+}
+
+async function run(page, jql) {
+  await page.locator('.query-input').fill(jql)
+  await page.locator('.run-btn').click()
+}
+
+function columnCells(page, nth) {
+  // nth is 1-based CSS nth-child of the column
+  return page.locator(`.results-table tbody td:nth-child(${nth})`)
+}
+
+test.describe('JQL search view (#302)', () => {
+
+  test('runs a query and renders rows in fetch order with linked titles', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened ORDER BY due ASC')
+
+    await expect(page.locator('.results-table tbody tr')).toHaveCount(3)
+    await expect(columnCells(page, 1)).toHaveText(['12', '11', '14'])
+    const link = page.locator('.cell-title a').first()
+    await expect(link).toHaveAttribute('href', 'https://gitlab.example/team-a/-/work_items/12')
+    await expect(link).toHaveAttribute('target', '_blank')
+    expect(page.queryCalls).toBe(1)
+  })
+
+  test('header click re-sorts client-side, toggles asc/desc, no new API call', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS) })
+    await run(page, 'state = opened ORDER BY due ASC')
+    await expect(page.locator('.results-table tbody tr')).toHaveCount(3)
+
+    // Sort by Weight (6th column): asc → 2, 5, 9
+    await page.getByRole('button', { name: /^Weight/ }).click()
+    await expect(columnCells(page, 6)).toHaveText(['2', '5', '9'])
+    // Toggle → desc
+    await page.getByRole('button', { name: /^Weight/ }).click()
+    await expect(columnCells(page, 6)).toHaveText(['9', '5', '2'])
+    // Due sort keeps the empty due date last even ascending
+    await page.getByRole('button', { name: /^Due/ }).click()
+    await expect(columnCells(page, 10)).toHaveText(['2026-08-20', '2026-09-01', '—'])
+
+    // Re-sorting is a client-side re-sort of the fetched set only
+    expect(page.queryCalls).toBe(1)
+
+    // Reset returns to the fetch order defined by the query's ORDER BY
+    await page.locator('.meta-reset').click()
+    await expect(columnCells(page, 1)).toHaveText(['12', '11', '14'])
+  })
+
+  test('capped result set shows the "sorted locally" hint only once a header sort is active', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS, { limit: 3, truncated: true }) })
+    await run(page, 'state = opened')
+    await expect(page.locator('.results-table tbody tr')).toHaveCount(3)
+
+    await expect(page.locator('.meta-truncated')).toContainText('capped at limit 3')
+    await expect(page.locator('.meta-hint')).toHaveCount(0)
+
+    await page.getByRole('button', { name: /^Weight/ }).click()
+    await expect(page.locator('.meta-hint')).toContainText('sorted locally — first 3 results')
+
+    await page.locator('.meta-reset').click()
+    await expect(page.locator('.meta-hint')).toHaveCount(0)
+  })
+
+  test('syntax errors render inline with the caret at the reported position', async ({ page }) => {
+    const jql = 'state = opened AND'
+    await openSearch(page, {
+      status: 400,
+      json: { detail: { kind: 'syntax', message: 'Expected a field name',
+                        position: 18, found: 'end of query',
+                        expected: ['field name', '('] } },
+    })
+    await run(page, jql)
+
+    const box = page.locator('.error-box')
+    await expect(box).toBeVisible()
+    await expect(box.locator('.error-lead')).toHaveText('Syntax error')
+    await expect(box.locator('.error-msg')).toContainText('Expected a field name')
+    await expect(box.locator('.error-expected code')).toHaveText(['field name', '('])
+    // The echoed query plus a caret line anchored at offset 18
+    await expect(box.locator('.error-query')).toHaveText(jql + '\n' + ' '.repeat(18) + '^')
+  })
+
+  test('semantic errors and empty results have their own states', async ({ page }) => {
+    await openSearch(page, {
+      status: 400,
+      json: { detail: { kind: 'semantic',
+                        message: "Unknown field 'flavor'. Valid fields: state, type" } },
+    })
+    await run(page, 'flavor = chocolate')
+    await expect(page.locator('.error-lead')).toHaveText('Query error')
+    await expect(page.locator('.error-msg')).toContainText("Unknown field 'flavor'")
+
+    await page.unroute('**/api/query')
+    await page.route('**/api/query', (route) => route.fulfill({ json: envelope([]) }))
+    await run(page, 'state = closed AND weight >= 99')
+    await expect(page.locator('.search-empty .empty-lead')).toHaveText('No matching work items')
+  })
+})
