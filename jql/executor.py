@@ -29,6 +29,7 @@ __all__ = [
     "JqlExecutionError",
     "EvalContext",
     "build_work_items_query",
+    "collect_label_colors",
     "shape_node",
     "evaluate",
     "sort_items",
@@ -95,7 +96,7 @@ _CORE_NODE_FIELDS = """
             namespace { fullPath }"""
 
 _CORE_WIDGETS = """
-              ... on WorkItemWidgetLabels { labels { nodes { title } } }
+              ... on WorkItemWidgetLabels { labels { nodes { title color textColor } } }
               ... on WorkItemWidgetAssignees { assignees { nodes { username name } } }
               ... on WorkItemWidgetMilestone { milestone { title dueDate } }
               ... on WorkItemWidgetIteration { iteration { id title } }
@@ -204,6 +205,18 @@ def _widget_map(node):
         if isinstance(w, dict):
             merged.update(w)
     return merged
+
+
+def collect_label_colors(node, into):
+    """Harvest ``label title -> {color, text_color}`` from a raw GraphQL node
+    into ``into`` — the colors set in GitLab, which the web UI's label chips
+    honor. First sighting wins; labels without a color are skipped so the
+    UI's default chip style applies."""
+    for n in (_widget_map(node).get("labels") or {}).get("nodes") or []:
+        title = n.get("title")
+        if title and title not in into and n.get("color"):
+            into[title] = {"color": n["color"],
+                           "text_color": n.get("textColor")}
 
 
 def shape_node(node, bv_field_id=None):

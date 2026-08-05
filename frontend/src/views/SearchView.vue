@@ -211,7 +211,7 @@
               <td class="cell-type">{{ row.type }}</td>
               <td><span class="state-chip" :class="row.state">{{ row.state }}</span></td>
               <td class="cell-labels">
-                <span v-for="l in row.labels" :key="l" class="label-chip">{{ l }}</span>
+                <span v-for="l in row.labels" :key="l" class="label-chip" :style="chipStyle(l)">{{ l }}</span>
               </td>
               <td class="cell-num">{{ row.weight ?? '—' }}</td>
               <td class="cell-people">{{ row.assignees.length ? row.assignees.join(', ') : '—' }}</td>
@@ -480,6 +480,24 @@ const displayRows = computed(() => sortRows(result.value ? result.value.items : 
 
 function day(iso) {
   return iso ? String(iso).slice(0, 10) : '—'
+}
+
+// ── GitLab-true label chips ──
+//    The envelope's label_colors maps title -> {color, text_color} straight
+//    from GitLab's label definitions. GitLab's own text_color wins; the YIQ
+//    rule (same one epic-cards uses) is the fallback ink. Labels the map
+//    doesn't know keep the default chip style.
+function textOn(bg) {
+  const r = parseInt(bg.slice(1, 3), 16)
+  const g = parseInt(bg.slice(3, 5), 16)
+  const b = parseInt(bg.slice(5, 7), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? '#1a1a1a' : '#ffffff'
+}
+
+function chipStyle(name) {
+  const c = result.value && result.value.label_colors && result.value.label_colors[name]
+  if (!c || !/^#[0-9a-fA-F]{6}$/.test(c.color || '')) return null
+  return { background: c.color, color: c.text_color || textOn(c.color), border: 'none' }
 }
 </script>
 

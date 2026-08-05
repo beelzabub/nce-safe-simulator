@@ -57,6 +57,14 @@ USER_NAMES = {
     "jamie": "Jamie Powers",
 }
 
+#: GitLab-side label colors served by the fake backend's label nodes —
+#: labels off this map get color: None, like a label GitLab never styled.
+LABEL_COLORS = {
+    "risk::high":       "#cc0033",
+    "epic::capability": "#6699cc",
+    "type::feature":    "#009966",
+}
+
 
 def wi(iid, type="Issue", title="", state="OPEN", labels=(), assignees=(),
        author="alice", milestone=None, milestone_due=None, iteration=None,
@@ -76,7 +84,10 @@ def wi(iid, type="Issue", title="", state="OPEN", labels=(), assignees=(),
         "author": {"username": author, "name": USER_NAMES.get(author)},
         "namespace": {"fullPath": path},
         "widgets": [
-            {"labels": {"nodes": [{"title": l} for l in labels]}},
+            {"labels": {"nodes": [{"title": l,
+                                   "color": LABEL_COLORS.get(l),
+                                   "textColor": "#FFFFFF" if LABEL_COLORS.get(l) else None}
+                                  for l in labels]}},
             {"assignees": {"nodes": [{"username": u, "name": USER_NAMES.get(u)}
                                      for u in assignees]}},
             {"milestone": {"title": milestone, "dueDate": milestone_due}
@@ -784,6 +795,37 @@ class TestTotalAndUnboundedLimit:
         assert result["truncated"] is False
         assert result["total"] == result["count"]
         assert result["plan"]["pages_fetched"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Label colors (GitLab-true chips in the web UI)
+# ---------------------------------------------------------------------------
+
+class TestLabelColors:
+
+    def test_envelope_maps_matched_labels_to_gitlab_colors(self, harness):
+        result = harness.run_jql('labels = "risk::high"', now=NOW)
+        assert result["label_colors"]["risk::high"] == {
+            "color": "#cc0033", "text_color": "#FFFFFF"}
+
+    def test_uncolored_labels_stay_out_of_the_map(self, harness):
+        # PIID::2026Q2 has no GitLab color — the UI keeps its default chip.
+        result = harness.run_jql("iid = 1", now=NOW)
+        item_labels = set(result["items"][0]["labels"])
+        assert "PIID::2026Q2" in item_labels
+        assert "PIID::2026Q2" not in result["label_colors"]
+        assert result["label_colors"]["epic::capability"]["color"] == "#6699cc"
+
+    def test_map_covers_only_matched_items(self, harness):
+        # A query matching no risk::high item must not leak its color.
+        result = harness.run_jql("iid = 1", now=NOW)
+        assert "risk::high" not in result["label_colors"]
+
+    def test_items_keep_flat_string_labels(self, harness):
+        # The color selection must not change the documented item schema.
+        result = harness.run_jql('labels = "risk::high"', now=NOW)
+        assert all(isinstance(l, str) for it in result["items"]
+                   for l in it["labels"])
 
 
 # ---------------------------------------------------------------------------

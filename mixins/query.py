@@ -36,6 +36,7 @@ from jql.executor import (
     JqlExecutionError,
     _gql_value,
     build_work_items_query,
+    collect_label_colors,
     evaluate,
     shape_node,
     sort_items,
@@ -196,8 +197,10 @@ class QueryMixin:
         (every predicate's server-side filter equals the query — Plan.exact —
         so the GraphQL connection's own count is the true total); ``None``
         only when an early-stopped scan left envelope-only filters with
-        client-side rejections unevaluated on unfetched pages — plus a
-        ``plan`` block
+        client-side rejections unevaluated on unfetched pages;
+        ``label_colors`` — ``title -> {color, text_color}`` for every label
+        on a matched item, straight from GitLab's label definitions, so UI
+        chips can honor the colors set in GitLab — plus a ``plan`` block
         describing what was pushed down and what ran client-side. The whole
         dict is JSON-serializable (pushed date bounds are reported in their
         ISO-8601 transport form).
@@ -245,6 +248,7 @@ class QueryMixin:
         truncated = False
         server_total = None   # the connection's count — total after pushed-down filters
         exhausted = True      # False only when early termination left pages unfetched
+        label_colors = {}     # title -> {color, text_color} for matched items' labels
 
         # A provably-empty plan (e.g. a type constraint entirely outside the
         # entity scope) never fetches: the server *skips* blank list filters
@@ -300,6 +304,7 @@ class QueryMixin:
                     item = shape_node(node, bv_field_id=bv_field_id)
                     if plan.expr is None or evaluate(plan.expr, item, ctx):
                         items.append(item)
+                        collect_label_colors(node, label_colors)
                 pages += 1
                 info = page.get("pageInfo") or {}
                 has_next = bool(info.get("hasNextPage"))
@@ -342,6 +347,7 @@ class QueryMixin:
             "offset":    offset,
             "total":     total,
             "truncated": truncated,
+            "label_colors": label_colors,
             "plan": {
                 "push_down":     push_down,
                 "exact_push":    plan.exact,

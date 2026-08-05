@@ -26,9 +26,10 @@ const ITEMS = [
   ROW(14, 'Unassigned backlog item', 9, null),
 ]
 
-function envelope(items, { limit = 100, truncated = false, total = null } = {}) {
+function envelope(items, { limit = 100, truncated = false, total = null,
+                           labelColors = {} } = {}) {
   return { query: '', items, count: items.length, limit, offset: 0, total,
-           truncated,
+           truncated, label_colors: labelColors,
            plan: { push_down: true, variables: {}, sort: null,
                    client_sort: [], pages_fetched: 1, scanned: items.length } }
 }
@@ -90,6 +91,16 @@ test.describe('JQL search view (#302)', () => {
     // Reset returns to the fetch order defined by the query's ORDER BY
     await page.locator('.meta-reset').click()
     await expect(columnCells(page, 1)).toHaveText(['12', '11', '14'])
+  })
+
+  test('label chips honor GitLab colors, defaults for unmapped labels', async ({ page }) => {
+    await openSearch(page, { json: envelope(ITEMS, {
+      labelColors: { 'type::feature': { color: '#cc0033', text_color: '#FFFFFF' } },
+    }) })
+    await run(page, 'state = opened')
+    const chip = page.locator('.label-chip', { hasText: 'type::feature' }).first()
+    await expect(chip).toHaveCSS('background-color', 'rgb(204, 0, 51)')
+    await expect(chip).toHaveCSS('color', 'rgb(255, 255, 255)')
   })
 
   test('capped result set shows the "sorted locally" hint only once a header sort is active', async ({ page }) => {

@@ -68,7 +68,7 @@ class TestEndpointParity:
     def test_envelope_shape(self, client):
         body = post(client, {"jql": "state = opened"}).json()
         assert set(body) >= {"query", "items", "count", "limit", "offset",
-                             "total", "truncated", "plan"}
+                             "total", "truncated", "label_colors", "plan"}
         assert body["query"] == "state = opened"
         assert body["limit"] == 100                   # run_jql default applies
         for item in body["items"]:

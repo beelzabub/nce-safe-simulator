@@ -27,6 +27,7 @@ from .executor import (
     JqlExecutionError,
     build_work_items_query,
     evaluate,
+    collect_label_colors,
     shape_node,
     sort_items,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "JqlExecutionError",
     "build_work_items_query",
     "evaluate",
+    "collect_label_colors",
     "shape_node",
     "sort_items",
 ]
