@@ -850,3 +850,45 @@ class TestErrorPaths:
         harness = QueryHarness()
         with pytest.raises(JqlSyntaxError):
             harness.run_jql("state =", now=NOW)
+
+
+class TestOffsetPagination:
+    """offset/limit page through one stable result sequence — pages must
+    tile the full list exactly, with truncated signalling a further page."""
+
+    def test_pages_tile_the_full_result_list(self, harness):
+        full = ids(harness.run_jql("state = opened ORDER BY iid ASC",
+                                   limit=1000, now=NOW))
+        paged = []
+        offset = 0
+        while True:
+            r = harness.run_jql("state = opened ORDER BY iid ASC",
+                                limit=3, offset=offset, now=NOW)
+            paged.extend(i["iid"] for i in r["items"])
+            assert r["offset"] == offset
+            if not r["truncated"]:
+                break
+            offset += 3
+        assert paged == full
+
+    def test_middle_page_matches_slice(self, harness):
+        full = ids(harness.run_jql("state = opened ORDER BY iid ASC",
+                                   limit=1000, now=NOW))
+        r = harness.run_jql("state = opened ORDER BY iid ASC",
+                            limit=3, offset=2, now=NOW)
+        assert ids(r) == full[2:5]
+        assert r["truncated"] is (len(full) > 5)
+
+    def test_offset_past_the_end_is_empty_not_truncated(self, harness):
+        r = harness.run_jql("state = opened", limit=10, offset=500, now=NOW)
+        assert r["items"] == []
+        assert r["count"] == 0
+        assert r["truncated"] is False
+
+    def test_negative_offset_rejected(self, harness):
+        with pytest.raises(ValueError):
+            harness.run_jql("state = opened", limit=5, offset=-1, now=NOW)
+
+    def test_default_offset_is_zero(self, harness):
+        r = harness.run_jql("state = opened", limit=5, now=NOW)
+        assert r["offset"] == 0
