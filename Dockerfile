@@ -8,7 +8,7 @@
 # PKG_PROJECT (no default — see the runtime stage note) names the GitLab
 # project; APT_DEBS_VERSION pins the captured set.
 ARG PKG_PROJECT
-ARG APT_DEBS_VERSION=2026.07.22
+ARG APT_DEBS_VERSION=2026.08.06
 # apt-debs capture-input: ebd4984a6e6c — first 12 hex of
 # sha256(scripts/capture-apt-debs.sh), whose layer package lists DEFINE the
 # apt closure. Unlike pip/npm (content-addressed, issue #296), a stale apt
