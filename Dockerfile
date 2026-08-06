@@ -88,10 +88,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
         "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
         /tmp/wheels.tar.gz && \
       mkdir -p /tmp/wheels && tar xzf /tmp/wheels.tar.gz -C /tmp/wheels && \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-index --find-links /tmp/wheels diagrams && \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-cache-dir --no-index --find-links /tmp/wheels diagrams && \
       rm -rf /tmp/wheels /tmp/wheels.tar.gz; \
     else \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install -c /tmp/requirements.lock diagrams; \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-cache-dir -c /tmp/requirements.lock diagrams; \
     fi
 WORKDIR /build
 COPY diagrams/ ./
@@ -165,10 +165,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
         "${PKG_PROJECT}/packages/generic/pip-wheels/${PIP_WHEELS_VERSION}/pip-wheels-${ARCH}.tar.gz" \
         /tmp/wheels.tar.gz && \
       mkdir -p /tmp/wheels && tar xzf /tmp/wheels.tar.gz -C /tmp/wheels && \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-index --find-links /tmp/wheels -r requirements.lock && \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-cache-dir --no-index --find-links /tmp/wheels -r requirements.lock && \
       rm -rf /tmp/wheels /tmp/wheels.tar.gz; \
     else \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install -r requirements.lock; \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 pip install --no-cache-dir -r requirements.lock; \
     fi
 
 COPY . .
