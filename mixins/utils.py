@@ -234,22 +234,61 @@ class UtilitiesMixin:
                 return "ok_reopen"
             raise
 
+    # Transport-level retry budget for GraphQL. Separate from graphql_query's
+    # ``retries``, which covers GraphQL *errors* — i.e. failures a server that
+    # answered chose to report. A read timeout or dropped connection never
+    # reaches that branch, so without this a single network blip aborts whatever
+    # is running: create-lorem-data can spend half an hour building a portfolio
+    # and lose all of it to one timed-out mutation, with nothing resumable left
+    # behind. Retried unconditionally, because callers passing retries=0 want a
+    # blip absorbed just as much as the ones that don't.
+    _GQL_TRANSPORT_ATTEMPTS = 3
+    _GQL_RETRY_STATUSES     = frozenset({429, 500, 502, 503, 504})
+
+    def _graphql_post(self, payload):
+        """POST to the GraphQL endpoint, retrying transient transport failures.
+
+        The read timeout follows ``api_timeout`` like every other call (the REST
+        session gets it via _TimeoutAdapter); connect stays short so an
+        unreachable host fails fast instead of burning the read budget.
+        """
+        last = None
+        for attempt in range(1, self._GQL_TRANSPORT_ATTEMPTS + 1):
+            try:
+                response = requests.post(
+                    f"{self.url}/api/graphql",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.private_token}",
+                        "Content-Type": "application/json",
+                    },
+                    verify=getattr(self, "ssl_verify", True),
+                    timeout=(15, getattr(self, "api_timeout", 300)),
+                )
+                response.raise_for_status()
+                return response
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last = exc
+            except requests.HTTPError as exc:
+                status = getattr(exc.response, "status_code", None)
+                if status not in self._GQL_RETRY_STATUSES:
+                    raise
+                last = exc
+            if attempt == self._GQL_TRANSPORT_ATTEMPTS:
+                break
+            delay = 2 ** attempt
+            print(f"  GraphQL transport error ({type(last).__name__}) — "
+                  f"retry {attempt}/{self._GQL_TRANSPORT_ATTEMPTS - 1} in {delay}s",
+                  file=sys.stderr)
+            time.sleep(delay)
+        raise last
+
     def graphql_query(self, query, variables=None, retries=0):
         import time
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
-        response = requests.post(
-            f"{self.url}/api/graphql",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {self.private_token}",
-                "Content-Type": "application/json",
-            },
-            verify=getattr(self, "ssl_verify", True),
-            timeout=30,
-        )
-        response.raise_for_status()
+        response = self._graphql_post(payload)
         data = response.json()
         if "errors" in data:
             if retries > 0:
