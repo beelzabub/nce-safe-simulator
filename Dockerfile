@@ -200,10 +200,14 @@ COPY --from=diagram-builder /diagrams/ ./public/architecture/
 # Bind mounts over these paths must be writable by uid 1000 (redeploy.sh
 # chowns them on the single-box host; EFS access points enforce their own
 # posix user server-side, so ECS/EKS are unaffected).
+# public/ stays root-owned, so every runtime-written directory under it has to
+# be pre-created here — public/data (the Quarto/Marimo data layer a report run
+# writes) as much as interactive/ and exports/. Creating it at runtime would
+# need write permission on public/ itself, which the app deliberately lacks.
 RUN useradd --create-home --uid 1000 --user-group app && \
-    mkdir -p reports logs quarto-site public/interactive public/exports uploads && \
+    mkdir -p reports logs quarto-site public/interactive public/exports public/data uploads && \
     chown app:app /app && \
-    chown -R app:app reports logs quarto-site public/interactive public/exports uploads
+    chown -R app:app reports logs quarto-site public/interactive public/exports public/data uploads
 
 EXPOSE 8080
 USER app
