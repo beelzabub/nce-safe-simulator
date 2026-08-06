@@ -332,7 +332,7 @@ TOOLS = [
     },
     {
         "key":         "create-lorem-data",
-        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Preview the resolved structure first with the CLI's --dry_run.",
         "confirm":     True,
         "method":      "create_all_lorem_objects",
         "params": [
@@ -345,7 +345,7 @@ TOOLS = [
             {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
             {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
             {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
-            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True, "cli_only": True},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
