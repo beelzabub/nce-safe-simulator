@@ -35,20 +35,30 @@ def _runtime_stage_prep():
     return m.group(0)
 
 
-def _public_subdirs_written_by_source():
-    """Every public/<name> directory the source treats as a path root.
+def _runtime_written_dirs():
+    """Every directory literal the app writes its data layer into.
 
-    Matches ``Path("public/<name>")`` only — a bare two-segment directory the
-    code builds paths from, which is how each of these is written to. Deeper
-    literals like ``Path("public/app/index.html")`` are reads of the shipped
-    frontend bundle, not directories the app creates, so they stay out.
+    Two sources, because the failure mode differs and both have now bitten:
+
+    * ``Path("public/<name>")`` — a two-segment directory under the root-owned
+      public/ bundle, which the app cannot create at runtime. Deeper literals
+      like ``Path("public/app/index.html")`` are reads of the shipped frontend,
+      not directories the app creates, so they stay out.
+    * the directory arguments of ``write_report_json(...)`` — these are written
+      into directly. quarto-data ships in the repo, so it already exists and
+      ``mkdir -p`` succeeds; the *write* inside it is what fails when it is
+      root-owned. Existence is not the contract — ownership is.
     """
     found = set()
     for path in SOURCE_FILES:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
             if line.lstrip().startswith("#"):
                 continue
-            for name in re.findall(r'Path\("public/([a-z_]+)"\)', line):
+            for name in re.findall(r'Path\("(public/[a-z_]+)"\)', line):
+                found.add(name)
+        for call in re.findall(r"write_report_json\(([^)]*)\)", text):
+            for name in re.findall(r'Path\("([a-z][a-z_/-]*)"\)', call):
                 found.add(name)
     return found
 
@@ -62,15 +72,15 @@ def test_public_subdirs_are_precreated_and_chowned():
     made = set(mkdir.group(1).split())
     owned = set(chown.group(1).split())
 
-    for name in sorted(_public_subdirs_written_by_source()):
-        target = f"public/{name}"
+    for target in sorted(_runtime_written_dirs()):
         assert target in made, (
-            f"{target} is written at runtime but is not created in the image. "
-            f"public/ is root-owned, so uid 1000 cannot create it — add it to mkdir -p."
+            f"{target} is written at runtime but is not created in the image — "
+            f"add it to mkdir -p."
         )
         assert target in owned, (
-            f"{target} is created in the image but not chowned to app — "
-            f"uid 1000 cannot write into it."
+            f"{target} is not chowned to app, so uid 1000 cannot write into it. "
+            f"Shipping in the build context is not enough: COPY lands it "
+            f"root-owned and mkdir -p then succeeds without granting a write."
         )
 
 
