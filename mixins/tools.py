@@ -1745,14 +1745,20 @@ class ToolsMixin:
         # rolls up to a correctly-labelled Portfolio Epic, so the report's ancestor
         # walk (_portfolio_ancestors) resolves a real Portfolio Epic instead of
         # silently collapsing the blocked item into its own "Epic at Risk".
-        pe_type    = self.EPIC_TYPE_DISPLAY_NAMES[0]
+        # Match the labels the epics actually carry (epic::epic, epic::capability,
+        # …), not EPIC_TYPE_DISPLAY_NAMES — those are the capitalized leaves
+        # ("Epic", "Capability") built for report headings, and never appear in
+        # a label list. Comparing against them typed every epic "Unknown", so
+        # nothing ever resolved a Portfolio Epic ancestor and every run fell
+        # through to the random-target path below.
+        pe_type    = self.EPIC_TYPE_LABELS[0]
         epic_by_id = {epic.id: epic for _, epic in all_epics}
         parent_of  = {epic.id: epic.parent_id for _, epic in all_epics
                       if getattr(epic, "parent_id", None)}
 
         def _etype(epic):
             labels = getattr(epic, "labels", []) or []
-            for t in self.EPIC_TYPE_DISPLAY_NAMES:
+            for t in self.EPIC_TYPE_LABELS:
                 if t in labels:
                     return t
             return "Unknown"
