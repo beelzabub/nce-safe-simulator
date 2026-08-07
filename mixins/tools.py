@@ -1097,6 +1097,18 @@ class ToolsMixin:
                 if name in prefills:
                     raw = prefills[name]
                     ptype = param["type"]
+                    # A numeric param that arrived as a bare flag means its value
+                    # was swallowed by the argv scan: `--count -15` looks like a
+                    # flag followed by another flag, so count lands here as True.
+                    # int(True) is 1, which silently turned "remove 15 blocking
+                    # links" into "create 1". Refuse it and name the --count=-15
+                    # form that survives the scan.
+                    if isinstance(raw, bool) and ptype in (int, float):
+                        raise SystemExit(
+                            f"--{name} was given without a value. A value starting "
+                            f"with '-' is read as the next flag, so pass it attached: "
+                            f"--{name}=<value> (e.g. --{name}=-15)."
+                        )
                     if ptype is bool:
                         val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
                     elif ptype is int:
