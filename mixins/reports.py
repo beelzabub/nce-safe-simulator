@@ -8334,10 +8334,27 @@ class ReportsMixin:
 
             self._print_timing_table(phases, f"{total} report(s) completed")
 
-        self._build_site(formats=formats)
+        site_ok = self._build_site(formats=formats)
 
         # expose aggregate for --all phase summary
         if phases:
             wall  = (phases[-1][2] - phases[0][1]).total_seconds()
             label = f"reports ({len(phases)})" if len(phases) > 1 else f"report: {phases[0][0]}"
             self._last_reports_phase = (label, phases[0][1], phases[-1][2], wall)
+
+        # A failed site build used to be swallowed here: _build_site already
+        # printed "FAILED (exit 1)" per stage, but the return value was
+        # discarded, so the run exited 0 and the durable job manifest recorded
+        # state=done. Both the Quarto render and every Marimo export failed for
+        # a full day behind that green result — the markdown reports had
+        # published to the wiki, so nothing else looked wrong. Exit non-zero
+        # instead, the same way a tool reports its own failure.
+        if not site_ok:
+            bar = "  " + "!" * 64
+            print(bar)
+            print("  SITE BUILD FAILED — the markdown reports above published,")
+            print("  but the Quarto and/or Marimo pages were NOT rebuilt, so the")
+            print("  served site still shows the previous build. See the stage")
+            print("  output above for the failing command.")
+            print(bar)
+            raise SystemExit(1)
