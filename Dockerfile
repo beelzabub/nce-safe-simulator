@@ -206,10 +206,13 @@ COPY --from=diagram-builder /diagrams/ ./public/architecture/
 # write inside it is what fails. public/ stays root-owned (the served bundle is
 # read-only to the app), so public/data has to be pre-created rather than made
 # at runtime, which would need write permission on public/ itself.
+# quarto/ is the one SOURCE tree that must also be app-owned: `quarto render`
+# writes each .qmd's executed <name>.quarto_ipynb intermediate next to the
+# source file, so a root-owned quarto/ fails the static build outright.
 RUN useradd --create-home --uid 1000 --user-group app && \
     mkdir -p reports logs quarto-site quarto-data public/interactive public/exports public/data uploads && \
     chown app:app /app && \
-    chown -R app:app reports logs quarto-site quarto-data public/interactive public/exports public/data uploads
+    chown -R app:app reports logs quarto-site quarto-data public/interactive public/exports public/data uploads quarto
 
 EXPOSE 8080
 USER app

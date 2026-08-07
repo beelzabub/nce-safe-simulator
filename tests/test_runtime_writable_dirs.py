@@ -84,6 +84,41 @@ def test_public_subdirs_are_precreated_and_chowned():
         )
 
 
+def test_quarto_source_dirs_are_app_owned():
+    """`quarto render` writes into its own SOURCE tree, not just the output.
+
+    Each .qmd is executed through the jupyter engine, which writes the
+    intermediate <name>.quarto_ipynb next to the source file. A root-owned
+    quarto/ therefore fails the static build outright:
+
+        ERROR: PermissionDenied: Permission denied (os error 13):
+        writefile '/app/quarto/health-dashboard.quarto_ipynb'
+
+    Derived from the tree rather than hardcoded, so a new .qmd directory is
+    covered the day it is added. The repo root is exempt — the runtime layer
+    already does `chown app:app /app`.
+    """
+    prep = _runtime_stage_prep()
+    chown = re.search(r"chown -R app:app ([^&\\]+)", prep)
+    assert chown, "runtime prep layer must chown -R"
+    owned = set(chown.group(1).split())
+
+    qmd_dirs = {
+        str(p.parent.relative_to(REPO))
+        for p in REPO.rglob("*.qmd")
+        if ".git" not in p.parts and "node_modules" not in p.parts
+    }
+    qmd_dirs.discard(".")          # repo root: covered by `chown app:app /app`
+    assert qmd_dirs, "expected at least one .qmd source directory"
+
+    for d in sorted(qmd_dirs):
+        assert d in owned, (
+            f"{d}/ holds .qmd sources but is not chowned to app. quarto render "
+            f"writes each executed notebook next to its source, so uid 1000 "
+            f"needs write permission on the source directory itself."
+        )
+
+
 def test_public_itself_is_not_handed_to_app():
     """Guard the tighter fix: grant the subdirectory, never the parent.
 
