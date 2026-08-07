@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call
 
 
 from conftest import ToolsHarness, _make_epic_mock, _make_issue_mock
+from mixins.label_colors import DEFAULT_COLOR, FAMILY_DEFAULTS, LABEL_COLORS
 
 pytestmark = pytest.mark.unit
 
@@ -546,8 +547,31 @@ def test_create_and_apply_labels_creates_scoped_label():
     h.create_and_apply_labels(target, ["lifecycle::funnel"])
 
     target.labels.create.assert_called_once_with(
-        {"name": "lifecycle::funnel", "color": "#4287f5"}
+        {"name": "lifecycle::funnel", "color": LABEL_COLORS["lifecycle::funnel"]}
     )
+
+
+def test_create_and_apply_labels_uses_the_taxonomy_palette():
+    """A reseed must reproduce the palette, not repaint every chip one colour."""
+    h = ToolsHarness()
+    target = MagicMock()
+    names = ["PIID::2026Q3", "wsjf-urgency::13", "lifecycle::done"]
+
+    h.create_and_apply_labels(target, names)
+
+    used = [c.args[0]["color"] for c in target.labels.create.call_args_list]
+    assert used == [LABEL_COLORS[n] for n in names]
+    assert len(set(used)) == 3, "the families must not collapse to one colour"
+
+
+def test_unknown_label_falls_back_by_family_then_default():
+    h = ToolsHarness()
+    target = MagicMock()
+
+    h.create_and_apply_labels(target, ["PIID::2099Q4", "nothing-like-a-taxonomy"])
+
+    used = [c.args[0]["color"] for c in target.labels.create.call_args_list]
+    assert used == [FAMILY_DEFAULTS["PIID"], DEFAULT_COLOR]
 
 
 def test_create_and_apply_labels_skips_existing_label():
