@@ -6,7 +6,15 @@ requests
 lorem
 plotly
 marimo
+# marimo >=0.23 shells out to uv to resolve a notebook's imports during
+# `export html-wasm`; without it every notebook export fails and the
+# interactive pages silently stop rebuilding (the report job still exits 0).
+uv
 nbformat
+# Quarto's jupyter engine executes each .qmd's python cells through
+# nbclient in an ipykernel; nbformat alone only parses the notebook.
+nbclient
+ipykernel
 fastapi
 uvicorn[standard]
 python-multipart

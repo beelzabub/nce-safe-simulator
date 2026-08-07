@@ -119,6 +119,27 @@ def test_quarto_source_dirs_are_app_owned():
         )
 
 
+def test_site_build_toolchain_is_installed():
+    """The two site-build stages each need a dependency the app never imports.
+
+    Both failed silently in the image: nothing in the Python source imports
+    either one, so a missing pin surfaces only as a failed subprocess at run
+    time.
+
+    * uv     — marimo >=0.23 shells out to it to resolve a notebook's imports
+               during `export html-wasm`; without it every export fails with
+               "uv must be installed to resolve local imports".
+    * nbclient / ipykernel — quarto's jupyter engine executes each .qmd's
+               python cells through them ("No module named 'nbclient'").
+    """
+    lock = (REPO / "requirements.lock").read_text()
+    for pkg in ("uv", "nbclient", "ipykernel"):
+        assert re.search(rf"(?mi)^{pkg}==", lock), (
+            f"{pkg} is not pinned in requirements.lock — the site build shells "
+            f"out to it, so nothing in the source tree will flag its absence."
+        )
+
+
 def test_public_itself_is_not_handed_to_app():
     """Guard the tighter fix: grant the subdirectory, never the parent.
 
