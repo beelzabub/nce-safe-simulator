@@ -1,0 +1,67 @@
+{
+  "project": "gl-demo-ultimate-lmwilliams/nce-safe-simulator",
+  "scanned_sha": "2dbd11f0",
+  "generated_at": "2026-08-10T08:20:22Z",
+  "scan_pipeline": {
+    "id": 2746483470,
+    "url": "https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/pipelines/2746483470"
+  },
+  "totals": {
+    "detected": 0,
+    "dismissed": 237,
+    "resolved": 97
+  },
+  "by_scanner": {
+    "CONTAINER_SCANNING": {
+      "detected": 0,
+      "dismissed": 186,
+      "resolved": 21,
+      "detected_by_severity": {}
+    },
+    "DEPENDENCY_SCANNING": {
+      "detected": 0,
+      "dismissed": 1,
+      "resolved": 11,
+      "detected_by_severity": {}
+    },
+    "SAST": {
+      "detected": 0,
+      "dismissed": 47,
+      "resolved": 58,
+      "detected_by_severity": {}
+    },
+    "SECRET_DETECTION": {
+      "detected": 0,
+      "dismissed": 3,
+      "resolved": 7,
+      "detected_by_severity": {}
+    }
+  },
+  "scanners": [
+    {
+      "job": "container_scanning",
+      "report": "gl-container-scanning-report.json",
+      "scanner": "Trivy",
+      "version": "0.72.0",
+      "type": "container_scanning",
+      "report_sha256": "d8c8cdfd23fe454f522f86c81fe76cc651c420e63f4f846d1c7c25213d0c9f58"
+    },
+    {
+      "job": "secret_detection",
+      "report": "gl-secret-detection-report.json",
+      "scanner": "Gitleaks",
+      "version": "8.30.1",
+      "type": "secret_detection",
+      "report_sha256": "466973565b017cffaa5c18f8760ba6a15b0415ea5ac58ffd9ce5cc5f75e59e48"
+    },
+    {
+      "job": "semgrep-sast",
+      "report": "gl-sast-report.json",
+      "scanner": "Semgrep",
+      "version": "1.145.0",
+      "type": "sast",
+      "report_sha256": "ffcd8e26b1f038061f0c142933e96cf22edf164e136725071806adbfc772efd3"
+    }
+  ],
+  "note": "Raw gl-*-report.json artifacts are intentionally not committed; only their SHA-256 hashes are recorded."
+}
