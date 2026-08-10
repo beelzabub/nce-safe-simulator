@@ -339,6 +339,11 @@ class DeckBuilder:
         # the cover, and the Latest-Work window start.
         self.review_date = review_date or _now_pacific()
         self.since_dt = since_dt or _window_start_pacific()
+        # The reporting period always ends on the Friday 14:00 Pacific boundary
+        # the deck covers — never on the last commit, which lands on whatever
+        # weekday work happened to stop. Every "built <start> – <end>" line in
+        # the deck reads from here so they cannot disagree with the cover.
+        self.period_end_iso = self.review_date.strftime("%Y-%m-%d")
         self.C = _load_theme_colors(self.prs)
         self.SW = self.prs.slide_width
         self.SH = self.prs.slide_height
@@ -647,8 +652,13 @@ class DeckBuilder:
 
     def _cover_timeline(self, slide, x, y, w, first_iso, last_iso):
         """Compact development-timeline graphic for the cover: an accent line
-        with end dots, the first/last commit dates, and the elapsed span — a
-        visual replacement for the old plain "Development window:" text line."""
+        with end dots, the window's start and end dates, and the elapsed span —
+        a visual replacement for the old plain "Development window:" text line.
+
+        ``last_iso`` is the **reporting period end** (the Friday 14:00 Pacific
+        boundary this deck covers), never the last commit date. Commits land on
+        an arbitrary weekday, so sourcing the endpoint from one produced covers
+        dated to a Wednesday on a deck whose period ended that Friday."""
         d0 = datetime.strptime(first_iso, "%Y-%m-%d")
         d1 = datetime.strptime(last_iso, "%Y-%m-%d")
         weeks = max(1, round((d1 - d0).days / 7))
@@ -674,7 +684,7 @@ class DeckBuilder:
                       bold=True, align=PP_ALIGN.RIGHT)
         self.add_text(slide, x, lbl_y + Emu(300000), Emu(2600000), Emu(220000), "first commit", 8.5, dim)
         self.add_text(slide, x + w - Emu(2600000), lbl_y + Emu(300000), Emu(2600000), Emu(220000),
-                      "latest commit", 8.5, dim, align=PP_ALIGN.RIGHT)
+                      "week ending", 8.5, dim, align=PP_ALIGN.RIGHT)
 
     def build_cover(self):
         # The committed template of record carries no content slides, so the cover
@@ -745,7 +755,7 @@ class DeckBuilder:
 
         m = self.metrics
         self._cover_timeline(cover, left, Emu(4020000), Emu(4360000),
-                             m["first_commit_date"], m["last_commit_date"])
+                             m["first_commit_date"], self.period_end_iso)
 
         # White emblem (not the navy one) now that the cover reads dark.
         nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
@@ -1143,7 +1153,7 @@ class DeckBuilder:
         (2) issue-status donut and MR-status bar with value labels. Split from
         one crowded slide so every chart has room and actually renders."""
         m = self.metrics
-        first, last = m["first_commit_date"], m["last_commit_date"]
+        first, last = m["first_commit_date"], self.period_end_iso
 
         # ---- Slide 1: activity & code growth ----
         s1 = self.new_slide()
@@ -1811,7 +1821,7 @@ class DeckBuilder:
             # they stand apart from the counts around them.
             [(f"{len(self.capabilities)} capability areas, {m['issues_total']} issues, {m['mrs_total']} MRs, "
               f"~{m['sloc']['grand_total']/1000:.1f}K lines of code, built ", False),
-             (f"{m['first_commit_date']} – {m['last_commit_date']}", True),
+             (f"{m['first_commit_date']} – {self.period_end_iso}", True),
              (".", False)],
             "Three deployment paths (single-box / ECS / EKS) sharing one CDK project and one Docker image.",
             "CLI and web UI are two front ends over the same tool registry — same commands, different guardrails.",
