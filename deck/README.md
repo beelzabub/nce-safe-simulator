@@ -267,7 +267,10 @@ The service runs `deck/weekly-status-deck.sh`, which:
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
    and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build
-   falls back to auto-derived spotlights rather than aborting. The same step also **keeps
+   falls back to auto-derived spotlights rather than aborting. A committed
+   `deck/latest-work-spotlights.yaml` **updated for the current window** (committed after the
+   previous Friday) takes precedence over headless authoring, so a reviewed, curated set can
+   be shipped deliberately (#258); otherwise the headless set is used. The same step also **keeps
    the background matter current**: `build_deck.py --print-coverage-gap` lists every closed
    issue (both repos) cited in no capability area, and the authoring step proposes homes
    for them in `deck/dist/capabilities-updates.gen.yaml` (extensions to existing areas
@@ -312,8 +315,10 @@ Three guards, in order:
   unchanged, so rebuilding would only reproduce the bad image), and once it is re-checked
   healthy the run **continues and builds the deck against it** rather than aborting (#258).
   Only a rollback that itself will not serve is fatal — then there is no app to screenshot.
-  A degraded build still ships, but its SNS email is subject-tagged **(DEGRADED)** and names
-  the reason.
+  A degraded build still ships, but it is marked as one two ways: its SNS email is
+  subject-tagged **(DEGRADED)** with the reason, and the deck **cover carries a red "DEGRADED
+  BUILD" note** (`build_deck.py --degraded`), so a saved or forwarded file can't be mistaken
+  for a clean run.
 
 `scripts/redeploy.sh --image <ref>` is generally useful for this: it skips the build and
 recreates the container from an image that already exists, in about two seconds.

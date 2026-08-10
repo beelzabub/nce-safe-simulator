@@ -757,6 +757,15 @@ class DeckBuilder:
         self._cover_timeline(cover, left, Emu(4020000), Emu(4360000),
                              m["first_commit_date"], self.period_end_iso)
 
+        # Degraded-build marker (#258): when the weekly run fell back to the
+        # previous container, the app screenshots may be stale — say so on the
+        # cover so a saved or forwarded deck can't be mistaken for a clean run.
+        if getattr(self, "degraded", None):
+            self.add_text(cover, left, self.SH - Emu(560000), self.SW - Emu(680000), Emu(400000),
+                          "DEGRADED BUILD — app screenshots may reflect a previous deploy "
+                          "(see the build notification for details).",
+                          11, RGBColor(0xE0, 0x3A, 0x3A), bold=True)
+
         # White emblem (not the navy one) now that the cover reads dark.
         nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
         pmw_seal = os.path.join(REPO_ROOT, "frontend/src/assets/pmw-120-seal-transparent.png")
@@ -1956,6 +1965,9 @@ def main():
                     default=os.path.join(HERE, "dist", "capabilities-updates.gen.yaml"),
                     help="proposed capability-area deltas from the weekly authoring step; "
                          "merged into --capabilities at build time when the file exists.")
+    ap.add_argument("--degraded", default=os.environ.get("DECK_DEGRADED"), metavar="REASON",
+                    help="mark this as a degraded build — stamps a warning on the cover. The "
+                         "weekly script passes the deploy/health degrade reason here (#258).")
     ap.add_argument("--print-coverage-gap", action="store_true",
                     help="print the closed issues cited in no capability area (JSON) and exit "
                          "— used by the weekly authoring step to propose updates.")
@@ -2013,6 +2025,7 @@ def main():
 
     builder = DeckBuilder(template_path, args.screenshots_dir, metrics, capabilities, shots,
                           review_date=review_date, since_dt=since_dt, spotlights=spotlights)
+    builder.degraded = args.degraded
     prs = builder.build()
 
     # The output filename always ends with a -YYYYMMDD date postfix (issue #210).

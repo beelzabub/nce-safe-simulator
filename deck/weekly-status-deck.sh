@@ -200,11 +200,30 @@ rm -f "$GEN_SPOTLIGHTS" "$GEN_CAPS"
 claude -p "$(cat "$REPO/deck/weekly-authoring-prompt.md")" \
   --allowedTools "Bash(python3 *),Bash(ls *),Bash(glab *),Read,Write,Edit" 2>&1 | tail -25 \
   || echo "WARN: authoring step returned non-zero"
-[ -f "$GEN_SPOTLIGHTS" ] && SPOT="$GEN_SPOTLIGHTS" \
-  || { echo "WARN: no authored spotlights — auto-deriving from labels"; SPOT="/nonexistent.yaml"; }
+# Spotlights source (issue #258, Gap D). Prefer a freshly-curated committed set
+# over headless authoring: if deck/latest-work-spotlights.yaml was committed
+# AFTER this window opened (the previous Friday), a human curated it for THIS
+# deck — use it. Otherwise use the headless-authored set; only if that is
+# missing too fall back to auto-derive from labels. The date guard fails safe:
+# if the window start can't be computed, the proven headless path is used.
+CURATED="$REPO/deck/latest-work-spotlights.yaml"
+WINDOW_START_EPOCH="$(date -d 'last friday 15:00' +%s 2>/dev/null || echo 0)"
+CURATED_EPOCH="$(git -C "$REPO" log -1 --format=%ct -- deck/latest-work-spotlights.yaml 2>/dev/null || echo 0)"
+if [ -f "$CURATED" ] && [ "$WINDOW_START_EPOCH" -gt 0 ] && [ "$CURATED_EPOCH" -gt "$WINDOW_START_EPOCH" ]; then
+  echo "spotlights: using curated $CURATED (committed $(date -d "@$CURATED_EPOCH" +%F), newer than the window start)"
+  SPOT="$CURATED"
+elif [ -f "$GEN_SPOTLIGHTS" ]; then
+  echo "spotlights: using headless-authored $GEN_SPOTLIGHTS"
+  SPOT="$GEN_SPOTLIGHTS"
+else
+  echo "WARN: no curated or authored spotlights — auto-deriving from labels"
+  SPOT="/nonexistent.yaml"
+fi
 
 echo "--- build deck ---"
-python3 deck/build_deck.py --spotlights "$SPOT" || fail "build_deck"
+BUILD_ARGS=(--spotlights "$SPOT")
+[ -n "$DEGRADED" ] && BUILD_ARGS+=(--degraded "$DEGRADED")
+python3 deck/build_deck.py "${BUILD_ARGS[@]}" || fail "build_deck"
 DECK="$(ls -t deck/dist/NCE-Safe-Simulator-Status-*.pptx 2>/dev/null | head -1)"
 [ -n "$DECK" ] || fail "no deck produced"
 KEY="$S3_PREFIX/$(basename "$DECK")"
