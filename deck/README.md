@@ -38,6 +38,10 @@ python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu
 python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
 python3 deck/capture_git_workflow.py  # -> deck/screenshots/git-workflow{,-compact,-epic}.png
 python3 deck/capture_ci_router.py     # -> deck/screenshots/{ci-recipe-router,security-scan-findings}.png
+python3 deck/capture_jql_cli.py       # -> deck/screenshots/22c-jql-cli-query.png
+python3 deck/capture_jql_internals.py # -> deck/screenshots/22{a-jql-parser,b-jql-fields,d-jql-planner}.png
+python3 deck/capture_jql_compiler.py  # -> deck/screenshots/22f-jql-compiler.png
+python3 deck/capture_vendored_packages.py  # -> deck/screenshots/22e-vendored-packages.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Status.pptx
 ```
@@ -81,8 +85,50 @@ its `SCANNERS` numbers when a newer sweep becomes the one the deck should cite
 (the current ones match the wiki's Security-scanning page). Same requirements as
 `capture_cli_menu.py` (Pillow + DejaVu fonts).
 
+### The JQL engine's art (epic #297)
+
+The query engine is mostly not a UI, so three of its slides would otherwise carry
+bullets and nothing else. Four generators cover it:
+
+`capture_jql_cli.py` runs the `query` tool against the live group and renders its
+real table output. `capture_jql_internals.py` renders the three pieces that have no
+screen at all — a parsed AST plus a real position-aware parse error (#298), the
+field-to-GitLab mapping read straight off `FieldRegistry` (#299), and the planner's
+pushed GraphQL variables beside the predicates left for local evaluation (#300).
+Both invoke the engine at render time, so the slides cannot drift from the code the
+way a pasted sample would; `capture_jql_internals.py` needs no token or network,
+since everything up to execution is pure Python.
+
+`capture_jql_compiler.py` is the exception — a hand-authored diagram of the engine
+as a compiler (front end / optimiser / back end) for the architecture slide. Its
+phase names are the deck's *claim* about the design rather than introspected fact,
+so if the package layout changes, change this too.
+
+`capture_vendored_packages.py` lists the project package registry live and totals
+real file sizes for the offline-dependency slide (#271). It paginates: a closure of
+225 files must not be reported as the API's first 100.
+
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.
+
+### Dating a rebuild
+
+`build_deck.py --since` and `--review-date` both default to *now*, so an off-cadence
+rebuild silently reports the wrong week — always pass them explicitly when rebuilding
+a past deck (`--since 2026-07-31 --review-date 2026-08-07`).
+
+The deck's window **always ends on the Friday 14:00 Pacific boundary** it covers.
+That end date comes from `--review-date`, never from the last commit — commits land
+on whatever weekday work stopped, so sourcing it from one produced a cover dated to a
+Wednesday. For the same reason `fetch_metrics.py` takes `--ref` and `--until`:
+
+```bash
+python3 deck/fetch_metrics.py --ref origin/develop --until 2026-08-07
+```
+
+Without them it reads plain `git log` against whatever the build clone has checked
+out, so a rebuild from a working branch counts that branch's commits as the
+project's, and counts work done after the period the deck covers.
 
 All three are read-only against the target app **except one deliberate exception**:
 `live_run_shots` in `shots.yaml` selects a parameterless, explicitly read-only tool
@@ -98,6 +144,25 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
   report page here and re-run `capture_screenshots.py` with `--only <name>` to add just
   that one shot without a full re-capture, or `--section quarto` / `--section login` to
   refresh just those (skips the other sections).
+
+  A `click:` entry is normally a selector string, but may also be a step object for
+  what a click cannot express — `{fill: <selector>, value: <text>}` to type into
+  arbitrary page chrome, and `{wait: <ms>}` for slow live content. This is separate
+  from the shot-level `fill:` key, which only ever addresses dialog parameter rows.
+  The `/search` JQL navigator needs click → type → Run, which is why it exists:
+
+  ```yaml
+  - out: 22-jql-search
+    click:
+      - "button.search-btn"
+      - {fill: ".query-input", value: "state = opened AND weight >= 5 ORDER BY due ASC"}
+      - "button.run-btn"
+      - {wait: 12000}
+  ```
+
+  A shot that fails is reported and skipped rather than aborting the pass, and a
+  report page too tall for Chromium to capture whole degrades to a top-frame
+  thumbnail — the `__segN` crops were always the readable artefact.
 
   `login_shots` is captured differently from `ui_shots`: it does **not** seed the auth
   gate (so the real background slideshow shows) but pre-acknowledges the DoD banner so
@@ -189,15 +254,26 @@ On the single-box host, a **systemd timer** builds and emails the deck every **F
 
 The service runs `deck/weekly-status-deck.sh`, which:
 
-1. checks out + pulls the build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides
-   for a pre-merge validation run),
-2. `make redeploy` — rebuilds the image and hot-swaps the app container so screenshots are
-   current — then health-checks the app,
-3. captures screenshots and fetches metrics,
+1. **pre-flights credentials** (an early `git ls-remote` so an expired GitLab token fails
+   loudly up front — what silently killed the 2026-07-31 run), then checks out + pulls the
+   build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides for a pre-merge
+   validation run),
+2. **checks that the image and the reverse proxy agree on a port**, then `make redeploy` —
+   rebuilds the image and hot-swaps the app container so screenshots are current — then
+   health-checks it. A port mismatch, a failed redeploy or a failed health check no longer
+   aborts the run: it **degrades** to the last-healthy container and builds the deck against
+   it (see **Deploy safety** below),
+3. runs **pre-capture checks** (`deck_checks.py`, #258) — warns if any shot's tool was
+   renamed/removed or any new tool has no screenshot, without blocking the run — then
+   captures screenshots and fetches metrics (the metrics fetch stamps `generated_at`, which
+   `build_deck.py` checks so a by-hand build can't silently ship stale numbers),
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
    and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build
-   falls back to auto-derived spotlights rather than aborting. The same step also **keeps
+   falls back to auto-derived spotlights rather than aborting. A committed
+   `deck/latest-work-spotlights.yaml` **updated for the current window** (committed after the
+   previous Friday) takes precedence over headless authoring, so a reviewed, curated set can
+   be shipped deliberately (#258); otherwise the headless set is used. The same step also **keeps
    the background matter current**: `build_deck.py --print-coverage-gap` lists every closed
    issue (both repos) cited in no capability area, and the authoring step proposes homes
    for them in `deck/dist/capabilities-updates.gen.yaml` (extensions to existing areas
@@ -214,6 +290,48 @@ The service runs `deck/weekly-status-deck.sh`, which:
 Logs land in `deck/dist/weekly-logs/` and the systemd journal
 (`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the
 `claude` CLI, Docker, network to the live app, and `sns:Publish` on the instance role.
+
+
+### Deploy safety (issue #309)
+
+The image and the reverse-proxy config come from **different checkouts**: the image is
+built from the build ref in this clone, while Caddy's config is bind-mounted from the
+live tree, which may sit on any branch. On 2026-08-07 `develop`'s image listened on 80
+while Caddy dialled 8080 — the swap put up a container the proxy could not reach, the
+build aborted at its health check, and the public site stayed down for five hours
+because a failed run left the broken container running.
+
+Three guards, in order:
+
+- **Port pre-flight.** The ref's `Dockerfile` `EXPOSE` is compared against the port in
+  the live `deploy/Caddyfile` *before anything is built or swapped*. On disagreement the
+  deploy is **skipped** and the deck is built against the running (unchanged) container —
+  a mismatch now costs only a fresh app image, never the deck and never the site (#258).
+- **Two health checks, reported separately.** The container is polled directly on its own
+  address and port, which proves the app came up without the reverse proxy being able to
+  hold the run hostage; the public URL is then polled as a distinct step, which proves the
+  proxy can reach it. The old script checked only the public URL, so it could not tell
+  those two failures apart.
+- **Rollback, then degrade.** The running image is tagged `nce-safe-simulator:rollback`
+  before the swap. If a redeploy or health check fails, `scripts/redeploy.sh --image
+  nce-safe-simulator:rollback` recreates the previous container (no rebuild — the source is
+  unchanged, so rebuilding would only reproduce the bad image), and once it is re-checked
+  healthy the run **continues and builds the deck against it** rather than aborting (#258).
+  Only a rollback that itself will not serve is fatal — then there is no app to screenshot.
+  A degraded build still ships, but it is marked as one two ways: its SNS email is
+  subject-tagged **(DEGRADED)** with the reason, and the deck **cover carries a red "DEGRADED
+  BUILD" note** (`build_deck.py --degraded`), so a saved or forwarded file can't be mistaken
+  for a clean run.
+
+`scripts/redeploy.sh --image <ref>` is generally useful for this: it skips the build and
+recreates the container from an image that already exists, in about two seconds.
+
+A note that costs time otherwise: `deploy/Caddyfile` is bind-mounted as a **single file**,
+so editing it on the host replaces the inode and the running Caddy keeps serving the old
+one — `docker exec caddy cat /etc/caddy/Caddyfile` still shows the previous content, and
+`caddy validate` inside the container validates the stale file. Restart the container for
+a Caddyfile edit to take effect. This also means a `git checkout` in the live tree changes
+what Caddy *will* load on its next restart, silently.
 
 ## Template
 

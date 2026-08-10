@@ -27,11 +27,12 @@ capabilities:
     caption: "DevSecOps pipeline — pytest on every push, image publish on develop"
 
   - title: "CI Recipes & Security Scanning"
-    count: 2
-    all_issues: "#283, nce-git-ops#28"
+    count: 3
+    all_issues: "#283, #279, nce-git-ops#28"
     blurb: "On-demand child pipelines, including a five-scanner security suite"
     bullets:
       - "#283 The root CI file is a router — RECIPE=<name> runs any ci-recipes/ child pipeline (reports, diagnostics, security) while pushes and merges keep the unchanged baseline"
+      - "#279 CI tests now run in the pipeline's own dev image, so the test job and the shipped image can't drift apart"
       - "nce-git-ops#28 Code-analysis tooling explored on the platform repo"
       - "Five GitLab Ultimate scanners — SAST, secret detection, dependency, container CVE, IaC — run individually or as one security-all audit"
       - "First verified sweep: 297 findings across the Security tab / Vulnerability report / MR widget; the full-history secret scan came back clean"
@@ -173,10 +174,11 @@ capabilities:
     caption: "Web UI — Deployments dialog (S3 / ECR / ECS / EKS)"
 
   - title: "Cloud Deployment & Infrastructure"
-    count: 17
-    all_issues: "#83, #85, #87, #88, #89, #90, #91, #97, #98, #99, #100, #102, #112, #117, #118, #122, #164"
+    count: 18
+    all_issues: "#83, #85, #87, #88, #89, #90, #91, #97, #98, #99, #100, #102, #112, #117, #118, #122, #164, #290"
     blurb: "Docker → ECS → EKS, one CDK project"
     bullets:
+      - "#290 EKS deploys rode the mutable :latest tag, so a rollout could pick up an image nobody had approved"
       - "#83 Containerize the simulator"
       - "#85 Transition containerized version to run in Kubernetes"
       - "#97 Auto-generate architecture diagram for ECS/EKS"
@@ -185,10 +187,12 @@ capabilities:
     caption: "EKS deployment architecture (SV-2, auto-generated)"
 
   - title: "Security & Credential Hygiene"
-    count: 3
-    all_issues: "#109, #110, #111"
+    count: 5
+    all_issues: "#109, #110, #111, #287, #292"
     blurb: "A dedicated remediation pass, not an afterthought"
     bullets:
+      - "#287 A full sweep of the outstanding scanner findings, remediated and re-verified against the develop baseline"
+      - "#292 Non-matching token placeholders in the docs were tripping secret detection"
       - "#111 Scrub leaked GitLab token from git history"
       - "#110 Remove private_token from tracked config.json + resolve token from env"
       - "#109 Explore self-signed cert for the simulator"
@@ -220,8 +224,8 @@ capabilities:
     caption: "Other — Epic Cards (print-ready PDF)"
 
   - title: "Engineering Process & CLI UX"
-    count: 28
-    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #191, #210, #213, #255, #256, #257, #268"
+    count: 29
+    all_issues: "#17, #18, #22, #30, #31, #36, #51, #61, #64, #73, #76, #78, #103, #104, #114, #116, #121, #144, #145, #176, #183, #191, #210, #213, #255, #256, #257, #268, #289"
     blurb: "Tooling housekeeping and reliability polish"
     bullets:
       - "#18 CLI navigation, logging, UX polish and reliability improvements"
@@ -233,20 +237,23 @@ capabilities:
     caption: "Audit & Validation — Audit Hierarchy"
 
   - title: "Containerization & Golden Images"
-    count: 6
-    all_issues: "#243, #244, #247, #248, #253, #266"
+    count: 7
+    all_issues: "#243, #244, #247, #248, #253, #266, #285"
     blurb: "The VM-to-container roadmap, with working reference containers"
     bullets:
+      - "#285 OVA to AMI conversion, and back out again — a virtual appliance in S3 becomes a registered AMI and optionally a running instance."
       - "#243 Leadership brief: the VM-to-container migration roadmap (#266 refreshed with the as-is/to-be SDLC views)."
       - "#244 Containerized dev & deploy workflow for the project itself."
       - "#247 / #248 Java and C/C++ golden-container demos — build-once base images other teams can copy."
       - "#253 CLI tools hardened to run reliably inside containers."
 
   - title: "Enclave Lift-and-Shift (Air-Gapped)"
-    count: 10
-    all_issues: "#261, #262, #263, #264, #269, #270, #273, #274, #275, #276"
+    count: 13
+    all_issues: "#261, #262, #263, #264, #269, #270, #273, #274, #275, #276, #271, #295, #296"
     blurb: "The whole project transfers to, and builds on, a disconnected enclave"
     bullets:
+      - "#271 Full pip and npm dependency closures vendored in the package registry — the last internet reach in the image build is closed."
+      - "#295 Offline package import syncs by sha256: identical files skipped, changed ones replaced, absent ones pruned."
       - "#263 One-command full enclave export — repo, wiki, package registries, and container images in a single artifact."
       - "#264 PowerShell transfer scripts for the cross-domain hop."
       - "#270 Imports pass the destination's push rules — history rewrite with GPG signing."
@@ -266,3 +273,16 @@ capabilities:
       - "nce-git-ops#25 Developer VM for Team RedWolf, provisioned on AWS."
     image: "deck/assets/spotlight-extras/gitops-argocd-applications.png"
     caption: "Argo CD — platform and simulator applications, all healthy"
+
+  - title: "Jira-Style Query Language & Issue Search"
+    count: 6
+    all_issues: "#297, #298, #299, #300, #301, #302"
+    blurb: "The query language GitLab's search bar doesn't have"
+    bullets:
+      - "Real JQL syntax — booleans, comparison operators, IN, IS EMPTY, date arithmetic and ORDER BY — over the simulator's own field vocabulary."
+      - "Queries compile into native GitLab filter arguments, so the server does the narrowing; only predicates GitLab cannot express are evaluated locally."
+      - "SAFe taxonomy fields are first-class: piid, epic_type, roam and the WSJF dimensions resolve to their scoped labels."
+      - "Jira aliases (status, issuetype, sprint, reporter, summary) map straight across for Atlassian muscle memory."
+      - "One engine behind two front doors — a CLI tool with table/json/csv output and a web issue navigator."
+    image: "22-jql-search_light.png"
+    caption: "Jira-style query language over live GitLab data — CLI and web"

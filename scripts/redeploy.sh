@@ -26,18 +26,35 @@ if [ "${1:-}" = "--ops" ]; then
   BUILD_TARGET=(--target ops)
 fi
 
+# --image REF (issue #309): recreate the container from an image that already
+# exists, skipping the build entirely. This is the rollback path — the weekly
+# deck build tags the running image before it swaps, and restores it with this
+# if the new container fails its health checks. Rebuilding would be useless
+# there: the source is unchanged, so it would produce the same bad image.
+SKIP_BUILD=""
+if [ "${1:-}" = "--image" ]; then
+  [ -n "${2:-}" ] || { echo "--image needs an image reference" >&2; exit 2; }
+  IMAGE="$2"
+  SKIP_BUILD=1
+  docker image inspect "$IMAGE" >/dev/null 2>&1 \
+    || { echo "==> no such image: $IMAGE" >&2; exit 1; }
+  echo "==> Recreating from existing image ($IMAGE) — no build."
+fi
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$BRANCH" != "develop" ]; then
+if [ -z "$SKIP_BUILD" ] && [ "$BRANCH" != "develop" ]; then
   echo "==> NOTE: building from '$BRANCH', not develop. The live site will run" >&2
   echo "          that branch's code — make sure that is intended." >&2
 fi
 
+if [ -z "$SKIP_BUILD" ]; then
 echo "==> Building image ($IMAGE)..."
 docker build "${BUILD_TARGET[@]}" \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg NCE_VERSION="$(git describe --tags --exact-match 2>/dev/null || true)" \
   --build-arg PKG_PROJECT="$(scripts/pkg-project-url.sh)" \
   -t "$IMAGE" .
+fi
 
 # Guard (issue #186): never swap the live container for an image that can't
 # report its own version. This catches builds made from a branch that predates
