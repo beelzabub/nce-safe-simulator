@@ -75,11 +75,21 @@ def _git(args):
     return subprocess.run(["git"] + args, cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout
 
 
-def fetch_commit_stats():
-    total = int(_git(["log", "--oneline"]).count("\n"))
-    first_date = _git(["log", "--reverse", "--format=%ad", "--date=short"]).splitlines()[0]
-    last_date = _git(["log", "-1", "--format=%ad", "--date=short"]).strip()
-    months = _git(["log", "--format=%ad", "--date=format:%Y-%m"]).splitlines()
+def fetch_commit_stats(ref="HEAD", until=None):
+    """Commit counts for ``ref``, optionally bounded at ``until``.
+
+    Both arguments matter for a rebuild. Plain ``git log`` reads whatever the
+    build clone happens to have checked out, so a rebuild run from a working
+    branch reports that branch's commits as the project's — and an off-cadence
+    rebuild counts commits made after the period the deck covers. Pass the ref
+    the deck reports on and the period-end date, and the numbers match what a
+    build on the day would have produced.
+    """
+    rng = [ref] + ([f"--until={until} 23:59:59"] if until else [])
+    total = int(_git(["log", "--oneline"] + rng).count("\n"))
+    first_date = _git(["log", "--reverse", "--format=%ad", "--date=short"] + rng).splitlines()[0]
+    last_date = _git(["log", "-1", "--format=%ad", "--date=short"] + rng).strip()
+    months = _git(["log", "--format=%ad", "--date=format:%Y-%m"] + rng).splitlines()
     monthly = Counter(months)
     return {
         "commits_total": total,
@@ -218,11 +228,19 @@ def fetch_sloc_by_week():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(HERE, "metrics.json"))
+    ap.add_argument("--ref", default="HEAD",
+                    help="git ref the commit stats describe (default: whatever is checked "
+                         "out). A rebuild should pass the ref the deck reports on, e.g. "
+                         "origin/develop — see issue #309.")
+    ap.add_argument("--until", metavar="YYYY-MM-DD",
+                    help="ignore commits after this date, so an off-cadence rebuild "
+                         "reproduces the numbers a build on the day would have produced. "
+                         "Pass the deck's period end (the Friday).")
     args = ap.parse_args()
 
     metrics = {}
     metrics.update(fetch_issue_mr_counts())
-    metrics.update(fetch_commit_stats())
+    metrics.update(fetch_commit_stats(ref=args.ref, until=args.until))
     metrics["sloc"] = fetch_sloc()
     metrics["sloc_by_week"] = fetch_sloc_by_week()
 

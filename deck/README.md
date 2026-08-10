@@ -38,6 +38,10 @@ python3 deck/capture_cli_menu.py      # -> deck/screenshots/cli-interactive-menu
 python3 deck/capture_test_log.py      # -> deck/screenshots/pytest-run.png
 python3 deck/capture_git_workflow.py  # -> deck/screenshots/git-workflow{,-compact,-epic}.png
 python3 deck/capture_ci_router.py     # -> deck/screenshots/{ci-recipe-router,security-scan-findings}.png
+python3 deck/capture_jql_cli.py       # -> deck/screenshots/22c-jql-cli-query.png
+python3 deck/capture_jql_internals.py # -> deck/screenshots/22{a-jql-parser,b-jql-fields,d-jql-planner}.png
+python3 deck/capture_jql_compiler.py  # -> deck/screenshots/22f-jql-compiler.png
+python3 deck/capture_vendored_packages.py  # -> deck/screenshots/22e-vendored-packages.png
 python3 deck/fetch_metrics.py         # -> deck/metrics.json
 python3 deck/build_deck.py            # -> deck/dist/NCE-Safe-Simulator-Status.pptx
 ```
@@ -81,8 +85,50 @@ its `SCANNERS` numbers when a newer sweep becomes the one the deck should cite
 (the current ones match the wiki's Security-scanning page). Same requirements as
 `capture_cli_menu.py` (Pillow + DejaVu fonts).
 
+### The JQL engine's art (epic #297)
+
+The query engine is mostly not a UI, so three of its slides would otherwise carry
+bullets and nothing else. Four generators cover it:
+
+`capture_jql_cli.py` runs the `query` tool against the live group and renders its
+real table output. `capture_jql_internals.py` renders the three pieces that have no
+screen at all — a parsed AST plus a real position-aware parse error (#298), the
+field-to-GitLab mapping read straight off `FieldRegistry` (#299), and the planner's
+pushed GraphQL variables beside the predicates left for local evaluation (#300).
+Both invoke the engine at render time, so the slides cannot drift from the code the
+way a pasted sample would; `capture_jql_internals.py` needs no token or network,
+since everything up to execution is pure Python.
+
+`capture_jql_compiler.py` is the exception — a hand-authored diagram of the engine
+as a compiler (front end / optimiser / back end) for the architecture slide. Its
+phase names are the deck's *claim* about the design rather than introspected fact,
+so if the package layout changes, change this too.
+
+`capture_vendored_packages.py` lists the project package registry live and totals
+real file sizes for the offline-dependency slide (#271). It paginates: a closure of
+225 files must not be reported as the API's first 100.
+
 `build_deck.py` also pulls **every** project issue live via `glab` for the paginated
 Issues table, so `glab` must be authenticated when building.
+
+### Dating a rebuild
+
+`build_deck.py --since` and `--review-date` both default to *now*, so an off-cadence
+rebuild silently reports the wrong week — always pass them explicitly when rebuilding
+a past deck (`--since 2026-07-31 --review-date 2026-08-07`).
+
+The deck's window **always ends on the Friday 14:00 Pacific boundary** it covers.
+That end date comes from `--review-date`, never from the last commit — commits land
+on whatever weekday work stopped, so sourcing it from one produced a cover dated to a
+Wednesday. For the same reason `fetch_metrics.py` takes `--ref` and `--until`:
+
+```bash
+python3 deck/fetch_metrics.py --ref origin/develop --until 2026-08-07
+```
+
+Without them it reads plain `git log` against whatever the build clone has checked
+out, so a rebuild from a working branch counts that branch's commits as the
+project's, and counts work done after the period the deck covers.
 
 All three are read-only against the target app **except one deliberate exception**:
 `live_run_shots` in `shots.yaml` selects a parameterless, explicitly read-only tool
@@ -98,6 +144,25 @@ step submits any dialog (Launch/Save/Confirm are never clicked).
   report page here and re-run `capture_screenshots.py` with `--only <name>` to add just
   that one shot without a full re-capture, or `--section quarto` / `--section login` to
   refresh just those (skips the other sections).
+
+  A `click:` entry is normally a selector string, but may also be a step object for
+  what a click cannot express — `{fill: <selector>, value: <text>}` to type into
+  arbitrary page chrome, and `{wait: <ms>}` for slow live content. This is separate
+  from the shot-level `fill:` key, which only ever addresses dialog parameter rows.
+  The `/search` JQL navigator needs click → type → Run, which is why it exists:
+
+  ```yaml
+  - out: 22-jql-search
+    click:
+      - "button.search-btn"
+      - {fill: ".query-input", value: "state = opened AND weight >= 5 ORDER BY due ASC"}
+      - "button.run-btn"
+      - {wait: 12000}
+  ```
+
+  A shot that fails is reported and skipped rather than aborting the pass, and a
+  report page too tall for Chromium to capture whole degrades to a top-frame
+  thumbnail — the `__segN` crops were always the readable artefact.
 
   `login_shots` is captured differently from `ui_shots`: it does **not** seed the auth
   gate (so the real background slideshow shows) but pre-acknowledges the DoD banner so

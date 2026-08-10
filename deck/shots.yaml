@@ -148,6 +148,19 @@ ui_shots:
     title: "Image Conversion — AMI To OVA (export back to S3)"
     expand: ["IMAGE CONVERSION"]
     select: "AMI To OVA"
+  # The JQL issue navigator (epic #297 / issue #302) is not a job dialog — it is
+  # its own route, and the shot is only worth taking with real rows in it. Hence
+  # the step objects: open /search, type a query, run it, wait for the live
+  # GitLab round trip. Read-only, like every other shot here. `limit` is held
+  # low so the result table fits a slide rather than running off it.
+  - out: 22-jql-search
+    title: "JQL Search — Live Query Against the Group (#297, #302)"
+    click:
+      - "button.search-btn"
+      - {fill: ".query-input", value: "state = opened AND weight >= 5 ORDER BY due ASC"}
+      - {fill: "input.limit-input", value: "12"}
+      - "button.run-btn"
+      - {wait: 12000}
 
 # Diagnose is parameterless and read-only, so it launches immediately with no dialog to
 # screenshot — it belongs in live_run_shots, not ui_shots. Since #249 reclassified it
