@@ -21,6 +21,49 @@
 app_url: "https://nce-safe-sim.com/app/"
 quarto_base_url: "https://nce-safe-sim.com/quarto/"
 
+# Tools intentionally WITHOUT a screenshot (issue #258, Gap C): bulk data
+# mutators, cleaners, and label ops driven from the CLI, not captured as
+# individual dialogs. deck_checks.py flags any tool that is neither shot nor
+# listed here, so a NEW user-facing tool can't silently go uncaptured.
+excluded_tools:
+  # bulk seeders / scaffolding data ops
+  - scaffold
+  - generate-epic-blocks
+  - generate-issue-blocks
+  - generate-risk-reasons
+  - close-percent
+  - reset-pi-progress
+  - setup-bv-field
+  - update-weights
+  - orphan-epics
+  - orphan-issues
+  # bulk label / weight setters and strippers
+  - set-epic-states
+  - set-issue-weights
+  - set-piid-labels
+  - set-project-labels
+  - set-risk-labels
+  - set-work-type-labels
+  - set-wsjf-labels
+  - strip-issue-weights
+  - strip-labels
+  - strip-lifecycle-labels
+  - strip-piid-labels
+  - strip-project-labels
+  - strip-work-type-labels
+  - strip-wsjf-labels
+  - strip-business-value
+  - clean-epic-blocks
+  # destructive cleaners
+  - clean-wikis
+  - clean-roam-risks
+  # readonly diagnostics not individually captured
+  - audit-labels
+  - validate-weights
+  - weight-drift-check
+  - clean-reports
+  - clean-logs
+
 login_shots:
   - out: 15-login-front-door
     title: "Web UI — Login Front Door (background slideshow)"

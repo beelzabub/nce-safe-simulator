@@ -263,7 +263,10 @@ The service runs `deck/weekly-status-deck.sh`, which:
    health-checks it. A port mismatch, a failed redeploy or a failed health check no longer
    aborts the run: it **degrades** to the last-healthy container and builds the deck against
    it (see **Deploy safety** below),
-3. captures screenshots and fetches metrics,
+3. runs **pre-capture checks** (`deck_checks.py`, #258) — warns if any shot's tool was
+   renamed/removed or any new tool has no screenshot, without blocking the run — then
+   captures screenshots and fetches metrics (the metrics fetch stamps `generated_at`, which
+   `build_deck.py` checks so a by-hand build can't silently ship stale numbers),
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
    and writes `deck/dist/latest-work-spotlights.gen.yaml`; if that step fails the build

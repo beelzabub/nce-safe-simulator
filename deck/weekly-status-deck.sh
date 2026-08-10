@@ -184,6 +184,12 @@ else
   echo "    existing container OK: $CURL_TARGET"
 fi
 
+echo "--- pre-capture checks (#258) ---"
+# Warn-only in the cron (never blocks the Friday deck): reports any shot whose
+# tool was renamed/removed, and any new tool with no screenshot. Run with
+# --strict by hand or in CI to fail on these.
+python3 deck/deck_checks.py || true
+
 echo "--- capture screenshots ---"
 python3 deck/capture_screenshots.py || fail "capture_screenshots"
 python3 deck/capture_diagrams.py     || true
