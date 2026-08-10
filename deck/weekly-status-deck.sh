@@ -50,19 +50,32 @@ Log on the box: $LOG"
 echo "=== weekly status deck @ $(TZ=America/Los_Angeles date '+%F %T %Z') ==="
 cd "$REPO" || fail "cd repo"
 
+# --- credentials pre-flight (issue #258) ------------------------------------
+# The 2026-07-31 run died at `git pull` on an expired GitLab token — a silent
+# step-1 death after the timer had already fired. Check auth up front and fail
+# with a clear, actionable message instead of deep in the run. Tokens expire
+# again, so this stays.
+echo "--- credentials pre-flight ---"
+git ls-remote origin HEAD >/dev/null 2>&1 \
+  || fail "git auth pre-flight — cannot reach origin over HTTPS. The GitLab token in
+the cron's git credentials has most likely expired (this is what broke the
+2026-07-31 run). Rotate it (update ~/.git-credentials / the glab token), then re-run."
+
 echo "--- sync $REF ---"
 git checkout "$REF"  || fail "git checkout $REF"
 git pull --ff-only   || fail "git pull $REF"
 
-# --- port agreement pre-flight (issue #309) --------------------------------
+# --- port agreement pre-flight (issue #309, degrade #258) -------------------
 # The image and the reverse proxy come from *different checkouts*: the image is
 # built here from $REF, while Caddy's config is bind-mounted from the live tree,
 # which may sit on any branch. On 2026-08-07 develop's image listened on 80
-# while Caddy dialled 8080, so the swap put up a container the proxy could not
-# reach and the public site stayed down for five hours.
+# while Caddy dialled 8080, so a swap would have put up a container the proxy
+# could not reach — and the run aborted with no deck.
 #
-# Checked *before* the swap: on disagreement the run aborts with the running
-# container untouched, so a mismatch costs a deck and never the site.
+# Checked *before* the swap. A mismatch no longer aborts: if a healthy container
+# is already serving, we SKIP the deploy and build the deck against it (degraded,
+# see #258), so a config drift costs a fresh app image — not the deck, and never
+# the site.
 LIVE_TREE="/root/.venv/nce-safe-simulator"
 CADDYFILE="$LIVE_TREE/deploy/Caddyfile"
 
@@ -73,34 +86,7 @@ proxy_port() {   # the port Caddy is configured to dial
   grep -oE 'nce-safe-sim:[0-9]+' "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2
 }
 
-# Read from the Dockerfile rather than a built image on purpose: this has to be
-# answerable *before* anything is built or swapped, and EXPOSE is what the build
-# would produce anyway.
-IMG_PORT="$(image_port)"
-PRX_PORT="$(proxy_port)"
-echo "    image listens on ${IMG_PORT:-?}; proxy dials ${PRX_PORT:-?}"
-if [ -n "$IMG_PORT" ] && [ -n "$PRX_PORT" ] && [ "$IMG_PORT" != "$PRX_PORT" ]; then
-  fail "port mismatch — the $REF image listens on $IMG_PORT but the live Caddy config
-($CADDYFILE, from $(git -C "$LIVE_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?'))
-dials $PRX_PORT. Deploying would take the public site down, so nothing was swapped.
-Reconcile the two checkouts, then re-run."
-fi
-
-# Tag whatever is running now so a failed deploy can be undone.
-PREV_IMAGE="$(docker inspect -f '{{.Image}}' "$APP_NAME" 2>/dev/null || true)"
-if [ -n "$PREV_IMAGE" ]; then
-  docker tag "$PREV_IMAGE" "$IMAGE_ROLLBACK" && echo "    rollback point: $IMAGE_ROLLBACK"
-fi
-
-echo "--- rebuild + redeploy container ---"
-make redeploy || fail "make redeploy"
-
-# --- health checks ---------------------------------------------------------
-# Two distinct checks, reported separately. The container check proves the app
-# itself came up; the public check proves the proxy can reach it. The deck build
-# used to depend on the public URL alone, which let reverse-proxy config hold
-# the whole run hostage without saying so.
-container_url() {
+container_url() {  # the running container's own address — a proxy-independent check
   local ip
   ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$APP_NAME" 2>/dev/null)"
   [ -n "$ip" ] && echo "http://$ip:${IMG_PORT:-8080}/app/"
@@ -115,35 +101,88 @@ poll() {  # poll <url> <attempts> -> 0 when it answers 200
   return 1
 }
 
-rollback() {  # restore the previous container, then fail with $1
-  if [ -n "$PREV_IMAGE" ]; then
-    echo "==> rolling back to $IMAGE_ROLLBACK"
-    if bash scripts/redeploy.sh --image "$IMAGE_ROLLBACK"; then
-      local cu; cu="$(container_url)"
-      if [ -n "$cu" ] && poll "$cu" 24; then
-        echo "==> rollback healthy — the site is serving the previous image"
-      else
-        echo "==> WARNING: rollback container is not answering" >&2
-      fi
-    else
-      echo "==> WARNING: rollback failed — the app container may be down" >&2
-    fi
-  else
-    echo "==> no previous image recorded; nothing to roll back to" >&2
-  fi
-  fail "$1"
+# Degrade-don't-abort (issue #258): a failed redeploy/health check used to end
+# the whole run, so a deploy hiccup cost the weekly deck entirely (2026-08-07,
+# 2026-08-01). Instead we fall back to the last-healthy container and keep going;
+# the deck is still built, against the previous image. Only a case where *no*
+# healthy container can be reached is fatal — then there is genuinely no app to
+# screenshot.
+DEGRADED=""
+degrade_note() {  # record a degraded reason (accumulates) and log it
+  [ -n "$DEGRADED" ] && DEGRADED="$DEGRADED  |  $1" || DEGRADED="$1"
+  echo "==> DEGRADING: $1"
 }
 
-echo "--- app health check (container) ---"
-CURL_TARGET="$(container_url)"
-[ -n "$CURL_TARGET" ] || rollback "app container has no address after redeploy"
-poll "$CURL_TARGET" 30 || rollback "app container health check ($CURL_TARGET)"
-echo "    container OK: $CURL_TARGET"
+degrade_to_rollback() {  # degrade_to_rollback <reason> — restore prev image and continue
+  local reason="$1"
+  [ -n "$PREV_IMAGE" ] || fail "$reason — and no previous image to fall back to, so there is no app to screenshot."
+  degrade_note "$reason; deck built against the previous container ($IMAGE_ROLLBACK), so app screenshots may lag the latest $REF."
+  echo "==> rolling back to $IMAGE_ROLLBACK"
+  bash scripts/redeploy.sh --image "$IMAGE_ROLLBACK" \
+    || fail "$reason — and the rollback redeploy failed, so the app is down; no deck."
+  local cu; cu="$(container_url)"
+  { [ -n "$cu" ] && poll "$cu" 24; } \
+    || fail "$reason — the rollback container is not answering either; no app to screenshot, so no deck."
+  echo "==> rollback healthy — continuing against the previous container"
+}
 
-echo "--- app health check (public URL) ---"
-poll "$APP_URL" 12 || rollback "public URL health check ($APP_URL) — the container is up,
-so this is the reverse proxy, not the app."
-echo "    public OK: $APP_URL"
+# Tag whatever is running now so a failed deploy can be undone / fallen back to.
+PREV_IMAGE="$(docker inspect -f '{{.Image}}' "$APP_NAME" 2>/dev/null || true)"
+if [ -n "$PREV_IMAGE" ]; then
+  docker tag "$PREV_IMAGE" "$IMAGE_ROLLBACK" && echo "    rollback point: $IMAGE_ROLLBACK"
+fi
+
+# Read from the Dockerfile rather than a built image on purpose: this has to be
+# answerable *before* anything is built or swapped, and EXPOSE is what the build
+# would produce anyway.
+IMG_PORT="$(image_port)"
+PRX_PORT="$(proxy_port)"
+echo "    image listens on ${IMG_PORT:-?}; proxy dials ${PRX_PORT:-?}"
+
+SKIP_DEPLOY=""
+if [ -n "$IMG_PORT" ] && [ -n "$PRX_PORT" ] && [ "$IMG_PORT" != "$PRX_PORT" ]; then
+  MISMATCH="port mismatch — the $REF image listens on $IMG_PORT but the live Caddy config ($CADDYFILE, from $(git -C "$LIVE_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')) dials $PRX_PORT; deploying would take the site down"
+  if [ -n "$PREV_IMAGE" ]; then
+    SKIP_DEPLOY=1
+    degrade_note "$MISMATCH — kept the running container and built against it. Reconcile the two checkouts."
+  else
+    fail "$MISMATCH — and nothing is running to fall back to. Reconcile the two checkouts, then re-run."
+  fi
+fi
+
+if [ -z "$SKIP_DEPLOY" ]; then
+  echo "--- rebuild + redeploy container ---"
+  make redeploy || degrade_to_rollback "make redeploy failed"
+
+  # Two distinct checks, reported separately. The container check proves the app
+  # itself came up; the public check proves the proxy can reach it. Depending on
+  # the public URL alone let reverse-proxy config hold the whole run hostage.
+  if [ -z "$DEGRADED" ]; then
+    echo "--- app health check (container) ---"
+    CURL_TARGET="$(container_url)"
+    if [ -z "$CURL_TARGET" ]; then
+      degrade_to_rollback "app container has no address after redeploy"
+    elif ! poll "$CURL_TARGET" 30; then
+      degrade_to_rollback "app container health check ($CURL_TARGET)"
+    else
+      echo "    container OK: $CURL_TARGET"
+      echo "--- app health check (public URL) ---"
+      if poll "$APP_URL" 12; then
+        echo "    public OK: $APP_URL"
+      else
+        degrade_to_rollback "public URL health check ($APP_URL) — container up, so this is the reverse proxy, not the app"
+      fi
+    fi
+  fi
+else
+  # Deploy skipped on a port mismatch: confirm the existing container really
+  # serves before we spend time screenshotting it.
+  echo "--- app health check (existing container, deploy skipped) ---"
+  CURL_TARGET="$(container_url)"
+  { [ -n "$CURL_TARGET" ] && poll "$CURL_TARGET" 6; } \
+    || fail "deploy was skipped on a port mismatch, but the running container is not answering either; no app to screenshot."
+  echo "    existing container OK: $CURL_TARGET"
+fi
 
 echo "--- capture screenshots ---"
 python3 deck/capture_screenshots.py || fail "capture_screenshots"
@@ -184,8 +223,19 @@ review $GEN_CAPS and fold accepted changes into deck/capabilities.yaml.
 "
 
 echo "--- notify success ---"
-notify "NCE Safe Simulator - Weekly Status Deck ready" "The weekly status deck built successfully.
-
+# A degraded run still ships a deck (that is the point of #258) — but say so
+# loudly so nobody mistakes a fallback build for a clean one.
+SUBJECT="NCE Safe Simulator - Weekly Status Deck ready"
+DEGRADED_NOTE=""
+if [ -n "$DEGRADED" ]; then
+  SUBJECT="NCE Safe Simulator - Weekly Status Deck ready (DEGRADED)"
+  DEGRADED_NOTE="
+*** DEGRADED BUILD — a deck was produced, but not a clean run ***
+$DEGRADED
+"
+fi
+notify "$SUBJECT" "The weekly status deck built successfully.
+$DEGRADED_NOTE
 Deck:  $(basename "$DECK")  ($SLIDES slides)
 Built: $(TZ=America/Los_Angeles date '+%A %F %H:%M %Z')
 $CAPS_NOTE

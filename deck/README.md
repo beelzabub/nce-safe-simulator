@@ -254,11 +254,15 @@ On the single-box host, a **systemd timer** builds and emails the deck every **F
 
 The service runs `deck/weekly-status-deck.sh`, which:
 
-1. checks out + pulls the build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides
-   for a pre-merge validation run),
+1. **pre-flights credentials** (an early `git ls-remote` so an expired GitLab token fails
+   loudly up front — what silently killed the 2026-07-31 run), then checks out + pulls the
+   build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides for a pre-merge
+   validation run),
 2. **checks that the image and the reverse proxy agree on a port**, then `make redeploy` —
    rebuilds the image and hot-swaps the app container so screenshots are current — then
-   health-checks it (see **Deploy safety** below),
+   health-checks it. A port mismatch, a failed redeploy or a failed health check no longer
+   aborts the run: it **degrades** to the last-healthy container and builds the deck against
+   it (see **Deploy safety** below),
 3. captures screenshots and fetches metrics,
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
@@ -295,18 +299,21 @@ Three guards, in order:
 
 - **Port pre-flight.** The ref's `Dockerfile` `EXPOSE` is compared against the port in
   the live `deploy/Caddyfile` *before anything is built or swapped*. On disagreement the
-  run aborts with the running container untouched — a mismatch now costs a deck, never
-  the site.
+  deploy is **skipped** and the deck is built against the running (unchanged) container —
+  a mismatch now costs only a fresh app image, never the deck and never the site (#258).
 - **Two health checks, reported separately.** The container is polled directly on its own
   address and port, which proves the app came up without the reverse proxy being able to
   hold the run hostage; the public URL is then polled as a distinct step, which proves the
   proxy can reach it. The old script checked only the public URL, so it could not tell
   those two failures apart.
-- **Rollback.** The running image is tagged `nce-safe-simulator:rollback` before the swap.
-  If either health check fails, `scripts/redeploy.sh --image nce-safe-simulator:rollback`
-  recreates the previous container (no rebuild — the source is unchanged, so rebuilding
-  would only reproduce the bad image) and the restored container is re-checked before the
-  run reports failure.
+- **Rollback, then degrade.** The running image is tagged `nce-safe-simulator:rollback`
+  before the swap. If a redeploy or health check fails, `scripts/redeploy.sh --image
+  nce-safe-simulator:rollback` recreates the previous container (no rebuild — the source is
+  unchanged, so rebuilding would only reproduce the bad image), and once it is re-checked
+  healthy the run **continues and builds the deck against it** rather than aborting (#258).
+  Only a rollback that itself will not serve is fatal — then there is no app to screenshot.
+  A degraded build still ships, but its SNS email is subject-tagged **(DEGRADED)** and names
+  the reason.
 
 `scripts/redeploy.sh --image <ref>` is generally useful for this: it skips the build and
 recreates the container from an image that already exists, in about two seconds.
