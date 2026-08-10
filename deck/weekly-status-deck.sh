@@ -14,6 +14,10 @@ TOPIC_ARN="arn:aws:sns:us-east-1:881490118830:nce-status-deck"
 BUCKET="workflow-bootstrap-20260626-055227-881490118830"
 S3_PREFIX="nce-safe-simulator/status"
 APP_URL="https://nce-safe-sim.com/app/"
+# Container name must match scripts/redeploy.sh; the rollback tag is what the
+# pre-swap image gets stamped with so a failed deploy can be undone (#309).
+APP_NAME="nce-safe-sim"
+IMAGE_ROLLBACK="nce-safe-simulator:rollback"
 GEN_SPOTLIGHTS="$REPO/deck/dist/latest-work-spotlights.gen.yaml"
 GEN_CAPS="$REPO/deck/dist/capabilities-updates.gen.yaml"
 LOGDIR="$REPO/deck/dist/weekly-logs"
@@ -50,16 +54,96 @@ echo "--- sync $REF ---"
 git checkout "$REF"  || fail "git checkout $REF"
 git pull --ff-only   || fail "git pull $REF"
 
+# --- port agreement pre-flight (issue #309) --------------------------------
+# The image and the reverse proxy come from *different checkouts*: the image is
+# built here from $REF, while Caddy's config is bind-mounted from the live tree,
+# which may sit on any branch. On 2026-08-07 develop's image listened on 80
+# while Caddy dialled 8080, so the swap put up a container the proxy could not
+# reach and the public site stayed down for five hours.
+#
+# Checked *before* the swap: on disagreement the run aborts with the running
+# container untouched, so a mismatch costs a deck and never the site.
+LIVE_TREE="/root/.venv/nce-safe-simulator"
+CADDYFILE="$LIVE_TREE/deploy/Caddyfile"
+
+image_port() {   # the port this ref's image will listen on, read from its Dockerfile
+  grep -oE '^EXPOSE[[:space:]]+[0-9]+' Dockerfile 2>/dev/null | tail -1 | grep -oE '[0-9]+'
+}
+proxy_port() {   # the port Caddy is configured to dial
+  grep -oE 'nce-safe-sim:[0-9]+' "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2
+}
+
+# Read from the Dockerfile rather than a built image on purpose: this has to be
+# answerable *before* anything is built or swapped, and EXPOSE is what the build
+# would produce anyway.
+IMG_PORT="$(image_port)"
+PRX_PORT="$(proxy_port)"
+echo "    image listens on ${IMG_PORT:-?}; proxy dials ${PRX_PORT:-?}"
+if [ -n "$IMG_PORT" ] && [ -n "$PRX_PORT" ] && [ "$IMG_PORT" != "$PRX_PORT" ]; then
+  fail "port mismatch — the $REF image listens on $IMG_PORT but the live Caddy config
+($CADDYFILE, from $(git -C "$LIVE_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?'))
+dials $PRX_PORT. Deploying would take the public site down, so nothing was swapped.
+Reconcile the two checkouts, then re-run."
+fi
+
+# Tag whatever is running now so a failed deploy can be undone.
+PREV_IMAGE="$(docker inspect -f '{{.Image}}' "$APP_NAME" 2>/dev/null || true)"
+if [ -n "$PREV_IMAGE" ]; then
+  docker tag "$PREV_IMAGE" "$IMAGE_ROLLBACK" && echo "    rollback point: $IMAGE_ROLLBACK"
+fi
+
 echo "--- rebuild + redeploy container ---"
 make redeploy || fail "make redeploy"
 
-echo "--- app health check ---"
-ok=0
-for _ in $(seq 1 30); do
-  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$APP_URL" || true)" = "200" ] && { ok=1; break; }
-  sleep 5
-done
-[ "$ok" = "1" ] || fail "app health check ($APP_URL)"
+# --- health checks ---------------------------------------------------------
+# Two distinct checks, reported separately. The container check proves the app
+# itself came up; the public check proves the proxy can reach it. The deck build
+# used to depend on the public URL alone, which let reverse-proxy config hold
+# the whole run hostage without saying so.
+container_url() {
+  local ip
+  ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$APP_NAME" 2>/dev/null)"
+  [ -n "$ip" ] && echo "http://$ip:${IMG_PORT:-8080}/app/"
+}
+
+poll() {  # poll <url> <attempts> -> 0 when it answers 200
+  local url="$1" n="$2"
+  for _ in $(seq 1 "$n"); do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)" = "200" ] && return 0
+    sleep 5
+  done
+  return 1
+}
+
+rollback() {  # restore the previous container, then fail with $1
+  if [ -n "$PREV_IMAGE" ]; then
+    echo "==> rolling back to $IMAGE_ROLLBACK"
+    if bash scripts/redeploy.sh --image "$IMAGE_ROLLBACK"; then
+      local cu; cu="$(container_url)"
+      if [ -n "$cu" ] && poll "$cu" 24; then
+        echo "==> rollback healthy — the site is serving the previous image"
+      else
+        echo "==> WARNING: rollback container is not answering" >&2
+      fi
+    else
+      echo "==> WARNING: rollback failed — the app container may be down" >&2
+    fi
+  else
+    echo "==> no previous image recorded; nothing to roll back to" >&2
+  fi
+  fail "$1"
+}
+
+echo "--- app health check (container) ---"
+CURL_TARGET="$(container_url)"
+[ -n "$CURL_TARGET" ] || rollback "app container has no address after redeploy"
+poll "$CURL_TARGET" 30 || rollback "app container health check ($CURL_TARGET)"
+echo "    container OK: $CURL_TARGET"
+
+echo "--- app health check (public URL) ---"
+poll "$APP_URL" 12 || rollback "public URL health check ($APP_URL) — the container is up,
+so this is the reverse proxy, not the app."
+echo "    public OK: $APP_URL"
 
 echo "--- capture screenshots ---"
 python3 deck/capture_screenshots.py || fail "capture_screenshots"
