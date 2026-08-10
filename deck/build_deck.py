@@ -757,6 +757,15 @@ class DeckBuilder:
         self._cover_timeline(cover, left, Emu(4020000), Emu(4360000),
                              m["first_commit_date"], self.period_end_iso)
 
+        # Degraded-build marker (#258): when the weekly run fell back to the
+        # previous container, the app screenshots may be stale — say so on the
+        # cover so a saved or forwarded deck can't be mistaken for a clean run.
+        if getattr(self, "degraded", None):
+            self.add_text(cover, left, self.SH - Emu(560000), self.SW - Emu(680000), Emu(400000),
+                          "DEGRADED BUILD — app screenshots may reflect a previous deploy "
+                          "(see the build notification for details).",
+                          11, RGBColor(0xE0, 0x3A, 0x3A), bold=True)
+
         # White emblem (not the navy one) now that the cover reads dark.
         nce_logo = os.path.join(REPO_ROOT, "frontend/src/assets/nce-logo-white.png")
         pmw_seal = os.path.join(REPO_ROOT, "frontend/src/assets/pmw-120-seal-transparent.png")
@@ -1956,6 +1965,13 @@ def main():
                     default=os.path.join(HERE, "dist", "capabilities-updates.gen.yaml"),
                     help="proposed capability-area deltas from the weekly authoring step; "
                          "merged into --capabilities at build time when the file exists.")
+    ap.add_argument("--degraded", default=os.environ.get("DECK_DEGRADED"), metavar="REASON",
+                    help="mark this as a degraded build — stamps a warning on the cover. The "
+                         "weekly script passes the deploy/health degrade reason here (#258).")
+    ap.add_argument("--allow-stale", action="store_true",
+                    default=bool(os.environ.get("DECK_ALLOW_STALE")),
+                    help="skip the metrics-freshness guard (#258) — build even if metrics.json "
+                         "predates HEAD. For a deliberate offline or old-ref build.")
     ap.add_argument("--print-coverage-gap", action="store_true",
                     help="print the closed issues cited in no capability area (JSON) and exit "
                          "— used by the weekly authoring step to propose updates.")
@@ -1988,6 +2004,31 @@ def main():
 
     with open(args.metrics) as f:
         metrics = json.load(f)
+
+    # Metrics-freshness guard (#258): a by-hand build must not silently ship a
+    # stale metrics.json. It is stale if HEAD carries commits newer than when it
+    # was generated. The cron always re-fetches first, so it is unaffected;
+    # --allow-stale (or DECK_ALLOW_STALE) overrides for a deliberate offline build.
+    if not args.allow_stale:
+        def _iso(s):
+            return datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
+        gen = metrics.get("generated_at")
+        try:
+            head_iso = subprocess.run(["git", "log", "-1", "--format=%cI"], cwd=REPO_ROOT,
+                                      capture_output=True, text=True, check=True).stdout.strip()
+        except Exception:
+            head_iso = ""
+        if not gen:
+            raise SystemExit(
+                f"{args.metrics} has no generated_at stamp — it predates the freshness "
+                f"guard. Regenerate it:\n  python3 deck/fetch_metrics.py\n"
+                f"(or pass --allow-stale for a deliberate offline build).")
+        if head_iso and _iso(gen) < _iso(head_iso):
+            raise SystemExit(
+                f"{args.metrics} is stale: generated {gen}, but HEAD was committed "
+                f"{head_iso}. It would ship old numbers.\n"
+                f"Re-run `python3 deck/fetch_metrics.py` (or pass --allow-stale).")
+
     with open(args.capabilities) as f:
         capabilities = yaml.safe_load(f)["capabilities"]
     if args.capabilities_updates and os.path.exists(args.capabilities_updates):
@@ -2013,6 +2054,7 @@ def main():
 
     builder = DeckBuilder(template_path, args.screenshots_dir, metrics, capabilities, shots,
                           review_date=review_date, since_dt=since_dt, spotlights=spotlights)
+    builder.degraded = args.degraded
     prs = builder.build()
 
     # The output filename always ends with a -YYYYMMDD date postfix (issue #210).

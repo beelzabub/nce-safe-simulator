@@ -14,7 +14,7 @@ import json
 import os
 import subprocess
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -243,6 +243,10 @@ def main():
     metrics.update(fetch_commit_stats(ref=args.ref, until=args.until))
     metrics["sloc"] = fetch_sloc()
     metrics["sloc_by_week"] = fetch_sloc_by_week()
+    # Freshness stamp (#258): build_deck.py's guard compares this to HEAD's last
+    # commit so a by-hand build can't silently ship stale numbers.
+    metrics["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    metrics["generated_ref"] = args.ref
 
     with open(args.out, "w") as f:
         json.dump(metrics, f, indent=2)
