@@ -13,5 +13,20 @@
 
 nce-safe-sim.com, www.nce-safe-sim.com {
 	encode gzip
-	reverse_proxy nce-safe-sim:8080
+
+	# `reverse_proxy nce-safe-sim:8080` resolves the container name once, at
+	# config load, and pins the address. redeploy.sh recreates the app
+	# container, which usually draws a *new* address off the nce-net pool, so
+	# a pinned upstream leaves Caddy dialling a container that no longer
+	# exists — the site 502s until Caddy is restarted or the app happens to
+	# reclaim its old address. The dynamic upstream re-resolves the name
+	# against Docker's embedded DNS instead, so the swap is picked up on its
+	# own and "without touching Caddy" above stays true.
+	reverse_proxy {
+		dynamic a {
+			name nce-safe-sim
+			port 8080
+			refresh 5s
+		}
+	}
 }
