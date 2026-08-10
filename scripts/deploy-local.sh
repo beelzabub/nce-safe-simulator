@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Full single-box bring-up for nce-safe-sim.com:
 #
-#   internet :443/:80  ->  caddy (Let's Encrypt TLS)  ->  nce-safe-sim :80 (uvicorn)
+#   internet :443/:80  ->  caddy (Let's Encrypt TLS)  ->  nce-safe-sim :8080 (uvicorn, non-root)
 #
 # Both containers run with --restart unless-stopped, so they come back after a
 # reboot (the instance is on an EventBridge start/stop schedule to control cost;

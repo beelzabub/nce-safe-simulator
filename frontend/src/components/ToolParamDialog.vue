@@ -273,10 +273,19 @@ watch(() => props.tool, tool => {
   uploadError.value = ''
   if (!tool) { values.value = {}; return }
   const stored = loadStored(`nce-tool-params:${tool.key}`, {})
+  // Config-derived defaults (the group widgets, pre-filled from parent_group /
+  // gitlab_namespace) must not be outranked by a value stored back when the
+  // config said something else: editing config.json would then have no visible
+  // effect on an already-used dialog. Compare against the default in force when
+  // the value was stored — a changed config wins, while a deliberate override
+  // typed against the current config still persists.
+  const storedDefaults = loadStored(`nce-tool-params:${tool.key}:defaults`, {})
   const init = {}
   for (const p of tool.params) {
+    const staleDefault = _tracksDefault(p) && storedDefaults[p.name] !== (p.default ?? '')
     // File widgets can't be persisted/pre-filled — always start empty.
-    init[p.name] = (p.widget !== 'file' && Object.prototype.hasOwnProperty.call(stored, p.name))
+    init[p.name] = (p.widget !== 'file' && !staleDefault
+                    && Object.prototype.hasOwnProperty.call(stored, p.name))
       ? stored[p.name]
       : _initValue(p)
   }
@@ -320,6 +329,12 @@ async function fetchProjects() {
 
 // Pre-fill logic: optional params with a server-resolved default are pre-filled
 // so the dialog shows exactly what the config contains.
+// Params whose default follows config.json rather than the tool registry, so a
+// stored value has to be re-checked against it on every open.
+function _tracksDefault(p) {
+  return p.widget === 'group' || p.widget === 'group-picker'
+}
+
 function _initValue(p) {
   if (p.widget === 'group')                        return p.default ?? ''
   if (p.widget === 'group-picker' || p.widget === 'project') return p.default ?? ''
@@ -460,6 +475,13 @@ async function doLaunch() {
     if (p.widget === 'file') delete toStore[p.name]
   }
   saveStored(`nce-tool-params:${props.tool.key}`, toStore)
+  // Record the config-derived defaults these values were entered against, so
+  // the next open can tell a live override from one the config has outgrown.
+  const defaults = {}
+  for (const p of props.tool.params) {
+    if (_tracksDefault(p)) defaults[p.name] = p.default ?? ''
+  }
+  saveStored(`nce-tool-params:${props.tool.key}:defaults`, defaults)
 
   emit('launch', props.tool, params)
 }

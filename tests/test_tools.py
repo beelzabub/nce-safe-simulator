@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call
 
 
 from conftest import ToolsHarness, _make_epic_mock, _make_issue_mock
+from mixins.label_colors import DEFAULT_COLOR, FAMILY_DEFAULTS, LABEL_COLORS
 
 pytestmark = pytest.mark.unit
 
@@ -164,6 +165,88 @@ def test_generate_epic_blocks_does_not_block_resolved_epics():
     h._create_epic_blocks(session, all_epics, count=1, dry_run=True)
 
     session.post.assert_not_called()
+
+
+class _ScopedLabelHarness(ToolsHarness):
+    """Harness with production-shaped epic-type constants.
+
+    The default harness sets EPIC_TYPE_LABELS and EPIC_TYPE_DISPLAY_NAMES to the
+    same three strings, so it cannot tell the two apart — which is exactly how a
+    label/display-name mix-up survived. Real configs carry scoped labels and
+    derive the display names by capitalizing the leaf, so the lists never match.
+    """
+
+    EPIC_TYPE_LABELS        = ["epic::epic", "epic::capability", "epic::feature"]
+    EPIC_TYPE_DISPLAY_NAMES = ["Epic", "Capability", "Feature"]
+
+
+def _scoped_hierarchy(h):
+    """portfolio epic ← capability ← feature, as create-lorem-data builds it."""
+    grp = h._root_group
+    portfolio  = _make_epic_mock(id=1, iid=1, title="Portfolio", labels=["epic::epic"])
+    capability = _make_epic_mock(id=2, iid=2, title="Capability",
+                                 labels=["epic::capability"], parent_id=1)
+    feature    = _make_epic_mock(id=3, iid=3, title="Feature",
+                                 labels=["epic::feature"], parent_id=2)
+    return [(grp, e) for e in (portfolio, capability, feature)]
+
+
+def test_generate_epic_blocks_resolves_ancestry_with_scoped_labels(capsys):
+    """Scoped labels must resolve a Portfolio Epic ancestor, not fall back.
+
+    Matching epic.labels against EPIC_TYPE_DISPLAY_NAMES typed every epic
+    "Unknown", so no ancestor ever resolved and the tool silently seeded random
+    blocks — collapsing the WSJF "Epic at Risk" column it exists to populate.
+    """
+    h = _ScopedLabelHarness()
+    session = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 201
+    session.post.return_value = resp
+
+    h._create_epic_blocks(session, _scoped_hierarchy(h), count=1, dry_run=False)
+
+    out = capsys.readouterr().out
+    assert "no Capability/Feature with a Portfolio Epic ancestor" not in out, (
+        "ancestry did not resolve — the tool fell back to random blocking targets"
+    )
+
+
+def test_generate_epic_blocks_never_blocks_the_portfolio_epic(monkeypatch):
+    """The blocked side must be a Capability/Feature that rolls up to a Portfolio Epic.
+
+    Deterministic on purpose: the selection is random, so pinning random.choice
+    is what makes this a regression detector rather than a coin flip. Blocked is
+    taken from the front of the eligible list and blocker from the back, so the
+    two never collide. With ancestry resolving, the eligible list excludes the
+    Portfolio Epic and the front is the Capability; when it collapses to the
+    random fallback the eligible list is every epic and the front is the
+    Portfolio Epic itself.
+    """
+    import mixins.tools as tools_module
+
+    picks = {"n": 0}
+
+    def fake_choice(seq):
+        picks["n"] += 1
+        return seq[0] if picks["n"] % 2 else seq[-1]
+
+    monkeypatch.setattr(tools_module.random, "choice", fake_choice)
+
+    h = _ScopedLabelHarness()
+    session = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 201
+    session.post.return_value = resp
+
+    h._create_epic_blocks(session, _scoped_hierarchy(h), count=1, dry_run=False)
+
+    assert session.post.call_count > 0, "no blocking links were attempted"
+    for call in session.post.call_args_list:
+        url = call[0][0]
+        assert "/epics/1/related_epics" not in url, (
+            f"Portfolio Epic landed on the blocked side: {url}"
+        )
 
 
 def _issue_pairs(n):
@@ -464,8 +547,31 @@ def test_create_and_apply_labels_creates_scoped_label():
     h.create_and_apply_labels(target, ["lifecycle::funnel"])
 
     target.labels.create.assert_called_once_with(
-        {"name": "lifecycle::funnel", "color": "#4287f5"}
+        {"name": "lifecycle::funnel", "color": LABEL_COLORS["lifecycle::funnel"]}
     )
+
+
+def test_create_and_apply_labels_uses_the_taxonomy_palette():
+    """A reseed must reproduce the palette, not repaint every chip one colour."""
+    h = ToolsHarness()
+    target = MagicMock()
+    names = ["PIID::2026Q3", "wsjf-urgency::13", "lifecycle::done"]
+
+    h.create_and_apply_labels(target, names)
+
+    used = [c.args[0]["color"] for c in target.labels.create.call_args_list]
+    assert used == [LABEL_COLORS[n] for n in names]
+    assert len(set(used)) == 3, "the families must not collapse to one colour"
+
+
+def test_unknown_label_falls_back_by_family_then_default():
+    h = ToolsHarness()
+    target = MagicMock()
+
+    h.create_and_apply_labels(target, ["PIID::2099Q4", "nothing-like-a-taxonomy"])
+
+    used = [c.args[0]["color"] for c in target.labels.create.call_args_list]
+    assert used == [FAMILY_DEFAULTS["PIID"], DEFAULT_COLOR]
 
 
 def test_create_and_apply_labels_skips_existing_label():

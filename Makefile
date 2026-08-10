@@ -63,7 +63,7 @@ capture-apt: ## Re-capture the apt-debs closure (dated), print the Dockerfile va
 ##@ Container image / dev
 # Builds the dev/build image and drops into a shell with the working tree mounted
 # at /app — full toolchain, nothing installed on the host. Host :4645 maps to the
-# app's container :80 (`--serve` binds :80), reachable at http://localhost:4645.
+# app's container :8080 (`--serve` binds :8080), reachable at http://localhost:4645.
 # While dependencies are churning, `make dev-shell OFFLINE=0` installs pip/npm
 # from the internet (still lock-pinned) instead of the vendored registry
 # packages — capture + version-bump once, before merging (issue #271).
@@ -73,7 +73,7 @@ dev-shell: ## Container dev shell: dev image + working tree mounted at /app
 	  --build-arg PKG_PROJECT=$$(scripts/pkg-project-url.sh) \
 	  --build-arg OFFLINE=$(OFFLINE) \
 	  -t nce-safe-simulator:dev .
-	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:80 nce-safe-simulator:dev
+	docker run --rm -it -v "$$PWD":/app -w /app -p 4645:8080 nce-safe-simulator:dev
 
 # Local/manual mirror of the CI `containerize` job (#244). Log in first:
 # `docker login registry.gitlab.com` (username + a PAT/deploy token with

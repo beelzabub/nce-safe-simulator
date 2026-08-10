@@ -89,15 +89,41 @@ echo "==> Recreating app container ($APP)..."
 # lost on every redeploy.
 mkdir -p reports logs quarto-site public/interactive public/exports uploads
 
-# AWS credentials for in-app deploys (S3/CloudFront, ECS, EKS — issue #225).
-# The container runs as root, so boto3 reads /root/.aws; mount the host's creds
-# read-only rather than baking them into the image (which would leave IAM keys
-# in image layers, incl. anything pushed to ECR). Skipped when the host has no
-# ~/.aws so the site still comes up for non-deploy use.
+# The app container runs as uid 1000 (`USER app`, #304) — the bind-mounted
+# dirs and the UI-writable config.json (PUT /api/config/full) must be
+# writable by that uid, recursively, so existing root-created files can be
+# rewritten in place.
+if ! chown -R 1000:1000 reports logs quarto-site public/interactive \
+      public/exports uploads config.json 2>/dev/null; then
+  echo "    WARNING: could not chown mounts to uid 1000 — in-container writes" >&2
+  echo "             (reports, logs, config edits) may fail. Re-run as root." >&2
+fi
+
+# AWS credentials for in-app deploys (S3/CloudFront, ECS, EKS — issue #225),
+# mounted read-only rather than baked into the image (which would leave IAM
+# keys in image layers, incl. anything pushed to ECR). Skipped when the host
+# has no ~/.aws so the site still comes up for non-deploy use.
+#   - ops variant runs as root: mount the host's ~/.aws at /root/.aws as-is.
+#   - slim runs as uid 1000 (#304) and the host creds are typically 600
+#     root-only, so stage a uid-1000-owned copy and mount that at
+#     /home/app/.aws. Re-staged on every redeploy, so host cred rotations
+#     propagate on the next deploy.
+AWS_STAGE=/var/lib/nce-safe-sim/aws
 AWS_MOUNT=()
 if [ -d "${HOME}/.aws" ]; then
-  AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
-  echo "    mounting ${HOME}/.aws -> /root/.aws (read-only) for in-app AWS deploys"
+  if [ "${#BUILD_TARGET[@]}" -gt 0 ]; then
+    AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
+    echo "    mounting ${HOME}/.aws -> /root/.aws (read-only) for in-app AWS deploys"
+  elif install -d -m 700 -o 1000 -g 1000 "$AWS_STAGE" 2>/dev/null; then
+    for f in "${HOME}/.aws/config" "${HOME}/.aws/credentials"; do
+      [ -f "$f" ] && install -m 600 -o 1000 -g 1000 "$f" "$AWS_STAGE/"
+    done
+    AWS_MOUNT=(-v "$AWS_STAGE:/home/app/.aws:ro")
+    echo "    staged ${HOME}/.aws -> $AWS_STAGE (uid 1000) -> /home/app/.aws (read-only)"
+  else
+    echo "    WARNING: could not stage ${HOME}/.aws for uid 1000 (need root);" >&2
+    echo "             in-app AWS deploys will be unavailable this run." >&2
+  fi
 fi
 
 # Ops variant only (#231): hand the container the host docker daemon so the

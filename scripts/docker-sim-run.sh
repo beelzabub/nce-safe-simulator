@@ -35,13 +35,20 @@ fi
 
 : "${GITLAB_TOKEN:?Set GITLAB_TOKEN before running (the mounted config.json no longer carries the token)}"
 
-# AWS credentials for in-app deploys (S3/CloudFront, ECS, EKS — issue #225).
-# The container runs as root, so boto3 reads /root/.aws; mount the host's creds
-# read-only rather than baking them into the image. Skipped when the host has no
-# ~/.aws so the sim still runs for non-deploy use.
+# AWS credentials for in-app deploys (S3/CloudFront, ECS, EKS — issue #225),
+# mounted read-only rather than baked into the image. Skipped when the host
+# has no ~/.aws so the sim still runs for non-deploy use. The ops variant runs
+# as root (/root/.aws); the slim image runs as uid 1000 (#304), so its mount
+# lands in /home/app/.aws and the host files must be readable by uid 1000
+# (they usually are when you run this as a normal user — redeploy.sh has the
+# root-host staging logic if you need it).
 AWS_MOUNT=()
 if [ -d "${HOME}/.aws" ]; then
-  AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
+  if [ -n "$BUILD_TARGET" ]; then
+    AWS_MOUNT=(-v "${HOME}/.aws:/root/.aws:ro")
+  else
+    AWS_MOUNT=(-v "${HOME}/.aws:/home/app/.aws:ro")
+  fi
 fi
 
 # Ops variant only (#231): hand the container the host docker daemon so the
@@ -56,7 +63,7 @@ fi
 echo "Starting $IMAGE..."
 docker run -d --rm \
   --name nce \
-  -p 80:80 \
+  -p 80:8080 \
   -e GITLAB_TOKEN="$GITLAB_TOKEN" \
   "${AWS_MOUNT[@]}" \
   "${DOCKER_MOUNT[@]}" \

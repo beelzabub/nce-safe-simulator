@@ -145,23 +145,41 @@ def test_requirements_lock_exists_and_is_fully_pinned():
         assert "==" in s, f"requirements.lock has an unpinned line: {line!r}"
 
 
-def test_lock_covers_every_requirements_txt_name():
-    """Every direct requirement must appear pinned in the lock, or the
-    wheelhouse would be missing a top-level package."""
-    pins = _lock_pins()
+def _req_txt_names():
+    """Normalised distribution names declared in requirements.txt.
+
+    Comments and extras are stripped, so prose in a `#` line can never be
+    mistaken for a requirement.
+    """
+    names = set()
     for raw in REQ_TXT.splitlines():
         name = raw.split("#", 1)[0].strip()
         if not name:
             continue
-        base = re.split(r"[<>=!\[;]", name, 1)[0].strip().lower().replace("_", "-")
+        names.add(re.split(r"[<>=!\[;]", name, 1)[0].strip().lower().replace("_", "-"))
+    return names
+
+
+def test_lock_covers_every_requirements_txt_name():
+    """Every direct requirement must appear pinned in the lock, or the
+    wheelhouse would be missing a top-level package."""
+    pins = _lock_pins()
+    for base in sorted(_req_txt_names()):
         assert base in pins, f"requirements.txt name {base!r} is not pinned in requirements.lock"
 
 
 def test_jupyter_is_not_in_the_closure():
     """The jupyter metapackage was dropped (#271); it must not reappear via a
-    lock recompile (nbformat's transitive jupyter-core is fine — different)."""
+    lock recompile. Transitive pieces are fine and deliberately allowed —
+    nbformat pulls jupyter-core, and quarto's engine needs nbclient/ipykernel
+    (which pull jupyter-client). Only the bare `jupyter` metapackage is barred.
+
+    Matched against parsed requirement names, not raw words: requirements.txt
+    carries comments explaining why each pin is there, and one of them names
+    the jupyter engine in prose.
+    """
     assert "jupyter" not in [n for n in _lock_pins() if n == "jupyter"]
-    assert "jupyter" not in REQ_TXT.split()
+    assert "jupyter" not in _req_txt_names()
 
 
 def test_pip_wheels_version_is_content_derived():

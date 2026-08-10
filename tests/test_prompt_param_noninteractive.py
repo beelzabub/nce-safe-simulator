@@ -82,3 +82,28 @@ def test_required_without_default_raises_on_eof():
     with pytest.raises(ValueError) as e:
         _run_eof(p)
     assert "input_path" in str(e.value)          # names the missing param, not EOFError
+
+
+# --- cli_only dry_run params must not block the web UI from doing real work ---
+# The web UI strips cli_only params from the payload and never passes them on
+# the argv it launches, so every hidden dry_run param resolves here, from its
+# registry default, against a non-TTY stdin. A default of True therefore makes
+# the tool permanently preview-only from the web UI while its confirmation
+# banner still promises objects will be created. Guard every tool at once so a
+# future param keeps the property without anyone having to remember this.
+
+def test_hidden_dry_run_params_default_to_doing_the_work():
+    from mixins.tools import TOOLS
+
+    preview_only = [
+        (tool["key"], p["name"])
+        for tool in TOOLS
+        for p in tool.get("params", [])
+        if p.get("cli_only") and p["type"] is bool
+        and p["name"].startswith("dry_run")
+        and _run(p, isatty=False) is not False
+    ]
+    assert preview_only == [], (
+        "hidden dry_run params default to True, so the web UI can only ever "
+        f"preview: {preview_only}"
+    )

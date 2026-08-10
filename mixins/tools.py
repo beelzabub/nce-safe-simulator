@@ -332,7 +332,7 @@ TOOLS = [
     },
     {
         "key":         "create-lorem-data",
-        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Use Dry run to preview the resolved structure before committing.",
+        "description": "⚠ Populate the target group with lorem SAFe data — epics, capabilities, features, issues, labels, and BV field. Existing content is NOT removed first. Preview the resolved structure first with the CLI's --dry_run.",
         "confirm":     True,
         "method":      "create_all_lorem_objects",
         "params": [
@@ -345,7 +345,7 @@ TOOLS = [
             {"name": "art_epics",           "prompt": "ART Capabilities / ART", "type": int,   "optional": True, "gl_default": "default_art_caps_per_art"},
             {"name": "team_features",       "prompt": "Features per Team",       "type": int,   "optional": True, "gl_default": "default_features_per_team"},
             {"name": "direct_feature_ratio","prompt": "Direct Feature Ratio",   "type": float, "optional": True, "gl_default": "default_direct_feature_ratio", "section": "Distribution"},
-            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": True, "cli_only": True},
+            {"name": "dry_run",             "prompt": "Dry run — preview only, no objects created", "type": bool, "default": False, "cli_only": True},
         ],
     },
     {
@@ -1097,6 +1097,18 @@ class ToolsMixin:
                 if name in prefills:
                     raw = prefills[name]
                     ptype = param["type"]
+                    # A numeric param that arrived as a bare flag means its value
+                    # was swallowed by the argv scan: `--count -15` looks like a
+                    # flag followed by another flag, so count lands here as True.
+                    # int(True) is 1, which silently turned "remove 15 blocking
+                    # links" into "create 1". Refuse it and name the --count=-15
+                    # form that survives the scan.
+                    if isinstance(raw, bool) and ptype in (int, float):
+                        raise SystemExit(
+                            f"--{name} was given without a value. A value starting "
+                            f"with '-' is read as the next flag, so pass it attached: "
+                            f"--{name}=<value> (e.g. --{name}=-15)."
+                        )
                     if ptype is bool:
                         val = raw if isinstance(raw, bool) else str(raw).lower() in ("y", "yes", "true", "1")
                     elif ptype is int:
@@ -1745,14 +1757,20 @@ class ToolsMixin:
         # rolls up to a correctly-labelled Portfolio Epic, so the report's ancestor
         # walk (_portfolio_ancestors) resolves a real Portfolio Epic instead of
         # silently collapsing the blocked item into its own "Epic at Risk".
-        pe_type    = self.EPIC_TYPE_DISPLAY_NAMES[0]
+        # Match the labels the epics actually carry (epic::epic, epic::capability,
+        # …), not EPIC_TYPE_DISPLAY_NAMES — those are the capitalized leaves
+        # ("Epic", "Capability") built for report headings, and never appear in
+        # a label list. Comparing against them typed every epic "Unknown", so
+        # nothing ever resolved a Portfolio Epic ancestor and every run fell
+        # through to the random-target path below.
+        pe_type    = self.EPIC_TYPE_LABELS[0]
         epic_by_id = {epic.id: epic for _, epic in all_epics}
         parent_of  = {epic.id: epic.parent_id for _, epic in all_epics
                       if getattr(epic, "parent_id", None)}
 
         def _etype(epic):
             labels = getattr(epic, "labels", []) or []
-            for t in self.EPIC_TYPE_DISPLAY_NAMES:
+            for t in self.EPIC_TYPE_LABELS:
                 if t in labels:
                     return t
             return "Unknown"

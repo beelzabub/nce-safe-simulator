@@ -1,3 +1,6 @@
+from .label_colors import color_for
+
+
 class LabelsMixin:
 
     def create_and_apply_labels(self, target, labels):
@@ -5,10 +8,15 @@ class LabelsMixin:
             if isinstance(labels, str):
                 labels = [label.strip() for label in labels.split(",")]
 
+            # Colour comes from the taxonomy palette, not one flat blue: a reseed
+            # has to reproduce the same chips the reports and JQL results are read
+            # against. Unknown labels fall back by family, then to the old default.
             if hasattr(target, 'labels'):
-                create_label = lambda name: target.labels.create({"name": name, "color": "#4287f5"})
+                create_label = lambda name: target.labels.create(
+                    {"name": name, "color": color_for(name)})
             elif hasattr(target, 'group_labels'):
-                create_label = lambda name: target.group_labels.create({"name": name, "color": "#4287f5"})
+                create_label = lambda name: target.group_labels.create(
+                    {"name": name, "color": color_for(name)})
             else:
                 print(f"Unsupported target type: {type(target)}")
                 return
