@@ -256,8 +256,9 @@ The service runs `deck/weekly-status-deck.sh`, which:
 
 1. checks out + pulls the build ref (`develop` by default; `WEEKLY_REF=<branch>` overrides
    for a pre-merge validation run),
-2. `make redeploy` — rebuilds the image and hot-swaps the app container so screenshots are
-   current — then health-checks the app,
+2. **checks that the image and the reverse proxy agree on a port**, then `make redeploy` —
+   rebuilds the image and hot-swaps the app container so screenshots are current — then
+   health-checks it (see **Deploy safety** below),
 3. captures screenshots and fetches metrics,
 4. **authors the spotlights** headless: runs `claude -p` (scoped `--allowedTools`) against
    `deck/weekly-authoring-prompt.md`, which reads the week's `slides`-labeled closed issues
@@ -279,6 +280,43 @@ The service runs `deck/weekly-status-deck.sh`, which:
 Logs land in `deck/dist/weekly-logs/` and the systemd journal
 (`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the
 `claude` CLI, Docker, network to the live app, and `sns:Publish` on the instance role.
+
+
+### Deploy safety (issue #309)
+
+The image and the reverse-proxy config come from **different checkouts**: the image is
+built from the build ref in this clone, while Caddy's config is bind-mounted from the
+live tree, which may sit on any branch. On 2026-08-07 `develop`'s image listened on 80
+while Caddy dialled 8080 — the swap put up a container the proxy could not reach, the
+build aborted at its health check, and the public site stayed down for five hours
+because a failed run left the broken container running.
+
+Three guards, in order:
+
+- **Port pre-flight.** The ref's `Dockerfile` `EXPOSE` is compared against the port in
+  the live `deploy/Caddyfile` *before anything is built or swapped*. On disagreement the
+  run aborts with the running container untouched — a mismatch now costs a deck, never
+  the site.
+- **Two health checks, reported separately.** The container is polled directly on its own
+  address and port, which proves the app came up without the reverse proxy being able to
+  hold the run hostage; the public URL is then polled as a distinct step, which proves the
+  proxy can reach it. The old script checked only the public URL, so it could not tell
+  those two failures apart.
+- **Rollback.** The running image is tagged `nce-safe-simulator:rollback` before the swap.
+  If either health check fails, `scripts/redeploy.sh --image nce-safe-simulator:rollback`
+  recreates the previous container (no rebuild — the source is unchanged, so rebuilding
+  would only reproduce the bad image) and the restored container is re-checked before the
+  run reports failure.
+
+`scripts/redeploy.sh --image <ref>` is generally useful for this: it skips the build and
+recreates the container from an image that already exists, in about two seconds.
+
+A note that costs time otherwise: `deploy/Caddyfile` is bind-mounted as a **single file**,
+so editing it on the host replaces the inode and the running Caddy keeps serving the old
+one — `docker exec caddy cat /etc/caddy/Caddyfile` still shows the previous content, and
+`caddy validate` inside the container validates the stale file. Restart the container for
+a Caddyfile edit to take effect. This also means a `git checkout` in the live tree changes
+what Caddy *will* load on its next restart, silently.
 
 ## Template
 
