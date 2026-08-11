@@ -65,7 +65,7 @@ fi
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 
 # 1. Build the image and (re)create the internal app container on nce-net.
-"$SCRIPT_DIR/redeploy.sh"
+NCE_BRINGUP=1 NCE_SITE_ADDR="${NCE_SITE_ADDR:-}" "$SCRIPT_DIR/redeploy.sh"
 
 # 2. Caddy — TLS terminator / reverse proxy on 80+443.
 #    caddy_data persists issued certs across restarts (no needless re-issue).

@@ -55,6 +55,55 @@ class TestRedeployRequiresAReverseProxy:
         assert "deploy-local.sh" in result.stderr
         assert "--workstation" in result.stderr
 
+    def test_does_not_abort_during_a_first_time_bring_up(self, tmp_path):
+        """deploy-local.sh calls redeploy.sh *before* it starts Caddy.
+
+        Guarding unconditionally makes the bring-up abort with advice to run the
+        command already running — the guard would break the one path that fixes
+        the condition it detects.
+        """
+        marker = tmp_path / "build-ran"
+        env = _stub(
+            tmp_path, "docker",
+            f'case "$1 $2" in "build "*|"build") touch {marker}; exit 0 ;; esac\n'
+            'case "$1" in inspect) exit 1 ;; esac\n'
+            'exit 0',
+        )
+        env["NCE_BRINGUP"] = "1"
+        result = subprocess.run(
+            [str(REDEPLOY)], capture_output=True, text=True,
+            env=env, cwd=str(REPO_ROOT),
+        )
+        assert "no 'caddy' container" not in result.stderr
+        assert marker.exists(), "the guard blocked a legitimate bring-up"
+
+    def test_completes_when_caddy_is_absent_during_bring_up(self, tmp_path):
+        """Reaching the end matters, not just skipping the guard.
+
+        redeploy.sh runs under `set -o pipefail`, so the closing line's
+        `docker inspect caddy | sed` inherits inspect's failure when Caddy does
+        not exist yet — taking the script down before deploy-local.sh can create
+        it. The bring-up dies with the app deployed and nothing serving it.
+        """
+        env = _stub(
+            tmp_path, "docker",
+            'case "$1" in inspect) exit 1 ;; esac\n'
+            'case "$1 $2" in "run --rm"*) echo nce-test ;; esac\n'
+            'exit 0',
+        )
+        env["NCE_BRINGUP"] = "1"
+        result = subprocess.run(
+            [str(REDEPLOY), "--image", "nce-safe-simulator:latest"],
+            capture_output=True, text=True, env=env, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Done." in result.stdout
+
+    def test_deploy_local_announces_the_bring_up(self):
+        """The exemption is only sound if deploy-local.sh actually sets it."""
+        text = DEPLOY_LOCAL.read_text()
+        assert "NCE_BRINGUP=1" in text and '"$SCRIPT_DIR/redeploy.sh"' in text
+
     def test_aborts_before_building_the_image(self, tmp_path):
         """The guard is worthless at the bottom: a full build then a refusal.
 
