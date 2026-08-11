@@ -57,9 +57,11 @@ cd "$REPO" || fail "cd repo"
 # again, so this stays.
 echo "--- credentials pre-flight ---"
 git ls-remote origin HEAD >/dev/null 2>&1 \
-  || fail "git auth pre-flight — cannot reach origin over HTTPS. The GitLab token in
-the cron's git credentials has most likely expired (this is what broke the
-2026-07-31 run). Rotate it (update ~/.git-credentials / the glab token), then re-run."
+  || fail "git auth pre-flight — cannot reach origin over HTTPS. The credential git uses
+(~/.git-credentials) has most likely expired — this is what broke the 2026-07-31 run.
+That is a *different* credential from glab's and from the API token, so 'glab' still
+working proves nothing here (#318). Rotation procedure, with the full credential map and
+a verification step per consumer:  docs/runbooks/gitlab-token-rotation.md"
 
 echo "--- sync $REF ---"
 git checkout "$REF"  || fail "git checkout $REF"
