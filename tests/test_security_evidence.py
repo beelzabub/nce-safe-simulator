@@ -264,6 +264,31 @@ def test_the_script_never_shells_out_to_glab_when_a_token_exists(monkeypatch):
 
 # ── the recipe ───────────────────────────────────────────────────────────────
 
+def test_a_rejected_token_is_reported_not_tracebacked(monkeypatch, capsys):
+    """CI's failure mode is a stale token variable; the log must say so."""
+    monkeypatch.setenv("GITLAB_API_TOKEN", "stale")
+    for var in ("SECURITY_EVIDENCE_TOKEN",):
+        monkeypatch.delenv(var, raising=False)
+
+    class _Denied:
+        status_code = 401
+
+        @staticmethod
+        def raise_for_status():
+            pytest.fail("should have been handled before raise_for_status")
+
+    monkeypatch.setattr(se.requests, "post", lambda *a, **k: _Denied())
+    monkeypatch.setattr(se.requests, "get", lambda *a, **k: _Denied())
+
+    for call in (lambda: se.gql("query {}"), lambda: se.api("projects/1/pipelines/2")):
+        with pytest.raises(SystemExit) as exc:
+            call()
+        assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "GITLAB_API_TOKEN" in err and "read_api" in err
+    assert "CI_JOB_TOKEN" in err          # names the thing people reach for next
+
+
 def test_recipe_checks_and_never_targets_docs_security():
     job = yaml.safe_load(RECIPE.read_text())["security-evidence"]
     script = " ".join(job["script"])

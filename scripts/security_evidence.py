@@ -90,12 +90,28 @@ def http():
     return token() if requests is not None else None
 
 
+def auth_error(status, where):
+    """A rejected token is a configuration problem — say so, don't traceback."""
+    var = next((v for v in TOKEN_VARS if os.environ.get(v)), None)
+    print(f"error: GitLab rejected the token with HTTP {status} on {where}.\n"
+          f"       The token came from ${var}. It is present but not accepted — "
+          f"expired,\n       revoked, or without the read_api scope.\n"
+          f"       In CI: check that variable holds a CURRENT token with read_api. "
+          f"CI_JOB_TOKEN\n       cannot read project vulnerabilities, so it is not an "
+          f"alternative here.\n"
+          f"       Recognised variables, in order: {', '.join(TOKEN_VARS)}.",
+          file=sys.stderr)
+    sys.exit(1)
+
+
 def gql(q):
     tok = http()
     if tok:
         # .../api/v4 → .../api/graphql
         url = api_v4().rsplit("/", 1)[0] + "/graphql"
         r = requests.post(url, headers={"PRIVATE-TOKEN": tok}, json={"query": q}, timeout=60)
+        if r.status_code in (401, 403):
+            auth_error(r.status_code, "the GraphQL endpoint")
         r.raise_for_status()
         return r.json()
     out = subprocess.run(["glab", "api", "graphql", "-f", f"query={q}"],
@@ -112,6 +128,10 @@ def api(path):
     if tok:
         r = requests.get(f"{api_v4()}/{path.lstrip('/')}",
                          headers={"PRIVATE-TOKEN": tok}, timeout=60)
+        # A rejected token here would silently empty the scanner metadata rather
+        # than fail — the one 4xx worth stopping on.
+        if r.status_code in (401, 403):
+            auth_error(r.status_code, f"/{path.lstrip('/').split('?')[0]}")
         return r.text if r.status_code == 200 else None
     r = subprocess.run(["glab", "api", path], capture_output=True, text=True)
     return r.stdout if r.returncode == 0 else None
