@@ -2,22 +2,43 @@
 
 ## Provenance
 
-- **Scanned commit:** `develop @ 2dbd11f0`
-- **Scan:** pipeline [#2746483470](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/pipelines/2746483470), 2026-08-10
+- **Scanned commit:** `develop @ af0714ff`
+- **Scan:** pipeline [#2749370099](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/pipelines/2749370099), 2026-08-11
 - **Scanners:** Trivy 0.72.0, Gitleaks 8.30.1, Semgrep 1.145.0
 - **Disposition authority:** Reviewed and approved under issue #304 — container OS-package dispositions per the D4 review (note 3650491306), approved 2026-08-10.
 - **Source:** GitLab Vulnerability Report; regenerate with `scripts/security_evidence.py`.
 - **Full flat register:** [`dispositions.csv`](dispositions.csv) — one row per finding.
 
-## 0 open · 237 accepted / N/A · 97 remediated
+## Refreshing this register
+
+**When.** After anything that moves the dependency or image surface — a requirements bump, a base-image refresh, a Dockerfile change — and after the scanners have reconciled the register on the default branch. Scans only reconcile from the default branch's **own** pipeline jobs (#315), so the sequence is: merge, run `RECIPE=security-all` on the default branch, let it finish, then refresh this file.
+
+**Checking whether it is stale.** Run the recipe — `RECIPE=security-evidence` (see [`ci-recipes/README.md`](../../ci-recipes/README.md)) — or locally:
+
+```bash
+scripts/security_evidence.py --check
+```
+
+It regenerates the register somewhere harmless, prints what moved (findings added, no longer reported, or with a changed disposition), publishes the regenerated files as job artifacts, and **exits green whether or not there is drift**. It never writes to `docs/security` and never commits. Drift is information; a job that failed on it would only teach people to wave it through.
+
+**Refreshing it for real.**
+
+```bash
+scripts/security_evidence.py          # rewrites the three files in place
+git add docs/security && git commit   # a deliberate review step
+```
+
+**The commit is the point.** This register carries a disposition authority — an assertion that a person reviewed these findings and accepted the risk. The justifications are human-written; regeneration only re-reads them from the Vulnerability Report. So nothing automated commits this file: a job that re-stamped the approval on every push would be asserting a review nobody performed, which makes the artifact worth less as evidence, not more.
+
+## 0 open · 238 accepted / N/A · 97 remediated
 
 | Scanner | Open (Detected) | Accepted / N/A (Dismissed) | Remediated (Resolved) |
 |---|---:|---:|---:|
-| Container Scanning | 0 | 186 | 21 |
+| Container Scanning | 0 | 187 | 21 |
 | Dependency Scanning | 0 | 1 | 11 |
 | SAST / IaC | 0 | 47 | 58 |
 | Secret Detection | 0 | 3 | 7 |
-| **Total** | **0** | **237** | **97** |
+| **Total** | **0** | **238** | **97** |
 
 ## Accepted-risk & not-applicable register (dismissed)
 
@@ -138,7 +159,7 @@ Every accepted finding, its identifier and severity, and the justification for a
 | [345912128](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912128) | CVE-2010-4756 | libc-bin | LOW |
 | [345912126](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912126) | CVE-2019-1010024 | libc-bin | LOW |
 
-### Container · `perl` — 15 findings · **Not applicable**
+### Container · `perl` — 16 findings · **Not applicable**
 *Justification:* Not applicable — no perl execution path. The container runs a single python/uvicorn process; nothing in the app, scripts, or runtime tooling invokes perl (verified across the repo, #304). perl-base is present only because it is a dpkg Essential package (cannot be removed without breaking dpkg/apt). Worst-case impact of the perl-base CVE set is a crash of a perl process that never runs. No fixed perl-base exists in Debian trixie: verified 2026-08-06 against freshly pulled python:3.11-slim and python:3.13-slim — both Debian 13.6 with the same perl-base 5.40.1-6. The Dockerfile's unpinned base tag means a routine rebuild picks up Debian's fix automatically once released, after which this finding stops appearing in scans. Refs #304.
 
 | Vuln | CVE | Package | Severity |
@@ -157,6 +178,7 @@ Every accepted finding, its identifier and severity, and the justification for a
 | [345912196](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912196) | CVE-2026-48959 | perl-base | MEDIUM |
 | [345912188](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912188) | CVE-2026-12087 | perl-base | MEDIUM |
 | [345912211](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912211) | CVE-2011-4116 | perl-base | LOW |
+| [351666858](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/351666858) | CVE-2026-15534 | perl-base | UNKNOWN |
 | [345912303](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-safe-simulator/-/security/vulnerabilities/345912303) | CVE-2026-7017 | perl-base | UNKNOWN |
 
 ### Container · `shell-utils` — 14 findings · **Not applicable**
