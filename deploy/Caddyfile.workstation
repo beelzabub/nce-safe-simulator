@@ -1,0 +1,50 @@
+# Caddy config for the development WORKSTATION (nce-git-ops workstation, #32).
+#
+# Unlike deploy/Caddyfile — which fronts the live site at nce-safe-sim.com with
+# a public Let's Encrypt certificate — this box has no DNS name pointing at it.
+# The apex belongs to the standalone live box, so the workstation is reached by
+# its Elastic IP, and no public CA will vouch for a bare IP address. Caddy
+# therefore runs its own internal CA and issues the certificate itself.
+#
+# Consequence: browsers show a trust warning on first visit. To remove it,
+# install Caddy's root CA on the client once:
+#
+#   docker exec caddy cat /data/caddy/pki/authorities/local/root.crt
+#
+# The CA and the leaf live in the caddy_data volume, so they survive container
+# restarts and the warning only has to be dismissed once per client.
+#
+# Brought up by scripts/deploy-local.sh --workstation; the app container is
+# swapped in place by scripts/redeploy.sh without touching Caddy.
+#
+# Substituted at load time (deploy-local.sh sets both):
+#   NCE_SITE_ADDR   address to serve — the box's public IP.
+#   NCE_ALLOW_CIDR  space-separated CIDRs permitted to reach the app; every
+#                   other source gets a 403. Defaults to open.
+
+{
+	# A client connecting to a bare IP sends no SNI — the TLS extension carries a
+	# *name*, and an address literal has none (curl and every browser both omit
+	# it). Without this, Caddy has nothing to match the site block against, finds
+	# no certificate, and kills the handshake with an internal-error alert before
+	# any HTTP is spoken. Naming the site as the default SNI is what makes
+	# https://<ip>/ work at all.
+	default_sni {$NCE_SITE_ADDR}
+}
+
+https://{$NCE_SITE_ADDR} {
+	# No public ACME: an internal CA needs no challenge, so this works on a box
+	# whose 443 is closed to everything but the admin CIDR, and there is no
+	# 60-day renewal that can fail unattended.
+	tls internal
+
+	encode gzip
+
+	# Access control enforced here as well as in the security group, so widening
+	# the SG later (or running this on a box that never narrowed it) does not
+	# silently put the app and its login on the open internet.
+	@blocked not remote_ip {$NCE_ALLOW_CIDR:0.0.0.0/0 ::/0}
+	respond @blocked "not authorized" 403
+
+	reverse_proxy nce-safe-sim:8080
+}
