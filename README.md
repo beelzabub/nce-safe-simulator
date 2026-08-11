@@ -1600,6 +1600,46 @@ and the domain binding are left untouched, so the site at
 TLS churn. Use `make deploy-local` only for a full bring-up or after changing the
 Caddy config (`deploy/Caddyfile`).
 
+`redeploy.sh` **refuses to run where no `caddy` container exists.** It publishes
+no ports itself — Caddy owns 80/443 and reaches the app over the `nce-net`
+Docker network — so on a box that never had a first-time bring-up it would
+otherwise create an app container reachable from nothing and report a live site
+running on a different machine. If you see that error, you want `deploy-local.sh`
+(below) first.
+
+### Serving from a development workstation
+
+The [nce-git-ops workstation](https://gitlab.com/gl-demo-ultimate-lmwilliams/nce-git-ops)
+is a separate box from the live site, and it has no DNS name of its own — it is
+reached at its Elastic IP. Bring it up with:
+
+```bash
+scripts/deploy-local.sh --workstation      # https on this box's own public IP
+```
+
+The address is read from IMDS; override with `NCE_SITE_ADDR=<ip>` on a box behind
+NAT. `NCE_ALLOW_CIDR="203.0.113.4/32"` restricts which sources may reach the app
+(everything else gets a 403), and pairs with the security group rule that opens
+443 — the rule lives in `workstation/terraform/security.tf` in nce-git-ops and is
+scoped to `admin_cidr`.
+
+**No public CA will issue a certificate for a bare IP address**, so this mode
+uses Caddy's own internal CA (`deploy/Caddyfile.workstation`) rather than Let's
+Encrypt. Two consequences:
+
+- Browsers show a trust warning on first visit. To remove it on a client,
+  install the root once:
+  `docker exec caddy cat /data/caddy/pki/authorities/local/root.crt`
+- Because there is no ACME challenge to answer, port 80 is never published and
+  443 can be closed to everything but `admin_cidr`. A public certificate would
+  need 443 reachable by the CA's validators at every renewal — it would issue
+  fine and then quietly expire about 60 days later.
+
+The config sets `default_sni`, which is load-bearing: a TLS client connecting to
+a bare IP sends no SNI (the extension carries a *name*, and an address literal
+has none), so without it Caddy matches no site, presents no certificate, and
+aborts the handshake before any HTTP is spoken.
+
 To poke around inside the running app container (inspect logs, mounted state,
 the baked-in code):
 

@@ -41,6 +41,37 @@ if [ "${1:-}" = "--image" ]; then
   echo "==> Recreating from existing image ($IMAGE) — no build."
 fi
 
+# Precondition: this script is the ITERATIVE path — it deliberately publishes no
+# ports, because Caddy is meant to be the only thing on 80/443 and reaches the
+# app over $NETWORK. That is correct on a box where deploy-local.sh has been run
+# once, and silently wrong on one where it has not: the app comes up reachable
+# from nothing, and the closing "Live at ..." message asserts a site that does
+# not exist. "Caddy untouched" and "Caddy absent" used to print identically.
+#
+# NCE_BRINGUP is deploy-local.sh announcing that it is mid-first-time-bring-up
+# and will start Caddy itself the moment this returns. Without that exemption
+# the guard fires during the very bring-up that fixes it, and tells the operator
+# to run the command they are already running.
+if [ -z "${NCE_BRINGUP:-}" ] && ! docker inspect caddy >/dev/null 2>&1; then
+  echo "ERROR: no 'caddy' container on this box — there is no reverse proxy to" >&2
+  echo "       serve the app, and this script does not publish any ports itself." >&2
+  echo "       You are on a box that has never had a first-time bring-up. Run:" >&2
+  echo "         scripts/deploy-local.sh               # live site (nce-safe-sim.com)" >&2
+  echo "         scripts/deploy-local.sh --workstation # dev box (https on its public IP)" >&2
+  echo "       Then use this script for subsequent code updates." >&2
+  exit 1
+fi
+
+# Existing but stopped is a different failure: the bring-up did happen, so the
+# swap below is safe to do, but the site is down and the closing "Live at ..."
+# would be just as untrue. Warn rather than abort — the fix is one command and
+# does not require rebuilding anything.
+if [ -z "${NCE_BRINGUP:-}" ] && [ "$(docker inspect caddy --format '{{.State.Running}}' 2>/dev/null)" != "true" ]; then
+  echo "==> WARNING: the 'caddy' container exists but is not running — the app" >&2
+  echo "             will be swapped, but nothing is serving it. Start it with:" >&2
+  echo "               docker start caddy" >&2
+fi
+
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ -z "$SKIP_BUILD" ] && [ "$BRANCH" != "develop" ]; then
   echo "==> NOTE: building from '$BRANCH', not develop. The live site will run" >&2
@@ -166,4 +197,18 @@ docker run -d --name "$APP" --restart unless-stopped \
   "$IMAGE"
 
 docker image prune -f >/dev/null 2>&1 || true
-echo "==> Done. Live at https://nce-safe-sim.com (Caddy untouched)."
+
+# Report the address Caddy is actually serving rather than assuming the live
+# site: --workstation sets NCE_SITE_ADDR on the Caddy container, and printing
+# nce-safe-sim.com on a dev box sends people to the wrong machine.
+#
+# `|| true` is load-bearing under `set -o pipefail`: during a first-time
+# bring-up Caddy does not exist yet, so `docker inspect` fails, the pipeline
+# inherits that status, and the assignment takes the whole script down with it —
+# before deploy-local.sh ever gets to create Caddy.
+# deploy-local.sh passes NCE_SITE_ADDR during bring-up, when Caddy does not
+# exist yet to be asked.
+SITE="${NCE_SITE_ADDR:-}"
+[ -n "$SITE" ] || SITE="$(docker inspect caddy --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+  | sed -n 's/^NCE_SITE_ADDR=//p' || true)"
+echo "==> Done. Live at https://${SITE:-nce-safe-sim.com} (Caddy untouched)."
