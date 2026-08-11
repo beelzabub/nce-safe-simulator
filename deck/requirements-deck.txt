@@ -3,3 +3,7 @@ python-pptx
 Pillow
 PyYAML
 segno
+# Imported directly by build_deck.py and slides/243-*/build_brief.py. It also
+# arrives as a python-pptx dependency, which is why it ran for a year undeclared
+# — don't drop it as redundant: a direct import needs a direct declaration.
+lxml
