@@ -18,8 +18,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
 image: python:latest
 
+# ── Security scanners run in the PARENT pipeline, not the child router (#315) ──
+# The recipe router (below) runs recipes as CHILD pipelines via trigger:include,
+# because a top-level include can't interpolate the run-time $RECIPE in its path.
+# But GitLab's Vulnerability Report reconciles the project register only from the
+# DEFAULT-BRANCH parent pipeline's own security reports — a scanner one level down
+# in a child never updates it. That is #315: a green RECIPE=security-all sweep
+# scanned fine but left the register frozen until it was reconciled by hand.
+#
+# So security is exempted from the router and included here as parent-level jobs
+# instead: a STATIC path (no $RECIPE interpolation to defer), gated by a rule on
+# the same RECIPE value. On a default-branch run — manual or a scheduled
+# RECIPE=security-all — the scanners are now the parent's own jobs and the
+# register reconciles natively. Feature-branch runs still feed the MR security
+# widget, exactly as before. The router keeps handling every non-security recipe,
+# where the child-pipeline model is fine (those don't feed the security board).
+include:
+  - local: 'ci-recipes/security-all.yml'
+    rules:
+      - if: '$RECIPE == "security-all"'
+
 stages:
   - build
+  - test          # GitLab's security templates place their jobs here (#315)
   - containerize
 
 # The router itself: resolves which recipe file to run only when the trigger
@@ -28,6 +49,12 @@ stages:
 recipe:
   stage: build
   rules:
+    # security-all is handled as parent-level jobs (the top-level include above),
+    # so it must NOT also spawn a child here — that child pipeline is exactly what
+    # bypassed the Vulnerability Report (#315). Every other recipe still routes to
+    # a child pipeline, where the child model is fine.
+    - if: '$RECIPE == "security-all"'
+      when: never
     - if: $RECIPE
   trigger:
     include:

@@ -42,6 +42,17 @@ In the UI the parent pipeline shows a single `recipe` trigger job; the child
 pipeline hangs off it as a downstream pipeline, and its result is the parent's
 result (`strategy: depend`).
 
+**Exception — `security-all` (#315).** GitLab's Vulnerability Report reconciles
+the project register only from the default-branch **parent** pipeline's own
+security reports, so a scanner run in a child never updates it. `RECIPE=security-all`
+is therefore exempted from the router and included as **parent-level jobs** by
+`.gitlab-ci.yml` (a static, rule-gated `include`). On a default-branch run —
+manual or scheduled — the scanners are the parent's own jobs and the register
+reconciles natively; on a feature branch they feed the MR security widget. The
+per-scanner `security-*` recipes still run as child pipelines (they're for
+learning one surface at a time, not maintaining the register — run `security-all`
+for that).
+
 ## Before you run one
 
 Open the recipe and read its header — it lists how to run it and the
@@ -62,7 +73,7 @@ masked CI/CD variables, never in the file.
 | [`security-dependency-scanning.yml`](security-dependency-scanning.yml) | Known-vulnerable dependency versions from requirements.txt + frontend lockfiles, plus the Dependency list SBOM view. |
 | [`security-container-scanning.yml`](security-container-scanning.yml) | CVE scan (Trivy) of the project's own runtime image from the Container Registry (`CS_IMAGE` to scan another). |
 | [`security-iac.yml`](security-iac.yml) | Infrastructure-as-code misconfiguration scan (KICS) over cdk/, helm/, Dockerfile. |
-| [`security-all.yml`](security-all.yml) | All five scanners in one child pipeline — the one-shot audit / the recipe to schedule. |
+| [`security-all.yml`](security-all.yml) | All five scanners — the one-shot audit / the recipe to schedule. **Exempt from the router (#315):** runs as parent-pipeline jobs so `Secure → Vulnerability report` reconciles the register natively (a child pipeline's reports never reach it). |
 
 **Tuning findings (issue #287):** [`.gitlab/sast-ruleset.toml`](../.gitlab/sast-ruleset.toml) disables whole-class false positives at scan time — the analyzer auto-detects it, no CI change needed. The top-level table is the *analyzer* name (`[semgrep]`, `[kics]`), not `sast`. It only affects the branch it lives on, so it must reach `develop` to clear the Vulnerability Report there. For one-off false positives, dismiss the finding in the Vulnerability Report with a reason + comment instead (dismissals persist across scans). The `#287` agentic triage of the SAST backlog is written up in [`security-fix-via-graph-eng.md`](../security-fix-via-graph-eng.md).
 
