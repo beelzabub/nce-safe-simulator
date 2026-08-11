@@ -89,6 +89,17 @@ echo "==> Recreating app container ($APP)..."
 # lost on every redeploy.
 mkdir -p reports logs quarto-site public/interactive public/exports uploads
 
+# config.json is bind-mounted read-write below (the in-app settings editor
+# writes through it). If it's missing, Docker's bind-mount creates the source
+# as a DIRECTORY — which breaks config loading and pytest collection with
+# IsADirectoryError — so ensure it exists as a real file first, seeded from the
+# example. A directory here is always a stale mount artifact, never real config.
+if [ -d config.json ]; then
+  echo "    config.json is a directory (a prior bind-mount created it) — replacing with a file" >&2
+  rm -rf config.json
+fi
+[ -f config.json ] || cp config.example.json config.json
+
 # The app container runs as uid 1000 (`USER app`, #304) — the bind-mounted
 # dirs and the UI-writable config.json (PUT /api/config/full) must be
 # writable by that uid, recursively, so existing root-created files can be
