@@ -291,6 +291,26 @@ Logs land in `deck/dist/weekly-logs/` and the systemd journal
 (`journalctl -u nce-status-deck.service`). Prerequisites on the box: `glab`/`aws` auth, the
 `claude` CLI, Docker, network to the live app, and `sns:Publish` on the instance role.
 
+### Credentials (issue #318)
+
+When the credentials pre-flight fails, the recovery procedure is
+**[docs/runbooks/gitlab-token-rotation.md](../docs/runbooks/gitlab-token-rotation.md)**.
+Read it before editing anything: the box holds **three distinct GitLab credentials** across
+five locations — the API token (in `~/.config/nce/env` and both clones' `config.json`), a
+*different* credential in `~/.git-credentials` that `git pull` uses, and a *third* that
+`glab` keeps in its own config. `glab` will keep working while the other two are stale,
+which is what makes a partial rotation easy to miss.
+
+**The `config.json` dependency — do not "fix" it by accident.** This unit sets no
+`GITLAB_TOKEN` and systemd does not read `~/.bashrc`, so the Friday cron's `redeploy.sh`
+passes `-e GITLAB_TOKEN=""` to the container. That is harmless: `NceGitLab.py` checks
+`if gitlab_token_env:`, an empty string is falsy, and resolution falls through to
+`config.json`'s `private_token`. But it means **the app on this box depends on the
+`config.json` copy, not the environment** — removing `private_token` on the assumption that
+the environment carries it breaks the Friday deploy, and nothing reveals that until Friday.
+The runbook covers the `EnvironmentFile=` change that would make the env var reach the cron
+path, if you want to remove that dependency deliberately.
+
 
 ### Deploy safety (issue #309)
 
