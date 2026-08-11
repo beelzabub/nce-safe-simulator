@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe: is the committed security evidence still current? (issue #317)
+#
+# Run it:   pipeline with variable RECIPE=security-evidence
+#           (or: glab ci run -b <branch> --variables RECIPE:security-evidence)
+#
+# Regenerates docs/security/{EVIDENCE.md,dispositions.csv,evidence.json} from the
+# live Vulnerability Report, publishes them as job ARTIFACTS, and prints what
+# changed against the committed copy. It writes nothing into the repo and
+# commits nothing — read the log, and if the register has moved, regenerate and
+# commit it by hand.
+#
+# **The job is green whether or not there is drift.** Drift is information, not
+# a failure. Gating the pipeline on it would pressure people into rubber-stamping
+# a register whose entire value is that a human read it and accepted the risk —
+# the disposition authority in EVIDENCE.md is exactly that assertion.
+#
+# WHAT THE LOG TELLS YOU
+#   • the provenance of the committed register vs. what a fresh run produces
+#   • findings not in the committed register / no longer reported / with a
+#     changed disposition, each with its ID, severity, component and CVE
+#   • a normalised diff of the rendered files (the scan sha, timestamp, pipeline
+#     id and per-report SHA-256 change on every run, so they are excluded — only
+#     real movement is reported)
+#   • a plain verdict: CURRENT, or STALE with the two commands that refresh it
+#
+# Prerequisites in YOUR space:
+#   • A GitLab token with `read_api` as a masked CI/CD variable — any of
+#     SECURITY_EVIDENCE_TOKEN, GITLAB_API_TOKEN or GITLAB_TOKEN (checked in that
+#     order). CI_JOB_TOKEN CANNOT read project vulnerabilities, so the built-in
+#     token is not an option here. A project access token with read_api is the
+#     tightest fit.
+#     NOTE: a variable marked "Protected" is only injected on protected refs — on
+#     an unprotected branch it arrives empty and the job fails on the API call.
+#   • The runtime image exists in the Container Registry (the `containerize` job
+#     has run at least once), same as the other recipes.
+#   • The scanners have run on the DEFAULT branch at least once, so the
+#     Vulnerability Report has something to report. See #315: scans must be the
+#     default-branch parent pipeline's own jobs to reconcile the register, which
+#     is why `security-all` is exempt from this router.
+#
+# WHICH SCAN IT CITES
+# Not this pipeline — this one runs no scanners. The script resolves the most
+# recent default-branch pipeline that actually produced security reports and
+# cites that, stamping the register with the commit THAT pipeline scanned.
+#
+# WHERE THIS IS MEANINGFUL
+# The Vulnerability Report is a project-level register fed by default-branch
+# runs, so a feature-branch run of this recipe still reports on the default
+# branch's posture, not the branch's. That makes the natural home for it a
+# pipeline schedule (Build → Pipeline schedules) defining
+# RECIPE=security-evidence — weekly drift detection nobody has to remember.
+#
+# Air-gap note: runs entirely inside the project's own runtime image and talks
+# only to this GitLab instance's API ($CI_API_V4_URL). No `glab`, no downloads.
+# ─────────────────────────────────────────────────────────────────────────────
+stages: [evidence]
+
+security-evidence:
+  stage: evidence
+  image:
+    name: $CI_REGISTRY_IMAGE:latest
+    # The runtime image's ENTRYPOINT is the served app — it would swallow the
+    # runner's job script. Blank it so the runner gets a plain shell.
+    entrypoint: [""]
+  script:
+    # --check regenerates into --out (never docs/security), diffs it against the
+    # committed copy, prints the verdict and exits 0. Provenance — the scan
+    # pipeline, its commit, the timestamp — resolves itself; nothing to pass.
+    - python scripts/security_evidence.py --check --out build/security-evidence
+  artifacts:
+    name: "security-evidence-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/security-evidence/
+    expire_in: 30 days
+    # Publish them even when the job is interrupted or the API call fails
+    # partway: a partial candidate is still evidence of what went wrong.
+    when: always
