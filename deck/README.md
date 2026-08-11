@@ -293,23 +293,39 @@ Logs land in `deck/dist/weekly-logs/` and the systemd journal
 
 ### Credentials (issue #318)
 
-When the credentials pre-flight fails, the recovery procedure is
-**[docs/runbooks/gitlab-token-rotation.md](../docs/runbooks/gitlab-token-rotation.md)**.
-Read it before editing anything: the box holds **three distinct GitLab credentials** across
-five locations — the API token (in `~/.config/nce/env` and both clones' `config.json`), a
-*different* credential in `~/.git-credentials` that `git pull` uses, and a *third* that
-`glab` keeps in its own config. `glab` will keep working while the other two are stale,
-which is what makes a partial rotation easy to miss.
+The shared GitLab and GitHub tokens live **once**, in SSM Parameter Store
+(`/nce/gitlab/token`, `/nce/github/token`), and every consumer fetches at the moment it
+needs the value. Nothing is stored on the box. Rotation is one command from any box with
+AWS access:
 
-**The `config.json` dependency — do not "fix" it by accident.** This unit sets no
-`GITLAB_TOKEN` and systemd does not read `~/.bashrc`, so the Friday cron's `redeploy.sh`
-passes `-e GITLAB_TOKEN=""` to the container. That is harmless: `NceGitLab.py` checks
-`if gitlab_token_env:`, an empty string is falsy, and resolution falls through to
-`config.json`'s `private_token`. But it means **the app on this box depends on the
-`config.json` copy, not the environment** — removing `private_token` on the assumption that
-the environment carries it breaks the Friday deploy, and nothing reveals that until Friday.
-The runbook covers the `EnvironmentFile=` change that would make the env var reach the cron
-path, if you want to remove that dependency deliberately.
+```sh
+nce-credentials check      # is it healthy, and when does it expire
+nce-credentials rotate     # replace it — one write, every box, verified
+```
+
+`check` validates three ways — it authenticates, it has the scopes its consumers need,
+and it is **not within 14 days of expiring**. The last is the one that matters here: the
+2026-07-31 run died on a token that was valid the day before, and expiry is the only one
+of the three that can be seen coming.
+
+Full procedure, including what to do on a box with no AWS access:
+**[docs/runbooks/gitlab-token-rotation.md](../docs/runbooks/gitlab-token-rotation.md)**.
+
+**This run fetches its own token.** systemd does not read `~/.bashrc`, so before #318 the
+cron passed `-e GITLAB_TOKEN=""` to the container and `NceGitLab.py` fell through to
+`config.json`'s `private_token` — harmless (an empty string is falsy) but it meant the
+Friday run silently depended on a copy nobody rotated. `weekly-status-deck.sh` now fetches
+`GITLAB_TOKEN` before the pre-flight; the log line is
+`credentials: GITLAB_TOKEN fetched from SSM`.
+
+That is also why the `EnvironmentFile=` change this README used to point at was
+**dropped** — one fetch achieves the same thing without reformatting the env file or
+coupling this unit to the workstation's ansible.
+
+**Still true, so do not "fix" it by accident:** on a box that has not been migrated,
+`private_token` in `config.json` is what the app is really using. Prove a real timer run
+logs the fetch line before you empty it — the failure mode is a Friday outage, and
+nothing reveals it until Friday.
 
 
 ### Deploy safety (issue #309)

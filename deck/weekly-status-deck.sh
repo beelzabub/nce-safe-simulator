@@ -50,6 +50,31 @@ Log on the box: $LOG"
 echo "=== weekly status deck @ $(TZ=America/Los_Angeles date '+%F %T %Z') ==="
 cd "$REPO" || fail "cd repo"
 
+# --- shared credentials (issue #318) ----------------------------------------
+# systemd does not read ~/.bashrc, so this path inherits none of the shell's
+# environment. Before #318 that meant redeploy.sh passed -e GITLAB_TOKEN="" to
+# the container and the app fell through to config.json's private_token. That
+# worked — an empty string is falsy, so resolution continued — but it made the
+# Friday run silently depend on a copy of the credential that nobody was
+# rotating, and that anyone "tidying up" config.json would remove without
+# discovering the cost until the following Friday.
+#
+# Fetching here puts the cron path on the same shared value as every other
+# consumer, so rotation covers it too. This is also why #318's EnvironmentFile=
+# change was dropped: it existed to get the token into this process, and one
+# fetch does that without reformatting the env file or coupling the deck's
+# systemd unit to the workstation's ansible.
+#
+# Guarded and non-fatal on purpose. An already-set variable wins (a manual run
+# that exported one, a CI/CD variable), and a box with no nce-credentials or no
+# AWS access carries on exactly as before, falling through to config.json. The
+# one thing this must never become is a new way for Friday to fail.
+if [ -z "${GITLAB_TOKEN:-}" ] && [ -x /usr/local/bin/nce-credentials ]; then
+  GITLAB_TOKEN="$(/usr/local/bin/nce-credentials get gitlab 2>/dev/null || true)"
+  export GITLAB_TOKEN
+  [ -n "$GITLAB_TOKEN" ] && echo "--- credentials: GITLAB_TOKEN fetched from SSM ---"
+fi
+
 # --- credentials pre-flight (issue #258) ------------------------------------
 # The 2026-07-31 run died at `git pull` on an expired GitLab token — a silent
 # step-1 death after the timer had already fired. Check auth up front and fail
@@ -58,10 +83,15 @@ cd "$REPO" || fail "cd repo"
 echo "--- credentials pre-flight ---"
 git ls-remote origin HEAD >/dev/null 2>&1 \
   || fail "git auth pre-flight — cannot reach origin over HTTPS. The credential git uses
-(~/.git-credentials) has most likely expired — this is what broke the 2026-07-31 run.
-That is a *different* credential from glab's and from the API token, so 'glab' still
-working proves nothing here (#318). Rotation procedure, with the full credential map and
-a verification step per consumer:  docs/runbooks/gitlab-token-rotation.md"
+has most likely expired — this is what broke the 2026-07-31 run. On a box still using
+per-consumer credentials that is ~/.git-credentials, which is a *different* credential
+from glab's and from the API token, so 'glab' still working proves nothing here. On a box
+migrated to the shared store (#318) every consumer reads one value and 'nce-credentials
+check' will say exactly which part is wrong — it also warns BEFORE expiry, which is the
+whole reason this failure is worth preventing rather than reporting. Run:
+  nce-credentials check      then, if needed:   nce-credentials rotate
+Full credential map and a verification step per consumer:
+  docs/runbooks/gitlab-token-rotation.md"
 
 echo "--- sync $REF ---"
 git checkout "$REF"  || fail "git checkout $REF"

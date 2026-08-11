@@ -1,258 +1,208 @@
-# Runbook — rotating the GitLab credentials
+# Runbook — rotating the GitLab and GitHub credentials
 
 Issue #318. Written because the 2026-07-31 weekly deck run died at `git pull` on an
 expired token, and rotating it meant finding every copy under time pressure with no
 written procedure.
 
-**Read this first, before you start editing files:** the boxes do not hold *one* token
-in several places. The deck box holds **three distinct GitLab credentials** across five
-locations. Replacing "the token" everywhere with a single new value will silently change
-what three different consumers authenticate as.
+**The short version, on any box with AWS access:**
+
+```sh
+nce-credentials check      # what is stored, is it healthy, when does it expire
+nce-credentials rotate     # replace it — one write, every box, verified
+```
+
+Everything below explains what that does, what to do where it does not apply, and
+what changed from the five-location model this runbook used to describe.
 
 ---
 
-## When you need this
+## The model
 
-- The weekly deck run fails at the **credentials pre-flight** (`git auth pre-flight —
-  cannot reach origin over HTTPS`). That is the #258 guard doing its job; this runbook is
-  the recovery.
-- A token is expiring, was exposed, or is being rotated on schedule.
-- `glab` works but `git pull` fails, or vice versa — the classic symptom of a *partial*
-  rotation, because each consumer reads a different copy.
+One value per credential, stored once in **SSM Parameter Store**, fetched by every
+consumer at the moment it is needed:
 
----
+| Credential | Stored | Read by |
+|---|---|---|
+| GitLab token | `/nce/gitlab/token` (SecureString) | shells, `git` via the credential helper, `glab`, the app, the weekly deck run |
+| GitHub token | `/nce/github/token` (SecureString) | shells, `git` via the credential helper, `gh` |
+| AWS | **not stored — cannot be** | the EC2 instance role |
 
-## The credential map
+Nothing is written to disk on any box. Rotation is one `put-parameter`, and a rebuilt
+workstation is prompted for no token at all — it inherits read access from its instance
+role.
 
-### Deck box (`powers-dev`, work happens as `root`)
+### Why AWS is not in the table
 
-| # | Location | Field | Consumer | Distinct credential |
-|---|---|---|---|---|
-| 1 | `~/.config/nce/env` | `GITLAB_TOKEN` | interactive shells; anything sourcing it | **A** |
-| 2 | `/root/.venv/nce-safe-simulator/config.json` | `private_token` | the app in the live clone | **A** (same value) |
-| 3 | `/root/.venv/nce-safe-simulator-2/config.json` | `private_token` | the app the **Friday cron** redeploys | **A** (same value) |
-| 4 | `~/.git-credentials` | https password | `git pull` / `git push` over HTTPS | **B** |
-| 5 | `~/.config/glab-cli/config.yml` | `hosts.gitlab.com.token` | the `glab` CLI | **C** |
+You need AWS credentials to read Parameter Store, so the AWS credential is the one that
+can never live in it. It is also the credential that *guards* the others: a static key
+sitting on disk next to a fetch script does not reduce exposure, it just moves it —
+anyone who takes the box takes the key and then reads every token in SSM.
 
-Credential **B** is what failed on 2026-07-31. Credential **C** is a different length and
-format from A and B — `glab` keeps its own and will keep working while the others are
-stale, which is exactly why a partial rotation is hard to notice.
+So AWS access comes from the **instance role**: short-lived, machine-bound, rotated by
+EC2, and impossible to exfiltrate at rest. `nce-credentials check` verifies this by
+asking what *kind* of identity is in play, and flags static IAM user keys as a finding.
 
-### Dev workstation (nce-git-ops #32)
+### The precedence ladder — SSM is a source, not the source
 
-| # | Location | Field | Consumer | Distinct credential |
-|---|---|---|---|---|
-| 1 | `~/.config/nce/env` | `GITLAB_TOKEN` | **everything** | **A** (same value as the deck box) |
+This must not make the code less portable than it was. The simulator runs in CI, in
+containers, on laptops, and on boxes somebody cloned it onto with their own token —
+none of which have an instance role or any reason to reach Parameter Store. The
+existing precedence is preserved exactly and SSM slots in as a fallback:
 
-The workstation stores the credential **once**. `git` reads it through a host-scoped
-credential helper that pulls `$GITLAB_TOKEN` from the environment (nce-git-ops `c71875e`),
-`glab` reads the same environment variable, and the simulator clone's `config.json` has
-`private_token` deliberately **empty** so the app falls through to the env var.
+1. `$GITLAB_TOKEN` / `$GITHUB_TOKEN` **already in the environment** — a CI/CD masked
+   variable, a manual export, `-e` on a container. **Always wins.**
+2. **SSM Parameter Store** — fetched into that variable only when it is unset.
+3. **`config.json` `private_token`** — the app's own fallback, in `NceGitLab.py`,
+   untouched by any of this.
+4. **`ACCESS_TOKEN`** — deprecated, still honoured.
 
-Because the workstation shares credential **A** with the deck box, rotating A means
-updating both machines.
+Every fetch site is guarded with `[ -n "${GITLAB_TOKEN:-}" ] ||`, so a runner with a CI
+variable set never calls AWS at all, and a box with no AWS access falls through to
+`config.json` exactly as it does today.
 
-### Confirming the map yourself
-
-Fingerprints are not recorded here — they change on every rotation, and a stale fingerprint
-in a doc is worse than none. Derive them when you need them; this prints which locations
-agree without revealing any value:
-
-```sh
-fp() { printf '%s' "$1" | sha256sum | cut -c1-12; }
-
-fp "$(grep -E '^[[:space:]]*export[[:space:]]+GITLAB_TOKEN=' ~/.config/nce/env \
-      | head -1 | sed -E "s/^[^=]*=//; s/^['\"]//; s/['\"]$//")"
-fp "$(python3 -c "import json;print(json.load(open('/root/.venv/nce-safe-simulator/config.json'))['private_token'])")"
-fp "$(python3 -c "import json;print(json.load(open('/root/.venv/nce-safe-simulator-2/config.json'))['private_token'])")"
-fp "$(sed -E 's#^https://[^:]*:##; s#@.*##' ~/.git-credentials | head -1)"
-fp "$(awk '/^hosts:/{h=1} h && /^[[:space:]]+token:/{sub(/^[[:space:]]*token:[[:space:]]*/,"");print;exit}' ~/.config/glab-cli/config.yml)"
-```
-
-Note `~/.config/nce/env` contains **commented placeholder lines** above the real ones
-(`# export GITLAB_TOKEN=''`). Match on `^\s*export`, or a naive `grep | head -1` reads the
-placeholder and returns empty.
+`nce-credentials check` resolves through the same ladder and **reports which rung
+answered** — validating a copy the consumers will not use is worse than not checking.
 
 ---
 
-## Rotation procedure
+## Rotating
 
-Decide first whether you are rotating **all three** credentials or just the one that
-expired. Rotating only the expired one is legitimate and lower-risk; rotating all three
-onto a single new token is the cleanup, and it changes behaviour (see *Target state*).
+### On a box with AWS access (the workstation, the deck box)
 
-### 0. Mint the new token
+1. Mint the new token. GitLab → **Settings → Access Tokens**, scopes `api`,
+   `read_repository`, `write_repository`. GitHub → **Settings → Developer settings →
+   Personal access tokens**, scope `repo`.
+2. `nce-credentials rotate` — prompts for each (hidden input), writes to SSM, then
+   verifies every consumer before declaring success.
+3. Nothing else. No box is touched, no file is edited, no service is restarted. Shells
+   already open still hold the old value in their environment; start a new one.
 
-GitLab → **Settings → Access Tokens** → scopes `api`, `read_repository`, `write_repository`.
-Record the expiry somewhere you will see it before it lapses.
+Rotation is also the exposure fix. Once the old value is dead, **every historic copy is
+worthless** — including any that leaked into logs, session transcripts or backups. That
+is the argument for rotating all credentials at once rather than only the expired one.
 
-### 1. `~/.config/nce/env` (credential A)
+### Anywhere else
 
-```sh
-cp ~/.config/nce/env ~/.config/nce/env.rotate-$(date -u +%Y%m%dT%H%M%SZ)   # see cleanup note
-${EDITOR:-vi} ~/.config/nce/env      # replace the value on the `export GITLAB_TOKEN=` line
-chmod 600 ~/.config/nce/env
-```
-
-**Verify:**
-```sh
-. ~/.config/nce/env
-curl -sf -H "PRIVATE-TOKEN: $GITLAB_TOKEN" https://gitlab.com/api/v4/user | python3 -m json.tool | head -5
-```
-
-**Cleanup note:** delete that backup once the rotation is verified. Backups of this file
-are how three cleartext copies of a dead credential survived until 2026-08-11.
-
-### 2 & 3. Both `config.json` copies (credential A)
-
-Both clones, on the deck box only:
-
-```sh
-for d in /root/.venv/nce-safe-simulator /root/.venv/nce-safe-simulator-2; do
-  python3 - "$d/config.json" "$GITLAB_TOKEN" <<'PY'
-import json, sys
-p, tok = sys.argv[1], sys.argv[2]
-c = json.load(open(p))
-c['private_token'] = tok
-json.dump(c, open(p, 'w'), indent=2)
-print("updated", p)
-PY
-done
-```
-
-Both files are gitignored, so this is not a repo change.
-
-**Verify:** the running app must be recreated to pick it up — `config.json` is bind-mounted,
-but the app reads it at start:
-```sh
-cd /root/.venv/nce-safe-simulator && ./scripts/redeploy.sh --image nce-safe-simulator:latest
-curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:8080/
-```
-
-### 4. `~/.git-credentials` (credential B — the one that broke the Friday run)
-
-```sh
-${EDITOR:-vi} ~/.git-credentials     # line format: https://oauth2:<TOKEN>@gitlab.com
-chmod 600 ~/.git-credentials
-```
-
-**Verify — in *both* clones, because the cron uses the `-2` one:**
-```sh
-git -C /root/.venv/nce-safe-simulator   ls-remote origin HEAD >/dev/null && echo "clone 1 OK"
-git -C /root/.venv/nce-safe-simulator-2 ls-remote origin HEAD >/dev/null && echo "clone 2 OK"
-```
-This is the exact check the weekly pre-flight runs. If it passes here, the Friday run gets
-past step 1.
-
-### 5. `~/.config/glab-cli/config.yml` (credential C)
-
-```sh
-glab auth login --hostname gitlab.com --token <NEW_TOKEN>
-```
-
-**Verify:**
-```sh
-glab api user | python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])'
-```
-
-### 6. Dev workstation
-
-Repeat **step 1 only**. Then verify all three consumers, which on this box all read the
-one variable:
-```sh
-. ~/.config/nce/env
-git ls-remote origin HEAD >/dev/null && echo "git OK"
-glab api user >/dev/null && echo "glab OK"
-```
+A box with no AWS access supplies its own credential through the environment or
+`config.json`, and owns replacing it by whatever route it came in — a CI/CD variable is
+rotated in the GitLab UI, a container's `-e` flag in whatever launches it.
+`nce-credentials rotate` will tell you this rather than pretending to help.
 
 ---
 
-## Full verification checklist
+## Checking before it breaks
 
-Rotation is not done until every consumer is checked — each reads a different copy, so
-one passing tells you nothing about the others.
+`nce-credentials check` validates each credential **three ways**, and the first is the
+weakest:
 
-- [ ] `curl` with `PRIVATE-TOKEN` returns your user (credential A)
-- [ ] `git ls-remote` succeeds in **clone 1** (credential B)
-- [ ] `git ls-remote` succeeds in **clone 2** — the cron's clone (credential B)
-- [ ] `glab api user` returns your username (credential C)
-- [ ] app health check returns 200 after redeploy (credential A via `config.json`)
-- [ ] workstation `git` + `glab` both succeed (credential A)
-- [ ] rotation backups of `~/.config/nce/env` deleted
-- [ ] new expiry date recorded
+- **It authenticates.** The check everyone writes.
+- **It carries the scopes its consumers need.** A token missing a scope authenticates
+  perfectly and then fails on the first push — a green pre-flight followed by a red
+  deploy. Override the requirement with `NCE_GITLAB_REQUIRED_SCOPES` when a job
+  legitimately needs less (a read-only reporting box run with `read_api`).
+- **It is not about to expire.** Default 14 days' warning. *This is the one that
+  matters.* A token that authenticates today and lapses on Thursday passes every binary
+  valid/invalid test and still kills the Friday deck run — which is exactly the
+  2026-07-31 outage. The threshold exceeds the gap between the runs that would reveal
+  it.
 
-A no-cost end-to-end proof: run the weekly build against a branch without waiting for
-Friday — `WEEKLY_REF=<branch> systemctl start nce-status-deck.service`, then watch
-`journalctl -u nce-status-deck.service -f`. It exercises the pre-flight, the pull and the
-redeploy in the real cron environment.
+It runs automatically as the last step of the workstation build (`validate.yml`) and
+is the recovery route named by the weekly deck run's pre-flight.
 
----
+### When a box is stale
 
-## The `config.json` dependency — do not "fix" this
+Failing validation writes `/var/lib/nce/credentials-stale`. Every login then prints a
+banner, and the consumers refuse to run.
 
-`deck/systemd/nce-status-deck.service` sets **no** `GITLAB_TOKEN`, and systemd does not read
-`~/.bashrc`. So the Friday cron's `scripts/redeploy.sh` passes `-e GITLAB_TOKEN=""` to the
-app container.
+It is deliberately **not** a lock on the shell or on SSH. Bug #324 was that mistake in a
+different costume — a guard that refused to deploy and thereby broke the documented
+recovery path it was telling the operator to run (fixed in `e490d0e`, *"Fix the guard
+breaking the bring-up it tells you to run"*). A credential gate that can bar you from
+the box is a gate that can stop you fixing the credential. So: nothing real works, you
+cannot miss why, and the route to fixing it is never blocked.
 
-That is **harmless, not a bug.** `NceGitLab.py` resolves the token as
-`GITLAB_TOKEN` env → `config.json` `private_token` → `ACCESS_TOKEN` (deprecated), and the
-env check is `if gitlab_token_env:` — an empty string is falsy, so resolution falls through
-to `private_token`, which is populated.
-
-**The consequence that costs a Friday:** the app on the deck box silently depends on the
-`config.json` copy, *not* the environment. Anyone who removes `private_token` on the
-assumption that the environment carries it will break the Friday deploy, and will not find
-out until Friday.
-
-If you want the env var to reach the cron path, that is the `EnvironmentFile=` change in
-*Target state* below — do it deliberately, with a real timer run to prove it, not as a
-drive-by.
+`nce-credentials rotate` clears the marker on success.
 
 ---
 
-## Known residue: session transcripts
+## What changed, and what to un-learn
 
-Rotating does **not** clean historic copies. As of 2026-08-11 the live GitLab token appeared
-in cleartext in 10 files under `/root/.claude` and the GitHub token in 6 — session
-transcripts (`projects/**/*.jsonl`) and `file-history/` snapshots, written when a session
-read the shell config files.
+This runbook used to describe **five locations holding three distinct credentials** on
+the deck box. If you remember that model, these are the parts that are now wrong:
 
-Two consequences worth keeping straight:
+| Was | Now |
+|---|---|
+| `~/.config/nce/env` held the token | Holds no secret. Comments only, plus an escape hatch you normally leave empty. |
+| `config.json` `private_token` held a second copy | Still read by the app as rung 3, but left empty on migrated boxes. |
+| `~/.git-credentials` held a **different** credential | Gone. `git` uses a host-scoped helper reading `$GITLAB_TOKEN`. |
+| `glab` held a **third** credential | Gone. `glab` reads the environment. |
+| Rotation meant editing five files on two boxes | One `nce-credentials rotate`. |
+| `EnvironmentFile=` on the systemd unit was the planned fix | **Not taken, and no longer needed** — see below. |
 
-- **This is exposure, not just rotation surface.** The config files themselves are
-  gitignored or outside the repo, so none of this is a repo leak — but plaintext live
-  credentials in append-only logs that nobody audits or rotates is a different problem
-  from having too many copies to update.
-- **Rotation fixes it for free.** Once the old value is dead, every historic copy is
-  worthless. That is the strongest argument for rotating all three credentials rather than
-  only the expired one.
+### The `EnvironmentFile=` change was dropped on purpose
 
-If you rotate only the expired credential, purge the matching transcripts instead:
+It existed to get `GITLAB_TOKEN` into the Friday cron's process, because systemd does
+not read `~/.bashrc`. `deck/weekly-status-deck.sh` now fetches the token itself, which
+achieves the same thing without reformatting `~/.config/nce/env` to bare `KEY=value`,
+without switching `.bashrc` to `set -a`, and without coupling the deck's systemd unit to
+the workstation's ansible — a cross-repo change whose failure mode was an unattended
+Friday outage.
+
+### The `config.json` dependency — still worth knowing
+
+`deck/systemd/nce-status-deck.service` sets no `GITLAB_TOKEN`, so before #318 the cron's
+`redeploy.sh` passed `-e GITLAB_TOKEN=""` to the app container and `NceGitLab.py` fell
+through to `private_token`. That was harmless (an empty string is falsy) but it meant
+the Friday run silently depended on a copy nobody rotated.
+
+The fetch removes the dependency. **Verify it with a real run before emptying
+`private_token` on the deck box** — the failure mode is still a Friday outage:
+
 ```sh
-grep -rl -F "$OLD_TOKEN" /root/.claude          # review before deleting
+WEEKLY_REF=<branch> systemctl start nce-status-deck.service
+journalctl -u nce-status-deck.service -f
 ```
 
+Look for `credentials: GITLAB_TOKEN fetched from SSM` in the log.
+
 ---
 
-## Target state
+## Open: the static AWS keys
 
-The dev workstation already implements what the deck box should look like: **one credential,
-in one file, with every consumer reading it from the environment.** No `private_token`, no
-`~/.git-credentials`, no stored `glab` token.
+`/root/.aws/credentials` on the workstation holds **long-lived keys for the IAM user
+`powerja`**. Because file credentials take precedence over IMDS, every `aws` call on the
+box runs as that human user rather than as the `nce-workstation` role — which is why
+`aws route53` works there while the instance profile has no Route 53 access.
 
-Two changes would bring the deck box there. Both are optional and neither is required to
-rotate a token — they reduce how much work the *next* rotation is:
+They are not needed for anything this runbook describes: the instance role covers the
+SSM reads. What they *are* still needed for is **terraform** and other admin-shaped work
+run from the box. A 30-day CloudTrail review of `powerja` shows only read-only describes
+— and no Route 53 calls at all — but that is a thin sample, and terraform apply needs
+`iam:*` and `ec2:*` writes.
 
-1. **`EnvironmentFile=-/root/.config/nce/env`** in the systemd unit. Requires the env file to
-   drop the `export ` prefixes (systemd wants bare `KEY=value`) and `~/.bashrc` to source it
-   with `set -a`. The env var then reaches the cron path, making `private_token` redundant so
-   it can be emptied — removing the copy most likely to leak, since `config.json` is exported
-   and imported through the web UI.
-   **Prove it with a real timer run before trusting it**; the failure mode is a Friday outage.
-2. **Point `git` at the same token** via a host-scoped credential helper, as the workstation
-   does, so `~/.git-credentials` stops being a separate credential. See nce-git-ops `c71875e`
-   — deliberately a helper reading `$GITLAB_TOKEN`, not `~/.git-credentials`, so no second
-   copy is written to disk.
+Deliberately **not** resolved here, because the obvious fix is the wrong one: granting
+the instance role terraform's permissions would let any compromise of the box escalate
+to account admin, which is a worse position than the static key it replaced. The
+options, in preference order:
 
-Doing both collapses five locations and three credentials into one of each, and this runbook
-becomes a single step.
+1. Run terraform from an operator machine under short-lived SSO credentials, and delete
+   `/root/.aws/credentials` from the box entirely. The box keeps its role for runtime.
+2. Keep a static key but move it off the shared boxes.
+3. Accept the exposure, knowingly.
+
+`nce-credentials check` will keep reporting it until it is gone.
+
+---
+
+## Verification checklist
+
+- [ ] `nce-credentials check` is green on every box with AWS access
+- [ ] a fresh login shell has a non-empty `GITLAB_TOKEN` with nothing on disk:
+      `env -i HOME=/root bash -lc 'echo ${#GITLAB_TOKEN}'`
+- [ ] `git ls-remote origin HEAD` succeeds in each clone the cron uses
+- [ ] `glab api user` returns your username
+- [ ] `gh api user` returns your username
+- [ ] the app answers after a redeploy
+- [ ] a real timer run logs `GITLAB_TOKEN fetched from SSM`
+- [ ] no `glpat-`/`ghp_` anywhere in `~/.config/nce/env`, `~/.bashrc`, `~/.git-credentials`
+- [ ] new expiry recorded, and `check` reports more than 14 days

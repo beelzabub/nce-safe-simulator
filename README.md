@@ -132,6 +132,28 @@ export GITLAB_TOKEN=glpat-<your-token-here>   # add to ~/.bashrc to persist
 
 Token resolution precedence: `GITLAB_TOKEN` env → `config.json` `private_token` → `ACCESS_TOKEN` (deprecated). All other settings can be edited in-browser via the ⚙ Config button once the server is running.
 
+<details>
+<summary><b>Optional — a shared token in SSM instead of one per box (issue #318)</b></summary>
+
+On the managed EC2 boxes the GitLab and GitHub tokens are not stored on disk at all. They live once in SSM Parameter Store (`/nce/gitlab/token`, `/nce/github/token`) and each shell fetches at start-up, so rotation is a single write that reaches every box and a rebuilt machine is prompted for nothing:
+
+```bash
+nce-credentials check      # authenticates? right scopes? expiring soon?
+nce-credentials rotate     # replace it — one write, every box, verified
+```
+
+**This changes nothing about how the code resolves a token.** SSM is inserted as a *fallback*, never an override, so every other way of running the simulator is untouched:
+
+| | |
+|---|---|
+| `GITLAB_TOKEN` already set — CI/CD variable, manual export, container `-e` | **always wins**; AWS is never called |
+| SSM Parameter Store | fetched into that variable only when it is unset, and only where a fetch is possible |
+| `config.json` `private_token` → `ACCESS_TOKEN` | unchanged, still the app's own fallback |
+
+A CI runner, a container, or any clone on a machine with no AWS access behaves exactly as it always has — bring your own token and nothing reaches for Parameter Store. Full procedure in **[docs/runbooks/gitlab-token-rotation.md](docs/runbooks/gitlab-token-rotation.md)**.
+
+</details>
+
 ### 5 — Start the web server
 
 Linux / macOS:
